@@ -12,7 +12,7 @@ right in Studio. Refactors of the renderer must keep 0 mismatches in the regress
 
 | Check | Needs |
 |---|---|
-| `cargo test --release` (unit tests in `native/src`, `native/tests/image_math.rs`, `paint.rs`) | nothing beyond the build, except `engine::input::tests::textbox_focus_caret_and_editing`, which needs Studio's fonts; glyph tests use `RUR_TEST_FONT` or a system font and skip without one |
+| `cargo test --release` (unit tests in `native/src`, `native/tests/image_math.rs`, `paint.rs`) | nothing beyond the build, except `engine::input::tests::textbox_focus_caret_and_editing`, which needs Studio's fonts, and three that draw with the GPU (`render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph`, `render::gpu::tests::partial_redraws_match_whole_frames`, `render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas`); glyph tests use `RUR_TEST_FONT` or a system font and skip without one |
 | `native/tests/text_studio.rs`, `text_hinted.rs` | Studio's fonts (they fail without them) |
 | `native/tests/text_corpus.rs` | `out/golden/text-corpus.json`, a local artifact; skips without it |
 | `tools/tests/asset_*.mjs`, `native-assets.mjs`, `native-build-lock.mjs`, `places.mjs`, `web-bundle-directories.mjs`, `tools/analysis/image_assets_test.mjs` | Node only (HTTP is mocked) |

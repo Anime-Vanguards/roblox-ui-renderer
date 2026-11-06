@@ -47,10 +47,11 @@ jobs:
       - name: Build
         working-directory: native
         run: cargo build --release --locked
-      # text_studio, text_hinted and the TextBox editing test measure text with Studio's fonts
+      # text_studio, text_hinted and the TextBox editing test measure text with Studio's fonts; three
+      # render tests draw with the GPU, and the runner has none (they crashed the test process)
       - name: Rust tests
         working-directory: native
-        run: cargo test --release --locked --lib --test image_math --test paint --test text_corpus -- --skip engine::input::tests::textbox_focus_caret_and_editing
+        run: cargo test --release --locked --lib --test image_math --test paint --test text_corpus -- --skip engine::input::tests::textbox_focus_caret_and_editing --skip render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph --skip render::gpu::tests::partial_redraws_match_whole_frames --skip render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas
       - name: Node checks
         shell: bash
         run: |
