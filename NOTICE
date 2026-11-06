@@ -1,0 +1,13 @@
+roblox-ui-renderer
+Copyright 2026 The roblox-ui-renderer authors
+
+This product is licensed under the GNU General Public License, version 2 or
+(at your option) any later version (see LICENSE).
+It includes third-party software under its own licenses; see THIRD_PARTY_NOTICES.md.
+
+The programs it builds contain FreeType. Portions of this software are copyright
+© 2025 The FreeType Project (https://freetype.org). All rights reserved.
+
+Roblox and Roblox Studio are trademarks of Roblox Corporation. Luau is a
+trademark of Roblox Corporation. This project is not affiliated with, sponsored
+by, or endorsed by Roblox Corporation.

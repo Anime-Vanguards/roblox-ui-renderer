@@ -1,0 +1,63 @@
+# Runs on the public repository only: the private one has no free Actions minutes to spare.
+# Third-party actions are pinned to full commit SHAs; Dependabot (private repo) keeps them current.
+# GitHub's Windows runners have no GPU and no Roblox Studio: this builds rur-native and runs the checks
+# that need neither (docs/testing.md lists the others).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: ${{ !github.event.repository.private }}
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    env:
+      RUR_FREETYPE_SRC: ${{ github.workspace }}/.cache/native-app/source/freetype-2.14.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch, 2026-10-16
+        with:
+          toolchain: "1.90.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: native
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install npm packages
+        run: npm ci
+      - name: Download FreeType
+        run: node tools/native-app/build.mjs --prepare
+      - name: Build
+        working-directory: native
+        run: cargo build --release --locked
+      # text_studio, text_hinted and the TextBox editing test measure text with Studio's fonts
+      - name: Rust tests
+        working-directory: native
+        run: cargo test --release --locked --lib --test image_math --test paint --test text_corpus -- --skip engine::input::tests::textbox_focus_caret_and_editing
+      - name: Node checks
+        shell: bash
+        run: |
+          set -e
+          for check in tools/tests/asset_cookie.mjs tools/tests/asset_records.mjs tools/tests/asset_batch.mjs \
+            tools/tests/native-assets.mjs tools/tests/native-build-lock.mjs tools/tests/places.mjs \
+            tools/tests/web-bundle-directories.mjs tools/analysis/image_assets_test.mjs; do
+            echo "== $check"
+            node "$check"
+          done

@@ -1,0 +1,29 @@
+# Native assets
+
+`assets::AssetStore` keeps decoded straight RGBA8 textures and glyph-atlas metadata. Image sampling, mip generation, premultiplication, nine-slice layout, and GPU uploads remain renderer responsibilities. Supported decoders include PNG, JPEG, GIF, WebP, BMP and SVG; SVG rasterization uses resvg.
+
+The GUI/render thread calls `request_missing(&SceneStore)` and `poll()`. Neither performs file IO, network IO, rasterization, or decoding. A bounded worker queue performs those operations and returns texture-ready, eviction, font-refresh, and diagnostic events. The default decoded texture budget is 512 MiB; set `RUR_NATIVE_ASSET_MB` to a positive MiB count or use `with_budget` to select another hard limit. Individual image decodes remain limited to 256 MiB. Image pins and requests follow current node image/scrollbar references, not the cumulative URI discovery catalog. Active scene image and glyph textures are pinned; inactive textures are evicted first. If the active set exceeds the budget, a diagnostic names the setting instead of repeatedly decoding and evicting active assets. Scene changes release pins and clear that failure. Glyph metadata is limited to 128 pages, discovery signatures to 16,384 entries, and visible diagnostics to 128 messages. Consumers retaining texture Arcs or GPU copies must enforce their own renderer-cache budgets.
+
+Helper requests have a 60-second deadline covering pipe writes and responses. A failed/exited helper is discarded and restarted for subsequent work; glyph failures do not restart it. Scene switches cancel obsolete helper work and reject stale queued results. Failed glyph requirements have a retry cooldown; a scene reload clears it.
+
+Image URIs are the stable `AssetId`; atlas pages receive distinct IDs. `TextureAsset.rgba` preserves straight alpha, including PNG RGB values under fully transparent texels. `GlyphKey` uses the existing `fontIndex|ppem|glyphId|strokeRadius[|style]` atlas convention. `render_revision()` invalidates retained draws when texture residency or glyph bindings change.
+
+For a new story, call `begin_scene(&scene)` to reset scene-specific diagnostics and font-index bindings while retaining decoded image pixels. Atlas completions carry a generation so a previous scene's worker result cannot replace current glyphs. Existing image failures are reported only for scenes that reference them.
+
+For a saved scene, call `load_manifest(&scene, scene_path_or_directory)` before `request_missing`. This reads its sibling `manifest.json`, relative image files, and bundled glyph atlas in the Rust worker. Complete saved scenes require neither Node nor Python. The missing-asset pass waits until this load finishes so frozen captures use their original bundled bytes and glyphs. Unreferenced manifest images are skipped. A URI can point to different pixels in a subsequent manifest, including a file overwritten at the same path; old texture Arcs are reused only for identical decoded dimensions and bytes. A failed replacement invalidates the previous pixels and reports the source error; stale completions cannot alter the active scene.
+
+When a new glyph shape is required, the worker rasterizes it in process (`glyphs.rs`: `atlas_entries`, the port of `cli/rur.mjs` `atlasEntries`, and a `Rasterizer` on the FreeType 2.14.2 that `build.rs` compiles into the crate, through `src/glyphs/rur_glyph.c`, the C port of `tools/glyphs/rasterize.py`). Pages hold up to 512 missing glyphs, shelf-packed exactly like the Python atlas (byte-identical coverage and placements); a font-table entry that changes unbinds its font index's glyphs, and at most 128 pages are tracked, unused pages evicted first. The worker keeps no page pixels: a page sent again, or reloaded after a texture eviction, is rebuilt from the rasterizer's bitmap cache (keyed by file, ppem, glyph, stroke radius and style, dropped per font when the font file's size or modification time changes); a page whose fonts changed on disk is dropped and its glyphs rasterized again. Only scene glyph requirements are processed; complete scene frames are never copied. Movement and color changes do not create new glyph requirements. New text, font, scale, synthetic-bold or contextual-stroke requirements do.
+
+When a new image URI is required, or cloud fonts are missing, the worker starts `cli/native-assets.mjs` lazily. That helper reuses `cli/assets.mjs` URI resolution/authentication/download caches and `fetchMissingFonts`; it receives only missing image URIs and font requests.
+
+Glyphs need neither Node.js nor Python. Image preparation requires Node.js (`RUR_NODE` can select its executable). Chromium is not used. Authentication remains inside the canonical asset resolver: cookies are restricted to Roblox asset delivery and never included in helper responses or native files. Offline mode reads cached/local assets, including cached thumbnails and nested decal textures, without attempting HTTP. `request_fonts(ready_diagnostics)` uses the existing cloud-font resolver off-thread; `FontsChanged` asks the app to remount its runtime with newly available metrics.
+
+Validation:
+
+```powershell
+node tools/tests/native-assets.mjs
+node tools/tests/asset_cookie.mjs
+cargo test --release --manifest-path native/Cargo.toml --lib -- assets::tests glyphs::tests
+```
+
+The Node tests use synthetic credentials and a blocked HTTPS transport and cover cached images/thumbnails, offline nested decals and deduplication. Rust tests cover PNG transparent texels, SVG decoding, memory limits, saved-manifest loading without a helper, stale generation rejection, scene-specific diagnostics, and the glyph pages (incremental rasterization, page reuse after text updates, font-table switches, mixed-page bindings, the page bound, glyphs without a helper; a system font or `RUR_TEST_FONT`).

@@ -1,0 +1,12 @@
+node_modules/
+native/target/
+.cache/
+out/
+*.log
+__pycache__/
+.env
+.env.*
+!.env.example
+
+# A local roblox-engine-emulator link (tools/emulator.mjs link)
+/.cargo/

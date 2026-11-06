@@ -1,0 +1,126 @@
+[package]
+name = "rur-native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+description = "Native desktop and headless Roblox UI renderer"
+license = "GPL-2.0-or-later"
+repository = "https://github.com/Anime-Vanguards/roblox-ui-renderer"
+
+[workspace]
+resolver = "3"
+
+[lib]
+name = "rur_native"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rur-native"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+# The browser module (src/web.rs, native/web): wasm32-unknown-emscripten with
+# `--no-default-features --features web --profile web`; `node tools/native-app/build.mjs --wasm`
+[[bin]]
+name = "rur-web"
+path = "src/web_main.rs"
+required-features = ["web"]
+
+[features]
+default = ["desktop"]
+# The egui desktop app, headless captures, the render service, the runtime worker thread, the Luau
+# JIT and the native GPU backends
+desktop = ["dep:eframe", "dep:egui", "dep:egui-wgpu", "dep:tokio", "mlua/luau-jit", "roblox-engine-emulator/jit", "roblox-engine-emulator/bundles", "wgpu/dx12", "wgpu/vulkan", "wgpu/metal"]
+# The engine and renderer in a browser: WebGL2 through wgpu's GLES backend, single-threaded, files
+# from the page's bundle (src/web.rs)
+web = []
+# Live heap bytes by the phase that allocated them (src/memtrace.rs; RUR_MEMTRACE=1 reports them)
+memtrace = []
+
+[dependencies]
+anyhow = "=1.0.100"
+bytemuck = { version = "=1.24.0", features = ["derive"] }
+clap = { version = "=4.5.50", features = ["derive"] }
+eframe = { version = "=0.33.3", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"], optional = true }
+egui = { version = "=0.33.3", optional = true }
+egui-wgpu = { version = "=0.33.3", default-features = false, optional = true }
+image = { version = "=0.25.8", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+# The emulated engine (instances, reflection, signals, the scheduler, services, project mounting, the
+# 3D world, the recorder) with its patched Luau VM: roblox-engine-emulator at a pinned commit. Its
+# features follow ours (desktop: Luau native code, manifest bundles). Building against a local checkout
+# instead: `node tools/emulator.mjs link` (docs/how-it-works.md "The engine: roblox-engine-emulator").
+roblox-engine-emulator = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "2d682933ada8f2006a13b76fb89fba6ed98df2e3", default-features = false }
+rbx_binary = "=2.0.1"
+rbx_dom_weak = "=4.2.0"
+rustc-hash = "=2.1.3"
+chrono = "=0.4.45"
+# Rust engine text (native/src/engine/text): Studio content lookup like Lune's roblox.studioContentPath,
+# and the SHA-256 keys of the shared hinted-metric cache (.cache/hinted)
+roblox_install = "=1.2.0"
+sha2 = "=0.10.9"
+mlua = { version = "=0.11.4", features = ["luau", "serialize", "async"] }
+# Keep the VM ABI/source release aligned with the canonical Luau patch.
+mlua-sys = "=0.8.3"
+pollster = "=0.4.0"
+rayon = "=1.11.0"
+resvg = "=0.45.1"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = { version = "=1.0.145", features = ["float_roundtrip"] }
+tokio = { version = "=1.48.0", features = ["rt", "sync", "time"], optional = true }
+wgpu = { version = "=27.0.1", default-features = false, features = ["std", "parking_lot", "gles", "wgsl", "glsl"] }
+
+# The web build's canvas surface (wgpu's GLES backend presents to Emscripten's WebGL2 canvas)
+[target.'cfg(target_os = "emscripten")'.dependencies]
+raw-window-handle = "=0.6.2"
+
+# The rur-native binary's allocator (src/main.rs): the engine's Luau VM allocates through Rust's global
+# allocator, and a story that builds thousands of Instances spends much of that in the system heap
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+mimalloc = { version = "=0.1.52", default-features = false }
+# mimalloc's own collection and counters (the render service gives memory back between renders and
+# reports where it is: src/serve.rs)
+libmimalloc-sys = { version = "=0.1.49", default-features = false, features = ["extended"] }
+
+# build.rs: FreeType 2.14.2 and src/glyphs/rur_glyph.c (the in-process glyph rasterizer, src/glyphs.rs)
+[build-dependencies]
+cc = { version = "=1.5.1", features = ["parallel"] }
+
+# tests/text_hinted.rs: the zlib-compressed Studio crops of data/studio/dotted-glyphs.json
+[dev-dependencies]
+flate2 = "=1.1.10"
+
+# The patched Luau VM mlua-sys compiles: the emulator's vendor/luau0-src, at the same commit as the
+# dependency above (only the workspace root's [patch] applies; tools/emulator.mjs pin moves both)
+[patch.crates-io]
+luau0-src = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "2d682933ada8f2006a13b76fb89fba6ed98df2e3" }
+
+# `--release` is the everyday build (the app, agents, tests): full optimisation, incremental, many codegen
+# units, so an edit rebuilds in seconds. `lto = false` keeps cargo's ThinLTO across each crate's own codegen
+# units: the engine's cross-module inlining (lto = "off" halved a one-line rebuild but made property reads
+# and writes 5-25% slower; docs/setup.md "Requirements"). Float results are the same as with full LTO (no
+# fast-math either way; checked frame by frame). `--profile dist` is the slower whole-program build.
+[profile.release]
+opt-level = 3
+lto = false
+incremental = true
+codegen-units = 256
+
+# The browser module: whole-program optimisation at opt-level 3. Not "s" / "z": an opt-level "s" build
+# (a fifth smaller) dropped some rows of a settings story in the spike, a behavioural difference never
+# explained; frame identity with the native build is checked at this profile (tools/web/frame-identity.mjs)
+[profile.web]
+inherits = "release"
+lto = "fat"
+incremental = false
+codegen-units = 1
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+incremental = false
+codegen-units = 16
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2

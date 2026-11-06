@@ -1,0 +1,9 @@
+# Git dependencies (the engine, roblox-engine-emulator) are fetched with the git command line, which
+# uses git's own settings and credential helpers
+[net]
+git-fetch-with-cli = true
+
+# rust-lld (it comes with the Rust toolchain) links the Windows target instead of link.exe: faster on every
+# rebuild of rur-native and of each test binary (docs/setup.md "Requirements")
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"

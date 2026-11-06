@@ -1,0 +1,15 @@
+[
+	{ "t": 0.1, "type": "move", "x": 400, "y": 140 },
+	{ "t": 0.12, "type": "down", "button": 1, "x": 400, "y": 140 },
+	{ "t": 0.14, "type": "up", "button": 1, "x": 400, "y": 140 },
+	{ "t": 0.2, "type": "text", "text": "!" },
+	{ "t": 0.25, "type": "key", "key": "Left", "down": true },
+	{ "t": 0.26, "type": "key", "key": "Left", "down": false },
+	{ "t": 0.3, "type": "key", "key": "Backspace", "down": true },
+	{ "t": 0.31, "type": "key", "key": "Backspace", "down": false },
+	{ "t": 0.4, "type": "move", "x": 150, "y": 140 },
+	{ "t": 0.42, "type": "down", "button": 1, "x": 150, "y": 140 },
+	{ "t": 0.44, "type": "up", "button": 1, "x": 150, "y": 140 },
+	{ "t": 0.5, "type": "down", "button": 1, "x": 150, "y": 140 },
+	{ "t": 0.52, "type": "up", "button": 1, "x": 150, "y": 140 }
+]

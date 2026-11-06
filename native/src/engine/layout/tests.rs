@@ -1,0 +1,206 @@
+//! Layout tests through the script API. Expected values were recorded from the Luau runtime (the
+//! reference) running the same script as a fixture (`node cli/rur.mjs render --fixture ...`); the
+//! golden corpus (`tools/engine/golden.mjs`) covers the stories.
+
+use std::rc::Rc;
+
+use mlua::prelude::*;
+
+use crate::engine::{
+    Engine, Options,
+    lua::{self as engine_lua, globals::CallOutcome},
+    scheduler,
+};
+
+fn start(pixel_scale: f64) -> (Lua, Rc<Engine>) {
+    let engine = crate::engine::new_engine(Options { pixel_scale, ..crate::engine::options() }).expect("engine");
+    let lua = Lua::new();
+    engine_lua::start(&lua, &engine).expect("start");
+    (lua, engine)
+}
+
+/// Runs `source` (a chunk returning `function(Target)`) against a full-viewport Target frame in a
+/// CoreGui ScreenGui, runs virtual time to `until`, and returns the output lines.
+fn run(source: &str, pixel_scale: f64, until: f64) -> Vec<String> {
+    let (lua, engine) = start(pixel_scale);
+    let script = {
+        let mut state = engine.state.borrow_mut();
+        let class = engine.reflection.class_id("ModuleScript").unwrap();
+        crate::engine::instance::create_named(&mut state, &engine.reflection, class, "Test")
+    };
+    let env = engine_lua::modules::environment(&lua, &engine, script).expect("environment");
+    let wrapper = format!(
+        "local Story = (function() {source} end)()\n\
+         local Gui = Instance.new('ScreenGui') Gui.Name = 'Story' Gui.Parent = game:GetService('CoreGui')\n\
+         local Target = Instance.new('Frame') Target.Name = 'StoryTarget' Target.Size = UDim2.fromScale(1, 1)\n\
+         Target.BackgroundTransparency = 1 Target.Parent = Gui\n\
+         Story(Target)"
+    );
+    let function = lua.load(wrapper).set_name("=Test").set_environment(env).into_function().expect("compile");
+    let call = engine_lua::globals::call(&lua, &engine, function, LuaMultiValue::new()).expect("call");
+    if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+        panic!("test script failed: {message}");
+    }
+    scheduler::run_until(&lua, &engine, until).expect("frames");
+    let lines = engine.state.borrow().output.entries.iter().map(|e| format!("{}: {}", e.kind, e.message)).collect();
+    drop(lua);
+    lines
+}
+
+const API_SCRIPT: &str = r#"
+return function(Target)
+	local function V(Value) return `{Value.X},{Value.Y}` end
+	local Holder = Instance.new("Frame")
+	Holder.Size = UDim2.fromOffset(400, 300)
+	Holder.Position = UDim2.fromOffset(10, 20)
+	Holder.Parent = Target
+	local F = Instance.new("Frame")
+	F.Size = UDim2.new(0.5, 10, 0, 40)
+	F.Position = UDim2.fromScale(0.25, 0.5)
+	F.AnchorPoint = Vector2.new(0.5, 0.5)
+	F.Parent = Holder
+	print("frame", V(F.AbsoluteSize), V(F.AbsolutePosition), F.AbsoluteRotation)
+	F.Size = UDim2.fromOffset(100, 50)
+	print("resized", V(F.AbsoluteSize), V(F.AbsolutePosition))
+	local Changes = 0
+	F:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() Changes += 1 end)
+	F.Size = UDim2.fromOffset(120, 50)
+	print("lazy", V(F.AbsoluteSize))
+	task.wait()
+	print("changes", Changes)
+	local List = Instance.new("UIListLayout")
+	List.Padding = UDim.new(0, 5)
+	List.Parent = F
+	for Index = 1, 3 do
+		local Child = Instance.new("Frame")
+		Child.Name = `C{4 - Index}`
+		Child.Size = UDim2.fromOffset(20 * Index, 10)
+		Child.LayoutOrder = -Index
+		Child.Parent = F
+	end
+	print("list", V(List.AbsoluteContentSize))
+	List.SortOrder = Enum.SortOrder.Name
+	print("byname", V(F.C1.AbsolutePosition), V(F.C3.AbsolutePosition))
+	List.FillDirection = Enum.FillDirection.Horizontal
+	List.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	print("horizontal", V(List.AbsoluteContentSize), V(F.C2.AbsolutePosition))
+	local Auto = Instance.new("Frame")
+	Auto.AutomaticSize = Enum.AutomaticSize.XY
+	Auto.Size = UDim2.fromOffset(10, 10)
+	Auto.Parent = Holder
+	local Pad = Instance.new("UIPadding")
+	Pad.PaddingLeft = UDim.new(0, 4)
+	Pad.PaddingTop = UDim.new(0, 6)
+	Pad.Parent = Auto
+	local Inner = Instance.new("Frame")
+	Inner.Size = UDim2.fromOffset(70, 33)
+	Inner.Position = UDim2.fromOffset(5, 7)
+	Inner.Parent = Auto
+	print("auto", V(Auto.AbsoluteSize), V(Inner.AbsolutePosition))
+	local Scale = Instance.new("UIScale")
+	Scale.Scale = 1.3
+	Scale.Parent = Auto
+	print("uiscale", V(Auto.AbsoluteSize), V(Inner.AbsoluteSize))
+	local Scroll = Instance.new("ScrollingFrame")
+	Scroll.Size = UDim2.fromOffset(200, 200)
+	Scroll.CanvasSize = UDim2.fromOffset(0, 600)
+	Scroll.Parent = Holder
+	Scroll.CanvasPosition = Vector2.new(0, 5000)
+	print("scroll", V(Scroll.CanvasPosition), V(Scroll.AbsoluteCanvasSize), V(Scroll.AbsoluteWindowSize))
+	Scroll.CanvasPosition = Vector2.new(-5, 100.7)
+	local Item = Instance.new("Frame")
+	Item.Size = UDim2.fromOffset(50, 50)
+	Item.Parent = Scroll
+	print("scrolled", V(Scroll.CanvasPosition), V(Item.AbsolutePosition))
+	local Rotated = Instance.new("Frame")
+	Rotated.Size = UDim2.fromOffset(100, 40)
+	Rotated.Position = UDim2.fromOffset(50, 50)
+	Rotated.Rotation = 30
+	Rotated.Parent = Holder
+	local Child = Instance.new("Frame")
+	Child.Size = UDim2.fromOffset(10, 10)
+	Child.Parent = Rotated
+	print("rotated", V(Child.AbsolutePosition), Child.AbsoluteRotation)
+	local Pages = Instance.new("Frame")
+	Pages.Size = UDim2.fromOffset(100, 100)
+	Pages.Parent = Holder
+	local PageLayout = Instance.new("UIPageLayout")
+	PageLayout.Parent = Pages
+	for Index = 1, 3 do
+		local Page = Instance.new("Frame")
+		Page.Name = `P{Index}`
+		Page.Size = UDim2.fromScale(1, 1)
+		Page.LayoutOrder = Index
+		Page.Parent = Pages
+	end
+	print("page", V(Pages.P1.AbsolutePosition), V(PageLayout.AbsoluteContentSize))
+	PageLayout:Next()
+	print("next", PageLayout.CurrentPage and PageLayout.CurrentPage.Name, V(Pages.P2.AbsolutePosition))
+	PageLayout:JumpToIndex(2)
+	print("jump", PageLayout.CurrentPage and PageLayout.CurrentPage.Name, V(Pages.P3.AbsolutePosition))
+	local Grid = Instance.new("UIGridLayout")
+	local GridHolder = Instance.new("Frame")
+	GridHolder.Size = UDim2.fromOffset(210, 100)
+	GridHolder.Parent = Holder
+	Grid.CellSize = UDim2.fromOffset(50, 20)
+	Grid.Parent = GridHolder
+	for _ = 1, 5 do Instance.new("Frame").Parent = GridHolder end
+	print("grid", V(Grid.AbsoluteContentSize), V(Grid.AbsoluteCellSize), V(Grid.AbsoluteCellCount))
+end
+"#;
+
+/// Lazy getters, change events of computed properties, lists (sort orders, alignment),
+/// AutomaticSize with padding and UIScale, CanvasPosition clamping and physical-pixel canvas
+/// offsets, rotation, UIPageLayout navigation and grids: the Luau runtime's values at DPI 1.5.
+#[test]
+fn layout_api_matches_luau() {
+    let lines = run(API_SCRIPT, 1.5, 0.1);
+    let expected = [
+        "print: frame 210,40 5,150 0",
+        "print: resized 100,50 60,145",
+        "print: lazy 120,50",
+        "print: changes 1",
+        "print: list 60,40",
+        "print: byname 50,145 50,175",
+        "print: horizontal 130,10 110,145",
+        "print: auto 79,46 19,33",
+        "print: uiscale 102.70000457763672,59.79999542236328 91,42.89999771118164",
+        "print: scroll 0,400 200,600 187,200",
+        "print: scrolled 0,100.69999694824219 10,-80.66666412353516",
+        "print: rotated 73.52885437011719,49.509620666503906 30",
+        "print: page 10,20 300,100",
+        "print: next P2 10,20",
+        "print: jump P3 10,20",
+        "print: grid 160,45 50,20 3,2",
+    ];
+    assert_eq!(lines, expected);
+}
+
+
+/// Per-instance storage (Slots): entries are guarded by the id's generation, and a slot far beyond
+/// the ones in use costs one chunk, not everything below it.
+#[test]
+fn slots_are_guarded_by_generation_and_grow_by_chunks() {
+    use crate::engine::InstanceId;
+    let id = |index, generation| InstanceId { index, generation };
+    let mut slots = super::Slots::<String>::default();
+    assert_eq!(slots.get(id(0, 0)), None);
+    assert_eq!(slots.take(id(70_000, 0)), None);
+    slots.set(id(3, 1), "three".into());
+    slots.set(id(70_000, 2), "far".into());
+    slots.set(id(255, 0), "edge".into());
+    slots.set(id(256, 0), "next chunk".into());
+    assert_eq!(slots.get(id(3, 1)).map(String::as_str), Some("three"));
+    assert_eq!(slots.get(id(3, 2)), None, "a reused slot does not answer for the old instance");
+    assert_eq!(slots.get(id(4, 1)), None);
+    assert_eq!(slots.get(id(1_000, 0)), None, "a chunk nothing was written to");
+    assert_eq!(slots.get(id(255, 0)).map(String::as_str), Some("edge"));
+    assert_eq!(slots.get(id(256, 0)).map(String::as_str), Some("next chunk"));
+    slots.get_mut(id(70_000, 2)).unwrap().push_str(" away");
+    assert_eq!(slots.take(id(70_000, 3)), None);
+    assert_eq!(slots.take(id(70_000, 2)).as_deref(), Some("far away"));
+    assert_eq!(slots.get(id(70_000, 2)), None);
+    slots.set(id(3, 2), "again".into());
+    assert_eq!(slots.get(id(3, 1)), None);
+    assert_eq!(slots.get(id(3, 2)).map(String::as_str), Some("again"));
+}

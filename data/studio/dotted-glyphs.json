@@ -1,0 +1,257 @@
+{
+  "version": 1,
+  "source": "Studio capture out/compare/text-idots/studio.png, 2026-09-25; white text on black, ij prefix only. Glyph origins from matching scene export. Alpha is the captured red channel, not rasterizer output.",
+  "tolerance": 2,
+  "cases": [
+    {
+      "name": "Montserrat_10",
+      "font": "Montserrat-Bold.ttf",
+      "crop": [
+        0,
+        145,
+        10,
+        24
+      ],
+      "glyphs": [
+        [
+          475,
+          13.12551,
+          0,
+          17
+        ],
+        [
+          492,
+          13.12551,
+          4,
+          17
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYKAAhCYwMAQngFjPP3MwPANiBgZefgYGbn5Udf//i4AxmSzW//+FwOaUbvv/lBHMOvDnhgNZTgYAAP0oRQ=="
+    },
+    {
+      "name": "Montserrat_11",
+      "font": "Montserrat-Bold.ttf",
+      "crop": [
+        0,
+        208,
+        10,
+        25
+      ],
+      "glyphs": [
+        [
+          475,
+          13.94586,
+          0,
+          16
+        ],
+        [
+          492,
+          13.94586,
+          4,
+          16
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYCASdG1lZejZwgpk/fqvB8YMDOtucjJsAGJk8P+/CRhTi8XAwCz2/78GmLXn5f+HzCAG59U/l8wZKAMAL3k1xA=="
+    },
+    {
+      "name": "Montserrat_12",
+      "font": "Montserrat-Bold.ttf",
+      "crop": [
+        0,
+        270,
+        12,
+        27
+      ],
+      "glyphs": [
+        [
+          475,
+          15.58655,
+          0,
+          18
+        ],
+        [
+          492,
+          15.58655,
+          5,
+          18
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYKAAlN+ohhIMDD//f4cSDAyTf0yBEqig4v9/KEFDdiWEDQRaIjv/v4QwBX/+//+/B8I2vPXnZR87A/UAAE1oRPU="
+    },
+    {
+      "name": "Montserrat_13",
+      "font": "Montserrat-Bold.ttf",
+      "crop": [
+        0,
+        332,
+        13,
+        28
+      ],
+      "glyphs": [
+        [
+          475,
+          16.40689,
+          0,
+          20
+        ],
+        [
+          492,
+          16.40689,
+          5,
+          20
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYKAdKL9RDSIqwZyf/79DCSCY+mMKA8PkHxMx9cz4/x9K0IEzE8oBAl3JC/9fQtmq/4GgE8pxu//nWRsrVcIDADiYR3U="
+    },
+    {
+      "name": "Montserrat_14",
+      "font": "Montserrat-Bold.ttf",
+      "crop": [
+        0,
+        394,
+        14,
+        30
+      ],
+      "glyphs": [
+        [
+          475,
+          18.04758,
+          0,
+          21
+        ],
+        [
+          492,
+          18.04758,
+          5,
+          21
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYKA5KHn/qRZCgMC3//+/QQiw3IePpRACE9z4/x9KDDwPDB78/wVjCmfk/f9/EcbL/A8ECTBe8Yt/93KoGYAAPeNavg=="
+    },
+    {
+      "name": "FredokaOne_10",
+      "font": "FredokaOne-Regular.ttf",
+      "crop": [
+        600,
+        145,
+        7,
+        24
+      ],
+      "glyphs": [
+        [
+          76,
+          13.22314,
+          0,
+          17
+        ],
+        [
+          77,
+          13.22314,
+          3,
+          17
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYCAWsDnJsDtJMeT9P533/zBD0PdVwT8WwSWvfDY489mE4f//cCACUhFAhEGFg6hLnyz//w8Fmjb7/38ToGn//29jYAj9daeGHa/tAJxTMoc="
+    },
+    {
+      "name": "FredokaOne_12",
+      "font": "FredokaOne-Regular.ttf",
+      "crop": [
+        600,
+        270,
+        10,
+        27
+      ],
+      "glyphs": [
+        [
+          76,
+          15.70248,
+          0,
+          18
+        ],
+        [
+          77,
+          15.70248,
+          4,
+          18
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYCAZ7PnWyrD7WzuQ9e//ETBmYNj8po5h45taFHW7v7czbP/WAmT9/38MqO4YmHUCjElhHYOydn1rZf0PNgUIwv//Xw+iHd78//8/BcSqBDL2s4JYnj9fdHEwkAMA+GNM5Q=="
+    },
+    {
+      "name": "FredokaOne_14",
+      "font": "FredokaOne-Regular.ttf",
+      "crop": [
+        600,
+        394,
+        13,
+        30
+      ],
+      "glyphs": [
+        [
+          76,
+          18.18182,
+          0,
+          22
+        ],
+        [
+          77,
+          18.18182,
+          5,
+          22
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYKAdELaXBxJ2cmDOw/8/pUCEDIjz7/9/ExBhCuKs/3GZn2Hdjyu8GAas/X6Fj2HFt3Ngmf8g5X+heoAcCwhBDQ7YJTDO2u8XeISBHEOIG0R9t/7//0cAwrkBFP+/Guq6H0D2VVEoZ/2f+608ZIcUAADgYdg="
+    },
+    {
+      "name": "FredokaOne_15",
+      "font": "FredokaOne-Regular.ttf",
+      "crop": [
+        600,
+        457,
+        13,
+        31
+      ],
+      "glyphs": [
+        [
+          76,
+          19.00826,
+          0,
+          22
+        ],
+        [
+          77,
+          19.00826,
+          5,
+          22
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYKAdELRTgRJAcO//X3OGB///WYM4//7/jwARkSDOmh/3lBlW/36ghGHAym93lRiW/XigAOL8Byn/C9UD5MRACGpwwC6BcVZ+uyUvBuSEQNygG3oAyNEFswP/g8BhiEQ5iH1dBsIx//jzciUndYINAGxbZxw="
+    },
+    {
+      "name": "FredokaOne_16",
+      "font": "FredokaOne-Regular.ttf",
+      "crop": [
+        600,
+        519,
+        13,
+        33
+      ],
+      "glyphs": [
+        [
+          76,
+          20.66116,
+          0,
+          23
+        ],
+        [
+          77,
+          20.66116,
+          5,
+          23
+        ]
+      ],
+      "alphaZlibBase64": "eNpjYKAdWPjzXRDDoh8vA0CcP///LwYRS0Cc9///TwcRM0Acl4ndkgwe03ukMQxY9PNlIMPkH++8QJzfIL2/QKYAwf///1dACKpzfoOsgHEW/nwfwgbkLIU5yR3ImQBmcTes+Q7kBII56f9B4DwzmFMKYl+ThWgweP3zajUXdQIUABeEfOM="
+    }
+  ]
+}

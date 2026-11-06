@@ -1,0 +1,2 @@
+# Blank patch context lines retain their required leading space.
+tools/native-host/*.patch whitespace=-blank-at-eol
