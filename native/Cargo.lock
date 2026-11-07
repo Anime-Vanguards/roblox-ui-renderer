@@ -1779,7 +1779,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "luau0-src"
 version = "0.15.9+luau694"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=10faab9e5274d6d6851d18730c12dcd352b8fbf7#10faab9e5274d6d6851d18730c12dcd352b8fbf7"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=2d1187e2a5b1f1d1d30c260c2479646e0e094117#2d1187e2a5b1f1d1d30c260c2479646e0e094117"
 dependencies = [
  "cc",
 ]
@@ -1787,7 +1787,7 @@ dependencies = [
 [[package]]
 name = "lune-roblox"
 version = "0.3.4"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=10faab9e5274d6d6851d18730c12dcd352b8fbf7#10faab9e5274d6d6851d18730c12dcd352b8fbf7"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=2d1187e2a5b1f1d1d30c260c2479646e0e094117#2d1187e2a5b1f1d1d30c260c2479646e0e094117"
 dependencies = [
  "glam",
  "lune-utils",
@@ -1804,7 +1804,7 @@ dependencies = [
 [[package]]
 name = "lune-utils"
 version = "0.3.4"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=10faab9e5274d6d6851d18730c12dcd352b8fbf7#10faab9e5274d6d6851d18730c12dcd352b8fbf7"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=2d1187e2a5b1f1d1d30c260c2479646e0e094117#2d1187e2a5b1f1d1d30c260c2479646e0e094117"
 dependencies = [
  "console",
  "dunce",
@@ -2905,7 +2905,7 @@ dependencies = [
 [[package]]
 name = "roblox-engine-emulator"
 version = "0.1.0"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=10faab9e5274d6d6851d18730c12dcd352b8fbf7#10faab9e5274d6d6851d18730c12dcd352b8fbf7"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=2d1187e2a5b1f1d1d30c260c2479646e0e094117#2d1187e2a5b1f1d1d30c260c2479646e0e094117"
 dependencies = [
  "base64 0.13.1",
  "chrono",

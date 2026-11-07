@@ -205,7 +205,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-scheduler": {
-			"digest": "d9b326b4652c1d78d95c9e94af2d7e71550fc3764dbaaba0c872be258a3f7c85",
+			"digest": "1ba2937af16c58da90840d33a2a390f9a9a1b5a959e298a0594411b77657157e",
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
@@ -809,7 +809,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-scheduler": {
-			"digest": "8bab5a23de615722daac95e471736a4d5bae29838e30d2c67aeab694d23366c5",
+			"digest": "eea8496128c78a25a09edd2c83a0c7d307c8026339b601dd72a6ac5c934387a4",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
@@ -1393,7 +1393,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-scheduler": {
-			"digest": "7833b10f4af7f8b4a1d0929eeae07e176962bedcf0a18029178bdb2f2130eecc",
+			"digest": "dda64dd7c067cf71912784fe44d5fe29d3686b9c8de0b6fda97cda7881ca3351",
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
@@ -2021,7 +2021,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-07T02:39:58.221Z",
+	"recorded": "2026-11-07T02:56:17.296Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

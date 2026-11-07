@@ -1542,7 +1542,10 @@ mod device_tests {
         assert!(phone.contains("touch=true mouse=false keyboard=false gamepad=false last=Touch inset=58 story=-58 gui=0,242"), "{phone}");
         let pad = probe(&["--device", "gamepad"]).unwrap();
         assert!(pad.contains("gamepad=true last=Gamepad1"), "{pad}");
-        assert!(probe(&["--device", "phone"]).unwrap_err().contains("--device"));
+        // (a phone is the engine's touch device with a phone's work-clock prices: ree --device phone)
+        let handset = probe(&["--device", "phone"]).unwrap();
+        assert!(handset.contains("touch=true mouse=false keyboard=false gamepad=false last=Touch"), "{handset}");
+        assert!(probe(&["--device", "console"]).unwrap_err().contains("--device"));
     }
 
     fn flow(device: &str) -> String {
