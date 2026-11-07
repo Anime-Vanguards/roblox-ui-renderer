@@ -26,7 +26,10 @@ use serde_json::{Value, json};
 
 use crate::{
     assets::AssetStore,
-    engine::cli::{Args, Preloaded, SequenceFrame, SequenceMessage, SequenceSpec},
+    engine::{
+        cli::{Args, Preloaded, SequenceFrame, SequenceMessage, SequenceSpec},
+        profiler,
+    },
     presentation::ScrollPresentation,
     render::{
         DrawPreparer,
@@ -125,15 +128,49 @@ pub fn parse_options(value: &Value, offline: bool) -> Result<(SequenceSpec, Sequ
 /// The engine half of `args` in a fresh VM, on a thread of its own with a deep stack (as the render
 /// service's VMs: deep Luau and layout recursion): its frames
 pub fn start_fresh(args: &Args, spec: &SequenceSpec) -> Result<mpsc::Receiver<SequenceMessage>, String> {
+    start_fresh_profiled(args, spec, None)
+}
+
+/// [`start_fresh`], with a profile of the engine half when `profile` asks for one (`rur-native sequence --profile`, the
+/// emulator's profiling suite): it runs on the engine's thread from before the VM starts, reads the VM after the last
+/// frame, and is written before the end goes out, so its files are there by the time the sequence's result is. A run
+/// that stops early (a fresh start once cloud fonts arrived) writes none: the next one does.
+pub fn start_fresh_profiled(args: &Args, spec: &SequenceSpec, profile: Option<profiler::Config>) -> Result<mpsc::Receiver<SequenceMessage>, String> {
     let (send, receive) = mpsc::sync_channel(FRAME_QUEUE);
     let (args, spec) = (args.clone(), spec.clone());
     std::thread::Builder::new()
         .name("rur-sequence-engine".into())
         .stack_size(64 * 1024 * 1024)
-        .spawn(move || match Preloaded::load(&args) {
-            Ok(loaded) => loaded.sequence(&args, &spec, &mut |message| send.send(message).is_ok()),
-            Err(error) => {
-                let _ = send.send(SequenceMessage::End(Err(error)));
+        .spawn(move || {
+            let mut session = profile.map(crate::story_render::begin_profile);
+            let mut forward = |message: SequenceMessage| {
+                if let SequenceMessage::End(end) = &message {
+                    if let Some(session) = session.take() {
+                        let status = match end {
+                            Ok(report) => report["status"].as_str().unwrap_or("?").to_string(),
+                            Err(_) => "failed".into(),
+                        };
+                        let run = profiler::Run {
+                            command: "sequence".into(),
+                            status,
+                            harness: crate::story_render::source_file(&args),
+                            frames: u64::from(spec.frames),
+                            seconds: spec.from.max(0.0) + f64::from(spec.frames.saturating_sub(1)) / spec.fps,
+                            fps: spec.fps,
+                        };
+                        match session.finish(run) {
+                            Ok(summary) => eprint!("{summary}"),
+                            Err(error) => eprintln!("rur-native sequence: profile: {error}"),
+                        }
+                    }
+                }
+                send.send(message).is_ok()
+            };
+            match Preloaded::load(&args) {
+                Ok(loaded) => loaded.sequence(&args, &spec, &mut forward),
+                Err(error) => {
+                    forward(SequenceMessage::End(Err(error)));
+                }
             }
         })
         .map_err(|error| error.to_string())?;
@@ -779,6 +816,79 @@ mod tests {
                 (path, rects)
             })
             .collect()
+    }
+
+    fn temp_profile(name: &str) -> std::path::PathBuf {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("rur-profile-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    fn profile_json(dir: &std::path::Path) -> Value {
+        let profile = serde_json::from_str(&std::fs::read_to_string(dir.join("profile.json")).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+        profile
+    }
+
+    /// What a profile of a run with real layout holds: the VM's instructions, the heap at the start and the end, and the
+    /// layer's caches counted beside the engine's; the layout records' (hits, misses)
+    fn assert_profiled(profile: &Value) -> (u64, u64) {
+        assert!(profile["work"]["script_insns"].as_u64().unwrap_or(0) > 0, "{}", profile["work"]);
+        let snapshots = profile["heap"]["snapshots"].as_array().unwrap();
+        assert_eq!(snapshots.first().unwrap()["label"], "start");
+        assert_eq!(snapshots.last().unwrap()["label"], "end");
+        assert!(snapshots.last().unwrap()["reachable"]["bytes"].as_u64().unwrap() > 0, "{}", snapshots.last().unwrap()["reachable"]);
+        let caches = profile["ree_caches"].as_array().unwrap();
+        let records = caches.iter().find(|cache| cache["name"] == "layout records").unwrap_or_else(|| panic!("the layer's caches: {caches:?}"));
+        let (hits, misses) = (records["hits"].as_u64().unwrap(), records["misses"].as_u64().unwrap());
+        assert!(misses > 0, "a run lays every record out at least once: {records}");
+        assert!(caches.iter().any(|cache| cache["name"] == "text layouts"), "{caches:?}");
+        assert!(profile["warnings"].as_array().is_none_or(|warnings| warnings.is_empty()), "{}", profile["warnings"]);
+        (hits, misses)
+    }
+
+    /// A profiled sequence (`rur-native sequence --profile`) profiles its engine thread, and the profile is written by
+    /// the time its end message arrives: the process may exit as soon as the frames are drawn
+    #[test]
+    fn a_profiled_sequence_writes_its_profile_before_it_ends() {
+        let args = fixture_args(&[]);
+        let spec = SequenceSpec { from: 0.0, frames: 12, fps: 60.0 };
+        let dir = temp_profile("sequence");
+        let config = profiler::Config::new(profiler::Kinds::parse("work,heap,caches").unwrap(), dir.clone());
+        let frames = start_fresh_profiled(&args, &spec, Some(config)).unwrap();
+        let mut seen = 0;
+        loop {
+            match frames.recv().unwrap() {
+                SequenceMessage::Frame(_) => seen += 1,
+                SequenceMessage::End(end) => {
+                    assert_eq!(end.unwrap()["status"], "ok");
+                    assert!(dir.join("summary.txt").is_file() && dir.join("report.html").is_file(), "the profile is written before the end");
+                    break;
+                }
+            }
+        }
+        assert_eq!(seen, 12);
+        let profile = profile_json(&dir);
+        assert_eq!(profile["run"]["command"], "sequence");
+        assert_eq!(profile["run"]["frames"], 12);
+        // (a frame lays out again only what its tweens moved: the rest of the records are kept)
+        let (hits, misses) = assert_profiled(&profile);
+        assert!(hits > 0 && misses > 0, "{hits} hits, {misses} misses");
+    }
+
+    /// A profiled render (`rur-native render --profile`): run_once reads the VM after the last frame and the export, and
+    /// gives the run's clock (engine frames, seconds, rate) for the profile's frames
+    #[test]
+    fn a_profiled_render_reads_the_vm_after_its_last_frame() {
+        let args = fixture_args(&["--time", "0.5"]);
+        let dir = temp_profile("render");
+        let session = crate::story_render::begin_profile(profiler::Config::new(profiler::Kinds::parse("work,heap,caches").unwrap(), dir.clone()));
+        let output = run_once(&args).unwrap();
+        assert!((output.seconds - 0.5).abs() < 1.0 / 60.0 && output.fps == 60.0 && output.frames >= 29, "{} frames, {} s, {} fps", output.frames, output.seconds, output.fps);
+        let run = profiler::Run { command: "render".into(), status: output.status.clone(), frames: output.frames, seconds: output.seconds, fps: output.fps, ..Default::default() };
+        session.finish(run).unwrap();
+        let profile = profile_json(&dir);
+        assert_eq!(profile["run"]["frames"], output.frames);
+        assert_profiled(&profile);
     }
 
     /// Every message of a sequence of `args`, in order

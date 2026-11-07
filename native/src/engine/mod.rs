@@ -8,6 +8,7 @@
 
 pub use roblox_engine_emulator::*;
 
+pub mod cache_counts;
 pub mod cli;
 pub mod export;
 pub mod input;

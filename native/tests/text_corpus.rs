@@ -27,6 +27,8 @@ pub fn shared_state_path(repo: &std::path::Path, relative: &str) -> std::path::P
 }
 // ... and generates hinted metrics with the crate's FreeType
 pub use rur_native::glyphs;
+// ... and counts its caches with the crate's counters (a profile's `caches`)
+pub use rur_native::cache_counts;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

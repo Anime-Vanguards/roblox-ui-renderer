@@ -15,6 +15,7 @@ use super::{
 };
 use crate::engine::{
     ClassId, Hooks, InstanceId, K, NameId, Reflection, State,
+    cache_counts::{self, Cache},
     instance as core,
     text::{
         SizeConstraint, TextEngine, TextObject, Truncate,
@@ -1177,6 +1178,7 @@ impl<'a> Pass<'a> {
             if let Some(entry) = memo.entries.iter().find(|entry| entry.args == args) {
                 let (result, carry) = (entry.result, entry.carry.clone());
                 self.l.stats.memo += 1;
+                cache_counts::hit(Cache::Sizes);
                 self.l.text_carries.set(id, carry);
                 return result;
             }
@@ -1184,11 +1186,13 @@ impl<'a> Pass<'a> {
             self.l.size_memo.set(id, Memo { stamp, generation, entries: Vec::new() });
         }
         self.l.stats.computed += 1;
+        cache_counts::miss(Cache::Sizes);
         let result = self.compute_size(id, args);
         let carry = self.l.text_carries.get(id).cloned().flatten();
         if let Some(memo) = self.l.size_memo.get_mut(id) {
             if memo.entries.len() >= MEMO_LIMIT {
                 memo.entries.remove(0);
+                cache_counts::evicted(Cache::Sizes, 1);
             }
             memo.entries.push(MemoEntry { args, result, carry });
         }
@@ -2273,11 +2277,13 @@ impl<'a> Pass<'a> {
             let old = self.l.records.get(id).unwrap();
             if old.same_inputs(&record) {
                 self.l.stats.skipped += 1;
+                cache_counts::hit(Cache::Records);
                 return;
             }
             if old.same_shape(&record) {
                 // Only moved: keep the record (and everything computed for it), take the new place.
                 self.l.stats.moved += 1;
+                cache_counts::hit(Cache::Records);
                 self.l.stored_stamps.take(id);
                 let kept = self.l.records.get_mut(id).unwrap();
                 kept.x = record.x;
@@ -2296,6 +2302,7 @@ impl<'a> Pass<'a> {
         }
 
         self.l.stats.stored += 1;
+        cache_counts::miss(Cache::Records);
         self.l.stored_stamps.take(id);
         let old = self.l.records.take(id);
         let n = self.l.ids.n;

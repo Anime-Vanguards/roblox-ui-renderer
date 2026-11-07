@@ -13,6 +13,7 @@ use super::num::{clamp, f32r, idiv, lmax};
 use super::opentype::Font;
 use super::utf8::{Codepoint, codepoints_into};
 use super::{KeyHasher, TextEngine};
+use crate::cache_counts::{self, Cache};
 
 /// A positioned glyph (`TextLayout.Glyph`). `x` is the pen offset in whole px from the line start,
 /// `size` the pixel size it is laid out at (rich `<font size>` runs differ from the label's size),
@@ -805,10 +806,12 @@ impl TextEngine {
         if let Some(bucket) = self.shape_cache.get(&hash) {
             for entry in bucket {
                 if &*entry.family == family && entry.weight == weight.to_bits() && &*entry.style == style && entry.size == size.to_bits() && &*entry.text == text {
+                    cache_counts::hit(Cache::Shapes);
                     return entry.value.clone();
                 }
             }
         }
+        cache_counts::miss(Cache::Shapes);
 
         let mut result: Vec<Vec<Glyph>> = Vec::new();
         let mut points = std::mem::take(&mut self.scratch_codepoints);
@@ -833,6 +836,7 @@ impl TextEngine {
         let value = Arc::new(result);
         self.shape_count += 1;
         if self.shape_count > 5000 {
+            cache_counts::evicted(Cache::Shapes, self.shape_cache.values().map(Vec::len).sum());
             self.shape_cache.clear();
             self.shape_count = 0;
         }
@@ -927,8 +931,10 @@ impl TextEngine {
         };
         let hash = hasher.finish();
         if let Some(found) = self.measure_lookup(hash, &key) {
+            cache_counts::hit(Cache::Texts);
             return found;
         }
+        cache_counts::miss(Cache::Texts);
 
         let face = self.fonts.get_face(params.family, params.weight, params.style);
         let plain_paragraphs;

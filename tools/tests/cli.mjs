@@ -352,3 +352,39 @@ if (!results[0].error || /contacted a service/.test(results[0].error) || results
 	fs.rmSync(dir, { recursive: true, force: true });
 	console.log("CLI actions: PASS (validation exits 64 before any output, click by path / suffix / anchor / coordinates after layout shifts, unknown path fails the render, --isolated service client)");
 }
+
+// A profiled render (--profile) runs in a process of its own, never through the render service, writes the
+// engine's profile to <out>/profile and names it in the summary
+{
+	const os = await import("node:os");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-cli-profile-"));
+	fs.writeFileSync(path.join(dir, "label.luau"), `return function(Target)
+	local Label = Instance.new("TextLabel")
+	Label.Size = UDim2.fromOffset(200, 40)
+	Label.Text = "Profiled"
+	Label.Parent = Target
+end
+`);
+	const args = { fixture: path.join(dir, "label.luau"), viewport: "400x200", "no-png": true, offline: true, out: path.join(dir, "out"), profile: "work,heap,caches" };
+	const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+import http from 'node:http';
+let contacted = false;
+http.request = () => { contacted = true; throw new Error('contacted a service'); };
+const { render } = await import('./cli/rur.mjs');
+const summary = await render(${JSON.stringify(args)}, { service: true });
+console.log(JSON.stringify({ summary, contacted }));
+`], { cwd: root, encoding: "utf8", windowsHide: true, env: { ...process.env, RUR_STATE_DIR: path.join(dir, "state"), RUR_ISOLATED: "", RUR_NO_SERVICE: "" } });
+	assert.equal(result.status, 0, result.stderr);
+	const { summary, contacted } = JSON.parse(result.stdout.trim().split(/\r?\n/).pop());
+	// (the service client falls back to a render of its own when a request fails: what counts is that none was made)
+	assert.equal(contacted, false, "a profiled render never contacts the render service");
+	assert.equal(summary.status, "ok");
+	assert.equal(path.resolve(summary.profile), path.resolve(dir, "out", "profile"));
+	const profile = JSON.parse(fs.readFileSync(path.join(summary.profile, "profile.json"), "utf8"));
+	assert.equal(profile.run.command, "render");
+	assert.ok(profile.work.script_insns > 0, JSON.stringify(profile.work));
+	assert.ok(profile.ree_caches.some(cache => cache.name === "layout records" && cache.hits + cache.misses > 0), JSON.stringify(profile.ree_caches));
+	assert.match(result.stderr, /heap at end: .* reachable in /);
+	fs.rmSync(dir, { recursive: true, force: true });
+	console.log("CLI profile: PASS (render --profile runs without the render service, writes <out>/profile with the layout's caches, names it in the summary)");
+}

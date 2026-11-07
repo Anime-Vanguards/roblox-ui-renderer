@@ -25,6 +25,7 @@
 //             [--context <json|file>] [--assets-at <Service.Path>] [--assets <prefix>,...] [--mode play|edit]
 //                                                       run a harness on the project frame by frame and record
 //                                                       the 3D world: scene.rbxm + playback.json (ror), events.json
+//   rur profile diff <before> <after> | report <dir>    compare two --profile directories, rewrite a profile's page
 //
 // Global: --state-dir <dir> (or RUR_STATE_DIR): caches, builds, logs go there instead of .cache/;
 // RUR_OUT_DIR replaces out/ as the default output root (cli/paths.mjs). Renders go through the render
@@ -37,6 +38,10 @@
 // own (the sweep's children, tests that need a state dir of their own).
 // --actions '<JSON list>' | <file>: timed input (move, down, up, wheel, leave, key, text, paste, and
 // click / drag by coordinates or node path), checked first: a bad list exits 64 (cli/actions.mjs).
+// --profile <kinds> [--profile-out <dir>] (render, sequence, record): the engine's profiling suite (work, caches,
+// alloc, heap, timeline, cpu, phases, time, boundary or all: roblox-engine-emulator's docs/cli.md "Profiles and
+// caches"), with the layout's and text's caches among the caches, written to <out>/profile: summary.txt (printed on
+// stderr), profile.json, report.html, folded stacks. A profiled render or sequence runs in a process of its own.
 // `rur doctor --fix` removes build leftovers from the state dir (superseded engine binaries, retired
 // Python / FreeType installs).
 // Common options: --project <dir> (RUR_PROJECT; default examples/project; its places come from its rur.json,
@@ -220,6 +225,19 @@ export function runtimeArgs(args, scenePath = null) {
 	return result;
 }
 
+// --profile <kinds> [--profile-out <dir>] [--profile-top <n>] [--profile-phase <a,b|all>] [--profile-alloc-step <bytes>]
+// as `rur-native render`, `sequence` and `record` take them: the engine's profiling suite (roblox-engine-emulator's
+// docs/cli.md "Profiles and caches"). A profiled render or sequence runs in a process of its own, never through the
+// render service; the profile goes to <out>/profile unless --profile-out names a directory.
+export function profileArgs(args) {
+	if (args.profile === undefined || args.profile === false) return [];
+	const result = ["--profile", ...(args.profile === true ? [] : [String(args.profile)])];
+	for (const key of ["profile-out", "profile-top", "profile-phase", "profile-alloc-step"]) {
+		if (args[key] !== undefined && args[key] !== true) result.push(`--${key}`, key === "profile-out" ? path.resolve(String(args[key])) : String(args[key]));
+	}
+	return result;
+}
+
 // One `rur render` output directory in a process of its own (`rur-native render`, native/src/story_render.rs):
 // the run, scene.json, dependencies.json, the glyph atlas, the images, manifest.json and (unless
 // `png` is false) render.png. Resolves with its result ({ status, nodes, phases, renderErrors }).
@@ -274,6 +292,7 @@ export async function record(args) {
 	if (snapshots) argv.push("--snapshot-dir", snapshots);
 	if (args.offline) argv.push("--offline");
 	if (args.verbose) argv.push("--verbose");
+	argv.push(...profileArgs(args));
 	const executable = await ensureEngine();
 	return new Promise((resolve, reject) => {
 		const child = spawn(executable, argv, { cwd: ROOT, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -354,12 +373,13 @@ export async function render(args, { service = false, env = process.env } = {}) 
 	}
 	const options = { png: !args["no-png"], offline: Boolean(args.offline) };
 	let result = null;
-	// (--verbose mirrors the story's output on stderr: a process of its own)
-	if (service && !args.scene && !args.verbose) {
+	// (--verbose mirrors the story's output on stderr, and a profile is a run's own: a process of its own)
+	const profile = profileArgs(args);
+	if (service && !args.scene && !args.verbose && !profile.length) {
 		const { renderInService } = await import("./client.mjs");
 		result = await renderInService(argv, outDir, options, { env });
 	}
-	result ||= await renderNative(argv, outDir, options);
+	result ||= await renderNative([...profile, ...argv], outDir, options);
 
 	const scene = JSON.parse(fs.readFileSync(path.join(outDir, "scene.json"), "utf8"));
 	let manifest = { images: {} };
@@ -390,6 +410,8 @@ export async function render(args, { service = false, env = process.env } = {}) 
 		phases: result.phases || {},
 	};
 	if (gitRef) summary.gitRef = gitRef;
+	// (--profile: the profile's directory; its summary.txt was printed on stderr)
+	if (result.profile) summary.profile = result.profile;
 	fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
 	return summary;
 }
@@ -470,11 +492,13 @@ export async function sequence(args, { service = false, env = process.env } = {}
 	const argv = runtimeArgs({ ...args, "snapshot-dir": snapshotDir(args) });
 	const offline = Boolean(args.offline);
 	let result = null;
-	if (service && !args.verbose) {
+	// (a profile is a run's own: a process of its own)
+	const profile = profileArgs(args);
+	if (service && !args.verbose && !profile.length) {
 		const { sequenceInService } = await import("./client.mjs");
 		result = await sequenceInService(argv, outDir, options, { offline }, { env });
 	}
-	result ||= await sequenceNative(argv, outDir, options, { offline });
+	result ||= await sequenceNative([...profile, ...argv], outDir, options, { offline });
 	const diagnostics = result.diagnostics || {};
 	const output = asArray(diagnostics.output);
 	const summary = {
@@ -503,6 +527,7 @@ export async function sequence(args, { service = false, env = process.env } = {}
 		phases: result.phases || {},
 		perFrame: result.perFrame || {},
 	};
+	if (result.profile) summary.profile = result.profile;
 	fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
 	return summary;
 }
@@ -1069,6 +1094,12 @@ async function main() {
 	} else if (command === "record") {
 		const summary = await jsonResult(args, () => record(args));
 		if (summary.status === "error") process.exitCode = 2;
+	} else if (command === "profile") {
+		// The engine's profile comparison and page (`rur-native profile`): its arguments as they are
+		const executable = await ensureEngine();
+		const result = spawnSync(executable, ["profile", ...process.argv.slice(3)], { cwd: process.cwd(), stdio: "inherit", windowsHide: true });
+		if (result.error) throw result.error;
+		process.exitCode = result.status ?? 1;
 	} else if (command === "stories") {
 		if (args.place === "all") {
 			for (const entry of storyEntries(args)) console.log(entry.file);

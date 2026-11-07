@@ -168,6 +168,7 @@ impl TextEngine {
     pub(crate) fn measure_insert(&mut self, hash: u64, key: &MeasureKey, value: Arc<TextLayout>) {
         self.measure_count += 1;
         if self.measure_count > 20000 {
+            crate::cache_counts::evicted(crate::cache_counts::Cache::Texts, self.measure_cache.values().map(Vec::len).sum());
             self.measure_cache.clear();
             self.measure_count = 0;
         }

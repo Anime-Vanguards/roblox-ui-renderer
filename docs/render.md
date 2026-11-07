@@ -14,6 +14,7 @@ sweeps, recordings of 3D worlds and the text-first inspection of a render.
 | `rur compare --story <file>` | render in Studio and offline, diff layout and pixels ([studio.md](studio.md)) |
 | `rur diff --git-ref <ref> --story <file>` | render at a commit and in the working tree, diff them |
 | `rur record --harness <file.luau>` | run a harness against the project and record the 3D world |
+| `rur profile diff <before> <after>` | compare two profiles that `--profile` wrote ([profiles](#profiles---profile)) |
 | `rur native` | the desktop storybook ([storybook.md](storybook.md)) |
 | `rur doctor [--fix]`, `rur clean`, `rur selftest` | toolchain check, output cleanup, the offline checks |
 
@@ -132,6 +133,29 @@ covers harnesses and outputs) with rur's engines. The output (`scene.rbxm`, `pla
 ```powershell
 node cli/rur.mjs record --harness path/to/Harness.luau --seconds 3 --fps 60 --out out/record/demo --context '{"Scenario":"rain"}'
 ```
+
+## Profiles (`--profile`)
+
+`rur render`, `rur sequence` and `rur record` take the emulator's profiling suite: `--profile <kinds>
+[--profile-out <dir>]`, with the kinds `work`, `caches`, `alloc`, `heap`, `timeline`, `cpu`, `phases`, `time`,
+`boundary` or `all` ([the emulator's documentation](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md#profiles-and-caches)
+says what each one records). The run's real layout and text are in it: their cost lands on the script lines that
+asked for them, and `caches` counts the layout's records and AutomaticSize sizes and the text engine's laid-out
+text, shaped paragraphs and rich text beside the engine's own caches. The profile goes to `<out>/profile`
+(`summary.txt`, also printed on stderr, `profile.json`, `report.html` and folded stacks) and the summary's `profile`
+names it. A profiled render or sequence runs in a process of its own, never through the render service, with every
+chunk interpreted as the emulator's `record` runs them (natively compiled code would run unseen by the instruction
+profile; the results are the same). A render that runs again with the cloud fonts it lacked is profiled once, in its
+last run; a sequence's profile is its engine half's (the mount and the frames, not the drawing).
+
+```powershell
+node cli/rur.mjs render --story path/to/Shop.story.luau --time 2 --profile all
+node cli/rur.mjs sequence --story path/to/Shop.story.luau --to 4 --profile heap,alloc --no-video
+node cli/rur.mjs profile diff out/Shop/before/profile out/Shop/after/profile
+```
+
+`rur profile diff <before> <after>` compares two profiles (the emulator's `ree profile diff`: the headline figures,
+the functions and lines that moved, caches, memory by type); `rur profile report <dir>` rewrites a profile's page.
 
 ## Inspect (text first, for agents)
 

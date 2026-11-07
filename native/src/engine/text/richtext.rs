@@ -10,6 +10,7 @@ use super::layout::{Glyph, LayoutParams, Prepared, TextLayout, rich_size_for, sh
 use super::num::{f32r, lmax, tonumber};
 use super::utf8::Codepoint;
 use super::{KeyHasher, TextEngine};
+use crate::cache_counts::{self, Cache};
 
 pub type Color = [f64; 3];
 
@@ -481,11 +482,16 @@ impl TextEngine {
             }
         }
         let shaped = match shaped {
-            Some(shaped) => shaped,
+            Some(shaped) => {
+                cache_counts::hit(Cache::RichText);
+                shaped
+            }
             None => {
+                cache_counts::miss(Cache::RichText);
                 let value = Arc::new(self.shape_rich(&parsed.runs, params, base_size, scale));
                 self.rich_count += 1;
                 if self.rich_count > 5000 {
+                    cache_counts::evicted(Cache::RichText, self.rich_shape_cache.values().map(Vec::len).sum());
                     self.rich_shape_cache.clear();
                     self.rich_parse_cache.clear();
                     self.rich_count = 0;

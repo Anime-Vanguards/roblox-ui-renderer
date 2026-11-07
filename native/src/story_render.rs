@@ -15,7 +15,10 @@ use serde_json::{Map, Value, json};
 
 use crate::{
     assets::AssetStore,
-    engine::cli::{Args, SceneOutput},
+    engine::{
+        cli::{Args, SceneOutput},
+        profiler,
+    },
     presentation::ScrollPresentation,
     render::{DrawPreparer, gpu::GpuRenderer},
     resolve::Resolver,
@@ -399,6 +402,9 @@ fn saved_scene(file: &Path) -> Result<SceneOutput, String> {
         dependencies: Vec::new(),
         scene,
         text,
+        frames: 0,
+        seconds: 0.0,
+        fps: 0.0,
     })
 }
 
@@ -432,6 +438,57 @@ pub fn link_or_copy(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The emulator's profiling suite on a render or a sequence (its docs/cli.md "Profiles and caches"): `--profile <kinds>
+/// [--profile-out <dir>] [--profile-top <n>] [--profile-phase <a,b|all>] [--profile-alloc-step <bytes>]`, taken out of
+/// `argv` (the rest is returned: the engine's arguments), or `REE_PROFILE=<kinds>`. The profile directory defaults to
+/// `<out>/profile`; `--profile boundary` alone is the boundary profiler, its report in that directory.
+fn profile_options(argv: &[String], out: &Path) -> Result<(Option<profiler::Config>, Vec<String>), String> {
+    let (mut profile, mut rest) = (Vec::new(), Vec::new());
+    let mut index = 0;
+    while index < argv.len() {
+        let count = match argv[index].as_str() {
+            "--profile" => profiler::profile_arguments(argv, index),
+            "--profile-out" | "--profile-top" | "--profile-phase" | "--profile-alloc-step" => 2,
+            _ => {
+                rest.push(argv[index].clone());
+                index += 1;
+                continue;
+            }
+        };
+        profile.extend(argv[index..(index + count).min(argv.len())].iter().cloned());
+        index += count;
+    }
+    let default = || out.join("profile");
+    let config = match profiler::profile_value(&profile).as_deref() {
+        Some("boundary") => {
+            let dir = profile.iter().position(|arg| arg == "--profile-out").and_then(|at| profile.get(at + 1)).map(PathBuf::from).unwrap_or_else(default);
+            Some(profiler::Config::new(profiler::Kinds::BOUNDARY, dir))
+        }
+        None if profile.iter().any(|arg| arg == "--profile") => {
+            let kinds: Vec<&str> = profiler::Kinds::NAMES.iter().map(|(name, _, _)| *name).collect();
+            return Err(format!("--profile takes the kinds to profile: {}, all", kinds.join(", ")));
+        }
+        _ => profiler::Config::from_args(&profile, default)?,
+    };
+    Ok((config.map(|mut config| {
+        config.out = std::path::absolute(&config.out).unwrap_or(config.out);
+        config
+    }), rest))
+}
+
+/// Starts a profile on this thread, the layer's own caches listed with the engine's when it counts caches
+pub(crate) fn begin_profile(config: profiler::Config) -> profiler::Session {
+    if config.kinds.has(profiler::Kinds::CACHES) {
+        crate::engine::cache_counts::register();
+    }
+    profiler::Session::begin(config)
+}
+
+/// The story, module, model or fixture a run of `args` shows (a profile's run names it)
+pub(crate) fn source_file(args: &Args) -> Option<String> {
+    args.story.clone().or_else(|| args.module.clone()).or_else(|| args.model.clone()).or_else(|| args.fixture.clone())
+}
+
 /// JSON.stringify(value, null, 1)
 fn pretty(value: &Value) -> Vec<u8> {
     let mut out = Vec::new();
@@ -441,9 +498,10 @@ fn pretty(value: &Value) -> Vec<u8> {
 }
 
 /// `rur-native sequence --dir <out> [--from s] [--to s | --frames n | --duration s] [--fps n]
-/// [--crop node|x,y,w,h] [--pad px] [--no-png] [--scenes] [--no-video] [--offline] <engine arguments>`:
-/// one sequence (sequence.rs) in this process, the engine half in a fresh VM. Prints the result as one
-/// JSON line on stdout; returns the exit code.
+/// [--crop node|x,y,w,h] [--pad px] [--no-png] [--scenes] [--no-video] [--offline]
+/// [--profile <kinds> [--profile-out <dir>]] <engine arguments>`: one sequence (sequence.rs) in this process, the
+/// engine half in a fresh VM (profiled on its thread: [`crate::sequence::start_fresh_profiled`]). Prints the result as
+/// one JSON line on stdout; returns the exit code.
 pub fn sequence_cli(argv: &[String]) -> i32 {
     let mut out = None;
     let mut options = serde_json::Map::new();
@@ -483,8 +541,12 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
         eprintln!("rur-native sequence: --dir <output directory> is required");
         return 2;
     };
-    let parsed = crate::engine::cli::parse(&engine_args).and_then(|args| crate::sequence::parse_options(&Value::Object(options), offline).map(|(spec, output)| (args, spec, output)));
-    let (args, spec, output) = match parsed {
+    let out = std::path::absolute(&out).unwrap_or_else(|_| PathBuf::from(&out));
+    let parsed = profile_options(&engine_args, &out).and_then(|(profile, engine_args)| {
+        let args = crate::engine::cli::parse(&engine_args)?;
+        crate::sequence::parse_options(&Value::Object(options), offline).map(|(spec, output)| (profile, args, spec, output))
+    });
+    let (profile, args, spec, output) = match parsed {
         Ok(parsed) => parsed,
         Err(error) => {
             eprintln!("rur-native sequence: {error}");
@@ -492,10 +554,21 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
         }
     };
     let repo = args.repo.as_ref().map(PathBuf::from).unwrap_or_else(crate::engine::default_repo);
-    let out = std::path::absolute(&out).unwrap_or_else(|_| PathBuf::from(&out));
     let mut renderer = StoryRenderer::new(repo);
     let started = Instant::now();
-    let result = renderer.sequence(&args, &out, &output, &mut |args| crate::sequence::start_fresh(args, &spec), || {});
+    if let Some(config) = &profile {
+        // (a profile of an earlier sequence there is not this one's)
+        let _ = std::fs::remove_file(config.out.join("summary.txt"));
+    }
+    // (with a profile, the engine half profiles its own thread and writes the profile before its last message: it is
+    // there once the sequence is)
+    let result = renderer.sequence(&args, &out, &output, &mut |args| crate::sequence::start_fresh_profiled(args, &spec, profile.clone()), || {});
+    let result = result.map(|mut result| {
+        if let Some(config) = profile.as_ref().filter(|config| config.out.join("summary.txt").is_file()) {
+            result["profile"] = json!(config.out);
+        }
+        result
+    });
     let code = match result {
         Ok(result) => {
             eprintln!("rur: sequence {}; {} frames; {:.3}s -> {}", result["status"].as_str().unwrap_or("?"), result["frames"], started.elapsed().as_secs_f64(), out.display());
@@ -513,8 +586,9 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
     std::process::exit(code)
 }
 
-/// `rur-native render --dir <out> [--no-png] [--offline] <engine arguments>`: one render in this
-/// process. Prints the result as one JSON line on stdout; returns the exit code.
+/// `rur-native render --dir <out> [--no-png] [--offline] [--profile <kinds> [--profile-out <dir>]] <engine arguments>`:
+/// one render in this process. Prints the result as one JSON line on stdout (with `profile`, the profile's directory,
+/// default `<out>/profile`, whose summary goes to stderr: [`profile_options`]); returns the exit code.
 pub fn cli(argv: &[String]) -> i32 {
     let mut out = None;
     let mut saved = None;
@@ -543,23 +617,47 @@ pub fn cli(argv: &[String]) -> i32 {
         eprintln!("rur-native render: --dir <output directory> is required");
         return 2;
     };
-    let args = match crate::engine::cli::parse(&engine_args) {
-        Ok(args) => args,
+    let out = std::path::absolute(&out).unwrap_or_else(|_| PathBuf::from(&out));
+    let parsed = profile_options(&engine_args, &out).and_then(|(profile, engine_args)| Ok((profile, crate::engine::cli::parse(&engine_args)?)));
+    let (profile, args) = match parsed {
+        Ok(parsed) => parsed,
         Err(error) => {
             eprintln!("rur-native render: {error}");
             return 2;
         }
     };
+    if profile.is_some() && saved.is_some() {
+        eprintln!("rur-native render: --profile profiles a run, and --scene draws a saved scene without one");
+        return 2;
+    }
     let repo = args.repo.as_ref().map(PathBuf::from).unwrap_or_else(crate::engine::default_repo);
-    let out = std::path::absolute(&out).unwrap_or_else(|_| PathBuf::from(&out));
     let mut renderer = StoryRenderer::new(repo);
     // The GPU device starts while the story runs
     let gpu = options.png.then(|| thread::spawn(|| pollster::block_on(GpuRenderer::headless())));
     let started = Instant::now();
+    // A profile of the run (the emulator's profiler): it starts before the engine does and run_once reads the VM after the
+    // last frame; a run repeated with the cloud fonts it lacked starts it again, so it is the last run's
+    let mut session = profile.clone().map(begin_profile);
+    let mut clock = (0, 0.0, 0.0);
     let result = match &saved {
         // --scene <scene.json>: draw a saved (possibly hand-edited) scene, nothing runs
         Some(file) => saved_scene(Path::new(file)).map_err(|error| anyhow!(error)).and_then(|output| renderer.write_outputs(&args, &out, options.offline, false, move |_| Ok(output), || {})),
-        None => renderer.write_outputs(&args, &out, options.offline, true, crate::engine::cli::run_once, || {}),
+        None => renderer.write_outputs(
+            &args,
+            &out,
+            options.offline,
+            true,
+            |args| {
+                let output = crate::engine::cli::run_once(args)?;
+                clock = (output.frames, output.seconds, output.fps);
+                Ok(output)
+            },
+            || {
+                if let Some(config) = &profile {
+                    session = Some(begin_profile(config.clone()));
+                }
+            },
+        ),
     };
     let result = result.and_then(|(mut result, scene, _)| {
         if let Some(gpu) = gpu {
@@ -569,6 +667,31 @@ pub fn cli(argv: &[String]) -> i32 {
         }
         Ok(result)
     });
+    // The profile's files and its summary (on stderr), once the render is written
+    let result = match session {
+        Some(session) => {
+            let status = match &result {
+                Ok(result) => result["status"].as_str().unwrap_or("?").to_string(),
+                Err(_) => "failed".into(),
+            };
+            let (frames, seconds, fps) = clock;
+            let run = profiler::Run { command: "render".into(), status, harness: source_file(&args), frames, seconds, fps };
+            match session.finish(run) {
+                Ok(summary) => {
+                    eprint!("{summary}");
+                    result.map(|mut result| {
+                        result["profile"] = json!(profile.as_ref().map(|config| &config.out));
+                        result
+                    })
+                }
+                Err(error) => {
+                    eprintln!("rur-native render: profile: {error}");
+                    result
+                }
+            }
+        }
+        None => result,
+    };
     let code = match result {
         Ok(result) => {
             eprintln!("rur: {}; {} nodes; {:.3}s -> {}", result["status"].as_str().unwrap_or("?"), result["nodes"], started.elapsed().as_secs_f64(), out.display());
@@ -586,4 +709,38 @@ pub fn cli(argv: &[String]) -> i32 {
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     std::process::exit(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| arg.to_string()).collect()
+    }
+
+    /// `--profile <kinds>` and its options come out of a render's or a sequence's arguments, the rest are the engine's;
+    /// the profile directory defaults to `<out>/profile`, `--profile boundary` alone is the boundary profiler, and a
+    /// `--profile` without kinds is refused
+    #[test]
+    fn profile_options_are_taken_out_of_the_engine_arguments() {
+        let out = std::path::absolute("out-dir").unwrap();
+        let (config, rest) = profile_options(&strings(&["--story", "a.luau", "--profile", "heap,work", "--time", "1"]), &out).unwrap();
+        let config = config.unwrap();
+        assert!(config.kinds.has(profiler::Kinds::HEAP) && config.kinds.has(profiler::Kinds::WORK) && !config.kinds.has(profiler::Kinds::TIME));
+        assert_eq!(config.out, out.join("profile"));
+        assert_eq!(rest, strings(&["--story", "a.luau", "--time", "1"]));
+        let (config, rest) = profile_options(&strings(&["--profile", "all", "--profile-out", "elsewhere", "--profile-top", "5", "--story", "a.luau"]), &out).unwrap();
+        let config = config.unwrap();
+        assert_eq!((config.out, config.top), (std::path::absolute("elsewhere").unwrap(), 5));
+        assert_eq!(rest, strings(&["--story", "a.luau"]));
+        let (config, rest) = profile_options(&strings(&["--profile", "boundary", "--story", "a.luau"]), &out).unwrap();
+        assert_eq!(config.unwrap().kinds, profiler::Kinds::BOUNDARY);
+        assert_eq!(rest, strings(&["--story", "a.luau"]));
+        assert!(profile_options(&strings(&["--profile", "--story", "a.luau"]), &out).unwrap_err().contains("--profile takes the kinds"));
+        if std::env::var_os("REE_PROFILE").is_none() {
+            let (config, rest) = profile_options(&strings(&["--story", "a.luau"]), &out).unwrap();
+            assert!(config.is_none() && rest == strings(&["--story", "a.luau"]));
+        }
+    }
 }

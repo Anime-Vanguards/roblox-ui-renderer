@@ -642,6 +642,10 @@ pub struct SceneOutput {
     pub lines: usize,
     /// The source files the run required (`--dependencies`)
     pub dependencies: Vec<String>,
+    /// The engine frames the run stepped, the virtual seconds they took and the frame rate (a profile's run)
+    pub frames: u64,
+    pub seconds: f64,
+    pub fps: f64,
 }
 
 impl SceneOutput {
@@ -677,8 +681,12 @@ pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
     interpret_in_service(&lua, &engine);
     let result = (|| {
         let project = story::mount_project(&lua, &engine, &spec, started)?;
+        // A profile of the run (`rur-native render --profile`, the emulator's profiler) hooks the VM once the project
+        // is mounted, as `ree record` does, and reads it after the last frame and the export; nothing without one
+        super::luau_profile::install(&lua);
         run_scene(&lua, &engine, args, &project, target)
     })();
+    super::profiler::collect(&lua);
     // The VM, then the engine's own cycles (a process may run many of these: the render service)
     drop(lua);
     engine.teardown();
@@ -687,9 +695,11 @@ pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
 
 /// A render service's VM (the service keeps compiled modules between VMs) runs every chunk in the
 /// interpreter: module chunks already did, and compiling the engine's prelude and services to native
-/// code at every VM start, a VM per render, was most of the start (results are the same)
+/// code at every VM start, a VM per render, was most of the start (results are the same). So does a
+/// profiled run (`--profile`), as `ree record` runs: the profile counts the interpreter's instructions
+/// and inline caches, and natively compiled code would run unseen
 fn interpret_in_service(lua: &Lua, engine: &Engine) {
-    if super::lua::modules::reusing_compiled_modules() {
+    if super::lua::modules::reusing_compiled_modules() || super::profiler::active() {
         super::lua::modules::interpret_all(lua, engine);
     }
 }
@@ -765,6 +775,9 @@ impl Preloaded {
                 return Err(error);
             }
         };
+        // (a profile running on this thread hooks the VM once the project is mounted: `rur-native sequence --profile`;
+        // nothing without one)
+        super::luau_profile::install(&lua);
         Ok(Preloaded { project: Some(project), lua: Some(lua), engine, target })
     }
 
@@ -788,13 +801,21 @@ impl Preloaded {
             sink(SequenceMessage::End(Err("the preloaded VM was released".into())));
             return;
         };
+        // A profile running on this thread reads the VM when the sequence ends, after its last frame (before the end
+        // goes out: the sink may write the profile then)
+        let mut ending = |message: SequenceMessage| {
+            if matches!(message, SequenceMessage::End(_)) {
+                super::profiler::collect(lua);
+            }
+            sink(message)
+        };
         let result = match &args.actions {
             Some(actions) => story::read_actions(actions).map(|_| ()),
             None => Ok(()),
         }
-        .and_then(|()| run_sequence(lua, &self.engine, project, args, self.target, spec, sink));
+        .and_then(|()| run_sequence(lua, &self.engine, project, args, self.target, spec, &mut ending));
         if let Err(error) = result {
-            sink(SequenceMessage::End(Err(error)));
+            ending(SequenceMessage::End(Err(error)));
         }
     }
 
@@ -1274,11 +1295,14 @@ fn scene_output(
     }
     empty_arrays_as_objects(&mut scene);
     let nodes = scene.get("nodes").and_then(Json::as_array).map_or(0, Vec::len);
-    let lines = engine.state.borrow().output.entries.len();
+    let (lines, frames, seconds, fps) = {
+        let state = engine.state.borrow();
+        (state.output.entries.len(), state.sched.frame, state.sched.now, 1.0 / state.sched.frame_duration)
+    };
     let status = mounted.status.clone();
     let scene = sort_keys(scene);
     let text = serde_json::to_string(&scene).map_err(|e| e.to_string())?;
-    Ok(SceneOutput { text, scene, status, nodes, lines, dependencies: super::lua::modules::required_files(engine) })
+    Ok(SceneOutput { text, scene, status, nodes, lines, dependencies: super::lua::modules::required_files(engine), frames, seconds, fps })
 }
 
 /// Lune's JSON encoder writes an empty table as `{}`.

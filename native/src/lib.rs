@@ -157,6 +157,9 @@ fn default_repo() -> PathBuf {
 /// The engine's Luau profiler, MicroProfiler scopes and the state dir (cli/paths.mjs: RUR_STATE_DIR,
 /// else RUR_CACHE_DIR, else `<repo>/.cache`) are the emulator's
 pub use engine::{luau_profile, microprofile, shared_state_path, state_dir};
+/// The layer's cache counters (a profile's `caches`), at the root as the text module reaches them (it is also compiled on
+/// its own, by native/tests/text_corpus.rs)
+pub use engine::cache_counts;
 
 fn absolute(base: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {
