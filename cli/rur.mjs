@@ -26,6 +26,8 @@
 //                                                       run a harness on the project frame by frame and record
 //                                                       the 3D world: scene.rbxm + playback.json (ror), events.json
 //   rur profile diff <before> <after> | report <dir>    compare two --profile directories, rewrite a profile's page
+//   rur profile view <dir> [<dir2>]                    explore a profile (or a before/after pair) in the terminal
+//   rur profile render <dir> --view <name|all> --out <file.png|.svg|.txt|dir|->   the viewer's screens as files
 //
 // Global: --state-dir <dir> (or RUR_STATE_DIR): caches, builds, logs go there instead of .cache/;
 // RUR_OUT_DIR replaces out/ as the default output root (cli/paths.mjs). Renders go through the render

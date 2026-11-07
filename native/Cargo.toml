@@ -31,7 +31,7 @@ required-features = ["web"]
 default = ["desktop"]
 # The egui desktop app, headless captures, the render service, the runtime worker thread, the Luau
 # JIT and the native GPU backends
-desktop = ["dep:eframe", "dep:egui", "dep:egui-wgpu", "dep:tokio", "mlua/luau-jit", "roblox-engine-emulator/jit", "roblox-engine-emulator/bundles", "wgpu/dx12", "wgpu/vulkan", "wgpu/metal"]
+desktop = ["dep:eframe", "dep:egui", "dep:egui-wgpu", "dep:tokio", "dep:ree-profile-view", "mlua/luau-jit", "roblox-engine-emulator/jit", "roblox-engine-emulator/bundles", "wgpu/dx12", "wgpu/vulkan", "wgpu/metal"]
 # The engine and renderer in a browser: WebGL2 through wgpu's GLES backend, single-threaded, files
 # from the page's bundle (src/web.rs)
 web = []
@@ -50,7 +50,10 @@ image = { version = "=0.25.8", default-features = false, features = ["png", "jpe
 # 3D world, the recorder) with its patched Luau VM: roblox-engine-emulator at a pinned commit. Its
 # features follow ours (desktop: Luau native code, manifest bundles). Building against a local checkout
 # instead: `node tools/emulator.mjs link` (docs/how-it-works.md "The engine: roblox-engine-emulator").
-roblox-engine-emulator = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "67efc9b496e5f99e6d34e102064771c9fe001876", default-features = false }
+roblox-engine-emulator = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "e78d602062a46f3421a1695dd62366689347ca76", default-features = false }
+# The emulator's profile viewer (`rur-native profile view|render`, the desktop build): its crate in the same
+# repository, at the same commit (tools/emulator.mjs pins and links both)
+ree-profile-view = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "e78d602062a46f3421a1695dd62366689347ca76", optional = true }
 rbx_binary = "=2.0.1"
 rbx_dom_weak = "=4.2.0"
 rustc-hash = "=2.1.3"
@@ -93,7 +96,7 @@ flate2 = "=1.1.10"
 # The patched Luau VM mlua-sys compiles: the emulator's vendor/luau0-src, at the same commit as the
 # dependency above (only the workspace root's [patch] applies; tools/emulator.mjs pin moves both)
 [patch.crates-io]
-luau0-src = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "67efc9b496e5f99e6d34e102064771c9fe001876" }
+luau0-src = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "e78d602062a46f3421a1695dd62366689347ca76" }
 
 # `--release` is the everyday build (the app, agents, tests): full optimisation, incremental, many codegen
 # units, so an edit rebuilds in seconds. `lto = false` keeps cargo's ThinLTO across each crate's own codegen

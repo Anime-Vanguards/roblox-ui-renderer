@@ -385,6 +385,18 @@ console.log(JSON.stringify({ summary, contacted }));
 	assert.ok(profile.work.script_insns > 0, JSON.stringify(profile.work));
 	assert.ok(profile.ree_caches.some(cache => cache.name === "layout records" && cache.hits + cache.misses > 0), JSON.stringify(profile.ree_caches));
 	assert.match(result.stderr, /heap at end: .* reachable in /);
+	// the profile viewer reads it: the Caches view as text lists the layout's caches; every view as a PNG
+	const viewer = spawnSync(process.execPath, [path.join("cli", "rur.mjs"), "profile", "render", summary.profile, "--view", "caches", "--out", "-"], { cwd: root, encoding: "utf8", windowsHide: true, env: { ...process.env, RUR_STATE_DIR: path.join(dir, "state") } });
+	assert.equal(viewer.status, 0, viewer.stderr);
+	assert.match(viewer.stdout, /ree's caches/);
+	assert.match(viewer.stdout, /layout records/);
+	const shots = path.join(dir, "views");
+	const all = spawnSync(process.execPath, [path.join("cli", "rur.mjs"), "profile", "render", summary.profile, "--view", "all", "--out", shots, "--size", "100x30"], { cwd: root, encoding: "utf8", windowsHide: true, env: { ...process.env, RUR_STATE_DIR: path.join(dir, "state") } });
+	assert.equal(all.status, 0, all.stderr);
+	for (const view of ["overview", "flame", "calls", "source", "heap", "caches", "issues"]) {
+		assert.ok(fs.existsSync(path.join(shots, `${view}.png`)), `${view}.png`);
+	}
+	assert.match(all.stdout, /!\[Overview\]\(/);
 	fs.rmSync(dir, { recursive: true, force: true });
-	console.log("CLI profile: PASS (render --profile runs without the render service, writes <out>/profile with the layout's caches, names it in the summary)");
+	console.log("CLI profile: PASS (render --profile runs without the render service, writes <out>/profile with the layout's caches, names it in the summary; profile render draws its views)");
 }

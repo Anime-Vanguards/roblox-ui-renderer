@@ -27,13 +27,15 @@ fn main() -> anyhow::Result<()> {
         // `rur-native record ...`: a harness run recorded as a 3D scene and a playback: the emulator's
         // recorder (`ree record`) with rur's engines (the GUI layer installed)
         Some("record") => std::process::exit(rur_native::engine::record::run::cli(&argv[2..], &rur_native::engine::host(), true)),
-        // `rur-native profile diff <before> <after> | report <dir>`: the emulator's `ree profile` on the profiles
-        // render, sequence and record write (`--profile`)
+        // `rur-native profile diff <before> <after> | report <dir> | view <dir> [<dir2>] | render ...`: the emulator's
+        // `ree profile` on the profiles render, sequence and record write (`--profile`); view and render are its profile
+        // viewer (the terminal UI, and its screens as PNG, SVG or text)
         Some("profile") => std::process::exit(match argv.get(2).map(String::as_str) {
             Some("diff") => rur_native::engine::profiler::diff::cli(&argv[3..]),
             Some("report") => rur_native::engine::profiler::diff::report_cli(&argv[3..]),
+            Some("view" | "render") => ree_profile_view::main("rur profile", &argv[2..]),
             _ => {
-                eprintln!("usage: rur-native profile diff <before dir> <after dir> [--out <dir>] [--top <n>] | report <profile dir>");
+                eprintln!("usage: rur-native profile diff <before dir> <after dir> [--out <dir>] [--top <n>] | report <profile dir>\n       rur-native profile view <dir> [<dir2>] | render <dir> [<dir2>] --view <name|all> --out <file|dir|->");
                 2
             }
         }),

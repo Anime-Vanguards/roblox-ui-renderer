@@ -15,6 +15,8 @@ sweeps, recordings of 3D worlds and the text-first inspection of a render.
 | `rur diff --git-ref <ref> --story <file>` | render at a commit and in the working tree, diff them |
 | `rur record --harness <file.luau>` | run a harness against the project and record the 3D world |
 | `rur profile diff <before> <after>` | compare two profiles that `--profile` wrote ([profiles](#profiles---profile)) |
+| `rur profile view <dir> [<dir2>]` | explore a profile, or a before/after pair, in the terminal ([profiles](#profiles---profile)) |
+| `rur profile render <dir> --view <name\|all> --out <file\|dir\|->` | the viewer's screens as PNG, SVG or text, for screenshots ([profiles](#profiles---profile)) |
 | `rur native` | the desktop storybook ([storybook.md](storybook.md)) |
 | `rur doctor [--fix]`, `rur clean`, `rur selftest` | toolchain check, output cleanup, the offline checks |
 
@@ -156,6 +158,20 @@ node cli/rur.mjs profile diff out/Shop/before/profile out/Shop/after/profile
 
 `rur profile diff <before> <after>` compares two profiles (the emulator's `ree profile diff`: the headline figures,
 the functions and lines that moved, caches, memory by type); `rur profile report <dir>` rewrites a profile's page.
+
+`rur profile view <dir> [<dir2>]` is the emulator's profile viewer: a keyboard-driven terminal UI over a profile (or a
+before/after pair) with views a key each (Overview, Flame, Calls, Source, Allocations, Heap, Timeline, Caches, Issues,
+Diff), `m` for the metric and `?` for its keys; the Caches view lists the layout's and text's caches with the engine's.
+`rur profile render <dir> [<dir2>] --view <name|all> --out <file.png|.svg|.txt|dir|->` draws the same screens headless,
+for screenshots: `--view all --out shots` writes a PNG a view and prints each with its Markdown image line, and
+`--out -` prints a view as text ([the emulator's documentation](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md#the-profile-viewer)
+has the views, keys, issues and every option).
+
+```sh
+node cli/rur.mjs profile view out/Shop/after/profile
+node cli/rur.mjs profile render out/Shop/after/profile --view all --out out/Shop/after/views
+node cli/rur.mjs profile render out/Shop/after/profile --view issues --out -
+```
 
 ## Inspect (text first, for agents)
 

@@ -114,11 +114,14 @@ function link(dir) {
 		throw new Error(`${target} is not a roblox-engine-emulator checkout`);
 	}
 	fs.mkdirSync(path.dirname(LINK_FILE), { recursive: true });
+	// (the profile viewer, a crate of the same repository, from the same checkout when it has one)
+	const viewer = path.join(target, "profile-view");
 	fs.writeFileSync(LINK_FILE, [
 		"# Written by `node tools/emulator.mjs link`: rur builds against this roblox-engine-emulator checkout",
 		"# instead of the commit native/Cargo.toml pins (`node tools/emulator.mjs unlink` to go back)",
 		`[patch."${emulatorUrl()}"]`,
 		`roblox-engine-emulator = { path = "${target.replaceAll("\\", "/")}" }`,
+		...(fs.existsSync(path.join(viewer, "Cargo.toml")) ? [`ree-profile-view = { path = "${viewer.replaceAll("\\", "/")}" }`] : []),
 		"",
 	].join("\n"));
 	console.log(`linked ${describeCheckout(target)}; ${settleLock()}`);
