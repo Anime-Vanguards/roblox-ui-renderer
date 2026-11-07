@@ -395,6 +395,8 @@ console.log(JSON.stringify({ summary, contacted }));
 	assert.equal(path.resolve(summary.profile), path.resolve(dir, "out", "profile"));
 	const profile = JSON.parse(fs.readFileSync(path.join(summary.profile, "profile.json"), "utf8"));
 	assert.equal(profile.run.command, "render");
+	// (the mount is startup's, the run after it frames')
+	assert.deepEqual(profile.phases, ["startup", "frames"]);
 	assert.ok(profile.work.script_insns > 0, JSON.stringify(profile.work));
 	assert.ok(profile.ree_caches.some(cache => cache.name === "layout records" && cache.hits + cache.misses > 0), JSON.stringify(profile.ree_caches));
 	assert.match(result.stderr, /heap at end: .* reachable in /);

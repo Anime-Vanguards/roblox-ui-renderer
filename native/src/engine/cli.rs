@@ -502,6 +502,8 @@ fn mount_and_run(
 ) -> Result<(story::Story, Instant), String> {
     let lua_error = |error: LuaError| error.to_string();
     let mut mounted = mount_story(lua, engine, project, args, source, target)?;
+    // (a profile's phase from here: the frames, apart from the mount, as `ree run` marks them)
+    crate::luau_profile::mark_frames();
 
     let run_time = capture_time(engine, args.time.unwrap_or(1.0));
     let exec_start = Instant::now();
@@ -1158,6 +1160,8 @@ fn run_sequence(
     let run_started = Instant::now();
     let source = source_of(args);
     let mut mounted = mount_story(lua, engine, &project, args, source.as_ref(), target)?;
+    // (a profile's phase from here: the frames, apart from the mount, as `ree run` marks them)
+    crate::luau_profile::mark_frames();
     let actions = match &args.actions {
         Some(actions) => story::load_actions(lua, actions)?,
         None => Vec::new(),

@@ -145,7 +145,8 @@ says what each one records). The run's real layout and text are in it: their cos
 asked for them, and `caches` counts the layout's records and AutomaticSize sizes and the text engine's laid-out
 text, shaped paragraphs and rich text beside the engine's own caches. The profile goes to `<out>/profile`
 (`summary.txt`, also printed on stderr, `profile.json`, `report.html` and folded stacks) and the summary's `profile`
-names it. A profiled render or sequence runs in a process of its own, never through the render service; like every
+names it. Its phases are `startup` (the mount) and `frames` (the run after it), as `ree run` marks them, so the mount's
+cost reads apart from the frames'. A profiled render or sequence runs in a process of its own, never through the render service; like every
 run it interprets every chunk, as the emulator's `record` does ([how scripts run](how-it-works.md#how-scripts-run)),
 so the instruction profile sees all of the scripts' Luau. A render that runs again with the cloud fonts it lacked is profiled once, in its
 last run; a sequence's profile is its engine half's (the mount and the frames, not the drawing).
