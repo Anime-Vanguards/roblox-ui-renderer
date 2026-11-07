@@ -239,6 +239,8 @@ pub struct Stats {
     pub skipped: u64,
     pub moved: u64,
     pub texts: u64,
+    /// Records a scroll moved (`Pass::moved` while pending scrolls are applied)
+    pub scroll_moved: u64,
 }
 
 /// The layout's persistent state (the module-level tables of runtime/layout/init.luau).
@@ -272,6 +274,16 @@ pub struct Layout {
     carry_apply: Option<usize>,
     pub stats: Stats,
     pub print_stats: bool,
+    /// The layout clock at the frame's layout point (`mark_frame_layout`): a tree whose last change is later has changed since a
+    /// client laid it out, and the read that lays it out pays the pass (install.rs `ensure`)
+    frame_layout_clock: u64,
+    /// Each pending scroll's mark (`scroll_seq` when it was marked), and the mark at the frame's layout point
+    scroll_marks: FxHashMap<InstanceId, u64>,
+    scroll_seq: u64,
+    frame_scroll_seq: u64,
+    /// By root, what the per-frame pass laid out of a change made after the frame's layout point: a client lays that out at the
+    /// tree's next read before the next point, which pays it (install.rs `ensure`)
+    pub(crate) owed: FxHashMap<InstanceId, f64>,
     /// Scratch vectors (children lists) reused across calls
     pool: Vec<Vec<InstanceId>>,
     /// LayoutChildren's per-call vectors, reused (a stack: calls nest)
@@ -310,6 +322,11 @@ impl Layout {
             carry_capture: None,
             carry_apply: None,
             stats: Stats::default(),
+            frame_layout_clock: 0,
+            scroll_marks: FxHashMap::default(),
+            scroll_seq: 0,
+            frame_scroll_seq: 0,
+            owed: FxHashMap::default(),
             print_stats: std::env::var("RUR_LAYOUT_STATS").as_deref() == Ok("1"),
             pool: Vec::new(),
             scratch: Scratch::default(),
@@ -339,6 +356,24 @@ impl Layout {
         self.generation += 1;
     }
 
+    /// The frame's layout point: a client lays every changed GUI out once a frame, after the render step's bindings and before
+    /// PreRender, for nothing a script pays (install.rs `ensure` charges only a tree changed after this point).
+    pub fn mark_frame_layout(&mut self) {
+        self.frame_layout_clock = self.clock;
+        self.frame_scroll_seq = self.scroll_seq;
+        self.owed.clear();
+    }
+
+    /// Whether the pending scroll of `id` was made after the frame's layout point
+    pub fn scrolled_after_frame_layout(&self, id: InstanceId) -> bool {
+        self.scroll_marks.get(&id).is_some_and(|&seq| seq > self.frame_scroll_seq)
+    }
+
+    /// Whether `root`'s tree changed after the frame's layout point (`mark_frame_layout`)
+    pub fn changed_since_frame_layout(&self, root: InstanceId) -> bool {
+        self.stamps.get(root).copied().unwrap_or(0) > self.frame_layout_clock
+    }
+
     /// `Layout.MarkChanged`: stamps `id` and every ancestor with a new clock value.
     pub fn mark_changed(&mut self, state: &State, id: InstanceId) {
         self.clock += 1;
@@ -360,9 +395,12 @@ impl Layout {
         if self.scrolled_set.insert(id) {
             self.scrolled.push(id);
         }
+        self.scroll_seq += 1;
+        self.scroll_marks.insert(id, self.scroll_seq);
     }
 
     fn unmark_scrolled(&mut self, id: InstanceId) {
+        self.scroll_marks.remove(&id);
         if self.scrolled_set.remove(&id) {
             if let Some(index) = self.scrolled.iter().position(|&s| s == id) {
                 self.scrolled.remove(index);

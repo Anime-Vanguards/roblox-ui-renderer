@@ -2167,6 +2167,7 @@ impl<'a> Pass<'a> {
     /// descendants moved along.
     fn moved(&mut self, id: InstanceId) {
         let Some(record) = self.l.records.get(id) else { return };
+        self.l.stats.scroll_moved += 1;
         let (absolute_x, absolute_y) = absolute_position(record);
         let rotation = record.rotation;
         let n = self.l.ids.n;
@@ -2228,20 +2229,26 @@ impl<'a> Pass<'a> {
 
     /// Scrolls ScrollingFrames whose CanvasPosition changed and whose layout is otherwise current:
     /// the canvas subtree only moves.
-    pub(crate) fn process_scrolls(&mut self) {
+    /// Applies the pending scrolls; returns each scrolled frame applied with the records it moved and whether it was scrolled after
+    /// the frame's layout point (install.rs prices those).
+    pub(crate) fn process_scrolls(&mut self) -> Vec<(InstanceId, u64, bool)> {
         if self.l.scrolled.is_empty() {
-            return;
+            return Vec::new();
         }
         // Profile: counted, and its time is layout time (Layout.ProfileTime), like a pass's
         crate::engine::profile::count("scrollLayoutPasses", 1);
         let started = std::time::Instant::now();
-        self.process_pending_scrolls();
+        let applied = self.process_pending_scrolls();
         self.l.profile_time += super::elapsed(started);
+        applied
     }
 
-    fn process_pending_scrolls(&mut self) {
+    fn process_pending_scrolls(&mut self) -> Vec<(InstanceId, u64, bool)> {
         let pending: Vec<InstanceId> = self.l.scrolled.clone();
+        let mut applied = Vec::new();
         for id in pending {
+            let after = self.l.scrolled_after_frame_layout(id);
+            let before = self.l.stats.scroll_moved;
             let current = match self.l.records.get(id) {
                 Some(record) => {
                     record.canvas_place.is_some()
@@ -2258,8 +2265,10 @@ impl<'a> Pass<'a> {
             if self.apply_scroll(id) {
                 self.bump(id);
                 self.shift_children(id);
+                applied.push((id, self.l.stats.scroll_moved - before, after));
             }
         }
+        applied
     }
 
     /// Stores a record, writes computed properties, handles text / scrolling specifics, recurses.

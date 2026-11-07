@@ -32,20 +32,77 @@ fn with_pass<R>(engine: &Engine, f: impl FnOnce(&mut Pass) -> R) -> Option<R> {
 }
 
 /// `Layout.Ensure(Proxy)`: lays out `id`'s tree when it changed (lazy computed-property reads),
-/// then applies pending scrolls.
+/// then applies pending scrolls. A tree changed since the frame's layout point (`Layout::mark_frame_layout`) is one a client lays
+/// out for this read: the script pays the pass ([`lazy_layout_price`]); one changed before it the client had laid out already.
 pub fn ensure(engine: &Engine, id: InstanceId) {
     let _memory = crate::memtrace::scope(crate::memtrace::Tag::Layout);
-    with_pass(engine, |pass| {
+    let price = with_pass(engine, |pass| {
         if pass.state.dom.get(id).is_none() {
-            return;
+            return 0.0;
         }
         let root = pass.find_root(id);
+        // (what the per-frame pass laid out of this tree's changes since the frame's layout point: a client lays them out now)
+        let mut price = pass.l.owed.remove(&root).unwrap_or(0.0);
         if !pass.is_laid_out(root) {
+            let charged = pass.l.changed_since_frame_layout(root);
+            let before = pass.l.stats;
             pass.run(root);
+            if charged {
+                price += lazy_layout_price(&before, &pass.l.stats);
+                if pass.l.print_stats {
+                    let (after, before) = (pass.l.stats, before);
+                    eprintln!(
+                        "layout-lazy {:.2} us computed={} stored={} moved={} skipped={} memo={}",
+                        price * 1e6,
+                        after.computed - before.computed,
+                        after.stored - before.stored,
+                        after.moved - before.moved,
+                        after.skipped - before.skipped,
+                        after.memo - before.memo
+                    );
+                }
+            }
         }
-        pass.process_scrolls();
+        // (a scroll made since the frame's layout point: a client lays the scrolled tree out at its next read, this one for this
+        // tree; every pending scroll is applied here, another tree's is owed to its own next read)
+        for (scrolled, moved, after) in pass.process_scrolls() {
+            if !after || moved == 0 {
+                continue;
+            }
+            let scroll = LAZY_SCROLL_PASS + LAZY_LAYOUT_OBJECT * moved as f64;
+            if pass.l.print_stats {
+                eprintln!("layout-lazy-scroll {:.2} us moved={moved}", scroll * 1e6);
+            }
+            let scrolled_root = pass.find_root(scrolled);
+            if scrolled_root == root {
+                price += scroll;
+            } else {
+                *pass.l.owed.entry(scrolled_root).or_default() += scroll;
+            }
+        }
+        price
     });
+    if let Some(price) = price.filter(|price| *price > 0.0) {
+        engine.state.borrow().sched.charge(price);
+    }
 }
+
+/// What a client spends laying a changed GUI out for a script's read (`ensure`), by the records the pass stored or moved (one it
+/// skipped, unchanged, costs about nothing).
+fn lazy_layout_price(before: &super::Stats, after: &super::Stats) -> f64 {
+    let objects = (after.stored - before.stored) + (after.moved - before.moved);
+    LAZY_LAYOUT_PASS + LAZY_LAYOUT_OBJECT * objects as f64
+}
+
+// A client's lazy layout, measured in a rendered client of a game's lobby (roblox-sim, Studio 0.744; notes/macro layoutprobe, two
+// sessions of 15 rounds): a grid of cards in a ScrollingFrame, its canvas moved and every card's AbsolutePosition read in the same
+// handler, the first read 156 us for 100 cards (301 records the scroll moves here), 334-379 for 300 (901), 998 for 1,000 (3,001):
+// 62 us and 0.312 a record; one card's inner frame resized, or its label's text changed, among 300 (4 records stored, 300 skipped)
+// 3.6-4.0 us. The client lays every changed GUI out once a frame for nothing a script pays, after the render step's bindings and
+// before PreRender: a read there, or later in the frame, of a change made before it costs 2-7 us, as a clean read does.
+const LAZY_LAYOUT_PASS: f64 = 2.3e-6;
+const LAZY_LAYOUT_OBJECT: f64 = 0.312e-6;
+const LAZY_SCROLL_PASS: f64 = 62e-6;
 
 /// `Layout.Ensure(Proxy)` for a caller that already holds the engine state: a PropertyChanged
 /// hook (runtime/input scrolling.luau refreshes a presented ScrollingFrame when ScrollingEnabled
@@ -65,7 +122,7 @@ pub fn ensure_with_state(engine: &Engine, state: &mut crate::engine::State, id: 
     if !pass.is_laid_out(root) {
         pass.run(root);
     }
-    pass.process_scrolls();
+    let _ = pass.process_scrolls();
 }
 
 /// `Layout.UpdateAll(Game)`: lays out every displayed root whose tree changed (the per-frame pass).
@@ -75,15 +132,26 @@ pub fn update_all(engine: &Engine) {
     with_pass(engine, |pass| {
         let roots = pass.displayed_roots(game);
         let mut ran = false;
+        // (a change since the frame's layout point that this pass lays out is still owed to the tree's next read: ensure)
         for root in roots {
             if !pass.is_laid_out(root) {
+                let owed = pass.l.changed_since_frame_layout(root);
+                let before = pass.l.stats;
                 pass.run(root);
+                if owed {
+                    *pass.l.owed.entry(root).or_default() += lazy_layout_price(&before, &pass.l.stats);
+                }
                 ran = true;
             }
         }
         if !pass.l.scrolled_is_empty() {
             let started = std::time::Instant::now();
-            pass.process_scrolls();
+            for (scrolled, moved, after) in pass.process_scrolls() {
+                if after && moved > 0 {
+                    let root = pass.find_root(scrolled);
+                    *pass.l.owed.entry(root).or_default() += LAZY_SCROLL_PASS + LAZY_LAYOUT_OBJECT * moved as f64;
+                }
+            }
             pass.l.stats.time += super::elapsed(started);
             ran = true;
         }
@@ -323,6 +391,19 @@ pub fn install(engine: &Rc<Engine>) {
     drop(behaviors);
     engine.clear_member_cache();
 
+    // The frame's layout point: the tween step runs after the render step's bindings and before PreRender, where a client lays
+    // its changed GUIs out (measured, notes in Layout::mark_frame_layout)
+    engine.state.borrow_mut().sched.add_hook(
+        Phase::Tween,
+        Rc::new(|_, engine, _| {
+            if let Ok(mut guard) = engine.layout().try_borrow_mut() {
+                if let Some(layout) = guard.as_mut() {
+                    layout.mark_frame_layout();
+                }
+            }
+            Ok(())
+        }),
+    );
     engine.state.borrow_mut().sched.add_hook(
         Phase::Render,
         Rc::new(|_, engine, _| {

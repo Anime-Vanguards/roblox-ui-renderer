@@ -191,6 +191,63 @@ end
 /// Lazy getters, change events of computed properties, lists (sort orders, alignment),
 /// AutomaticSize with padding and UIScale, CanvasPosition clamping and physical-pixel canvas
 /// offsets, rotation, UIPageLayout navigation and grids: the Luau runtime's values at DPI 1.5.
+/// A rect read pays the lazy layout a client runs for it (install.rs `ensure`): a canvas moved and read in the same Heartbeat
+/// handler pays the scroll's pass (62 us and 0.312 a record moved); moved in Heartbeat and read in the next frame's PreRender,
+/// after the frame's layout point, where a client has laid it out already, it pays nothing.
+#[test]
+fn a_rect_read_after_a_change_pays_the_lazy_layout_a_client_runs() {
+    let output = run(
+        r#"
+        return function(Target)
+            local Scroller = Instance.new("ScrollingFrame")
+            Scroller.Size = UDim2.fromOffset(200, 200)
+            Scroller.CanvasSize = UDim2.fromOffset(0, 2200)
+            Scroller.Parent = Target
+            local Cards = {}
+            for I = 1, 20 do
+                local Card = Instance.new("Frame")
+                Card.Size = UDim2.fromOffset(100, 100)
+                Card.Position = UDim2.fromOffset(0, I * 100)
+                Card.Parent = Scroller
+                Cards[I] = Card
+            end
+            local RunService = game:GetService("RunService")
+            local function Twice()
+                local T0 = os.clock()
+                local _ = Cards[1].AbsolutePosition
+                local T1 = os.clock()
+                local _ = Cards[1].AbsolutePosition
+                local T2 = os.clock()
+                return ((T1 - T0) - (T2 - T1)) * 1e6
+            end
+            task.spawn(function()
+                RunService.Heartbeat:Wait()
+                RunService.Heartbeat:Wait()
+                local _ = Cards[1].AbsolutePosition
+                Scroller.CanvasPosition = Vector2.new(0, 50)
+                print(string.format("same %.3f", Twice()))
+                RunService.Heartbeat:Wait()
+                Scroller.CanvasPosition = Vector2.new(0, 100)
+                RunService.PreRender:Wait()
+                local _ = Cards[2].AbsolutePosition
+                local _ = Cards[1].Name
+                print(string.format("prerender %.3f", Twice()))
+            end)
+        end
+        "#,
+        1.0,
+        1.0,
+    );
+    let value = |name: &str| -> f64 {
+        let line = output.iter().find(|line| line.contains(&format!(": {name} "))).unwrap_or_else(|| panic!("{name} missing: {output:?}"));
+        line.rsplit(' ').next().unwrap().parse().unwrap()
+    };
+    let same = value("same");
+    assert!((64.0..75.0).contains(&same), "a read after a scroll in its handler pays {same:.2} us, a client 62 + 0.31 a card");
+    let after = value("prerender");
+    assert!(after.abs() < 0.05, "a read in PreRender of a scroll made before the frame's layout point pays {after:.3} us");
+}
+
 #[test]
 fn layout_api_matches_luau() {
     let lines = run(API_SCRIPT, 1.5, 0.1);
