@@ -1531,14 +1531,15 @@ mod device_tests {
 
     /// `--device` and `--topbar-inset` reach the scripts: UserInputService reports the device's
     /// input and GuiService:GetGuiInset() the inset, and a default ScreenGui (CoreUISafeInsets)
-    /// starts below the inset while the story's (IgnoreGuiInset) does not; without them a run is
-    /// Studio's edit-mode desktop.
+    /// starts below the inset while the story's (IgnoreGuiInset) does not. Scripts read
+    /// AbsolutePosition measured from below the inset, as in Roblox: the story's gui at -inset, the
+    /// default one at 0 and the inset shorter. Without them a run is Studio's edit-mode desktop.
     #[test]
     fn the_device_and_inset_reach_the_scripts() {
         let desktop = probe(&[]).unwrap();
         assert!(desktop.contains("touch=false mouse=true keyboard=true gamepad=false last=Focus inset=0 story=0 gui=0,300"), "{desktop}");
         let phone = probe(&["--device", "touch", "--topbar-inset", "58"]).unwrap();
-        assert!(phone.contains("touch=true mouse=false keyboard=false gamepad=false last=Touch inset=58 story=0 gui=58,242"), "{phone}");
+        assert!(phone.contains("touch=true mouse=false keyboard=false gamepad=false last=Touch inset=58 story=-58 gui=0,242"), "{phone}");
         let pad = probe(&["--device", "gamepad"]).unwrap();
         assert!(pad.contains("gamepad=true last=Gamepad1"), "{pad}");
         assert!(probe(&["--device", "phone"]).unwrap_err().contains("--device"));

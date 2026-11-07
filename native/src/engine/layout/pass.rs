@@ -467,6 +467,30 @@ impl<'a> Pass<'a> {
         }
     }
 
+    /// AbsolutePosition as scripts read it: Roblox measures it from below the top-bar inset, so a ScreenGui's content
+    /// reads `inset` higher than where it is drawn (an IgnoreGuiInset ScreenGui at (0, -inset), one below the inset at
+    /// (0, 0); measured in a playing client, Studio 0.744, with a 58 px inset: ree tools/parity/probes/ui_signals.luau).
+    /// Layout records, drawing and hit tests stay in screen pixels; other layers' content is in its own canvas.
+    fn set_absolute_position(&mut self, id: InstanceId, x: f64, y: f64) {
+        let mut y = y;
+        if self.l.top_inset != 0.0 {
+            let (layer, screen) = (self.l.ids.c.LayerCollector, self.l.ids.c.ScreenGui);
+            let mut current = Some(id);
+            while let Some(node) = current {
+                let class = self.class(node);
+                if self.reflection.class(class).is_a(layer) {
+                    if class == screen {
+                        y -= self.l.top_inset;
+                    }
+                    break;
+                }
+                current = self.parent(node);
+            }
+        }
+        let n_position = self.l.ids.n.AbsolutePosition;
+        self.set_vector(id, n_position, x, y);
+    }
+
     fn set_vector(&mut self, id: InstanceId, name: NameId, x: f64, y: f64) {
         if let Some(Value::Vector2(old)) = self.get(id, name) {
             if old.x as f64 == x && old.y as f64 == y {
@@ -2142,8 +2166,8 @@ impl<'a> Pass<'a> {
         let (absolute_x, absolute_y) = absolute_position(record);
         let rotation = record.rotation;
         let n = self.l.ids.n;
-        let (n_position, n_rotation) = (n.AbsolutePosition, n.AbsoluteRotation);
-        self.set_vector(id, n_position, absolute_x, absolute_y);
+        let n_rotation = n.AbsoluteRotation;
+        self.set_absolute_position(id, absolute_x, absolute_y);
         self.set_number(id, n_rotation, rotation);
         self.bump(id);
         self.shift_children(id);
@@ -2275,10 +2299,9 @@ impl<'a> Pass<'a> {
         self.l.stored_stamps.take(id);
         let old = self.l.records.take(id);
         let n = self.l.ids.n;
-        let (n_position, n_size, n_rotation, n_bounds, n_fits, n_auto) =
-            (n.AbsolutePosition, n.AbsoluteSize, n.AbsoluteRotation, n.TextBounds, n.TextFits, n.AutomaticSize);
+        let (n_size, n_rotation, n_bounds, n_fits, n_auto) = (n.AbsoluteSize, n.AbsoluteRotation, n.TextBounds, n.TextFits, n.AutomaticSize);
         let (absolute_x, absolute_y) = absolute_position(&record);
-        self.set_vector(id, n_position, absolute_x, absolute_y);
+        self.set_absolute_position(id, absolute_x, absolute_y);
         self.set_vector(id, n_size, record.w, record.h);
         self.set_number(id, n_rotation, record.rotation);
 
@@ -2642,8 +2665,8 @@ impl<'a> Pass<'a> {
                 ..Record::default()
             };
             let old = self.l.records.take(root);
-            let (n_position, n_size) = (n.AbsolutePosition, n.AbsoluteSize);
-            self.set_vector(root, n_position, x, y);
+            let n_size = n.AbsoluteSize;
+            self.set_absolute_position(root, x, y);
             self.set_vector(root, n_size, width, height);
             self.layout_children(root, &record, false, None);
             self.version(root, record, old);

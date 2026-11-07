@@ -47,6 +47,45 @@ fn run(source: &str, pixel_scale: f64, until: f64) -> Vec<String> {
     lines
 }
 
+/// AbsolutePosition is measured from below the top-bar inset, as in a playing Roblox client (Studio 0.744, a 58 px
+/// inset: an IgnoreGuiInset ScreenGui reads (0, -58) and its frame at offset (10, 20) reads (10, -38); a ScreenGui
+/// below the inset reads (0, 0) and the frame (10, 20)); sizes are as drawn.
+#[test]
+fn absolute_positions_are_measured_from_below_the_top_inset() {
+    let engine = crate::engine::new_engine(Options { topbar_inset: 58.0, ..crate::engine::options() }).expect("engine");
+    let lua = Lua::new();
+    engine_lua::start(&lua, &engine).expect("start");
+    let script = {
+        let mut state = engine.state.borrow_mut();
+        let class = engine.reflection.class_id("ModuleScript").unwrap();
+        crate::engine::instance::create_named(&mut state, &engine.reflection, class, "Test")
+    };
+    let env = engine_lua::modules::environment(&lua, &engine, script).expect("environment");
+    let source = r#"
+        local function V(Value) return `{Value.X},{Value.Y}` end
+        for _, Ignore in { true, false } do
+            local Gui = Instance.new("ScreenGui")
+            Gui.IgnoreGuiInset = Ignore
+            local Box = Instance.new("Frame")
+            Box.Position = UDim2.fromOffset(10, 20)
+            Box.Size = UDim2.fromScale(0.5, 0.5)
+            Box.Parent = Gui
+            Gui.Parent = game:GetService("CoreGui")
+            print(`{tostring(Ignore)} {V(Gui.AbsolutePosition)} {V(Gui.AbsoluteSize)} {V(Box.AbsolutePosition)} {V(Box.AbsoluteSize)}`)
+        end
+    "#;
+    let function = lua.load(source).set_name("=Test").set_environment(env).into_function().expect("compile");
+    let call = engine_lua::globals::call(&lua, &engine, function, LuaMultiValue::new()).expect("call");
+    if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+        panic!("test script failed: {message}");
+    }
+    let lines: Vec<String> = engine.state.borrow().output.entries.iter().map(|e| e.message.clone()).collect();
+    let (width, height) = (engine.options.viewport_width, engine.options.viewport_height);
+    let half = |value: f64| (value / 2.0).floor();
+    assert_eq!(lines[0], format!("true 0,-58 {width},{height} 10,-38 {},{}", half(width), half(height)), "{lines:?}");
+    assert_eq!(lines[1], format!("false 0,0 {width},{} 10,20 {},{}", height - 58.0, half(width), half(height - 58.0)), "{lines:?}");
+}
+
 const API_SCRIPT: &str = r#"
 return function(Target)
 	local function V(Value) return `{Value.X},{Value.Y}` end

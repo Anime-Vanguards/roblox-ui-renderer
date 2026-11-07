@@ -1,6 +1,7 @@
 -- What the scripts see of the device: UserInputService's input flags and last input type,
 -- GuiService's inset (--device / --topbar-inset), and where ScreenGuis start: the story's gui
--- ignores the inset, a default ScreenGui (CoreUISafeInsets) starts below it.
+-- ignores the inset, a default ScreenGui (CoreUISafeInsets) starts below it. AbsolutePosition is
+-- measured from below the inset, as in Roblox: the story reads -inset and the default gui 0.
 return function(Target)
 	local Input = game:GetService("UserInputService")
 	local Inset = game:GetService("GuiService"):GetGuiInset()

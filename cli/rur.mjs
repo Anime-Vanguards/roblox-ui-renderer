@@ -51,7 +51,8 @@
 // blob) in a Folder at that path for the story to clone, keeping the default project. --all-layers: draw every enabled
 // ScreenGui the run leaves under the PlayerGui and CoreGui (DisplayOrder, then the order they were
 // parented or enabled), not only the story gui. --topbar-inset <px>: GuiService's top inset (default 0, as
-// in Studio's Edit mode), which ScreenGuis with IgnoreGuiInset false start below.
+// in Studio's Edit mode), which ScreenGuis with IgnoreGuiInset false start below; scripts read AbsolutePosition
+// from below it, as in a Roblox client.
 // --viewport WxH (logical px), WxH@physical (divided by --scale) or --viewport-from <png> (its size,
 // physical px). --plugin [settings JSON]: a Studio `plugin` global with dock widgets. --json: stdout
 // holds only the JSON result (one line). --tag <name> (<out>/<name>/), --keep (numbered <out>-2, ...

@@ -15,6 +15,14 @@ How rur's layout (`native/src/engine/layout/`) computes `AbsolutePosition`, `Abs
   `f32(c - f32(W * 0.5))`, so 18.6 can read back as 18.600006 next to a wide object.
 - AnchorPoint components are clamped to [0, 1]. `UIScale.Scale` is clamped to [1e-7, 1000] when assigned.
 
+## The top-bar inset
+
+- With `--topbar-inset`, scripts read `AbsolutePosition` measured from below the inset, as in a playing
+  Roblox client, so a ScreenGui's content reads the inset higher than it is drawn. With a 58 px inset, an
+  `IgnoreGuiInset` ScreenGui reads `(0, -58)` and the full screen height. A default one reads `(0, 0)`, 58 px
+  shorter. `InputObject.Position`, `Mouse.Y` and `GetGuiObjectsAtPosition` use the same space. Layout
+  records, drawing, hit tests and exported rects stay in screen pixels.
+
 ## AutomaticSize
 
 - Children size and position against a *stable* size: the base size (Size and constraints) grown on
