@@ -191,6 +191,20 @@ export function captureViewport(studioName, width, height, outFile, scales) {
 	return matched ? Number(matched[1]) : undefined;
 }
 
+// A Luau string literal of value's text: its UTF-8 as it is, with ", \ and the control characters escaped as Luau reads
+// them (JSON's \uXXXX escapes are not Luau's, so a control character used to break the chunk it was written into)
 export function luauString(value) {
-	return JSON.stringify(String(value));
+	let literal = "\"";
+	for (const char of String(value)) {
+		const code = char.codePointAt(0);
+		if (char === "\"" || char === "\\") literal += `\\${char}`;
+		else if (char === "\n") literal += "\\n";
+		else if (char === "\r") literal += "\\r";
+		else if (char === "\t") literal += "\\t";
+		else if (code < 0x20 || code === 0x7f) literal += `\\${String(code).padStart(3, "0")}`;
+		// (a lone surrogate has no UTF-8: the replacement character stands in for it)
+		else if (code >= 0xd800 && code <= 0xdfff) literal += "\ufffd";
+		else literal += char;
+	}
+	return `${literal}"`;
 }

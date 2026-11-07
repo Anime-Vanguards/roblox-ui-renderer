@@ -834,8 +834,10 @@ function aggregateSweep(records, hierarchies = new Map()) {
 	};
 }
 
-function markdownCell(value) {
-	return String(value ?? "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ").slice(0, 200);
+// A table cell's text, cut to 200 characters before escaping (a cut cannot leave half an escape), with backslashes
+// escaped before pipes (text ending in a backslash cannot unescape the cell's own `|`)
+export function markdownCell(value) {
+	return String(value ?? "").replace(/\r?\n/g, " ").slice(0, 200).replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
 function sweepMarkdown(report) {

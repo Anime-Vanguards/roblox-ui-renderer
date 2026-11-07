@@ -4,7 +4,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { snapshotDir } from "../../cli/rur.mjs";
+import { snapshotDir, markdownCell } from "../../cli/rur.mjs";
+import { luauString } from "../../cli/studio.mjs";
+
+// Luau string literals: quotes and backslashes escaped, control characters as Luau's \ddd (not JSON's \uXXXX)
+assert.equal(luauString('a"b\\c'), '"a\\"b\\\\c"');
+assert.equal(luauString("line\nnext\ttab\u0001\u007f!"), '"line\\nnext\\ttab\\001\\127!"');
+assert.equal(luauString("\u00e9\u{1f600}"), '"\u00e9\u{1f600}"');
+assert.equal(luauString("\ud800"), '"\ufffd"');
+assert.equal(luauString(12), '"12"');
+// Markdown cells: pipes escaped, and a backslash cannot escape the cell's own closing pipe
+assert.equal(markdownCell("a|b"), "a\\|b");
+assert.equal(markdownCell("ends with \\"), "ends with \\\\");
+assert.equal(markdownCell("x".repeat(199) + "\\|"), "x".repeat(199) + "\\\\");
+assert.equal(markdownCell("two\r\nlines"), "two lines");
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 // No project or place has an implicit Studio snapshot: they load only when --snapshot-dir names one

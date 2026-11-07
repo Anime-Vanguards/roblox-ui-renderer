@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { engineBaseArgs, findEngine } from "../../cli/engine.mjs";
 import { withStudioInput, act, DPI } from "./studio.mjs";
+import { luauString } from "../../cli/studio.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..");
@@ -72,8 +73,11 @@ function runOffline() {
 	const delayed = [];
 	let last = null;
 	for (const step of scenario.steps) {
-		if (step.note) delayed.push(`task.delay(${step.at}, function() R.Note(${JSON.stringify(step.note)}) end)`);
-		if (step.luau) delayed.push(`task.delay(${step.at + 0.0005}, function()\n${step.luau}\nend)`);
+		// a step's time goes into the fixture as a number and its note as a Luau string; its luau is the scenario's own code
+		const at = Number(step.at);
+		if ((step.note || step.luau) && !Number.isFinite(at)) throw new Error(`scenario step at ${JSON.stringify(step.at)}: not a number`);
+		if (step.note) delayed.push(`task.delay(${at}, function() R.Note(${luauString(step.note)}) end)`);
+		if (step.luau) delayed.push(`task.delay(${at + 0.0005}, function()\n${step.luau}\nend)`);
 		if (step.post) {
 			let offset = 0;
 			const items = [];
