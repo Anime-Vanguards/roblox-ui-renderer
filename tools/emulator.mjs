@@ -1,6 +1,6 @@
 // The engine rur builds against: roblox-engine-emulator (https://github.com/Anime-Vanguards/roblox-engine-emulator),
 // a cargo git dependency pinned to a commit in native/Cargo.toml (the crate and, under [patch.crates-io],
-// its vendored Luau VM: both at the same commit). docs/how-it-works.md "The engine: roblox-engine-emulator".
+// its vendored Luau VM and mlua-sys: all at the same commit). docs/how-it-works.md "The engine: roblox-engine-emulator".
 //
 //   node tools/emulator.mjs status          the pinned commit, the link (if any), the checkout beside this one
 //   node tools/emulator.mjs link [<dir>]    build against a local checkout (default ../roblox-engine-emulator):

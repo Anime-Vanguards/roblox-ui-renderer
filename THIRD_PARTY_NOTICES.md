@@ -28,7 +28,8 @@ The engine core is [roblox-engine-emulator](https://github.com/Anime-Vanguards/r
 
 | Component | License | License text |
 |---|---|---|
-| Luau (Roblox's Lua dialect and VM), through its vendored `luau0-src` crate, patched | MIT | `vendor/luau0-src/LICENSE` in roblox-engine-emulator (covers Luau, Lua 5.1 and the luau-src crate) |
+| Luau (Roblox's Lua dialect and VM) 0.746, through its vendored `luau0-src` crate, patched | MIT | `vendor/luau0-src/luau/LICENSE.txt` and `lua_LICENSE.txt` in roblox-engine-emulator (Luau's and Lua 5.1's), `vendor/luau0-src/LICENSE` (the luau-src crate) |
+| `mlua-sys`, vendored with the Luau release's bytecode version range | MIT | `vendor/mlua-sys/LICENSE` in roblox-engine-emulator (mlua's) |
 | `lune-roblox` and `lune-utils` from [Lune](https://github.com/lune-org/lune), vendored and patched | MPL-2.0 | <https://www.mozilla.org/en-US/MPL/2.0/>; the vendored sources keep their headers |
 
 ### egui's default fonts
@@ -40,7 +41,7 @@ OFL-1.1 AND Ubuntu-font-1.0`. The license files are in that crate's source packa
 ### Rust crates
 
 Every crate in `native/Cargo.lock` is compiled in. Their licenses are listed below as each crate's
-`Cargo.toml` declares them (generated from `native/Cargo.lock` on 2026-11-04; the git packages are the
+`Cargo.toml` declares them (generated from `native/Cargo.lock` on 2026-11-07; the git packages are the
 engine's, above). Each crate's license text is in its source package on crates.io. Where a crate offers a
 choice of licenses we use it under MIT when offered, else under the first option compatible with the GPL.
 
@@ -81,15 +82,17 @@ font files are included.
 | ab_glyph_rasterizer | 0.1.10 | Apache-2.0 |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
 | ahash | 0.8.12 | MIT OR Apache-2.0 |
-| android_system_properties | 0.1.6 | MIT OR Apache-2.0 |
+| allocator-api2 | 0.2.21 | MIT OR Apache-2.0 |
 | android-activity | 0.6.1 | MIT OR Apache-2.0 |
 | android-properties | 0.2.2 | MIT |
+| android_system_properties | 0.1.6 | MIT OR Apache-2.0 |
 | anstream | 0.6.21 | MIT OR Apache-2.0 |
 | anstyle | 1.0.14 | MIT OR Apache-2.0 |
 | anstyle-parse | 0.2.7 | MIT OR Apache-2.0 |
 | anstyle-query | 1.1.5 | MIT OR Apache-2.0 |
 | anstyle-wincon | 3.0.11 | MIT OR Apache-2.0 |
 | anyhow | 1.0.100 | MIT OR Apache-2.0 |
+| approx | 0.5.1 | Apache-2.0 |
 | arboard | 3.6.1 | MIT OR Apache-2.0 |
 | arrayref | 0.3.9 | BSD-2-Clause |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 |
@@ -109,6 +112,7 @@ font files are included.
 | block2 | 0.5.1 | MIT |
 | bstr | 1.13.1 | MIT OR Apache-2.0 |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 |
+| by_address | 1.2.1 | MIT OR Apache-2.0 |
 | bytemuck | 1.24.0 | Zlib OR Apache-2.0 OR MIT |
 | bytemuck_derive | 1.12.1 | Zlib OR Apache-2.0 OR MIT |
 | byteorder | 1.5.0 | Unlicense OR MIT |
@@ -118,10 +122,11 @@ font files are included.
 | calloop | 0.14.4 | MIT |
 | calloop-wayland-source | 0.3.0 | MIT |
 | calloop-wayland-source | 0.4.1 | MIT |
+| castaway | 0.2.4 | MIT |
 | cc | 1.5.1 | MIT OR Apache-2.0 |
-| cfg_aliases | 0.2.2 | MIT |
 | cfg-if | 0.1.10 | MIT/Apache-2.0 |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |
+| cfg_aliases | 0.2.2 | MIT |
 | cgl | 0.3.2 | MIT / Apache-2.0 |
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
 | clap | 4.5.50 | MIT OR Apache-2.0 |
@@ -133,26 +138,36 @@ font files are included.
 | color_quant | 1.1.0 | MIT |
 | colorchoice | 1.0.5 | MIT OR Apache-2.0 |
 | combine | 4.6.8 | MIT |
+| compact_str | 0.9.1 | MIT |
 | concurrent-queue | 2.5.0 | Apache-2.0 OR MIT |
 | console | 0.16.6 | MIT |
 | constant_time_eq | 0.3.1 | CC0-1.0 OR MIT-0 OR Apache-2.0 |
-| core_maths | 0.1.1 | MIT |
+| convert_case | 0.10.0 | MIT |
 | core-foundation | 0.10.1 | MIT OR Apache-2.0 |
 | core-foundation | 0.9.4 | MIT OR Apache-2.0 |
 | core-foundation-sys | 0.8.7 | MIT OR Apache-2.0 |
 | core-graphics | 0.23.2 | MIT OR Apache-2.0 |
 | core-graphics-types | 0.1.3 | MIT OR Apache-2.0 |
 | core-graphics-types | 0.2.0 | MIT OR Apache-2.0 |
+| core_maths | 0.1.1 | MIT |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 |
 | crc32fast | 1.5.2 | MIT OR Apache-2.0 |
 | crossbeam-deque | 0.8.8 | MIT OR Apache-2.0 |
 | crossbeam-epoch | 0.9.21 | MIT OR Apache-2.0 |
 | crossbeam-utils | 0.8.23 | MIT OR Apache-2.0 |
+| crossterm | 0.29.0 | MIT |
+| crossterm_winapi | 0.9.1 | MIT |
 | crunchy | 0.2.4 | MIT |
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 |
 | cty | 0.2.2 | MIT OR Apache-2.0 |
 | cursor-icon | 1.2.0 | MIT OR Apache-2.0 OR Zlib |
+| darling | 0.24.1 | MIT |
+| darling_core | 0.24.1 | MIT |
+| darling_macro | 0.24.1 | MIT |
 | data-url | 0.3.2 | MIT OR Apache-2.0 |
+| deranged | 0.5.9 | MIT OR Apache-2.0 |
+| derive_more | 2.1.1 | MIT |
+| derive_more-impl | 2.1.1 | MIT |
 | digest | 0.10.7 | MIT OR Apache-2.0 |
 | dirs | 2.0.2 | MIT OR Apache-2.0 |
 | dirs | 5.0.1 | MIT OR Apache-2.0 |
@@ -169,9 +184,9 @@ font files are included.
 | ecolor | 0.33.3 | MIT OR Apache-2.0 |
 | eframe | 0.33.3 | MIT OR Apache-2.0 |
 | egui | 0.33.3 | MIT OR Apache-2.0 |
-| egui_glow | 0.33.3 | MIT OR Apache-2.0 |
 | egui-wgpu | 0.33.3 | MIT OR Apache-2.0 |
 | egui-winit | 0.33.3 | MIT OR Apache-2.0 |
+| egui_glow | 0.33.3 | MIT OR Apache-2.0 |
 | either | 1.18.0 | MIT OR Apache-2.0 |
 | emath | 0.33.3 | MIT OR Apache-2.0 |
 | encode_unicode | 1.0.0 | Apache-2.0 OR MIT |
@@ -191,6 +206,7 @@ font files are included.
 | foldhash | 0.2.0 | Zlib |
 | fontconfig-parser | 0.5.8 | MIT |
 | fontdb | 0.23.0 | MIT |
+| fontdue | 0.9.4 | MIT OR Apache-2.0 OR Zlib |
 | foreign-types | 0.5.0 | MIT/Apache-2.0 |
 | foreign-types-macros | 0.2.4 | MIT/Apache-2.0 |
 | foreign-types-shared | 0.3.1 | MIT/Apache-2.0 |
@@ -208,10 +224,10 @@ font files are included.
 | glam | 0.30.10 | MIT OR Apache-2.0 |
 | glow | 0.16.0 | MIT OR Apache-2.0 OR Zlib |
 | glutin | 0.32.3 | Apache-2.0 |
+| glutin-winit | 0.5.0 | MIT |
 | glutin_egl_sys | 0.7.1 | Apache-2.0 |
 | glutin_glx_sys | 0.6.1 | Apache-2.0 |
 | glutin_wgl_sys | 0.6.1 | Apache-2.0 |
-| glutin-winit | 0.5.0 | MIT |
 | gpu-alloc | 0.6.2 | MIT OR Apache-2.0 |
 | gpu-alloc-types | 0.3.1 | MIT OR Apache-2.0 |
 | gpu-allocator | 0.27.0 | MIT OR Apache-2.0 |
@@ -233,13 +249,17 @@ font files are included.
 | icu_properties | 2.3.0 | Unicode-3.0 |
 | icu_properties_data | 2.3.0 | Unicode-3.0 |
 | icu_provider | 2.3.1 | Unicode-3.0 |
+| ident_case | 1.0.1 | MIT/Apache-2.0 |
 | idna | 1.1.0 | MIT OR Apache-2.0 |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT |
 | image | 0.25.8 | MIT OR Apache-2.0 |
 | image-webp | 0.2.4 | MIT OR Apache-2.0 |
 | imagesize | 0.13.0 | MIT |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT |
+| indoc | 2.0.8 | MIT OR Apache-2.0 |
+| instability | 0.3.14 | MIT |
 | is_terminal_polyfill | 1.70.2 | MIT OR Apache-2.0 |
+| itertools | 0.14.0 | MIT OR Apache-2.0 |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
 | jni | 0.22.4 | MIT OR Apache-2.0 |
 | jni-macros | 0.22.4 | MIT OR Apache-2.0 |
@@ -248,8 +268,9 @@ font files are included.
 | jni-sys-macros | 0.4.1 | MIT OR Apache-2.0 |
 | jobserver | 0.1.35 | MIT OR Apache-2.0 |
 | js-sys | 0.3.106 | MIT OR Apache-2.0 |
-| khronos_api | 3.1.0 | Apache-2.0 |
+| kasuari | 0.4.13 | MIT OR Apache-2.0 |
 | khronos-egl | 6.0.0 | MIT/Apache-2.0 |
+| khronos_api | 3.1.0 | Apache-2.0 |
 | kurbo | 0.11.3 | Apache-2.0 OR MIT |
 | lazy_static | 1.5.0 | MIT OR Apache-2.0 |
 | libc | 0.2.189 | MIT OR Apache-2.0 |
@@ -257,12 +278,14 @@ font files are included.
 | libm | 0.2.16 | MIT |
 | libmimalloc-sys | 0.1.49 | MIT |
 | libredox | 0.1.25 | MIT |
+| line-clipping | 0.3.8 | MIT OR Apache-2.0 |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | linux-raw-sys | 0.4.15 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | litemap | 0.8.3 | Unicode-3.0 |
 | litrs | 1.0.0 | MIT OR Apache-2.0 |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 |
 | log | 0.4.34 | MIT OR Apache-2.0 |
+| lru | 0.18.5 | MIT |
 | lz4_flex | 0.11.6 | MIT |
 | malloc_buf | 0.0.6 | MIT |
 | memchr | 2.8.3 | Unlicense OR MIT |
@@ -272,17 +295,19 @@ font files are included.
 | mimalloc | 0.1.52 | MIT |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
-| mlua | 0.11.4 | MIT |
-| mlua-sys | 0.8.3 | MIT |
+| mio | 1.2.4 | MIT |
+| mlua | 0.12.2 | MIT |
 | moxcms | 0.7.11 | BSD-3-Clause OR Apache-2.0 |
 | naga | 27.0.3 | MIT OR Apache-2.0 |
 | ndk | 0.9.0 | MIT OR Apache-2.0 |
 | ndk-context | 0.1.1 | MIT OR Apache-2.0 |
 | ndk-sys | 0.6.0+11769913 | MIT OR Apache-2.0 |
 | nohash-hasher | 0.2.0 | Apache-2.0 OR MIT |
+| num-conv | 0.2.2 | MIT OR Apache-2.0 |
+| num-traits | 0.2.19 | MIT OR Apache-2.0 |
 | num_enum | 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 |
 | num_enum_derive | 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 |
-| num-traits | 0.2.19 | MIT OR Apache-2.0 |
+| num_threads | 0.1.8 | MIT OR Apache-2.0 |
 | objc | 0.2.7 | MIT |
 | objc-sys | 0.3.5 | MIT |
 | objc2 | 0.5.2 | MIT |
@@ -315,6 +340,9 @@ font files are included.
 | ordered-float | 5.5.0 | MIT |
 | os_str_bytes | 7.2.1 | MIT OR Apache-2.0 |
 | owned_ttf_parser | 0.25.1 | Apache-2.0 |
+| palette | 0.7.7 | MIT OR Apache-2.0 |
+| palette_derive | 0.7.7 | MIT OR Apache-2.0 |
+| palette_math | 0.7.7 | MIT OR Apache-2.0 |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 |
 | paste | 1.0.15 | MIT OR Apache-2.0 |
@@ -333,6 +361,7 @@ font files are included.
 | portable-atomic | 1.15.0 | Apache-2.0 OR MIT |
 | portable-atomic-util | 0.2.8 | Apache-2.0 OR MIT |
 | potential_utf | 0.1.6 | Unicode-3.0 |
+| powerfmt | 0.2.1 | MIT OR Apache-2.0 |
 | pp-rs | 0.2.1 | BSD-3-Clause |
 | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 |
 | presser | 0.3.1 | MIT OR Apache-2.0 |
@@ -353,6 +382,10 @@ font files are included.
 | rand_core | 0.6.4 | MIT OR Apache-2.0 |
 | rand_core | 0.9.5 | MIT OR Apache-2.0 |
 | range-alloc | 0.1.5 | MIT OR Apache-2.0 |
+| ratatui | 0.30.2 | MIT |
+| ratatui-core | 0.1.2 | MIT |
+| ratatui-crossterm | 0.1.2 | MIT |
+| ratatui-widgets | 0.3.2 | MIT |
 | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
 | rayon | 1.11.0 | MIT OR Apache-2.0 |
 | rayon-core | 1.13.0 | MIT OR Apache-2.0 |
@@ -373,9 +406,9 @@ font files are included.
 | rmp-serde | 1.3.1 | MIT |
 | roblox_install | 1.2.0 | MPL-2.0 |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
-| rustc_version | 0.4.1 | MIT OR Apache-2.0 |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
+| rustc_version | 0.4.1 | MIT OR Apache-2.0 |
 | rustix | 0.38.44 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |
@@ -386,14 +419,17 @@ font files are included.
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 |
 | semver | 1.0.28 | MIT OR Apache-2.0 |
 | serde | 1.0.228 | MIT OR Apache-2.0 |
+| serde-value | 0.7.0 | MIT |
 | serde_core | 1.0.228 | MIT OR Apache-2.0 |
 | serde_derive | 1.0.228 | MIT OR Apache-2.0 |
 | serde_json | 1.0.145 | MIT OR Apache-2.0 |
-| serde-value | 0.7.0 | MIT |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 |
 | shlex | 2.0.1 | MIT OR Apache-2.0 |
-| simd_cesu8 | 1.2.0 | Apache-2.0 OR MIT |
+| signal-hook | 0.3.18 | Apache-2.0/MIT |
+| signal-hook-mio | 0.2.5 | MIT OR Apache-2.0 |
+| signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 |
 | simd-adler32 | 0.3.10 | MIT |
+| simd_cesu8 | 1.2.0 | Apache-2.0 OR MIT |
 | simdutf8 | 0.1.5 | MIT OR Apache-2.0 |
 | simplecss | 0.2.2 | Apache-2.0 OR MIT |
 | siphasher | 1.0.4 | MIT OR Apache-2.0 |
@@ -409,6 +445,8 @@ font files are included.
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 |
 | strict-num | 0.1.1 | MIT |
 | strsim | 0.11.1 | MIT |
+| strum | 0.28.0 | MIT |
+| strum_macros | 0.28.0 | MIT |
 | svgtypes | 0.15.3 | Apache-2.0 OR MIT |
 | syn | 2.0.119 | MIT OR Apache-2.0 |
 | syn | 3.0.6 | MIT OR Apache-2.0 |
@@ -419,6 +457,8 @@ font files are included.
 | thiserror-impl | 1.0.69 | MIT OR Apache-2.0 |
 | thiserror-impl | 2.0.21 | MIT OR Apache-2.0 |
 | tiff | 0.10.3 | MIT |
+| time | 0.3.55 | MIT OR Apache-2.0 |
+| time-core | 0.1.9 | MIT OR Apache-2.0 |
 | tiny-skia | 0.11.4 | BSD-3-Clause |
 | tiny-skia-path | 0.11.4 | BSD-3-Clause |
 | tinystr | 0.8.4 | Unicode-3.0 |
@@ -441,6 +481,7 @@ font files are included.
 | unicode-properties | 0.1.4 | MIT/Apache-2.0 |
 | unicode-script | 0.5.8 | MIT OR Apache-2.0 |
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
+| unicode-truncate | 2.0.1 | MIT OR Apache-2.0 |
 | unicode-vo | 0.1.0 | MIT/Apache-2.0 |
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |
 | unicode-xid | 0.2.6 | MIT OR Apache-2.0 |
@@ -485,6 +526,25 @@ font files are included.
 | winapi-util | 0.1.11 | Unlicense OR MIT |
 | winapi-x86_64-pc-windows-gnu | 0.4.0 | MIT/Apache-2.0 |
 | windows | 0.58.0 | MIT OR Apache-2.0 |
+| windows-core | 0.58.0 | MIT OR Apache-2.0 |
+| windows-core | 0.62.2 | MIT OR Apache-2.0 |
+| windows-implement | 0.58.0 | MIT OR Apache-2.0 |
+| windows-implement | 0.60.2 | MIT OR Apache-2.0 |
+| windows-interface | 0.58.0 | MIT OR Apache-2.0 |
+| windows-interface | 0.59.3 | MIT OR Apache-2.0 |
+| windows-link | 0.2.1 | MIT OR Apache-2.0 |
+| windows-result | 0.2.0 | MIT OR Apache-2.0 |
+| windows-result | 0.4.1 | MIT OR Apache-2.0 |
+| windows-strings | 0.1.0 | MIT OR Apache-2.0 |
+| windows-strings | 0.5.1 | MIT OR Apache-2.0 |
+| windows-sys | 0.48.0 | MIT OR Apache-2.0 |
+| windows-sys | 0.52.0 | MIT OR Apache-2.0 |
+| windows-sys | 0.59.0 | MIT OR Apache-2.0 |
+| windows-sys | 0.60.2 | MIT OR Apache-2.0 |
+| windows-sys | 0.61.2 | MIT OR Apache-2.0 |
+| windows-targets | 0.48.5 | MIT OR Apache-2.0 |
+| windows-targets | 0.52.6 | MIT OR Apache-2.0 |
+| windows-targets | 0.53.5 | MIT OR Apache-2.0 |
 | windows_aarch64_gnullvm | 0.48.5 | MIT OR Apache-2.0 |
 | windows_aarch64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
 | windows_aarch64_gnullvm | 0.53.1 | MIT OR Apache-2.0 |
@@ -508,25 +568,6 @@ font files are included.
 | windows_x86_64_msvc | 0.48.5 | MIT OR Apache-2.0 |
 | windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 |
 | windows_x86_64_msvc | 0.53.1 | MIT OR Apache-2.0 |
-| windows-core | 0.58.0 | MIT OR Apache-2.0 |
-| windows-core | 0.62.2 | MIT OR Apache-2.0 |
-| windows-implement | 0.58.0 | MIT OR Apache-2.0 |
-| windows-implement | 0.60.2 | MIT OR Apache-2.0 |
-| windows-interface | 0.58.0 | MIT OR Apache-2.0 |
-| windows-interface | 0.59.3 | MIT OR Apache-2.0 |
-| windows-link | 0.2.1 | MIT OR Apache-2.0 |
-| windows-result | 0.2.0 | MIT OR Apache-2.0 |
-| windows-result | 0.4.1 | MIT OR Apache-2.0 |
-| windows-strings | 0.1.0 | MIT OR Apache-2.0 |
-| windows-strings | 0.5.1 | MIT OR Apache-2.0 |
-| windows-sys | 0.48.0 | MIT OR Apache-2.0 |
-| windows-sys | 0.52.0 | MIT OR Apache-2.0 |
-| windows-sys | 0.59.0 | MIT OR Apache-2.0 |
-| windows-sys | 0.60.2 | MIT OR Apache-2.0 |
-| windows-sys | 0.61.2 | MIT OR Apache-2.0 |
-| windows-targets | 0.48.5 | MIT OR Apache-2.0 |
-| windows-targets | 0.52.6 | MIT OR Apache-2.0 |
-| windows-targets | 0.53.5 | MIT OR Apache-2.0 |
 | winit | 0.30.13 | Apache-2.0 |
 | winnow | 1.0.4 | MIT |
 | winreg | 0.6.2 | MIT |

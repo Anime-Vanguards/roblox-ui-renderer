@@ -45,7 +45,8 @@ The rules themselves: the [documentation index](README.md).
 The engine core is its own repository,
 [roblox-engine-emulator](https://github.com/Anime-Vanguards/roblox-engine-emulator). rur depends on it as a
 cargo git dependency pinned to a commit (`native/Cargo.toml`: the crate, and under `[patch.crates-io]` its
-vendored patched Luau VM, both at the same commit) and adds its GUI layer through the engine's layer hooks
+vendored patched Luau VM and the mlua-sys that reads its bytecode, all at the same commit) and adds its GUI layer
+through the engine's layer hooks
 (`native/src/engine/mod.rs`: `GuiLayer`). Instances, reflection, values, signals, the scheduler, services,
 the Luau API, project mounting, the 3D world and the recorder are the emulator's; text, layout, input, the
 scene export, story mounting, sessions and the engine CLI are rur's.

@@ -50,10 +50,10 @@ image = { version = "=0.25.8", default-features = false, features = ["png", "jpe
 # 3D world, the recorder) with its patched Luau VM: roblox-engine-emulator at a pinned commit. Its
 # features follow ours (desktop: Luau native code, manifest bundles). Building against a local checkout
 # instead: `node tools/emulator.mjs link` (docs/how-it-works.md "The engine: roblox-engine-emulator").
-roblox-engine-emulator = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "0133afdee85ac1d500f5ecf52488e629f3d72ba3", default-features = false }
+roblox-engine-emulator = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "f41981fbab088f25152bee6edfe7b3aff057f64a", default-features = false }
 # The emulator's profile viewer (`rur-native profile view|render`, the desktop build): its crate in the same
 # repository, at the same commit (tools/emulator.mjs pins and links both)
-ree-profile-view = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "0133afdee85ac1d500f5ecf52488e629f3d72ba3", optional = true }
+ree-profile-view = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "f41981fbab088f25152bee6edfe7b3aff057f64a", optional = true }
 rbx_binary = "=2.0.1"
 rbx_dom_weak = "=4.2.0"
 rustc-hash = "=2.1.3"
@@ -62,9 +62,9 @@ chrono = "=0.4.45"
 # and the SHA-256 keys of the shared hinted-metric cache (.cache/hinted)
 roblox_install = "=1.2.0"
 sha2 = "=0.10.9"
-mlua = { version = "=0.11.4", features = ["luau", "serialize", "async"] }
-# Keep the VM ABI/source release aligned with the canonical Luau patch.
-mlua-sys = "=0.8.3"
+# The versions the emulator pins (its Cargo.toml says why): mlua and mlua-sys bind the C API of the Luau release it vendors.
+mlua = { version = "=0.12.2", features = ["luau", "serialize", "async"] }
+mlua-sys = "=0.13.0"
 pollster = "=0.4.0"
 rayon = "=1.11.0"
 resvg = "=0.45.1"
@@ -93,10 +93,12 @@ cc = { version = "=1.5.1", features = ["parallel"] }
 [dev-dependencies]
 flate2 = "=1.1.10"
 
-# The patched Luau VM mlua-sys compiles: the emulator's vendor/luau0-src, at the same commit as the
-# dependency above (only the workspace root's [patch] applies; tools/emulator.mjs pin moves both)
+# The patched Luau VM mlua-sys compiles (the emulator's vendor/luau0-src) and the mlua-sys that reads its bytecode
+# (vendor/mlua-sys), at the same commit as the dependency above (only the workspace root's [patch] applies;
+# tools/emulator.mjs pin moves them all)
 [patch.crates-io]
-luau0-src = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "0133afdee85ac1d500f5ecf52488e629f3d72ba3" }
+luau0-src = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "f41981fbab088f25152bee6edfe7b3aff057f64a" }
+mlua-sys = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "f41981fbab088f25152bee6edfe7b3aff057f64a" }
 
 # `--release` is the everyday build (the app, agents, tests): full optimisation, incremental, many codegen
 # units, so an edit rebuilds in seconds. `lto = false` keeps cargo's ThinLTO across each crate's own codegen
