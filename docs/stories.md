@@ -25,7 +25,12 @@ A story module returns one of:
   story is mounted with `vide.mount`, as the UI Labs plugin does; without it controls are plain values
   and `story` returns (or parents) the UI itself. A module or fixture that returns such a table is
   mounted as a story too.
-- A table with `render = function(props) ... end`: called with `{ target, controls = {} }`.
+- A UI Labs generic story: `{ controls = {...}, render = function(props) ... end }`. `props` holds
+  `target`, `controls` (plain values), `converted` (the controls as UI Labs control objects, for
+  `UILabs.CreateControlStates`) and `subscribe(listener)`, which returns an unsubscribe function. A
+  control changed in a live session (the desktop storybook, `{"cmd":"control"}`) calls each listener
+  with a new values table and `{ __old, __new }` per control, as UI Labs does. rur has no unmount, so
+  the cleanup `render` returns is not called.
 - A function: called with the target.
 
 Controls are the UI Labs kinds: plain values, `{ value, ... }` lists (the first is the default),

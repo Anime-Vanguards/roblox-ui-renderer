@@ -227,7 +227,7 @@ function Host.MountStory(Story, Target, IsModule, State)
 			end
 		end
 	elseif type(Story) == "table" and Story.render then
-		Story.render({ target = Target, controls = {} })
+		Host.MountGeneric(Story, Target, State)
 	elseif type(Story) == "function" then
 		Story(Target)
 	else
@@ -296,6 +296,110 @@ function Host.ModuleArguments(State)
 		Parent[Path[#Path]] = Value
 	end
 	return { Result }
+end
+
+-- UI Labs generic stories (`render`) by their first values table: the subscribed listeners and
+-- the current values once a control changed
+Host.Generic = setmetatable({}, { __mode = "k" })
+
+-- MountStory's generic story (`render`): the plain control values (with --controls applied),
+-- kept in State.StoryControls / State.StoryControlSpecs like a story's, and props for render
+function Host.MountGeneric(Story, Target, State)
+	local Controls = ConvertControls(Story.controls, function(Value)
+		return Value
+	end)
+	if State and State.Controls ~= nil then
+		ApplyControls(Controls, Story.controls, State.Controls)
+	end
+	local Generic = { Listeners = {} }
+	Host.Generic[Controls] = Generic
+	if State then
+		State.StoryControls, State.StoryControlSpecs = Controls, Story.controls
+	end
+	Story.render({
+		target = Target,
+		controls = Controls,
+		converted = Host.ConvertedControls(Story.controls),
+		subscribe = function(Listener)
+			if not table.find(Generic.Listeners, Listener) then
+				table.insert(Generic.Listeners, Listener)
+			end
+			return function()
+				local Index = table.find(Generic.Listeners, Listener)
+				if Index then
+					table.remove(Generic.Listeners, Index)
+				end
+			end
+		end,
+	})
+end
+
+-- props.converted of a generic story: UI Labs control objects, primitives wrapped as Controls
+function Host.ConvertedControls(Specs)
+	local Result = {}
+	if type(Specs) ~= "table" then
+		return Result
+	end
+	for Key, Spec in Specs do
+		if type(Spec) == "table" and Spec.EntryType == "ControlGroup" then
+			Result[Key] = { EntryType = "ControlGroup", Controls = Host.ConvertedControls(Spec.Controls) }
+		elseif type(Spec) == "table" then
+			Result[Key] = Spec
+		else
+			Result[Key] = { EntryType = "Control", ControlValue = Spec }
+		end
+	end
+	return Result
+end
+
+-- The listener's second argument: { __old, __new } per control, groups nested
+local function ControlInfos(Specs, Values, OldValues)
+	local Result = {}
+	for Key, Spec in Specs do
+		if type(Spec) == "table" and Spec.EntryType == "ControlGroup" then
+			Result[Key] = ControlInfos(Spec.Controls, Values[Key], OldValues[Key])
+		else
+			Result[Key] = { __new = Values[Key], __old = OldValues[Key] }
+		end
+	end
+	return Result
+end
+
+-- A live control change of a generic story: a new values table (as UI Labs passes), then every
+-- subscribed listener with the values and their infos
+function Host.SetGenericControl(Controls, Specs, Path, Value, Strict)
+	local Generic = Host.Generic[Controls]
+	local OldValues = Generic.Values or Controls
+	local Source, Spec = FindControl(OldValues, Specs, Path)
+	if #Path == 0 or Spec == nil or type(Source) == "table" then
+		if Strict then
+			error(`no control at {table.concat(Path, ".")}`, 0)
+		end
+		return
+	end
+	local Values = table.clone(OldValues)
+	local Parent = Values
+	for Index = 1, #Path - 1 do
+		Parent[Path[Index]] = table.clone(Parent[Path[Index]])
+		Parent = Parent[Path[Index]]
+	end
+	Parent[Path[#Path]] = ControlValue(Spec, Value)
+	Generic.Values = Values
+	local Infos = ControlInfos(Specs, Values, OldValues)
+	for _, Listener in table.clone(Generic.Listeners) do
+		Listener(Values, Infos)
+	end
+end
+
+-- A session's control change of a generic story goes to SetGenericControl, any other to the
+-- SetControl above
+local SetSourceControl = Host.SetControl
+function Host.SetControl(Controls, Specs, Path, Value, Strict)
+	if Host.Generic[Controls] then
+		Host.SetGenericControl(Controls, Specs, Path or {}, Value, Strict)
+		return
+	end
+	SetSourceControl(Controls, Specs, Path, Value, Strict)
 end
 
 return Host

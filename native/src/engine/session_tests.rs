@@ -463,3 +463,88 @@ fn a_session_frees_what_a_story_destroys() {
     drop(lua);
     let _ = std::fs::remove_file(fixture);
 }
+
+/// A UI Labs generic story (`render`): its props carry the controls (with `--controls` applied) and
+/// their converted control objects, and a live control change gives each subscribed listener a new
+/// values table with `{ __old, __new }` infos, as the UI Labs plugin does.
+#[test]
+fn a_generic_story_follows_its_controls() {
+    use super::story;
+    let fixture = std::env::temp_dir().join(format!("rur-generic-story-test-{}.luau", std::process::id()));
+    std::fs::write(
+        &fixture,
+        r#"
+        return {
+            controls = {
+                Label = "One",
+                Group = { EntryType = "ControlGroup", Controls = { Size = 10 } },
+            },
+            render = function(Props)
+                local Label = Instance.new("TextLabel")
+                Label.Text = Props.controls.Label
+                Label.Size = UDim2.fromOffset(Props.controls.Group.Size, 20)
+                Label.Parent = Props.target
+                _G.Label, _G.Converted, _G.Calls = Label, Props.converted, 0
+                Props.subscribe(function(Values, Infos)
+                    _G.Calls += 1
+                    _G.Fresh, _G.Infos = Values ~= Props.controls, Infos
+                    Label.Text = Values.Label
+                    Label.Size = UDim2.fromOffset(Values.Group.Size, 20)
+                end)
+                local Unsubscribe = Props.subscribe(function()
+                    _G.Unsubscribed = true
+                end)
+                Unsubscribe()
+            end,
+        }
+        "#,
+    )
+    .unwrap();
+    let engine = crate::engine::new_engine(crate::engine::options()).expect("engine");
+    let lua = Lua::new();
+    let project = story::mount_project(&lua, &engine, &story::ProjectSpec::default(), std::time::Instant::now()).unwrap();
+    let source = story::Source { kind: story::SourceKind::Fixture, path: fixture.to_string_lossy().into_owned() };
+    let controls = json!({ "Group.Size": 30 });
+    let mounted = story::mount(&lua, &engine, &project, Some(&source), 0.0, (800.0, 600.0), Some(&controls)).unwrap();
+    assert_eq!(mounted.status, "ok", "{:?}", mounted.failure);
+    let mut session = super::session::Session::new(&engine, project, mounted, [0.2, 0.2, 0.2], true);
+    let ready = session.ready(&lua).unwrap();
+    assert_eq!(ready["controls"].as_array().map(Vec::len), Some(2), "{ready}");
+    run(
+        &lua,
+        &engine,
+        r#"
+        local Converted = _G.Converted
+        assert(Converted.Label.EntryType == "Control" and Converted.Label.ControlValue == "One")
+        assert(Converted.Group.EntryType == "ControlGroup" and Converted.Group.Controls.Size.ControlValue == 10)
+        assert(_G.Label.Size.X.Offset == 30 and _G.Calls == 0)
+        "#,
+    );
+    assert_eq!(session.control(&lua, &json!(["Label"]), &json!("Two"))["type"], "frame");
+    run(
+        &lua,
+        &engine,
+        r#"
+        assert(_G.Calls == 1 and _G.Fresh and not _G.Unsubscribed)
+        assert(_G.Label.Text == "Two")
+        assert(_G.Infos.Label.__old == "One" and _G.Infos.Label.__new == "Two")
+        assert(_G.Infos.Group.Size.__old == 30 and _G.Infos.Group.Size.__new == 30)
+        "#,
+    );
+    assert_eq!(session.control(&lua, &json!(["Group", "Size"]), &json!(40))["type"], "frame");
+    run(
+        &lua,
+        &engine,
+        r#"
+        assert(_G.Calls == 2 and _G.Label.Size.X.Offset == 40)
+        assert(_G.Infos.Group.Size.__old == 30 and _G.Infos.Group.Size.__new == 40)
+        assert(_G.Infos.Label.__old == "Two" and _G.Infos.Label.__new == "Two")
+        "#,
+    );
+    for path in [json!(["Missing"]), json!(["Group"])] {
+        assert_eq!(session.control(&lua, &path, &json!(1))["type"], "error", "{path}");
+    }
+    drop(session);
+    drop(lua);
+    let _ = std::fs::remove_file(fixture);
+}
