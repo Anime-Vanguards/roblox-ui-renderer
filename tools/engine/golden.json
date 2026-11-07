@@ -597,7 +597,7 @@
 			"status": "ok"
 		},
 		"fast/edit/viewport-models": {
-			"digest": "85999ce24b21189cbfc74bc2154d46579cbe313a66a99eb5f10be0a5b5b0e074",
+			"digest": "ecb8d80111008515b0d9d218a9bcccd2eb2fb6327ef54780205d88964f664f55",
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
@@ -1193,7 +1193,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/viewport-models": {
-			"digest": "13d8bc01056b36ea9a9bd2ff4575fae8eb79a87dfdea1315bf74732107346010",
+			"digest": "37ef8c8dcf3d97b74bb14082633888eba109ac8d298968a89a7682f44f9eb495",
 			"status": "ok"
 		},
 		"fixtures/play/anim-mount": {
@@ -1777,7 +1777,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/viewport-models": {
-			"digest": "10ae5fad18414b76c8858f11d1bb16cf4e5bedc868d69a78f67bba3548ad8c5c",
+			"digest": "4700cfa01b17f734178af5c5bda777a7506b68779a3049ce2d5e7edbf5647345",
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
@@ -2021,7 +2021,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-07T18:08:32.557Z",
+	"recorded": "2026-11-07T20:35:36.682Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
