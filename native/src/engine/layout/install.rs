@@ -391,8 +391,9 @@ pub fn install(engine: &Rc<Engine>) {
     drop(behaviors);
     engine.clear_member_cache();
 
-    // The frame's layout point: the tween step runs after the render step's bindings and before PreRender, where a client lays
-    // its changed GUIs out (measured, notes in Layout::mark_frame_layout)
+    // The frame's layout point: the emulator's Tween phase runs after the render step's bindings and before RenderStepped and
+    // PreRender, where a client lays its changed GUIs out (measured, notes in Layout::mark_frame_layout); TweenService steps
+    // later, after the PreRender handlers
     engine.state.borrow_mut().sched.add_hook(
         Phase::Tween,
         Rc::new(|_, engine, _| {
