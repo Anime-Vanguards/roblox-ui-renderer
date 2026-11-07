@@ -62,3 +62,16 @@ node tools/emulator.mjs unlink     # back to the pin
 A link is an untracked `.cargo/config.toml` at this checkout's root that patches the git dependency with the
 local path. The Luau VM stays the pinned commit's even when linked.
 
+
+### How scripts run
+
+Every run runs its Luau as a playing client and the emulator's `record` run it, whichever host runs it: a
+one-shot `rur-native engine` run, the golden check's batch workers, `rur render` and `sequence`, the render
+service and the desktop app (`native/src/engine/cli.rs`, `interpret`). Every chunk is interpreted in a script
+environment that is safe as a client's is: a module's imports (`game`, `script.Parent.Child`, `math.floor`) are
+resolved when it loads, and builtins are fast calls. The scripts' own Luau is charged on the emulator's work clock
+at a client's prices, a `--!native` module's instructions at native code's (the emulator's docs/engine.md, "Work
+clock"), so `os.clock` moves by the same work in every host, and UI code that budgets its work by `os.clock` takes
+the same frames in a one-shot render, the render service and `record`. No host compiles Luau to native code:
+natively compiled code would run unseen by the VM's work counters, and compiling every module cost a run more
+than it saved (the golden corpus takes about a third less CPU interpreted).

@@ -36,7 +36,9 @@
 //! the mounting both paths share; this was the Luau runtime's main.luau until the engine replaced
 //! it). `--session 1` keeps the story running and answers session commands on stdin (session.rs).
 //! [`Host`] is the same mount for the native app's in-process session (runtime.rs drives it and
-//! applies its replies). Environment: RUR_CAMERA / RUR_PLACE_ID / RUR_PLAYER* /
+//! applies its replies). Every VM of every host runs its Luau as a playing client and the emulator's
+//! `record` do ([`interpret`]): interpreted, in safe script environments, its work charged on the work
+//! clock. Environment: RUR_CAMERA / RUR_PLACE_ID / RUR_PLAYER* /
 //! RUR_ROTATION_CLIPPING stand in for the flags, RUR_CLOCK (recorded Studio clock, scheduler.rs)
 //! and RUR_ORDER (services/order.rs) come from `rur compare`, RUR_LUAU_PROFILE samples the Luau
 //! stacks (luau_profile.rs).
@@ -316,6 +318,7 @@ fn run_with(args: Args, free: bool) -> Result<i32, String> {
     // RUR_LUAU_PROFILE=<file>: folded Luau stacks (startup, then frames after the first reply)
     let _profile = crate::luau_profile::begin();
     let lua = Lua::new();
+    interpret(&lua, &engine);
     crate::luau_profile::install(&lua);
     let result = (|| {
         let spec = story::ProjectSpec {
@@ -554,6 +557,7 @@ impl Host {
         let prepared = prepare(args)?;
         let engine = super::new_engine(prepared.options)?;
         let lua = Lua::new();
+        interpret(&lua, &engine);
         let spec = story::ProjectSpec {
             roots: prepared.roots.clone(),
             snapshots: args.snapshots.clone(),
@@ -586,12 +590,6 @@ impl Host {
         let ready = session.ready(&self.lua).map_err(|e| e.to_string())?;
         self.session = Some(session);
         Ok(ready)
-    }
-
-    /// Idle work between commands: compiles one deferred chunk to native code
-    /// (`modules::defer_codegen`); whether more is waiting.
-    pub fn idle_step(&self) -> bool {
-        super::lua::modules::compile_deferred(&self.lua, &self.engine)
     }
 
     /// One session command (None for "quit").
@@ -678,7 +676,7 @@ pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
     let target = prepared.target;
     let engine = super::new_engine(prepared.options)?;
     let lua = Lua::new();
-    interpret_in_service(&lua, &engine);
+    interpret(&lua, &engine);
     let result = (|| {
         let project = story::mount_project(&lua, &engine, &spec, started)?;
         // A profile of the run (`rur-native render --profile`, the emulator's profiler) hooks the VM once the project
@@ -693,15 +691,19 @@ pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
     result
 }
 
-/// A render service's VM (the service keeps compiled modules between VMs) runs every chunk in the
-/// interpreter: module chunks already did, and compiling the engine's prelude and services to native
-/// code at every VM start, a VM per render, was most of the start (results are the same). So does a
-/// profiled run (`--profile`), as `ree record` runs: the profile counts the interpreter's instructions
-/// and inline caches, and natively compiled code would run unseen
-fn interpret_in_service(lua: &Lua, engine: &Engine) {
-    if super::lua::modules::reusing_compiled_modules() || super::profiler::active() {
-        super::lua::modules::interpret_all(lua, engine);
-    }
+/// How every VM here runs Luau, whatever the host (a one-shot `engine` run, a batch job, `render`, the render
+/// service, a sequence, the desktop app), as a playing client and the emulator's `record` run it: every chunk
+/// interpreted, in a script environment that is safe as a client's is (a module's imports resolved when it
+/// loads, builtins taken as fast calls), and the scripts' own Luau charged on the work clock as a client runs
+/// it, a `--!native` module's instructions at native code's prices (the emulator's cost.rs). So `os.clock`
+/// moves by the same work in every host, and code that budgets its work by it takes the same frames. Natively
+/// compiled code runs unseen by the VM's work counters (the clock would miss it, a profile would read 0
+/// instructions) in an unsafe environment; compiling every module cost a one-shot story more than it gained
+/// (the golden corpus took 35 % less CPU interpreted). The engine's own Luau (the prelude, services) is not
+/// charged either way and is interpreted too: compiling it at every VM start was most of a start. Before the
+/// project mounts.
+fn interpret(lua: &Lua, engine: &Engine) {
+    super::lua::modules::interpret_all(lua, engine);
 }
 
 fn project_spec(args: &Args, prepared: &Prepared) -> Result<story::ProjectSpec, String> {
@@ -766,7 +768,7 @@ impl Preloaded {
         let target = prepared.target;
         let engine = super::new_engine(prepared.options)?;
         let lua = Lua::new();
-        interpret_in_service(&lua, &engine);
+        interpret(&lua, &engine);
         let project = match story::mount_project(&lua, &engine, &spec, started) {
             Ok(project) => project,
             Err(error) => {
@@ -1533,6 +1535,71 @@ mod kept_tests {
         // (the fixture is no project file: it is checked even when the roots are known unchanged)
         assert!(matches!(kept.resume(&at("0.3"), true), Resumed::Refused(why) if why.contains("shown.luau changed")));
         let _ = std::fs::remove_dir_all(directory);
+    }
+}
+
+#[cfg(test)]
+mod work_clock_tests {
+    use super::*;
+
+    /// The same loop in a plain module and a `--!native` one, timed with os.clock on a Heartbeat (the work before
+    /// the first frame is not charged)
+    const LOOP: &str = "local Data = {}\nfor Index = 1, 64 do\n\tData[Index] = { Value = Index }\nend\nreturn function()\n\tlocal Sum = 0\n\tfor _ = 1, 400 do\n\t\tfor Index = 1, 64 do\n\t\t\tSum += Data[Index].Value\n\t\tend\n\tend\n\treturn Sum\nend\n";
+    const FIXTURE: &str = "return function(Target)\n\tlocal ReplicatedStorage = game:GetService(\"ReplicatedStorage\")\n\tlocal Plain = require(ReplicatedStorage.Plain)\n\tlocal Native = require(ReplicatedStorage.Native)\n\tgame:GetService(\"RunService\").Heartbeat:Once(function()\n\t\tlocal Start = os.clock()\n\t\tPlain()\n\t\tlocal Middle = os.clock()\n\t\tNative()\n\t\tlocal Finish = os.clock()\n\t\tprint(string.format(\"plain %.9f native %.9f\", Middle - Start, Finish - Middle))\n\tend)\nend\n";
+
+    fn timed(output: &[Json]) -> String {
+        let line = output.iter().filter_map(|entry| entry["message"].as_str()).find(|message| message.starts_with("plain "));
+        line.unwrap_or_else(|| panic!("no timing printed: {output:?}")).to_string()
+    }
+
+    /// Every host runs a script's Luau as a client and the emulator's `record` do, charged on the work clock: a
+    /// one-shot `engine` run (and so a batch job), `render` and the render service, a standby VM and the desktop
+    /// app's session read the same os.clock for the same loop, and a `--!native` module's copy of it costs less
+    /// (native code's prices). Natively compiled modules were charged nothing (both readings 0)
+    #[test]
+    fn every_host_charges_a_scripts_luau_alike() {
+        let directory = std::env::temp_dir().join(format!("rur-clock-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root = directory.join("root");
+        std::fs::create_dir_all(root.join("ReplicatedStorage")).unwrap();
+        std::fs::write(root.join("ReplicatedStorage").join("Plain.luau"), LOOP).unwrap();
+        std::fs::write(root.join("ReplicatedStorage").join("Native.luau"), format!("--!native\n{LOOP}")).unwrap();
+        let fixture = directory.join("clock.luau");
+        std::fs::write(&fixture, FIXTURE).unwrap();
+        let repo = crate::engine::default_repo();
+        let argv = |extra: &[&str]| -> Args {
+            let mut list: Vec<String> = vec![
+                "--repo".into(), repo.to_string_lossy().into_owned(),
+                "--roots".into(), root.to_string_lossy().into_owned(),
+                "--fixture".into(), fixture.to_string_lossy().into_owned(),
+                "--viewport".into(), "400x300".into(), "--time".into(), "0.1".into(), "--no-snapshots".into(),
+            ];
+            list.extend(extra.iter().map(|arg| arg.to_string()));
+            parse(&list).unwrap()
+        };
+        let output = |scene: &Json| scene["diagnostics"]["output"].as_array().cloned().unwrap_or_default();
+
+        let once = timed(&output(&run_once(&argv(&[])).unwrap().scene));
+        let standby = timed(&output(&Preloaded::load(&argv(&[])).unwrap().run(&argv(&[])).unwrap().scene));
+        let file = directory.join("scene.json");
+        assert_eq!(run(argv(&["--out", &file.to_string_lossy()])).unwrap(), 0);
+        let engine_run = timed(&output(&serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap()));
+        let session = argv(&["--session", "1"]);
+        let mut host = Host::start(&session).unwrap();
+        host.mount(&session).unwrap();
+        for _ in 0..6 {
+            host.handle(&json!({ "cmd": "frame", "dt": 1.0 / 60.0, "events": [] })).unwrap();
+        }
+        let lines: Vec<Json> = host.engine.state.borrow().output.entries.iter().map(|entry| json!({ "message": entry.message })).collect();
+        let app = timed(&lines);
+        drop(host);
+        let _ = std::fs::remove_dir_all(&directory);
+
+        let numbers: Vec<f64> = once.split_whitespace().filter_map(|word| word.parse().ok()).collect();
+        let (plain, native) = (numbers[0], numbers[1]);
+        assert!(plain > 50e-6 && native > 0.0 && native < plain / 1.5, "plain {plain} s, native {native} s");
+        assert_eq!(standby, once, "a standby VM");
+        assert_eq!(engine_run, once, "rur-native engine");
+        assert_eq!(app, once, "the desktop app's session");
     }
 }
 

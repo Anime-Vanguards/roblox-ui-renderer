@@ -576,13 +576,12 @@ fn run_engine_worker(
         };
         mounted.store(id, Ordering::Release);
         // The files this story required when it was last mounted are read and compiled to
-        // bytecode on other threads meanwhile; native compilation waits for idle time
+        // bytecode on other threads meanwhile (the chunks stay interpreted: cli.rs interpret)
         let requires = requires_list(&options);
         if let Some(paths) = requires.as_ref().and_then(|file| std::fs::read_to_string(file).ok()) {
             let paths: Vec<String> = paths.lines().filter(|line| !line.is_empty()).map(str::to_string).collect();
             crate::engine::lua::modules::use_prefetch(&host.engine, crate::engine::lua::modules::Prefetch::start(paths));
         }
-        crate::engine::lua::modules::defer_codegen(&host.engine);
         match host.mount(&args) {
             Ok(ready) => {
                 let _ = replies.send((id, RuntimeEvent::Reply(ready)));
@@ -603,9 +602,6 @@ fn run_engine_worker(
             }
         }
         loop {
-            // Idle: native compilation of the chunks the mount loaded (one at a time, so a
-            // command waits for at most one chunk)
-            while receiver.is_empty() && !stopped.load(Ordering::Acquire) && host.idle_step() {}
             match receiver.blocking_recv() {
                 Some(Request::Command(command_id, command))
                     if command_id == id && command_id == generation.load(Ordering::Acquire) =>
