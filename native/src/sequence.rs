@@ -823,6 +823,14 @@ mod tests {
         std::env::temp_dir().join(format!("rur-profile-{name}-{}-{stamp}", std::process::id()))
     }
 
+    /// The profiling suite's switches and its caches' counts are the process's (a profile runs in a process of its own):
+    /// two profiled tests at once count each other's caches, and one's start or end zeroes or stops the other's counts
+    /// (both once read no layout records at all), so the profiled tests take turns, as the emulator's own do
+    fn one_profile_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+        static PROFILES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        PROFILES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn profile_json(dir: &std::path::Path) -> Value {
         let profile = serde_json::from_str(&std::fs::read_to_string(dir.join("profile.json")).unwrap()).unwrap();
         let _ = std::fs::remove_dir_all(dir);
@@ -850,6 +858,7 @@ mod tests {
     /// the time its end message arrives: the process may exit as soon as the frames are drawn
     #[test]
     fn a_profiled_sequence_writes_its_profile_before_it_ends() {
+        let _profile = one_profile_at_a_time();
         let args = fixture_args(&[]);
         let spec = SequenceSpec { from: 0.0, frames: 12, fps: 60.0 };
         let dir = temp_profile("sequence");
@@ -879,6 +888,7 @@ mod tests {
     /// gives the run's clock (engine frames, seconds, rate) for the profile's frames
     #[test]
     fn a_profiled_render_reads_the_vm_after_its_last_frame() {
+        let _profile = one_profile_at_a_time();
         let args = fixture_args(&["--time", "0.5"]);
         let dir = temp_profile("render");
         let session = crate::story_render::begin_profile(profiler::Config::new(profiler::Kinds::parse("work,heap,caches").unwrap(), dir.clone()));
