@@ -193,7 +193,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-errors": {
-			"digest": "18bd5fc97b2c57603295fff60b9593f39ed0828ee9c5c47374f28449db440a2e",
+			"digest": "d271fdf98223f837326869f253481d6d83c8d513bd746eea4b16e30dd342575e",
 			"status": "ok"
 		},
 		"fast/edit/probe-ids": {
@@ -797,7 +797,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-errors": {
-			"digest": "b8a840f404652552a3243e78b756560a5b240bddad08316b5ffbd2822640cf46",
+			"digest": "3e23aae854fb20d52992748df0c2bb7a9e1daf0a5995319e2d6b90aa144ee2d5",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-ids": {
@@ -1381,7 +1381,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-errors": {
-			"digest": "49b8ea1c05b4a287e1d74776726b3495546ac5e6cea9b2d070289ec63aca32e5",
+			"digest": "e15acb4a3e1b66f1a5cde8b8283bea70832b72a527ef0cf5b841940842df11fa",
 			"status": "ok"
 		},
 		"fixtures/play/probe-ids": {
@@ -1397,7 +1397,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "7a39d22e360b58efae020e1a5bcd3685f972b0eb52c895640cf10caf75237904",
+			"digest": "4e5dfb6887e464667804e364c786d44649742ea5ec3446f838bc561890be205d",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
@@ -2021,7 +2021,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-07T16:07:33.654Z",
+	"recorded": "2026-11-07T16:27:53.432Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
