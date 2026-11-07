@@ -548,3 +548,108 @@ fn a_generic_story_follows_its_controls() {
     drop(lua);
     let _ = std::fs::remove_file(fixture);
 }
+
+/// A generic story's props.converted and listener calls follow the UI Labs plugin: a literal becomes
+/// the control its constructor makes, a table (a control, a `{ value, ... }` list) is passed as it is,
+/// a group is copied with its controls converted, and a value UI Labs makes no control of is left out
+/// with a warning; a listener that errors or yields is reported with a warning while the listeners
+/// after it still get the change; a control whose value is a table can be set.
+#[test]
+fn a_generic_story_converts_and_calls_listeners_as_ui_labs_does() {
+    use super::story;
+    let fixture = std::env::temp_dir().join(format!("rur-generic-story-plugin-test-{}.luau", std::process::id()));
+    std::fs::write(
+        &fixture,
+        r#"
+        local Options = { { Name = "x" }, { Name = "y" } }
+        local Controls = {
+            Text = "Hi",
+            Count = 4,
+            On = true,
+            Tint = Color3.new(2, 0.5, -1),
+            Align = Enum.TextXAlignment.Left,
+            List = { "a", "b" },
+            Pick = { EntryType = "Control", Type = "Choose", ControlValue = Options[1], List = Options, DefIndex = 1 },
+            Group = { EntryType = "ControlGroup", Order = 3, Controls = { Size = 10 } },
+        }
+        _G.Specs = Controls
+        return {
+            controls = Controls,
+            render = function(Props)
+                _G.Props, _G.Calls = Props, {}
+                Props.subscribe(function()
+                    error("listener failed")
+                end)
+                Props.subscribe(function()
+                    task.wait()
+                    _G.Resumed = true
+                end)
+                Props.subscribe(function(Values, Infos)
+                    table.insert(_G.Calls, { Values = Values, Infos = Infos })
+                end)
+            end,
+        }
+        "#,
+    )
+    .unwrap();
+    let engine = crate::engine::new_engine(crate::engine::options()).expect("engine");
+    let lua = Lua::new();
+    let project = story::mount_project(&lua, &engine, &story::ProjectSpec::default(), std::time::Instant::now()).unwrap();
+    let source = story::Source { kind: story::SourceKind::Fixture, path: fixture.to_string_lossy().into_owned() };
+    let mounted = story::mount(&lua, &engine, &project, Some(&source), 0.0, (800.0, 600.0), None).unwrap();
+    assert_eq!(mounted.status, "ok", "{:?}", mounted.failure);
+    let mut session = super::session::Session::new(&engine, project, mounted, [0.2, 0.2, 0.2], true);
+    session.ready(&lua).unwrap();
+    let warnings = || -> Vec<String> {
+        engine.state.borrow().output.entries.iter().filter(|entry| entry.kind == "warn").map(|entry| entry.message.clone()).collect()
+    };
+    run(
+        &lua,
+        &engine,
+        r#"
+        local Converted, Specs = _G.Props.converted, _G.Specs
+        local Text, Count, On, Tint = Converted.Text, Converted.Count, Converted.On, Converted.Tint
+        assert(Text.EntryType == "Control" and Text.Type == "String" and Text.ControlValue == "Hi")
+        assert(Count.Type == "Number" and Count.ControlValue == 4 and Count.Dragger == true and Count.Sensibility == 40)
+        assert(On.Type == "Boolean" and On.ControlValue == true)
+        assert(Tint.Type == "Color3" and Tint.ControlValue == Color3.new(1, 0.5, 0))
+        assert(Converted.Align == nil and _G.Props.controls.Align == Enum.TextXAlignment.Left)
+        assert(Converted.List == Specs.List and Converted.Pick == Specs.Pick)
+        assert(Converted.Group ~= Specs.Group and Converted.Group.Order == 3 and Converted.Group.Controls.Size.Type == "Number")
+        "#,
+    );
+    assert!(warnings().iter().any(|warning| warning.contains("control Align") && warning.contains("EnumItem")), "{:?}", warnings());
+
+    assert_eq!(session.control(&lua, &json!(["Count"]), &json!(5))["type"], "frame");
+    run(
+        &lua,
+        &engine,
+        r#"
+        assert(#_G.Calls == 1 and _G.Calls[1].Values.Count == 5 and not _G.Resumed)
+        local Infos = _G.Calls[1].Infos
+        assert(Infos.Count.__old == 4 and Infos.Count.__new == 5 and Infos.Group.Size.__new == 10)
+        assert(Infos.Align == nil)
+        "#,
+    );
+    let seen = warnings();
+    assert!(seen.iter().any(|warning| warning.contains("errored") && warning.contains("listener failed")), "{seen:?}");
+    assert!(seen.iter().any(|warning| warning.contains("yielded")), "{seen:?}");
+    session.frame(&lua, 1.0 / 60.0, None, &[]);
+    run(&lua, &engine, "assert(_G.Resumed)");
+
+    assert_eq!(session.control(&lua, &json!(["Pick"]), &json!(2))["type"], "frame");
+    assert_eq!(session.control(&lua, &json!(["List"]), &json!("b"))["type"], "frame");
+    run(
+        &lua,
+        &engine,
+        r#"
+        assert(#_G.Calls == 3)
+        assert(_G.Calls[2].Values.Pick.Name == "y" and _G.Calls[2].Infos.Pick.__old.Name == "x")
+        assert(_G.Calls[3].Values.List == "b" and _G.Calls[3].Infos.List.__old == "a")
+        "#,
+    );
+    assert_eq!(session.control(&lua, &json!(["Pick", "Name"]), &json!("z"))["type"], "error");
+    drop(session);
+    drop(lua);
+    let _ = std::fs::remove_file(fixture);
+}

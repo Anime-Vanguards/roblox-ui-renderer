@@ -311,7 +311,8 @@ function Host.MountGeneric(Story, Target, State)
 	if State and State.Controls ~= nil then
 		ApplyControls(Controls, Story.controls, State.Controls)
 	end
-	local Generic = { Listeners = {} }
+	local Converted = Host.ConvertedControls(Story.controls)
+	local Generic = { Listeners = {}, Converted = Converted }
 	Host.Generic[Controls] = Generic
 	if State then
 		State.StoryControls, State.StoryControlSpecs = Controls, Story.controls
@@ -319,7 +320,7 @@ function Host.MountGeneric(Story, Target, State)
 	Story.render({
 		target = Target,
 		controls = Controls,
-		converted = Host.ConvertedControls(Story.controls),
+		converted = Converted,
 		subscribe = function(Listener)
 			if not table.find(Generic.Listeners, Listener) then
 				table.insert(Generic.Listeners, Listener)
@@ -334,30 +335,62 @@ function Host.MountGeneric(Story, Target, State)
 	})
 end
 
--- props.converted of a generic story: UI Labs control objects, primitives wrapped as Controls
-function Host.ConvertedControls(Specs)
+-- The control a literal stands for in the UI Labs package (ConvertControl in ui-labs-utils,
+-- src/Controls/ControlConversion.luau lines 20-34, github.com/PepeElToro41/ui-labs-utils at 77fddfb):
+-- what its String, Number, Boolean and Color3 constructors make (PrimitiveControls.luau lines 7-35,
+-- DatatypeControls.luau lines 5-8), or nil for a value it refuses
+local function LiteralControl(Value)
+	local Kind = typeof(Value)
+	if Kind == "string" then
+		return { EntryType = "Control", Type = "String", ControlValue = Value }
+	elseif Kind == "number" then
+		return { EntryType = "Control", Type = "Number", ControlValue = Value, Dragger = true, Sensibility = Value * 10 }
+	elseif Kind == "boolean" then
+		return { EntryType = "Control", Type = "Boolean", ControlValue = Value }
+	elseif Kind == "Color3" then
+		local Clamped = Color3.new(math.clamp(Value.R, 0, 1), math.clamp(Value.G, 0, 1), math.clamp(Value.B, 0, 1))
+		return { EntryType = "Control", Type = "Color3", ControlValue = Clamped }
+	end
+	return nil
+end
+
+-- props.converted of a generic story, as the UI Labs plugin builds it (ConvertLiterals and
+-- TryConvertControl in src/UI/StoryPreview/PreviewController/Mounters/Utils.tsx lines 20-51,
+-- github.com/PepeElToro41/ui-labs at 1e8f45f): a table (a control, or a `{ value, ... }` list) is
+-- passed as it is, a group is copied with its controls converted, a literal becomes its control,
+-- and a value UI Labs makes no control of is left out with a warning (props.controls keeps it)
+function Host.ConvertedControls(Specs, Prefix)
 	local Result = {}
 	if type(Specs) ~= "table" then
 		return Result
 	end
 	for Key, Spec in Specs do
+		local Name = if Prefix then `{Prefix}.{Key}` else tostring(Key)
 		if type(Spec) == "table" and Spec.EntryType == "ControlGroup" then
-			Result[Key] = { EntryType = "ControlGroup", Controls = Host.ConvertedControls(Spec.Controls) }
+			local Group = table.clone(Spec)
+			Group.Controls = Host.ConvertedControls(Spec.Controls, Name)
+			Result[Key] = Group
 		elseif type(Spec) == "table" then
 			Result[Key] = Spec
 		else
-			Result[Key] = { EntryType = "Control", ControlValue = Spec }
+			local Control = LiteralControl(Spec)
+			if Control then
+				Result[Key] = Control
+			else
+				warn(`control {Name}: UI Labs makes no control of a {typeof(Spec)}, so props.converted leaves it out`)
+			end
 		end
 	end
 	return Result
 end
 
--- The listener's second argument: { __old, __new } per control, groups nested
-local function ControlInfos(Specs, Values, OldValues)
+-- The listener's second argument: { __old, __new } per control of props.converted, groups nested,
+-- as the plugin's CreateControlInfos makes it (Mounters/Generic/Utils.ts lines 4-26)
+local function ControlInfos(Converted, Values, OldValues)
 	local Result = {}
-	for Key, Spec in Specs do
-		if type(Spec) == "table" and Spec.EntryType == "ControlGroup" then
-			Result[Key] = ControlInfos(Spec.Controls, Values[Key], OldValues[Key])
+	for Key, Control in Converted do
+		if Control.EntryType == "ControlGroup" then
+			Result[Key] = ControlInfos(Control.Controls, Values[Key], OldValues[Key])
 		else
 			Result[Key] = { __new = Values[Key], __old = OldValues[Key] }
 		end
@@ -365,13 +398,52 @@ local function ControlInfos(Specs, Values, OldValues)
 	return Result
 end
 
+-- The control definition at Path of a generic story's controls, or nil when the path names a group
+-- or nothing. Any control can be set, whatever its value (a Choose of tables, an RGBA), as in the
+-- plugin's controls panel.
+local function GenericControlSpec(Specs, Path)
+	local Spec = { EntryType = "ControlGroup", Controls = Specs }
+	for _, Key in Path do
+		if type(Spec) ~= "table" or Spec.EntryType ~= "ControlGroup" or type(Spec.Controls) ~= "table" then
+			return nil
+		end
+		Spec = Spec.Controls[Key]
+	end
+	if type(Spec) == "table" and Spec.EntryType == "ControlGroup" then
+		return nil
+	end
+	return Spec
+end
+
+-- One listener call, as the plugin makes each (RunListeners in Mounters/Generic/index.tsx lines
+-- 45-61, through YCall in src/Utils/MiscUtils.ts lines 21-35): in a thread of its own under xpcall,
+-- so a listener that errors or yields is reported with a warning and the next one still gets the
+-- change; a yielded listener carries on when its thread resumes
+local function CallListener(Listener, Values, Infos)
+	local Failure
+	local Thread = coroutine.create(function()
+		local Ran, Message = xpcall(Listener, function(Error)
+			return debug.traceback(tostring(Error), 2)
+		end, Values, Infos)
+		if not Ran then
+			Failure = Message
+		end
+	end)
+	local Resumed, Error = coroutine.resume(Thread)
+	if coroutine.status(Thread) ~= "dead" then
+		warn("a control listener of the generic story yielded; the listeners after it did not wait for it")
+	elseif not Resumed or Failure ~= nil then
+		warn(`a control listener of the generic story errored: {Failure or Error}`)
+	end
+end
+
 -- A live control change of a generic story: a new values table (as UI Labs passes), then every
 -- subscribed listener with the values and their infos
 function Host.SetGenericControl(Controls, Specs, Path, Value, Strict)
 	local Generic = Host.Generic[Controls]
 	local OldValues = Generic.Values or Controls
-	local Source, Spec = FindControl(OldValues, Specs, Path)
-	if #Path == 0 or Spec == nil or type(Source) == "table" then
+	local Spec = GenericControlSpec(Specs, Path)
+	if Spec == nil then
 		if Strict then
 			error(`no control at {table.concat(Path, ".")}`, 0)
 		end
@@ -385,9 +457,9 @@ function Host.SetGenericControl(Controls, Specs, Path, Value, Strict)
 	end
 	Parent[Path[#Path]] = ControlValue(Spec, Value)
 	Generic.Values = Values
-	local Infos = ControlInfos(Specs, Values, OldValues)
+	local Infos = ControlInfos(Generic.Converted, Values, OldValues)
 	for _, Listener in table.clone(Generic.Listeners) do
-		Listener(Values, Infos)
+		CallListener(Listener, Values, Infos)
 	end
 end
 
