@@ -5,6 +5,11 @@ rur runs Roblox UI outside Roblox (a UI Labs or Vide story, a Luau module that b
 at Studio's device scale. Its layout and raster rules are measured against Roblox Studio (lossless pixel
 captures and numeric dumps), so you, or a coding agent, can preview and debug a UI without opening Studio.
 
+> [!NOTE]
+> Almost all of the code here was written by AI: Claude, Anthropic's model, at its maintainers' direction. A lot of
+> work went into making it correct, usable and fast for real projects (its layout and drawing are measured against
+> Roblox Studio and checked by tests and golden images), but in the end Claude wrote nearly all of it.
+
 <img src="docs/media/studio-vs-rur-settings.jpg" width="100%" alt="A game's settings window captured in Roblox Studio on the left and rendered by rur on the right; the two look the same">
 
 A live Roblox game's settings window, its own Luau and assets unchanged: Roblox Studio's capture on the
