@@ -24,6 +24,7 @@ const originalGet = https.get, originalRequest = https.request;
 // 2 x 1 pixels: opaque red, and green at alpha 0 (its colour must survive)
 const PIXELS = Buffer.from([255, 0, 0, 255, 0, 255, 0, 0]);
 let luauCalls = [];
+let scans = 0;
 
 function refuse(callback) {
 	const request = new EventEmitter();
@@ -55,10 +56,15 @@ const bridge = http.createServer((request, response) => {
 		assert.equal(`${request.method} ${request.url}`, "POST /mcp/execute_luau");
 		const { code, sessionId } = JSON.parse(body);
 		assert.equal(sessionId, "edit-1", "only edit sessions are asked");
+		// The place scan (rur assets warm): its GUI names 41 and 42 (both readable) and 43 (not the creator's)
+		if (code.includes("GetDescendants")) {
+			scans++;
+			return reply({ content: [{ type: "text", text: JSON.stringify({ success: true, returnValue: JSON.stringify(["41", "42", "43"]) }) }] });
+		}
 		const ids = /local Ids = \{ ([\d, ]*) \}/.exec(code)[1].split(", ");
 		luauCalls.push(ids);
 		// Two images fill a call's budget: the rest is asked for in the next call. 31 travels compressed.
-		const value = ids.slice(0, 2).map(id => id === "33"
+		const value = ids.slice(0, 2).map(id => id === "33" || id === "43"
 			? { error: "AssetService::CreateEditableImageAsync failed because no permission to load asset" }
 			: id === "31"
 				? { width: 2, height: 1, encoding: "zstd", pixels: zlib.zstdCompressSync(PIXELS).toString("base64") }
@@ -69,7 +75,7 @@ const bridge = http.createServer((request, response) => {
 
 try {
 	fs.mkdirSync(path.join(repo, "cli"), { recursive: true });
-	for (const name of ["assets.mjs", "paths.mjs", "studio-images.mjs"]) fs.copyFileSync(path.join(root, "cli", name), path.join(repo, "cli", name));
+	for (const name of ["assets.mjs", "paths.mjs", "studio-images.mjs", "asset-warm.mjs"]) fs.copyFileSync(path.join(root, "cli", name), path.join(repo, "cli", name));
 	fs.symlinkSync(path.join(root, "node_modules"), path.join(repo, "node_modules"), "junction");
 	await new Promise(resolve => bridge.listen(0, "127.0.0.1", resolve));
 	for (const name of names) delete process.env[name];
@@ -115,7 +121,20 @@ try {
 	process.env.RUR_STUDIO_MCP_URL = "http://127.0.0.1:9";
 	results = await resolveAll(["rbxassetid://36"]);
 	assert.match(results.get("rbxassetid://36").error, /no Studio to read it from/);
-	console.log("Asset studio: refused images read from Studio, cached with a studio record, offline and opt-out passed.");
+
+	// rur assets warm: needs a bridge; reads what the place names, then finds it cached; --refresh reads the
+	// Studio images again
+	const { warmAssets } = await import(pathToFileURL(path.join(repo, "cli", "asset-warm.mjs")).href);
+	await assert.rejects(warmAssets({ env: {} }), /set RUR_STUDIO_MCP_URL or \w+ to a Studio MCP bridge/);
+	process.env.RUR_STUDIO_MCP_URL = `http://127.0.0.1:${bridge.address().port}`;
+	const pick = ({ images, cached, downloaded, fromStudio, refreshed, missing }) => ({ images, cached, downloaded, fromStudio, refreshed, missing: missing.map(entry => entry.id) });
+	assert.deepEqual(pick(await warmAssets()), { images: 3, cached: 0, downloaded: 0, fromStudio: 2, refreshed: 0, missing: ["43"] });
+	luauCalls = [];
+	assert.deepEqual(pick(await warmAssets()), { images: 3, cached: 2, downloaded: 0, fromStudio: 0, refreshed: 0, missing: ["43"] });
+	assert.deepEqual(luauCalls, [["43"]], "a warm cache asks Studio only for what it could not read");
+	assert.deepEqual(pick(await warmAssets({ refresh: true })), { images: 3, cached: 0, downloaded: 0, fromStudio: 0, refreshed: 2, missing: ["43"] });
+	assert.equal(scans, 3);
+	console.log("Asset studio: refused images read from Studio, cached with a studio record, offline, opt-out and assets warm passed.");
 } finally {
 	bridge.close();
 	https.get = originalGet;

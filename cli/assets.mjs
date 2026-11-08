@@ -607,6 +607,18 @@ function needsDownload(id) {
 	return !cached || !downloaded(cached, fs.readFileSync(cached));
 }
 
+// Where the usable cache file of `id` came from: "studio" (storeStudioImage), "download", or null when
+// there is none (nothing cached, or a file without its matching record)
+export function cachedSource(assetId) {
+	const id = String(assetId).replace(/\D/g, "");
+	if (needsDownload(id)) return null;
+	try {
+		return JSON.parse(fs.readFileSync(recordFile(cachedFile(id)), "utf8")).source === "studio" ? "studio" : "download";
+	} catch {
+		return null;
+	}
+}
+
 // Resolves many URIs with bounded concurrency; the asset ids to download are located in batches first.
 // 16 at a time, as ror downloads: located, a download is one CDN round trip, and 40 images took 2.7 s
 // 8 at a time, 1.7 s 16 at a time.

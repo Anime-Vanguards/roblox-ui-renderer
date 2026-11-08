@@ -33,6 +33,13 @@ edited or saved), and no credential is used.
 | `RUR_STUDIO_IMAGES=0` | don't read images from Studio, even with a bridge set |
 
 
+`rur assets warm` fills the cache ahead of renders: it scans the open place for every image its GUI names
+(the `Image`, `HoverImage` and `PressedImage` of ImageLabels and ImageButtons, and ScrollingFrames' bar
+images), downloads the ones asset delivery gives and reads the rest from Studio. Afterwards renders find them
+cached and need neither Studio nor the network for them. It prints how many were already cached,
+downloaded, read from Studio and missing (with each one's reason). `--refresh` reads the images cached from
+Studio again. On a live place it found 101 images: a cold warm took 7.3 s, a second 3.5 s.
+
 Studio can open only the images the place's creator owns (others fail with "no permission to load
 asset"), so this covers a game's own private art, not another creator's. An id Studio can't read keeps
 asset delivery's error, followed by Studio's reason.

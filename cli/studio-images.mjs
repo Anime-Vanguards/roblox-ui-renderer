@@ -188,3 +188,51 @@ export async function readStudioImages(ids, env = process.env) {
 	}
 	return { images, errors };
 }
+
+// Every image id a place's GUI names: ImageLabel / ImageButton / ScrollingFrame image properties. Attributes
+// and StringValues are not read: on a live place every one holding an asset URI was an AnimationId. Read-only.
+const SCAN_LUAU = `
+local HttpService = game:GetService("HttpService")
+local Properties = {
+	ImageLabel = { "Image" },
+	ImageButton = { "Image", "HoverImage", "PressedImage" },
+	ScrollingFrame = { "TopImage", "MidImage", "BottomImage" },
+}
+local Seen = {}
+local Ids = {}
+local function Add(Value)
+	if type(Value) ~= "string" then
+		return
+	end
+	for _, Pattern in { "rbxassetid://(%d+)", "roblox%.com/asset/?%?.-id=(%d+)" } do
+		for Id in string.gmatch(Value, Pattern) do
+			if not Seen[Id] then
+				Seen[Id] = true
+				table.insert(Ids, Id)
+			end
+		end
+	end
+end
+for _, Service in game:GetChildren() do
+	local Ok, Descendants = pcall(Service.GetDescendants, Service)
+	if Ok then
+		for _, Item in Descendants do
+			pcall(function()
+				for _, Name in Properties[Item.ClassName] or {} do
+					Add(Item[Name])
+				end
+			end)
+		end
+	end
+end
+return HttpService:JSONEncode(Ids)
+`;
+
+// The image ids of every connected Studio's place (RUR_STUDIO narrows them), and the Studios' names
+export async function studioImageIds(env = process.env) {
+	const sessions = await studios(env);
+	if (!sessions.length) throw new Error("no Studio edit session is connected");
+	const ids = new Set();
+	for (const session of sessions) for (const id of JSON.parse(await session.run(SCAN_LUAU))) ids.add(String(id));
+	return { ids: [...ids], studios: sessions.map(session => session.name) };
+}

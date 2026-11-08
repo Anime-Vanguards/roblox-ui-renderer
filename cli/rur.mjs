@@ -17,6 +17,8 @@
 //   rur clean [--older-than <days>] [--dry-run]         shrink the output root: copied images to hard links,
 //                                                       retired files out; --older-than: stale frames/ and
 //                                                       traces too (cli/clean.mjs)
+//   rur assets warm [--refresh]                         cache every image an open Studio's place uses: downloads,
+//                                                       and private ones read from Studio (docs/assets.md)
 //   rur selftest                                        run offline assertion checks
 //   rur native [--story <file>]                         the desktop storybook (native/, wgpu)
 //   rur native --headless --scene <scene.json>           a saved scene to PNG (--batch: many)
@@ -1134,6 +1136,12 @@ async function main() {
 			freed: megabytes(result.linked.bytes + result.frames.bytes + result.retired.bytes + result.expired.bytes + result.store.bytes),
 			failed: result.failed.slice(0, 20),
 		}, null, 2));
+	} else if (command === "assets") {
+		if (args._[1] !== "warm") throw new UsageError("rur assets: the only subcommand is warm (rur assets warm [--refresh])");
+		const { warmAssets } = await import("./asset-warm.mjs");
+		const result = await warmAssets({ refresh: Boolean(args.refresh) });
+		console.log(JSON.stringify({ ...result, missing: result.missing.slice(0, 50) }, null, 2));
+		if (result.missing.length) process.stderr.write(`rur: ${result.missing.length} of ${result.images} images could not be cached (missing)\n`);
 	} else if (command === "selftest") {
 		const { selftest } = await import("./selftest.mjs");
 		process.exitCode = await selftest();
