@@ -1,8 +1,9 @@
 // Images asset delivery refuses are read from Studio through a Studio MCP bridge (cli/studio-images.mjs):
 // stored as PNG in the asset cache with a "studio" record, used from the cache afterwards, never read
 // offline or without a configured bridge, and an id Studio cannot read keeps its error with Studio's
-// reason. Many ids go in one call, compressed, until its budget is used; the rest go in the next. The
-// bridge (an HTTP one, as robloxstudio-mcp --http-only serves) and asset delivery are synthetic.
+// reason. Many ids go in one call, compressed when Node supports it, until its budget is used; the rest
+// go in the next. The bridge (an HTTP one, as robloxstudio-mcp --http-only serves) and asset delivery
+// are synthetic.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
@@ -62,11 +63,13 @@ const bridge = http.createServer((request, response) => {
 			return reply({ content: [{ type: "text", text: JSON.stringify({ success: true, returnValue: JSON.stringify(["41", "42", "43"]) }) }] });
 		}
 		const ids = /local Ids = \{ ([\d, ]*) \}/.exec(code)[1].split(", ");
+		const compressed = code.includes("if true then");
+		assert.equal(compressed, typeof zlib.zstdDecompressSync === "function", "Studio is asked to compress exactly when this Node can decompress");
 		luauCalls.push(ids);
-		// Two images fill a call's budget: the rest is asked for in the next call. 31 travels compressed.
+		// Two images fill a call's budget: the rest is asked for in the next call. 31 is compressed when requested.
 		const value = ids.slice(0, 2).map(id => id === "33" || id === "43"
 			? { error: "AssetService::CreateEditableImageAsync failed because no permission to load asset" }
-			: id === "31"
+			: id === "31" && compressed
 				? { width: 2, height: 1, encoding: "zstd", pixels: zlib.zstdCompressSync(PIXELS).toString("base64") }
 				: { width: 2, height: 1, encoding: "raw", pixels: PIXELS.toString("base64") });
 		reply({ content: [{ type: "text", text: JSON.stringify({ success: true, returnValue: JSON.stringify(value) }) }] });
