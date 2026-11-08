@@ -50,7 +50,8 @@
 // Python / FreeType installs).
 // Common options: --project <dir> (RUR_PROJECT; default examples/project; its places come from its rur.json,
 // cli/places.mjs), --roots "<dir>;<dir>", --place <name> (default: the place whose roots hold the story, else the
-// first), --offline (no network), --no-png, --background r,g,b (0-255) | transparent, --mode edit|play,
+// first), --offline (no network), --placeholders (render: draw a labelled checkerboard for each missing image;
+// it is still listed in missingImages), --no-png, --background r,g,b (0-255) | transparent, --mode edit|play,
 // --device desktop|touch|gamepad (what UserInputService reports: TouchEnabled, MouseEnabled, GetLastInputType; default desktop),
 // --player <name>, --place-id <n> (game.PlaceId; default: the rur.json placeIds entry of the roots), --snapshot-dir <dir>
 // (Studio-only templates exported from Studio, loaded only when given; see snapshotDir) / --no-snapshots.
@@ -245,9 +246,9 @@ export function profileArgs(args) {
 // One `rur render` output directory in a process of its own (`rur-native render`, native/src/story_render.rs):
 // the run, scene.json, dependencies.json, the glyph atlas, the images, manifest.json and (unless
 // `png` is false) render.png. Resolves with its result ({ status, nodes, phases, renderErrors }).
-export async function renderNative(argv, outDir, { png = true, offline = false, executable } = {}) {
+export async function renderNative(argv, outDir, { png = true, offline = false, placeholders = false, executable } = {}) {
 	executable ||= await ensureEngine();
-	const renderArgs = ["render", "--dir", outDir, ...(png ? [] : ["--no-png"]), ...(offline ? ["--offline"] : []), ...argv];
+	const renderArgs = ["render", "--dir", outDir, ...(png ? [] : ["--no-png"]), ...(offline ? ["--offline"] : []), ...(placeholders ? ["--placeholders"] : []), ...argv];
 	return new Promise((resolve, reject) => {
 		const child = spawn(executable, renderArgs, { cwd: ROOT, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";
@@ -375,7 +376,7 @@ export async function render(args, { service = false, env = process.env } = {}) 
 		}
 		argv = runtimeArgs(runArgs);
 	}
-	const options = { png: !args["no-png"], offline: Boolean(args.offline) };
+	const options = { png: !args["no-png"], offline: Boolean(args.offline), placeholders: Boolean(args.placeholders) };
 	let result = null;
 	// (--verbose mirrors the story's output on stderr, and a profile is a run's own: a process of its own)
 	const profile = profileArgs(args);

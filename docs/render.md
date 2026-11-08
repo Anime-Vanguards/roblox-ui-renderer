@@ -45,6 +45,10 @@ node cli/rur.mjs render --story path/to/Button.story.luau --viewport 1200x900 --
   a screenshot's size the same way. `--background r,g,b` or `transparent` (straight alpha in render.png).
 - `--out <dir>` (default `out/<name>`), `--tag <name>` (`<out>/<name>/`), `--keep` (a numbered sibling
   instead of replacing an earlier render), `--no-png`, `--offline` (no downloads).
+- `--placeholders` draws each image the render could not get as a magenta and black checkerboard with its
+  asset id on a black band, so a missing icon shows as missing instead of as a gap. Studio draws nothing
+  there, so it is off by default. The placeholder goes into the render's own `assets/`, never the asset
+  cache, and the image is still listed in `missingImages`.
 - `--controls '{"Group.Name": 2}'` (or a JSON file) starts the story with those control values;
   `node cli/controls.mjs` lists a story's controls.
 - `--actions '[{"t":0.5,"type":"click","node":"Stack.Primary"}]'` (or a JSON file) replays input on a

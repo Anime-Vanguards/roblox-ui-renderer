@@ -34,6 +34,9 @@ pub struct RenderOptions {
     pub png: bool,
     /// No downloads: images and fonts from the caches only
     pub offline: bool,
+    /// Draw a labelled placeholder for each image that could not be had (placeholder.rs); it is still
+    /// reported missing
+    pub placeholders: bool,
     /// Draw, but hand the frame back as straight-alpha RGBA (the render service's `pixels: "rgba"`)
     /// instead of encoding render.png
     pub pixels: bool,
@@ -52,6 +55,8 @@ pub struct StoryRenderer {
     /// Created on the first scene with text (FreeType, the faces and a bitmap cache)
     glyphs: Option<crate::glyphs::Rasterizer>,
     draw: Option<Draw>,
+    /// The render being written draws placeholders for missing images (RenderOptions::placeholders)
+    placeholders: bool,
 }
 
 struct Draw {
@@ -63,7 +68,7 @@ struct Draw {
 impl StoryRenderer {
     pub fn new(repo: impl Into<PathBuf>) -> Self {
         let repo = repo.into();
-        Self { resolver: Resolver::new(repo.clone(), false), glyphs: None, draw: None, repo }
+        Self { resolver: Resolver::new(repo.clone(), false), glyphs: None, draw: None, placeholders: false, repo }
     }
 
     /// What this renderer keeps between renders, in bytes (the render service's /memory)
@@ -176,6 +181,7 @@ impl StoryRenderer {
         first: impl FnOnce(&Args) -> Result<SceneOutput, String>,
         fonts_changed: impl FnMut(),
     ) -> Result<(Value, Option<Pixels>)> {
+        self.placeholders = options.placeholders;
         let (mut result, scene, images) = self.write_outputs(args, out, options.offline, true, first, fonts_changed)?;
         let mut pixels = None;
         if options.pixels {
@@ -260,7 +266,11 @@ impl StoryRenderer {
                         crate::assets::note_linked_image(&target, &file);
                         json!({"src": format!("assets/{name}")})
                     }
-                    Err(error) => json!({"error": error}),
+                    // --placeholders: drawn with a labelled stand-in, and still reported missing (its error)
+                    Err(error) => match self.placeholders.then(|| crate::placeholder::write(&assets, &uri)) {
+                        Some(Ok(name)) => json!({"src": format!("assets/{name}"), "error": error, "placeholder": true}),
+                        _ => json!({"error": error}),
+                    },
                 };
                 images.insert(uri, entry);
             }
@@ -586,7 +596,7 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
     std::process::exit(code)
 }
 
-/// `rur-native render --dir <out> [--no-png] [--offline] [--profile <kinds> [--profile-out <dir>]] <engine arguments>`:
+/// `rur-native render --dir <out> [--no-png] [--offline] [--placeholders] [--profile <kinds> [--profile-out <dir>]] <engine arguments>`:
 /// one render in this process. Prints the result as one JSON line on stdout (with `profile`, the profile's directory,
 /// default `<out>/profile`, whose summary goes to stderr: [`profile_options`]); returns the exit code.
 pub fn cli(argv: &[String]) -> i32 {
@@ -609,6 +619,7 @@ pub fn cli(argv: &[String]) -> i32 {
             }
             "--no-png" => options.png = false,
             "--offline" => options.offline = true,
+            "--placeholders" => options.placeholders = true,
             other => engine_args.push(other.to_string()),
         }
         index += 1;
@@ -632,6 +643,7 @@ pub fn cli(argv: &[String]) -> i32 {
     }
     let repo = args.repo.as_ref().map(PathBuf::from).unwrap_or_else(crate::engine::default_repo);
     let mut renderer = StoryRenderer::new(repo);
+    renderer.placeholders = options.placeholders;
     // The GPU device starts while the story runs
     let gpu = options.png.then(|| thread::spawn(|| pollster::block_on(GpuRenderer::headless())));
     let started = Instant::now();

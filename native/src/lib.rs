@@ -18,6 +18,7 @@ pub mod input;
 pub mod memtrace;
 #[cfg(feature = "desktop")]
 pub mod microprofiler_ui;
+pub mod placeholder;
 pub mod places;
 pub mod presentation;
 #[cfg(feature = "desktop")]

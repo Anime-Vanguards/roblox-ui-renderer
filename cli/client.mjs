@@ -229,8 +229,8 @@ function engineEnv(env) {
 // One `rur-native render` in the service (cli/rur.mjs render): its result, or null when the service
 // cannot be used for it (disabled, not started, another engine environment, a failure: the caller
 // then renders in a process of its own)
-export async function renderInService(argv, out, { png = true, offline = false } = {}, { env = process.env } = {}) {
-	const response = await request("POST", "/render", { argv, out, png, offline, env: engineEnv(env) }, { env });
+export async function renderInService(argv, out, { png = true, offline = false, placeholders = false } = {}, { env = process.env } = {}) {
+	const response = await request("POST", "/render", { argv, out, png, offline, placeholders, env: engineEnv(env) }, { env });
 	if (!response) return null;
 	if (response.status !== 200) {
 		if (!response.json.envMismatch) notice(`failed:${response.json.error}`, `the render service failed (${String(response.json.error).split("\n")[0]}); rendering without it`);

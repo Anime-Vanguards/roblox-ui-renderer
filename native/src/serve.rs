@@ -623,6 +623,7 @@ impl Service {
         let options = RenderOptions {
             png: input["png"].as_bool().unwrap_or(true),
             offline: input["offline"].as_bool().unwrap_or(false),
+            placeholders: input["placeholders"].as_bool().unwrap_or(false),
             pixels: match input["pixels"].as_str() {
                 None => false,
                 Some("rgba") => true,
