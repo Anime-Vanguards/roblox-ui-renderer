@@ -15,7 +15,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rur-asset-records-test-"));
 const repo = path.join(temporary, "renderer");
 const assets = path.join(temporary, "state", "assets");
-const names = ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "RUR_COOKIE_ENV", "RUR_PROJECT", "RUR_CACHE_DIR", "RUR_STATE_DIR"];
+const names = ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "RUR_COOKIE_ENV", "RUR_PROJECT", "RUR_CACHE_DIR", "RUR_STATE_DIR", "RUR_STUDIO_MCP_URL", "RUR_STUDIO_MCP_PORT"];
 const previousEnv = new Map(names.map(name => [name, process.env[name]]));
 const originalGet = https.get;
 // The asset ("real", a 1 x 1 PNG) and a stand-in for it (other PNG bytes)

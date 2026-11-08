@@ -24,6 +24,7 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/asset_cookie.mjs"]],
 		[process.execPath, ["tools/tests/asset_records.mjs"]],
 		[process.execPath, ["tools/tests/asset_batch.mjs"]],
+		[process.execPath, ["tools/tests/asset_studio.mjs"]],
 		[process.execPath, ["tools/tests/web-bundle-directories.mjs"]],
 		[process.execPath, ["tools/tests/places.mjs"]],
 		[process.execPath, ["tools/tests/examples.mjs"]],

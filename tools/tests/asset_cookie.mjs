@@ -13,7 +13,7 @@ const repo = path.join(temporary, "checkout", "renderer");
 const localEnv = path.join(repo, ".env");
 const overrideEnv = path.join(temporary, "override.env");
 const cache = path.join(temporary, "cache");
-const names = ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "RUR_COOKIE_ENV", "RUR_PROJECT", "RUR_CACHE_DIR"];
+const names = ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "RUR_COOKIE_ENV", "RUR_PROJECT", "RUR_CACHE_DIR", "RUR_STUDIO_MCP_URL", "RUR_STUDIO_MCP_PORT"];
 const previousEnv = new Map(names.map(name => [name, process.env[name]]));
 const previousCwd = process.cwd();
 const originalGet = https.get;

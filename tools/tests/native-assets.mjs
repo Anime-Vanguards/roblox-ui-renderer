@@ -20,7 +20,7 @@ const preload = path.join(directory, "offline-guard.mjs");
 fs.writeFileSync(preload, 'import https from "node:https"; https.get = () => { throw new Error("NETWORK WAS ATTEMPTED"); };');
 const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, path.join(root, "cli/native-assets.mjs"), "--offline"], {
 	cwd: root, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
-	env: { ...process.env, RUR_CACHE_DIR: directory, ROBLOX_ASSET_DELIVERY_COOKIE: "dummy-native-assets", ROBLOSECURITY: "dummy-native-assets", RUR_COOKIE_ENV: path.join(directory, "absent.env") },
+	env: { ...process.env, RUR_CACHE_DIR: directory, ROBLOX_ASSET_DELIVERY_COOKIE: "dummy-native-assets", ROBLOSECURITY: "dummy-native-assets", RUR_COOKIE_ENV: path.join(directory, "absent.env"), RUR_STUDIO_IMAGES: "0" },
 });
 const lines = readline.createInterface({ input: child.stdout });
 const iterator = lines[Symbol.asyncIterator]();

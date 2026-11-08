@@ -1,7 +1,8 @@
 // Asset resolution + download cache.
 //
 // rbxasset://      → the local Roblox Studio install (content/, ExtraContent/, PlatformContent/pc/)
-// rbxassetid://N   → assetdelivery.roblox.com (public route first, then the account cookie)
+// rbxassetid://N   → assetdelivery.roblox.com (public route first, then the account cookie), then an open
+//                    Studio for an image asset delivery refuses (cli/studio-images.mjs, when a bridge is set)
 // rbxthumb://...   → thumbnails.roblox.com
 //
 // The account cookie comes from this repo's .env, the process environment, or the file RUR_COOKIE_ENV
@@ -247,9 +248,23 @@ const RECORD_DIR = path.join(ASSET_DIR, "downloaded");
 const sha256 = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 const recordFile = file => path.join(RECORD_DIR, `${path.basename(file)}.json`);
 
-function recordDownload(file, body) {
+function recordDownload(file, body, extra = {}) {
 	fs.mkdirSync(RECORD_DIR, { recursive: true });
-	writeAtomic(recordFile(file), JSON.stringify({ sha256: sha256(body), size: body.length }));
+	writeAtomic(recordFile(file), JSON.stringify({ sha256: sha256(body), size: body.length, ...extra }));
+}
+
+// An image Studio decoded for rur (cli/studio-images.mjs), stored as assets/<id>.png. Not a stand-in: its
+// pixels are the asset's own, as Studio loads them, re-encoded losslessly. Its record says
+// "source": "studio", so the cache can tell it from a download (`rur assets warm --refresh` reads it again).
+export function storeStudioImage(assetId, png) {
+	const id = String(assetId).replace(/\D/g, "");
+	const cached = cachedFile(id);
+	fs.mkdirSync(ASSET_DIR, { recursive: true });
+	const file = path.join(ASSET_DIR, `${id}.png`);
+	if (cached !== file || sha256(fs.readFileSync(cached)) !== sha256(png)) writeAtomic(file, png);
+	if (cached && cached !== file) fs.rmSync(cached, { force: true });
+	recordDownload(file, png, { source: "studio" });
+	return { file, ...sniff(png) };
 }
 
 // Files that matched their record, by the size and modification time they had then
@@ -607,5 +622,26 @@ export async function resolveAll(uris, options = {}) {
 		}
 	});
 	await Promise.all(workers);
+	if (!options.offline) await readRefusedFromStudio(results);
 	return results;
+}
+
+// Whether refused images are read from Studio: a Studio MCP bridge is configured (RUR_STUDIO_MCP_URL, or the
+// TCP bridge's port) and RUR_STUDIO_IMAGES is not "0"
+export function studioImagesEnabled(env = process.env) {
+	return env.RUR_STUDIO_IMAGES !== "0" && Boolean(env.RUR_STUDIO_MCP_URL || Number(env.RUR_STUDIO_MCP_PORT));
+}
+
+// The asset ids asset delivery would not give (a private image), read from an open Studio when a bridge is
+// configured (cli/studio-images.mjs); an id Studio cannot read either keeps its error, with Studio's reason
+export async function readRefusedFromStudio(results, env = process.env) {
+	const refused = [...results].filter(([uri, result]) => result.error && assetIdFromUri(uri) && !/without an image texture/.test(result.error));
+	if (!refused.length || !studioImagesEnabled(env)) return;
+	const { readStudioImages } = await import("./studio-images.mjs");
+	const { images, errors } = await readStudioImages([...new Set(refused.map(([uri]) => assetIdFromUri(uri)))], env);
+	for (const [uri, result] of refused) {
+		const id = assetIdFromUri(uri);
+		if (images.has(id)) results.set(uri, storeStudioImage(id, images.get(id)));
+		else if (errors.has(id)) results.set(uri, { error: `${result.error}; ${errors.get(id)}` });
+	}
 }
