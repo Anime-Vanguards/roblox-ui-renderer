@@ -20,8 +20,9 @@
 With a Studio MCP bridge configured, a render's `rbxassetid://` images that asset delivery refuses are read
 from Studio (`cli/studio-images.mjs`): Studio opens each one as an `EditableImage`
 (`AssetService:CreateEditableImageAsync`) and returns its pixels, and rur stores them losslessly as
-`assets/<id>.png`, recorded with `"source": "studio"`. Later renders use the cache and don't ask Studio
-again. `--offline` never asks Studio. The bridge is on 127.0.0.1; the Luau only reads (nothing is mounted,
+`assets/<id>.png`, recorded with `"source": "studio"`. One call reads many images: Studio loads 12 at a
+time and returns their pixels zstd-compressed, up to about 2 MB per call. Later renders use the cache and
+don't ask Studio again. `--offline` never asks Studio. The bridge is on 127.0.0.1; the Luau only reads (nothing is mounted,
 edited or saved), and no credential is used.
 
 | Variable | Meaning |

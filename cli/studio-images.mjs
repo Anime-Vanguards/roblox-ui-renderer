@@ -13,24 +13,83 @@
 // RUR_STUDIO picks the Studio (an id or part of its name; default: every edit session, in order).
 // RUR_STUDIO_IMAGES=0 turns this off with a bridge configured (cli/assets.mjs studioImagesEnabled).
 
+import zlib from "node:zlib";
 import { PNG } from "pngjs";
 
 const TIMEOUT_MS = 120000;
+// Base64 characters one call returns at most (the image that crosses it is the call's last); the rest
+// of the ids go in the next call
+const CALL_BUDGET = 2_000_000;
+// Pixels travel zstd-compressed (EncodingService:CompressBuffer) when this Node can decompress them; icons
+// are mostly transparent, so a call carries many
+const ZSTD = typeof zlib.zstdDecompressSync === "function";
 
-// The pixels of one image as JSON { width, height, pixels (base64 RGBA8) } or { error }
-function imageLuau(id) {
+// Images Studio loads at once (each load waits on its own download)
+const WAVE = 12;
+
+// Many images in one call: a JSON list, one entry per id it reached, in order: { width, height, encoding
+// ("zstd" | "raw"), pixels (base64 RGBA8) } or { error }. Ids load WAVE at a time; the call stops once
+// CALL_BUDGET characters are used (a wave's unreported loads are dropped and asked for again next call).
+function imagesLuau(ids) {
 	return `
 local AssetService = game:GetService("AssetService")
 local EncodingService = game:GetService("EncodingService")
 local HttpService = game:GetService("HttpService")
-local Ok, Image = pcall(AssetService.CreateEditableImageAsync, AssetService, Content.fromAssetId(${id}))
-if not Ok then
-	return HttpService:JSONEncode({ error = tostring(Image) })
+local Ids = { ${ids.join(", ")} }
+local Results = {}
+local Used = 0
+
+local function Encode(Image)
+	local Size = Image.Size
+	local Pixels = Image:ReadPixelsBuffer(Vector2.zero, Size)
+	local Encoding = "raw"
+	if ${ZSTD} then
+		local Packed, Compressed = pcall(EncodingService.CompressBuffer, EncodingService, Pixels, Enum.CompressionAlgorithm.Zstd, 1)
+		if Packed then
+			Pixels = Compressed
+			Encoding = "zstd"
+		end
+	end
+	return { width = Size.X, height = Size.Y, encoding = Encoding, pixels = buffer.tostring(EncodingService:Base64Encode(Pixels)) }
 end
-local Size = Image.Size
-local Pixels = Image:ReadPixelsBuffer(Vector2.zero, Size)
-Image:Destroy()
-return HttpService:JSONEncode({ width = Size.X, height = Size.Y, pixels = buffer.tostring(EncodingService:Base64Encode(Pixels)) })
+
+for First = 1, #Ids, ${WAVE} do
+	local Last = math.min(First + ${WAVE} - 1, #Ids)
+	local Loads = {}
+	local Waiting = Last - First + 1
+	local Thread = coroutine.running()
+	for Index = First, Last do
+		task.spawn(function()
+			Loads[Index] = table.pack(pcall(AssetService.CreateEditableImageAsync, AssetService, Content.fromAssetId(Ids[Index])))
+			Waiting -= 1
+			if Waiting == 0 then
+				task.spawn(Thread)
+			end
+		end)
+	end
+	if Waiting > 0 then
+		coroutine.yield()
+	end
+	for Index = First, Last do
+		local Ok, Image = Loads[Index][1], Loads[Index][2]
+		if Used >= ${CALL_BUDGET} then
+			if Ok then
+				Image:Destroy()
+			end
+		elseif not Ok then
+			table.insert(Results, { error = tostring(Image) })
+		else
+			local Entry = Encode(Image)
+			Image:Destroy()
+			Used += #Entry.pixels
+			table.insert(Results, Entry)
+		end
+	end
+	if Used >= ${CALL_BUDGET} then
+		break
+	end
+end
+return HttpService:JSONEncode(Results)
 `;
 }
 
@@ -92,20 +151,40 @@ export async function readStudioImages(ids, env = process.env) {
 		for (const id of ids) errors.set(id, reason);
 		return { images, errors };
 	}
-	for (const id of ids) {
-		for (const session of sessions) {
+	// Each session reads what the ones before it could not, as few calls as the budget allows
+	let pending = [...ids];
+	for (const session of sessions) {
+		const failed = [];
+		const fail = (id, error) => {
+			failed.push(id);
+			errors.set(id, `Studio (${session.name}) could not read it: ${String(error?.message || error).slice(0, 200)}`);
+		};
+		while (pending.length) {
+			let replies;
 			try {
-				const reply = JSON.parse(await session.run(imageLuau(id)));
-				if (reply.error) throw new Error(reply.error);
-				const rgba = Buffer.from(reply.pixels, "base64");
-				if (rgba.length !== reply.width * reply.height * 4) throw new Error(`${rgba.length} bytes of pixels for ${reply.width} x ${reply.height}`);
-				images.set(id, encodePng(reply.width, reply.height, rgba));
-				errors.delete(id);
-				break;
+				replies = JSON.parse(await session.run(imagesLuau(pending)));
+				if (!Array.isArray(replies) || !replies.length) throw new Error("it returned no images");
 			} catch (error) {
-				errors.set(id, `Studio (${session.name}) could not read it: ${String(error?.message || error).slice(0, 200)}`);
+				for (const id of pending) fail(id, error);
+				break;
 			}
+			for (const [index, reply] of replies.entries()) {
+				const id = pending[index];
+				try {
+					if (reply.error) throw new Error(reply.error);
+					const packed = Buffer.from(reply.pixels, "base64");
+					const rgba = reply.encoding === "zstd" ? zlib.zstdDecompressSync(packed) : packed;
+					if (rgba.length !== reply.width * reply.height * 4) throw new Error(`${rgba.length} bytes of pixels for ${reply.width} x ${reply.height}`);
+					images.set(id, encodePng(reply.width, reply.height, rgba));
+					errors.delete(id);
+				} catch (error) {
+					fail(id, error);
+				}
+			}
+			pending = pending.slice(replies.length);
 		}
+		pending = failed;
+		if (!pending.length) break;
 	}
 	return { images, errors };
 }

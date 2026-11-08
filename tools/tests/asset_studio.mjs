@@ -1,13 +1,15 @@
 // Images asset delivery refuses are read from Studio through a Studio MCP bridge (cli/studio-images.mjs):
 // stored as PNG in the asset cache with a "studio" record, used from the cache afterwards, never read
 // offline or without a configured bridge, and an id Studio cannot read keeps its error with Studio's
-// reason. The bridge (an HTTP one, as robloxstudio-mcp --http-only serves) and asset delivery are synthetic.
+// reason. Many ids go in one call, compressed, until its budget is used; the rest go in the next. The
+// bridge (an HTTP one, as robloxstudio-mcp --http-only serves) and asset delivery are synthetic.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { EventEmitter } from "node:events";
 import { PNG } from "pngjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -53,12 +55,14 @@ const bridge = http.createServer((request, response) => {
 		assert.equal(`${request.method} ${request.url}`, "POST /mcp/execute_luau");
 		const { code, sessionId } = JSON.parse(body);
 		assert.equal(sessionId, "edit-1", "only edit sessions are asked");
-		const ids = [...code.matchAll(/Content\.fromAssetId\((\d+)\)/g)].map(match => match[1]);
+		const ids = /local Ids = \{ ([\d, ]*) \}/.exec(code)[1].split(", ");
 		luauCalls.push(ids);
-		const id = ids[0];
-		const value = id === "33"
+		// Two images fill a call's budget: the rest is asked for in the next call. 31 travels compressed.
+		const value = ids.slice(0, 2).map(id => id === "33"
 			? { error: "AssetService::CreateEditableImageAsync failed because no permission to load asset" }
-			: { width: 2, height: 1, pixels: PIXELS.toString("base64") };
+			: id === "31"
+				? { width: 2, height: 1, encoding: "zstd", pixels: zlib.zstdCompressSync(PIXELS).toString("base64") }
+				: { width: 2, height: 1, encoding: "raw", pixels: PIXELS.toString("base64") });
 		reply({ content: [{ type: "text", text: JSON.stringify({ success: true, returnValue: JSON.stringify(value) }) }] });
 	});
 });
@@ -94,6 +98,7 @@ try {
 		assert.equal(record.size, fs.statSync(result.file).size);
 	}
 	assert.match(results.get("rbxassetid://33").error, /Authentication required.*; Studio \(Test Place\) could not read it: .*no permission/);
+	assert.deepEqual(luauCalls, [["31", "32", "33"], ["33"]], "the ids in one call, the rest in the next once its budget is used");
 
 	// Read once: cached afterwards, and never read offline
 	luauCalls = [];
