@@ -168,8 +168,29 @@ inventory explicitly (`path_contract::`) before the installed tests.
 
 ### Where the workflow runs them
 
-The `build` job runs the installed tests before it packages, against the marked `dist` binary it
-just built.
+The Linux and macOS `build` jobs run the inventory and the installed tests before packaging, against
+the marked `dist` binary they just built.
+
+On Windows the two builds run on separate runners, so the installed tests run in a third job.
+`windows-build` is a matrix of the two profiles. The `dist` job builds the marked binary and
+packages it. The `release` job builds the unmarked comparison binary and the test program
+(`standalone-*.exe`), runs the inventory with the cargo command the other platforms use, and
+uploads those two files with a record of its workspace path.
+
+`windows-validation` then starts on a fresh runner. It checks out the same commit, downloads the
+two files back to the paths they were built at, and unpacks the zip that `dist` made. It starts the
+test program directly instead of through cargo, against the `rur-native.exe` from that zip, so the
+installed tests exercise the file that will be published. It runs every installed test except the
+five that need a GPU. The test program has two absolute paths compiled in, the checkout
+(`CARGO_MANIFEST_DIR`) and the comparison binary (`CARGO_BIN_EXE_rur-native`). The job compares the
+recorded workspace path with its own and fails if they differ, and it fails if there is not exactly
+one test program. `smoke` and `publish` wait for it.
+
+`windows-validation` installs neither Rust nor npm packages. None of the installed tests runs Cargo;
+only the inventory does, to find the pinned engine's sources through `cargo metadata`. One test
+starts the checkout's asset helper (`cli/native-assets.mjs`) with the runner's Node, and what it
+asks of the helper takes Node's standard library only; another starts Node on a stub helper it
+writes itself.
 
 The project comparison tests also run a checkout binary, which `cargo test --release` builds for the
 target without `RUR_RELEASE_BUILD`. It has to be unmarked: if both binaries were standalone, the

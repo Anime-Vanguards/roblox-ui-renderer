@@ -7,8 +7,9 @@
 //! and always runs standalone. Cargo cannot build both modes in one test run, so these tests are
 //! ignored by default and run only on request: build the marked binary, set
 //! `RUR_TEST_STANDALONE_BINARY` to its absolute path, then run this target with `-- --ignored`.
-//! The release workflow does this before it packages a build; `tools/release/README.md` has the
-//! commands. Only this suite reads that variable, never the renderer.
+//! The release workflow does this for every platform's build, on Windows against the binary in the
+//! packaged zip; `tools/release/README.md` has the commands. Only this suite reads that variable,
+//! never the renderer.
 use std::{path::Path, process::Command};
 
 #[path = "support/process.rs"]

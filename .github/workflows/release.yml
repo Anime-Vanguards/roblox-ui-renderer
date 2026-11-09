@@ -2,8 +2,10 @@
 # release files, or a manual run, does everything except publish, as a dry run that leaves the
 # built zips as workflow artifacts.
 #
-# Jobs: version (check the version), build (one zip per platform), smoke (run each zip on a fresh
-# runner), notes (release notes, tags only) and publish (tags only, the only job that can write).
+# Jobs: version (check the version), windows-build (the two Windows builds, one runner each),
+# windows-validation (the Windows installed tests, on a fresh runner), build (Linux and macOS, one
+# zip each), smoke (run each zip on a fresh runner), notes (release notes, tags only) and publish
+# (tags only, the only job that can write).
 # The workflow never creates or moves a tag: the tag is pushed to the private repository and
 # mirrored here by the export.
 name: Release
@@ -73,6 +75,206 @@ jobs:
       - name: Release script self-checks
         run: node --test tools/release/test.mjs
 
+  # Windows takes about twelve minutes per profile, so the two builds each get their own runner
+  # instead of running one after the other:
+  #   dist     the binary that ships, marked as a release build. It is packaged and uploaded as the zip.
+  #   release  the ordinary build the installed tests compare it with, and the test program itself.
+  # windows-validation then runs the installed tests on a fresh runner. Linux and macOS keep one
+  # build job each: a second macOS job would only add another wait for a scarce macOS runner.
+  windows-build:
+    if: ${{ !github.event.repository.private }}
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [dist, release]
+    env:
+      RELEASE_OS: windows
+      RELEASE_ARCH: x86_64
+      RELEASE_TARGET: x86_64-pc-windows-msvc
+      EXE_SUFFIX: .exe
+      # Windows links the C runtime in, so the binary needs no Visual C++ redistributable. The test
+      # program that goes to the validation runner is linked the same way, so it needs none either.
+      RUSTFLAGS: '-C target-feature=+crt-static'
+      # Where `node tools/native-app/build.mjs --prepare` puts the downloaded FreeType source
+      RUR_FREETYPE_SRC: ${{ github.workspace }}/.cache/native-app/source/freetype-2.14.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The same toolchain as ci.yml. No build cache here: a release starts clean, so nothing a
+      # pull request's CI run saved can reach a release binary.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch, 2026-10-16
+        with:
+          toolchain: "1.90.0"
+      - name: Download and verify FreeType
+        run: node tools/native-app/build.mjs --prepare
+      - name: Build this profile
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only the dist build below sets the mark
+          unset RUR_RELEASE_BUILD
+          if [ "${{ matrix.profile }}" = dist ]; then
+            # Marks the binary as a release build, so it uses standalone defaults and never the
+            # checkout it was built in (native/src/paths.rs). Read at compile time. Only the shipped
+            # binary is marked; its dist profile and the public default features are as ever.
+            RUR_RELEASE_BUILD=1 cargo build --profile dist --locked --bin rur-native --target "$RELEASE_TARGET"
+          else
+            # Builds the unmarked rur-native the comparison tests start as the checkout binary, and
+            # the standalone test program, without running anything. Cargo writes the absolute path
+            # of that rur-native into the test program, so the program has to be run from where it
+            # was built (see windows-validation).
+            cargo test --release --locked --test standalone --target "$RELEASE_TARGET" --no-run
+          fi
+      # The parser inventory (path_contract) is an ordinary test, which the --ignored run in
+      # windows-validation does not include. It runs here, with the cargo command Linux and macOS
+      # use, because it needs what this runner already has: Cargo and, through `cargo metadata`,
+      # the pinned engine's sources. A new path option, positional input or request field fails
+      # the release build until the path check covers it. The build step has built everything this
+      # command needs, so it compiles nothing and runs the test program that is uploaded below.
+      - name: Parser inventory
+        if: matrix.profile == 'release'
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Nothing here may mark the comparison binary
+          unset RUR_RELEASE_BUILD
+          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" path_contract::
+      # The test program is named standalone-<hash>.exe and the hash is not known here, so the
+      # pattern must match exactly one file. The program has the path of this checkout compiled
+      # in (CARGO_MANIFEST_DIR), so record that path for windows-validation to compare.
+      - name: Check the harness and record its workspace
+        if: matrix.profile == 'release'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_BINARIES=(native/target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe)
+          [ "${#TEST_BINARIES[@]}" = 1 ]
+          [ -f "${TEST_BINARIES[0]}" ]
+          node -e "require('node:fs').writeFileSync(
+            'native/target/x86_64-pc-windows-msvc/release/workspace.txt',
+            require('node:fs').realpathSync('.')
+          )"
+      # The validation runner needs only these three files from this job: the unmarked comparison
+      # binary, the test program and the recorded path. They are stored relative to the release
+      # folder and the validation job downloads them back into the same folder, so each lands at
+      # the path Cargo compiled into the test program. deps/ stays in the pattern for that reason.
+      # It keeps the default retention, so re-running only the failed jobs of a run days later still
+      # finds it.
+      - name: Upload the unmarked comparison binary and standalone harness
+        if: matrix.profile == 'release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-validation-binaries
+          path: |
+            native/target/x86_64-pc-windows-msvc/release/rur-native.exe
+            native/target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe
+            native/target/x86_64-pc-windows-msvc/release/workspace.txt
+          if-no-files-found: error
+      - name: Generate licenses and package
+        if: matrix.profile == 'dist'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/release/licenses.mjs --target "$RELEASE_TARGET" --out release/THIRD_PARTY_LICENSES.txt --freetype "$RUR_FREETYPE_SRC"
+          node tools/release/package.mjs --binary "native/target/$RELEASE_TARGET/dist/rur-native$EXE_SUFFIX" --os "$RELEASE_OS" --arch "$RELEASE_ARCH" --licenses release/THIRD_PARTY_LICENSES.txt --out release --commit "$GITHUB_SHA"
+      - name: Upload the zip
+        if: matrix.profile == 'dist'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary-windows-x86_64
+          path: release/*.zip
+          if-no-files-found: error
+      # The release carries the exact FreeType source the binaries were built with (the GPL's
+      # Corresponding Source). One copy is enough: every platform downloads the same checked archive.
+      - name: Preserve the exact FreeType source archive used by the build
+        if: matrix.profile == 'dist'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: freetype-source
+          path: .cache/native-app/source/freetype-2.14.2.tar.gz
+          if-no-files-found: error
+
+  # The Windows installed tests, on a fresh runner. They run against the rur-native.exe inside the
+  # zip that smoke tests and publish ships, not against the build job's own output. Nothing is
+  # compiled here: the unmarked binary and the test program come from windows-build.
+  windows-validation:
+    if: ${{ !github.event.repository.private }}
+    needs: [version, windows-build]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # The marked binary the installed tests run, the one extracted from the zip below
+      RUR_TEST_STANDALONE_BINARY: ${{ github.workspace }}/installed/rur-native.exe
+    steps:
+      # Besides the files downloaded below, the installed tests need only this checkout. They name
+      # it as the checkout an installed binary must not take as its own. One test starts its asset
+      # helper (cli/native-assets.mjs) with the runner's Node; another starts Node on a stub helper
+      # it writes to the temp folder.
+      # No Rust toolchain is installed: none of these tests runs Cargo. The tests that do, the
+      # parser inventory, ran in windows-build.
+      # No npm packages are installed: what these tests ask of the helper takes Node's standard
+      # library only.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Puts the comparison binary, the test program and workspace.txt back at the paths the build
+      # runner had them at, inside the checkout's native/target
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-validation-binaries
+          path: native/target/x86_64-pc-windows-msvc/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: binary-windows-x86_64
+          path: archives
+      - name: Extract the binary from the zip that will be published
+        shell: pwsh
+        run: Expand-Archive -LiteralPath "archives/rur-native-$env:VERSION-windows-x86_64.zip" -DestinationPath installed
+      - name: Installed release validation against the packaged binary
+        working-directory: native
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Nothing here may mark the comparison binary
+          unset RUR_RELEASE_BUILD
+          # The test program has two absolute paths compiled in: this checkout (CARGO_MANIFEST_DIR)
+          # and the comparison binary (CARGO_BIN_EXE_rur-native). Hosted runners of this OS use the
+          # same workspace path in every job, so the downloaded files are where it expects them.
+          # If that ever changes, this check fails the job rather than let the tests run against
+          # another path.
+          node -e "
+            const fs = require('node:fs');
+            require('node:assert/strict').equal(
+              fs.readFileSync('target/x86_64-pc-windows-msvc/release/workspace.txt', 'utf8'),
+              fs.realpathSync('..')
+            )
+          "
+          # Exactly one test program must have arrived; a missing or doubled one fails the job
+          TEST_BINARIES=(target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe)
+          [ "${#TEST_BINARIES[@]}" = 1 ]
+          [ -f "${TEST_BINARIES[0]}" ]
+          # --ignored runs only the ignored tests, which are the installed_* ones: the tests the
+          # Linux and macOS build job runs with `cargo test -- --ignored`, here started without
+          # cargo. Windows runners have no GPU, so the same five tests are skipped as ever: four
+          # capture headless, and the fifth is a sequence, which creates a GPU device even when
+          # PNG output is disabled. The smoke job still checks scene export there; the project
+          # comparisons and render-service place checks run on every platform. The comparison
+          # tests' own checks reject a marked comparison binary.
+          "${TEST_BINARIES[0]}" --ignored \
+            --skip installed_headless_uses_the_selected_project_for_local_images \
+            --skip installed_saved_frames_stay_inside_the_named_output \
+            --skip installed_default_captures_and_batch_summaries_stay_in_state \
+            --skip installed_headless_selects_its_place_through_a_linked_root \
+            --skip installed_service_standbys_keep_the_selected_place_for_sequence
+
+  # Linux and macOS build both profiles, run the installed tests and package in one job each
   build:
     if: ${{ !github.event.repository.private }}
     needs: version
@@ -83,8 +285,6 @@ jobs:
       matrix:
         include:
           # os and arch are the words in the zip's name (rur-native-<version>-<os>-<arch>.zip)
-          # rustflags: Windows links the C runtime in, so the binary needs no Visual C++ redistributable
-          - { runner: windows-latest, os: windows, arch: x86_64, target: x86_64-pc-windows-msvc, suffix: .exe, rustflags: '-C target-feature=+crt-static' }
           # The oldest Ubuntu runner, for the lowest glibc the binary asks for
           - { runner: ubuntu-22.04, os: linux, arch: x86_64, target: x86_64-unknown-linux-gnu, suffix: '' }
           - { runner: macos-15, os: macos, arch: aarch64, target: aarch64-apple-darwin, suffix: '' }
@@ -93,7 +293,8 @@ jobs:
       RELEASE_ARCH: ${{ matrix.arch }}
       RELEASE_TARGET: ${{ matrix.target }}
       EXE_SUFFIX: ${{ matrix.suffix }}
-      RUSTFLAGS: ${{ matrix.rustflags }}
+      # Set but empty, as these platforms have always built: only Windows adds a compiler flag
+      RUSTFLAGS: ''
       # Where `node tools/native-app/build.mjs --prepare` puts the downloaded FreeType source
       RUR_FREETYPE_SRC: ${{ github.workspace }}/.cache/native-app/source/freetype-2.14.2
     steps:
@@ -141,24 +342,12 @@ jobs:
           # comparison would prove nothing. The `release` profile builds it away from the marked
           # `dist` binary, which stays untouched for packaging.
           unset RUR_RELEASE_BUILD
-          # --ignored runs only the ignored tests, which are the installed_* ones
-          TEST_ARGS=(--ignored)
-          # Windows runners have no GPU. The smoke job still checks scene export there; the
-          # project comparisons and render-service place checks run on every platform.
-          if [ "$RELEASE_OS" = windows ]; then
-            # Headless captures draw on a GPU
-            TEST_ARGS+=(--skip installed_headless_uses_the_selected_project_for_local_images)
-            TEST_ARGS+=(--skip installed_saved_frames_stay_inside_the_named_output)
-            TEST_ARGS+=(--skip installed_default_captures_and_batch_summaries_stay_in_state)
-            TEST_ARGS+=(--skip installed_headless_selects_its_place_through_a_linked_root)
-            # Sequences create a GPU device even when PNG output is disabled.
-            TEST_ARGS+=(--skip installed_service_standbys_keep_the_selected_place_for_sequence)
-          fi
           # The parser inventory is an ordinary test, which the --ignored run below does not
           # include. Run it here so that a new path option, positional input or request field fails
           # the release build until the path check covers it.
           cargo test --release --locked --test standalone --target "$RELEASE_TARGET" path_contract::
-          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" -- "${TEST_ARGS[@]}"
+          # --ignored runs only the ignored tests, which are the installed_* ones
+          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" -- --ignored
       - name: Generate licenses and package
         shell: bash
         run: |
@@ -171,19 +360,11 @@ jobs:
           name: binary-${{ matrix.os }}-${{ matrix.arch }}
           path: release/*.zip
           if-no-files-found: error
-      # The release carries the exact FreeType source the binaries were built with (the GPL's
-      # Corresponding Source). One copy is enough: every platform downloads the same checked archive.
-      - name: Preserve the exact FreeType source archive used by the build
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: freetype-source
-          path: .cache/native-app/source/freetype-2.14.2.tar.gz
-          if-no-files-found: error
 
   smoke:
     if: ${{ !github.event.repository.private }}
-    needs: [version, build]
+    # windows-validation: the Windows zip is smoke-tested only after its installed tests passed
+    needs: [version, build, windows-validation]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -241,7 +422,7 @@ jobs:
 
   publish:
     if: ${{ !github.event.repository.private && github.event_name == 'push' && github.ref_type == 'tag' }}
-    needs: [version, build, smoke, notes]
+    needs: [version, build, windows-validation, smoke, notes]
     runs-on: ubuntu-22.04
     # The only job that can write
     permissions:
