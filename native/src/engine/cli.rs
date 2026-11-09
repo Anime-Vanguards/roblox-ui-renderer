@@ -53,12 +53,17 @@ use mlua::prelude::*;
 use serde_json::{Map, Value as Json, json};
 
 use super::{Engine, Options, export, launch, project, story};
+use crate::paths::RurVariables;
 
 /// The engine CLI's arguments: the emulator's engine options (launch.rs; read through `Deref`, so
 /// `args.roots`, `args.mode`, ... are theirs) and what a story render adds.
 #[derive(Default, Debug, Clone)]
 pub struct Args {
     pub engine: launch::Args,
+    /// Whether `--roots` was among the arguments. The engine's `roots` list drops empty entries, so
+    /// it is empty both for no `--roots` and for `--roots ""`. Standalone project selection must tell
+    /// them apart: omitted roots come from the place, while an empty list means no implicit roots.
+    pub roots_given: bool,
     pub fixture: Option<String>,
     pub module: Option<String>,
     pub story: Option<String>,
@@ -110,6 +115,9 @@ pub fn dispatch() -> Option<i32> {
     if args.get(1).map(String::as_str) == Some("engine-batch") {
         return Some(batch());
     }
+    if crate::paths::is_standalone() && args.get(1).map(String::as_str) == Some(BATCH_JOB_COMMAND) {
+        return Some(batch_job_child(&args[2..]));
+    }
     if args.get(1).map(String::as_str) != Some("engine") {
         return None;
     }
@@ -136,12 +144,14 @@ fn parse_background(text: &str) -> Option<[f64; 3]> {
 }
 
 pub fn parse(args: &[String]) -> Result<Args, String> {
+    crate::paths::validate_arguments(args)?;
     let mut result = Args::default();
     let mut index = 0;
     while index < args.len() {
         let key = args[index].as_str();
         let value = args.get(index + 1).cloned();
         if let Some(used) = result.engine.accept(key, value.as_ref())? {
+            result.roots_given |= key == "--roots";
             index += used;
             continue;
         }
@@ -226,6 +236,10 @@ fn plugin_settings(args: &Args) -> Result<Option<Json>, String> {
 /// The answers of [`batch`] start with this on a line of stdout
 pub const BATCH_ANSWER: &str = "@@RUR-BATCH ";
 
+/// The command a release batch runner starts a child with: `rur-native engine-batch-job <engine
+/// arguments>` runs one job and answers it like [`batch`] does.
+pub const BATCH_JOB_COMMAND: &str = "engine-batch-job";
+
 /// `rur-native engine-batch`: engine runs one after another in this process, each exactly as a
 /// `rur-native engine <arguments>` process of its own would make it (the golden check sends its scene
 /// entries so: a process start, its exit and the reflection load were most of a small run). A job is a
@@ -234,7 +248,8 @@ pub const BATCH_ANSWER: &str = "@@RUR-BATCH ";
 /// the next run reads unchanged is kept, as in the render service: module sources and their bytecode,
 /// mounted model files and the project's listings. Its answer is a line on stdout, `@@RUR-BATCH {"code": exit code, "error":
 /// message}`, after whatever the run itself printed; a run that panics answers code 101 and the next
-/// job runs. Live sessions (`--session`) are not batched.
+/// job runs. Live sessions (`--session`) are not batched. A release build shares this process only with
+/// jobs whose environment matches its own; other jobs use `batch_job_process`.
 pub fn batch() -> i32 {
     use std::io::{BufRead, Write};
     super::lua::modules::reuse_compiled_modules();
@@ -266,6 +281,22 @@ fn batch_job(job: &Json) -> Json {
     if argv.first().is_some_and(|arg| arg == "engine") {
         argv.remove(0);
     }
+    if crate::paths::is_standalone() {
+        // Refused before the job picks this process or a child: neither may start work (or choose
+        // a default location) for an unusable path.
+        if let Err(error) = crate::paths::validate_arguments(&argv) {
+            return json!({"code": 2, "error": error});
+        }
+        // A release build never changes its environment once threads exist (see the `paths` module
+        // comment), and a finished run can leave threads behind (workers, GPU drivers). So a job
+        // runs here only when this process already has the variables it asks for, which keeps the
+        // warm caches and saves a process start. Any other job gets a child that starts with them.
+        let variables = job_variables(job);
+        if crate::paths::batch_environment_matches(&variables, &argv) {
+            return run_batch_job(&argv);
+        }
+        return batch_job_process(&variables, &argv);
+    }
     // The job's environment as a process of its own would have it: the runs read RUR_CLOCK, RUR_ORDER,
     // RUR_PLAYER*, RUR_EPOCH, RUR_FONT_ROOT... when they start
     let names: Vec<std::ffi::OsString> = std::env::vars_os().map(|(name, _)| name).filter(|name| name.to_string_lossy().starts_with("RUR_")).collect();
@@ -281,7 +312,12 @@ fn batch_job(job: &Json) -> Json {
             }
         }
     }
-    let args = match parse(&argv) {
+    run_batch_job(&argv)
+}
+
+/// The structured result is identical for checkout jobs, warm release jobs and child jobs.
+fn run_batch_job(argv: &[String]) -> Json {
+    let args = match parse(argv) {
         Ok(args) if !args.session => args,
         Ok(_) => return json!({"code": 2, "error": "live sessions are not batched"}),
         Err(error) => {
@@ -297,6 +333,92 @@ fn batch_job(job: &Json) -> Json {
         }
         Err(_) => json!({"code": 101, "error": "the run panicked"}),
     }
+}
+
+/// The `RUR_*` variables a job asks for; other names in its `env` are ignored.
+fn job_variables(job: &Json) -> RurVariables {
+    let requested = job["env"].as_object().into_iter().flatten();
+    requested
+        .filter(|(name, _)| name.starts_with("RUR_"))
+        .filter_map(|(name, value)| Some((name.into(), value.as_str()?.into())))
+        .collect()
+}
+
+/// A release job whose variables differ from this process's runs in a child that starts with
+/// exactly those variables, so this process's environment never changes.
+fn batch_job_process(variables: &RurVariables, argv: &[String]) -> Json {
+    // Answer bad arguments from here, as the in-process path does, without starting a child
+    match parse(argv) {
+        Ok(args) if args.session => return json!({"code": 2, "error": "live sessions are not batched"}),
+        Err(error) => return json!({"code": 2, "error": error}),
+        Ok(_) => {}
+    }
+    match run_job_process(variables, argv) {
+        Ok(answer) => answer,
+        Err(error) => json!({"code": 1, "error": error.to_string()}),
+    }
+}
+
+/// Runs the job in a child and returns its answer.
+fn run_job_process(variables: &RurVariables, argv: &[String]) -> std::io::Result<Json> {
+    let mut child = spawn_job_child(variables, argv)?;
+    // The child ends itself when this pipe closes (see `batch_job_child`), so keep it open until
+    // the child has answered. `Child::wait` would close it first.
+    let _stdin_held_open = child.stdin.take();
+    let answer = read_job_answer(&mut child);
+    if answer.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    answer
+}
+
+/// Starts `rur-native engine-batch-job <arguments>` with the job's variables and no other `RUR_*`
+/// variable of this runner. The child finds its state directory and repo itself, as any release
+/// process does (`paths::initialize`).
+fn spawn_job_child(variables: &RurVariables, argv: &[String]) -> std::io::Result<std::process::Child> {
+    use std::process::{Command, Stdio};
+    let mut command = Command::new(std::env::current_exe()?);
+    command.arg(BATCH_JOB_COMMAND).args(argv).stdin(Stdio::piped()).stdout(Stdio::piped());
+    for name in crate::paths::rur_variables().into_keys() {
+        command.env_remove(name);
+    }
+    command.envs(variables);
+    command.spawn()
+}
+
+/// Waits for the child and returns its answer line. Whatever else it printed goes on to this
+/// process's stdout, as the run's own output would in a batch of one process.
+fn read_job_answer(child: &mut std::process::Child) -> std::io::Result<Json> {
+    use std::io::{BufRead, BufReader};
+    let output = child.stdout.take().expect("piped stdout");
+    let mut answer = None;
+    for line in BufReader::new(output).lines() {
+        let line = line?;
+        match line.strip_prefix(BATCH_ANSWER) {
+            Some(text) => answer = Some(serde_json::from_str::<Json>(text)?),
+            None => println!("{line}"),
+        }
+    }
+    let status = child.wait()?;
+    // A child that ended without an answer failed, even with exit code 0; a killed one has no code
+    let code = status.code().filter(|code| *code != 0).unwrap_or(1);
+    Ok(answer.unwrap_or_else(|| json!({"code": code, "error": "batch child exited without a result"})))
+}
+
+/// `rur-native engine-batch-job <engine arguments>`: one job of a release batch runner, run here
+/// as a process of its own. It answers on stdout as [`batch`] does and exits with the job's code.
+fn batch_job_child(argv: &[String]) -> i32 {
+    // The runner holds the write end of our stdin and never writes to it, so stdin reaches its end
+    // only when the runner exits or is killed. A job that never yields (busy in virtual time, say)
+    // cannot be cancelled from inside, so this thread ends the process instead.
+    std::thread::spawn(|| {
+        let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+        std::process::exit(1);
+    });
+    let answer = run_batch_job(argv);
+    println!("{BATCH_ANSWER}{answer}");
+    answer["code"].as_i64().unwrap_or(1) as i32
 }
 
 /// One render (or live session): returns the process exit code.
@@ -344,7 +466,9 @@ fn run_with(args: Args, free: bool) -> Result<i32, String> {
 }
 
 /// `--test-hooks 1`: a global `rur` table for engine-oracle test scripts (tools/tests/*.luau run as
-/// fixtures by their .mjs drivers): `rur.layout()` (a layout pass), `rur.scene(roots, presentation)`
+/// fixtures by their .mjs drivers): `rur.processId` (release builds only: this process's id, which shows
+/// whether a batch job ran in the runner or in a child), `rur.layout()` (a layout pass),
+/// `rur.scene(roots, presentation)`
 /// (the scene a fresh retained export cache builds, as Scene.Build with a new cache: clipped-node
 /// culling, or presentation fields when `presentation`), `rur.id(instance)` (the node id),
 /// `rur.flush()` (deferred events), `rur.input.dispatch(event)` / `snapshot()` /
@@ -355,6 +479,9 @@ fn install_test_hooks(lua: &Lua, engine: &Rc<Engine>) -> LuaResult<()> {
     let shared = engine.lua.borrow().shared_globals().ok_or_else(|| LuaError::runtime("engine not started"))?;
     let rur = lua.create_table()?;
     let e = engine.clone();
+    if crate::paths::is_standalone() {
+        rur.set("processId", std::process::id())?;
+    }
     rur.set("layout", lua.create_function(move |_, ()| {
         layout::update_all(&e);
         Ok(())
@@ -430,6 +557,8 @@ pub fn prepare(args: &Args) -> Result<Prepared, String> {
     let mut engine = args.engine.clone();
     let (width, height) = engine.viewport.unwrap_or((1920.0, 1080.0));
     engine.viewport = Some((width + 2.0 * args.margin, height + 2.0 * args.margin));
+    #[cfg(feature = "desktop")]
+    select_standalone_project(args, &mut engine)?;
     let prepared = launch::prepare(&engine, &super::default_repo())?;
     let device = args.device.clone().unwrap_or(prepared.options.device.clone());
     let options = Options { topbar_inset: args.topbar_inset, device, ..prepared.options };
@@ -723,7 +852,10 @@ fn project_spec(args: &Args, prepared: &Prepared) -> Result<story::ProjectSpec, 
 /// own options (time, actions, controls, background, output paths). Two runs with equal startup
 /// arguments can use the same preloaded project ([`Preloaded`]).
 pub fn startup_key(args: &Args) -> String {
-    let mut startup = args.clone();
+    let mut startup = match with_selected_project(args) {
+        Ok(selected) => selected,
+        Err(error) => return format!("invalid startup: {error}; {args:?}"),
+    };
     startup.fixture = None;
     startup.module = None;
     startup.story = None;
@@ -739,6 +871,40 @@ pub fn startup_key(args: &Args) -> String {
     startup.all_layers = false;
     startup.loads = Vec::new();
     format!("{startup:?}")
+}
+
+/// A copy of `args` that carries the project, place and roots a run of `args` uses, so a cache key
+/// built from the copy tells two runs apart by their resolved project, not by how they spell it.
+/// Only standalone mode resolves anything; other builds return `args` unchanged.
+///
+/// The spelling is not enough because `rur.json` can change between two requests that spell the
+/// same arguments, and the story's location then picks another place or another root order.
+/// Without the resolved project in the key, a standby or a kept run loaded for the old choice
+/// would answer the new request.
+fn with_selected_project(args: &Args) -> Result<Args, String> {
+    #[cfg(feature = "desktop")]
+    {
+        let mut selected = args.clone();
+        select_standalone_project(args, &mut selected.engine)?;
+        Ok(selected)
+    }
+    #[cfg(not(feature = "desktop"))]
+    Ok(args.clone())
+}
+
+/// Standalone mode only: gives `engine` the project, place and roots that a run of `args` uses
+/// ([`crate::paths::prepare_project`]; the story's own place gives the roots unless `--place` names
+/// another). `prepare` runs it before the engine reads its options, and the cache keys run it
+/// through [`with_selected_project`].
+#[cfg(feature = "desktop")]
+fn select_standalone_project(args: &Args, engine: &mut launch::Args) -> Result<(), String> {
+    if !crate::paths::is_standalone() {
+        return Ok(());
+    }
+    let source = source_of(args);
+    let source_path = source.as_ref().map(|source| std::path::Path::new(&source.path));
+    let repo = args.repo.as_ref().map(std::path::PathBuf::from).unwrap_or_else(super::default_repo);
+    crate::paths::prepare_project(engine, &repo, source_path, args.roots_given)
 }
 
 /// The engine and the project of some startup arguments, loaded ahead of one run: the render service
@@ -867,9 +1033,16 @@ impl Preloaded {
 }
 
 /// The options two renders must share for the later one to go on from the earlier one's run
-/// ([`Kept`]): every argument but the moment, the actions (compared apart) and the output paths
+/// ([`Kept`]): every argument but the moment, the actions (compared apart) and the output paths.
+/// Standalone mode adds the resolved project, place and ordered roots, as [`startup_key`] does.
+/// The service's fingerprint of the project (serve.rs `fingerprint`) cannot stand in for this: it
+/// folds the roots together with xor, so another root order gives the same value, and it never
+/// sees the place name.
 pub fn run_key(args: &Args) -> String {
-    let mut key = args.clone();
+    let mut key = match with_selected_project(args) {
+        Ok(selected) => selected,
+        Err(error) => return format!("invalid run: {error}; {args:?}"),
+    };
     key.time = None;
     key.actions = None;
     key.dump_scene = None;

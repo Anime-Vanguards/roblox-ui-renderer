@@ -40,10 +40,13 @@ OFL-1.1 AND Ubuntu-font-1.0`. The license files are in that crate's source packa
 
 ### Rust crates
 
-Every crate in `native/Cargo.lock` is compiled in. Their licenses are listed below as each crate's
-`Cargo.toml` declares them (generated from `native/Cargo.lock` on 2026-11-07; the git packages are the
-engine's, above). Each crate's license text is in its source package on crates.io. Where a crate offers a
-choice of licenses we use it under MIT when offered, else under the first option compatible with the GPL.
+The crates in `native/Cargo.lock` are listed below as each crate's `Cargo.toml` declares them (generated
+from `native/Cargo.lock` on 2026-11-07; the git packages are the engine's, above). Which of them a build
+links depends on the platform. A release's `THIRD_PARTY_LICENSES.txt` is made for its platform: it holds the
+license texts of the crates that platform links, the notices of the embedded fonts and the vendored C and
+C++ code, and FreeType's licenses. Each crate's license text is also in its source package on crates.io.
+Where a crate offers a choice of licenses we use it under MIT when offered, else under the first option
+compatible with the GPL.
 
 Licenses other than MIT and Apache-2.0 among them: Unicode-3.0 (ICU4X data crates), Zlib, BSD-2-Clause,
 BSD-3-Clause (including zstd through `zstd-sys`), BSL-1.0, ISC, CC0-1.0, BSD-2-Clause-Patent and MPL-2.0

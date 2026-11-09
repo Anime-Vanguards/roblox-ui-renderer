@@ -20,9 +20,12 @@ pub mod memtrace;
 pub mod microprofiler_ui;
 pub mod placeholder;
 pub mod places;
+pub mod paths;
 pub mod presentation;
 #[cfg(feature = "desktop")]
 pub mod profiler;
+#[cfg(feature = "desktop")]
+pub mod profile_cli;
 pub mod render;
 pub mod resolve;
 #[cfg(feature = "desktop")]
@@ -48,10 +51,12 @@ pub mod web;
     about = "Render Roblox UI natively: the desktop storybook, headless captures, rur render and its service"
 )]
 pub struct NativeOptions {
-    #[arg(long, default_value_os_t = default_repo())]
+    #[arg(long, default_value_os_t = paths::default_repo())]
     pub repo: PathBuf,
-    // The project whose places the storybook lists and runs (src/places.rs), relative to --repo
-    #[arg(long, default_value = "examples/project")]
+    // The project whose places the storybook lists and runs (src/places.rs). The default is a path
+    // under the checkout in checkout mode, which resolve() makes relative to --repo, and an
+    // absolute path in standalone mode (see paths.rs).
+    #[arg(long, default_value_os_t = paths::default_project(Path::new("")))]
     pub project: PathBuf,
     #[arg(long, conflicts_with = "scene")]
     pub story: Option<PathBuf>,
@@ -59,7 +64,7 @@ pub struct NativeOptions {
     pub scene: Option<PathBuf>,
     #[arg(long, conflicts_with_all = ["story", "scene", "actions", "benchmark"])]
     pub batch: Option<PathBuf>,
-    #[arg(long, default_value = "out/native")]
+    #[arg(long, default_value_os_t = paths::default_output())]
     pub out: PathBuf,
     #[arg(long)]
     pub headless: bool,
@@ -109,8 +114,10 @@ impl NativeOptions {
     pub fn resolve(mut self) -> Result<Self> {
         let cwd = std::env::current_dir().context("Reading current working directory")?;
         self.repo = absolute(&cwd, &self.repo);
-        self.project = absolute(&self.repo, &self.project);
-        self.out = absolute(&self.repo, &self.out);
+        // Relative --project and --out follow the checkout in checkout mode, else the current directory
+        let base = if paths::is_standalone() { &cwd } else { &self.repo };
+        self.project = absolute(base, &self.project);
+        self.out = absolute(base, &self.out);
         self.story = self.story.map(|path| absolute(&cwd, &path));
         self.scene = self.scene.map(|path| absolute(&cwd, &path));
         self.batch = self.batch.map(|path| absolute(&cwd, &path));
@@ -146,13 +153,6 @@ impl NativeOptions {
         }
         Ok(self)
     }
-}
-
-fn default_repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .to_path_buf()
 }
 
 /// The engine's Luau profiler, MicroProfiler scopes and the state dir (cli/paths.mjs: RUR_STATE_DIR,
@@ -195,6 +195,22 @@ fn parse_controls(value: &str) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkout_project_and_output_defaults_stay_relative_to_the_checkout() {
+        let options = NativeOptions::try_parse_from(["rur-native"]).unwrap().resolve().unwrap();
+        assert_eq!(options.repo, Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap());
+        assert!(!paths::is_standalone());
+        let state_dir_is_redirected =
+            std::env::var_os("RUR_STATE_DIR").is_some() || std::env::var_os("RUR_CACHE_DIR").is_some();
+        if !state_dir_is_redirected {
+            assert_eq!(state_dir(&options.repo), options.repo.join(".cache"));
+        }
+        assert_eq!(options.out, options.repo.join("out/native"));
+        if std::env::var_os("RUR_PROJECT").is_none() {
+            assert_eq!(options.project, options.repo.join("examples/project"));
+        }
+    }
 
     #[test]
     fn scene_preview_stays_interactive_and_benchmark_is_headless() {

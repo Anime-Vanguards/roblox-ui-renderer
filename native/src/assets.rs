@@ -1437,7 +1437,7 @@ fn start_helper(
 > {
     let mut command = Command::new(std::env::var_os("RUR_NODE").unwrap_or_else(|| "node".into()));
     command
-        .arg(repo.join("cli/native-assets.mjs"))
+        .arg(crate::paths::asset_helper(repo)?)
         .current_dir(&repo)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1549,7 +1549,6 @@ struct Worker {
     response_timeout: Duration,
     helper: Option<(mpsc::SyncSender<Value>, mpsc::Receiver<Result<String, String>>)>,
     glyphs: GlyphPages,
-    #[cfg(feature = "web")]
     resolver: crate::resolve::Resolver,
 }
 
@@ -1563,8 +1562,8 @@ impl Worker {
         response_timeout: Duration,
     ) -> Self {
         Self {
-            #[cfg(feature = "web")]
-            resolver: crate::resolve::Resolver::new(repo.clone(), true),
+            // The web build has no helper and never downloads, so its resolver is always offline
+            resolver: crate::resolve::Resolver::new(repo.clone(), cfg!(feature = "web") || offline),
             repo,
             offline,
             byte_limit,
@@ -1590,7 +1589,6 @@ impl Worker {
     fn run(&mut self, job: Job, done: &Done) -> bool {
         let Worker { repo, offline, byte_limit, control, active_generation, response_timeout, helper, glyphs, .. } = self;
         let (repo, offline, byte_limit, response_timeout) = (&*repo, *offline, *byte_limit, *response_timeout);
-        #[cfg(feature = "web")]
         let resolver = &mut self.resolver;
         // Set while the Node helper owns the job: its failures restart the helper, glyph failures do not
         let mut helper_fault = false;
@@ -1646,14 +1644,21 @@ impl Worker {
                     None => Ok(pages),
                 };
             }
-            // The web build: images are files of the page's bundle at their local paths (the asset
-            // cache, the Studio install), resolved without the helper; cloud fonts are the bundle's
-            #[cfg(feature = "web")]
-            {
+            // Without the Node helper (the web build, or a binary outside a checkout) images are files
+            // at their local paths (the asset cache, the Studio install), resolved here. The web
+            // build's cloud fonts come with its bundle; a binary outside a checkout only reports the
+            // fonts it is missing.
+            if cfg!(feature = "web") || !crate::paths::has_asset_helper(repo) {
+                if let Some(diagnostics) = job.diagnostics.as_ref().filter(|_| !cfg!(feature = "web")) {
+                    let _ = resolver.fetch_fonts(diagnostics);
+                }
                 if job.diagnostics.is_none() {
                     // The bundle's answers (RUR_WEB_IMAGES: {uri: file | {error}}, what the Node
                     // helper answered when the page was bundled), else the local rules
+                    #[cfg(feature = "web")]
                     let bundled = web_images();
+                    #[cfg(not(feature = "web"))]
+                    let bundled = Value::Null;
                     let mut resolved = resolver.resolve_all(&job.images.iter().filter(|uri| bundled.get(uri.as_str()).is_none()).cloned().collect::<Vec<_>>());
                     for uri in &job.images {
                         match bundled.get(uri.as_str()) {

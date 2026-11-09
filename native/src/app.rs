@@ -852,12 +852,10 @@ impl NativeApp {
                         .desired_width(240.0),
                 );
                 if ui.button("Open").clicked() && !self.open_path.trim().is_empty() {
-                    let path = PathBuf::from(self.open_path.trim());
-                    self.open_story(if path.is_absolute() {
-                        path
-                    } else {
-                        self.options.repo.join(path)
-                    });
+                    let typed = PathBuf::from(self.open_path.trim());
+                    let path =
+                        crate::paths::open_path(&self.options.repo, &self.options.project, &typed);
+                    self.open_story(path);
                 }
             });
         });

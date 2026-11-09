@@ -31,9 +31,9 @@ use std::{
     rc::Rc,
 };
 
-/// This checkout: the state dir (caches), fixtures and the default project (`--project`).
+/// The baked checkout, or the standalone state directory for a release build.
 pub fn default_repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    crate::paths::default_repo()
 }
 
 /// Engine options with this checkout as the repo (the emulator's own default is its checkout).

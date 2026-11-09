@@ -3,6 +3,7 @@
 // resolver (native/src/resolve.rs) start it when a URI needs a download or cloud fonts are missing;
 // glyphs are rasterized natively (native/src/glyphs.rs). Authentication, downloads and the asset cache
 // stay with cli/assets.mjs.
+import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -68,7 +69,22 @@ async function main() {
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Whether `node cli/native-assets.mjs` started this file, as opposed to another module importing it.
+function startedDirectly() {
+	if (!process.argv[1]) return false;
+	const entry = path.resolve(process.argv[1]);
+	const moduleFile = fileURLToPath(import.meta.url);
+	if (entry === moduleFile) return true;
+	// Node resolves the links in the module's path but leaves the command line's entry path as
+	// written, so a launch through a linked folder differs in text only
+	try {
+		return fs.realpathSync(entry) === fs.realpathSync(moduleFile);
+	} catch {
+		return false;
+	}
+}
+
+if (startedDirectly()) {
 	// Exit at "quit" or the end of stdin even when a download left a socket or timer behind (the native
 	// owner waits for this process)
 	main().then(() => process.exit(0), () => process.exit(1));

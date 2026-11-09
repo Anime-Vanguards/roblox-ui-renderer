@@ -15,6 +15,8 @@ use mlua::prelude::*;
 use serde_json::Value;
 use tokio::sync::mpsc as async_channel;
 
+use crate::paths::canonical_path;
+
 type InterruptCallback = unsafe extern "C-unwind" fn(*mut mlua::ffi::lua_State, i32);
 #[derive(Clone, Copy)]
 struct InterruptGate {
@@ -51,23 +53,6 @@ unsafe extern "C-unwind" fn cancellation_interrupt(state: *mut mlua::ffi::lua_St
             }
         }
     }
-}
-
-fn canonical_path(path: &std::path::Path) -> std::io::Result<PathBuf> {
-    let resolved = path.canonicalize()?;
-    // Luau's project lookup compares normalized path strings. Keep Windows' verbatim prefix
-    // out of mounted roots so they match script paths and the CLI's existing path convention.
-    #[cfg(windows)]
-    {
-        let text = resolved.to_string_lossy();
-        if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
-            return Ok(PathBuf::from(format!(r"\\{unc}")));
-        }
-        if let Some(local) = text.strip_prefix(r"\\?\") {
-            return Ok(PathBuf::from(local));
-        }
-    }
-    Ok(resolved)
 }
 
 #[derive(Clone, Debug)]
@@ -131,8 +116,21 @@ impl RuntimeOptions {
             project.join(&self.story)
         };
         let story = canonical_path(&story).map_err(|error| format!("story: {error}"))?;
+        // A standalone launch without --roots picks the story's place the way render does
+        // (`paths::selected_place`, which compares canonical paths), so a story reached through a
+        // linked root runs in the same place as in a render. The place name goes into the launch
+        // arguments below, which keeps a standby VM tied to that place.
+        let selected_place = if crate::paths::is_standalone() && self.roots.is_none() {
+            Some(crate::paths::selected_place(&project, None, Some(&story))?)
+        } else {
+            None
+        };
+        let roots = self
+            .roots
+            .clone()
+            .or_else(|| selected_place.as_ref().map(crate::places::joined));
         // Without --roots: the roots of the project's place that holds the story (src/places.rs)
-        let roots = self.roots.clone().unwrap_or_else(|| crate::places::joined(&crate::places::place_of(&project, &story)));
+        let roots = roots.unwrap_or_else(|| crate::places::joined(&crate::places::place_of(&project, &story)));
         let mut place = vec![
             "--roots".into(),
             roots,
@@ -143,6 +141,14 @@ impl RuntimeOptions {
             "--session".into(),
             "1".into(),
         ];
+        // In checkout mode the engine infers the asset base from the roots, as before. In standalone
+        // mode it gets the selected project, which also tells apart their preloaded engines.
+        if crate::paths::is_standalone() {
+            place.extend(["--project".into(), project.to_string_lossy().into_owned()]);
+        }
+        if let Some(selected) = selected_place {
+            place.extend(["--place".into(), selected.name]);
+        }
         if self.margin > 0 {
             place.extend(["--margin".into(), self.margin.to_string()]);
         }
@@ -502,14 +508,20 @@ fn engine_interrupt(lua: &Lua, generation: &Arc<AtomicU64>, stopped: &Arc<Atomic
 }
 
 /// Where the modules a story required at its last mount are listed (read ahead at the next
-/// mount): `.cache/native-app/requires/<hash of the story, project and roots>.txt`.
+/// mount): `native-app/requires/<hash of the story, project and roots>.txt` in the checkout's
+/// `.cache` in checkout mode, or in the state dir in standalone mode.
 fn requires_list(options: &RuntimeOptions) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     options.story.hash(&mut hash);
     options.project.hash(&mut hash);
     options.roots.hash(&mut hash);
-    Some(options.repo.join(".cache").join("native-app").join("requires").join(format!("{:016x}.txt", hash.finish())))
+    let cache = if crate::paths::is_standalone() {
+        crate::state_dir(&options.repo)
+    } else {
+        options.repo.join(".cache")
+    };
+    Some(cache.join("native-app").join("requires").join(format!("{:016x}.txt", hash.finish())))
 }
 
 fn run_engine_worker(
@@ -653,6 +665,18 @@ mod tests {
             no_snapshots: true,
             offline: true,
         }
+    }
+
+    #[test]
+    fn checkout_launch_keeps_root_based_assets_and_standby_keys() {
+        let options = fixture();
+        let mut other_project = options.clone();
+        other_project.project = options.repo.join("examples/project");
+        assert!(!options.launch().unwrap().place.iter().any(|arg| arg == "--project"));
+        assert_eq!(
+            options.standby_key().unwrap(),
+            other_project.standby_key().unwrap()
+        );
     }
 
     fn reply(worker: &RuntimeWorker) -> Value {

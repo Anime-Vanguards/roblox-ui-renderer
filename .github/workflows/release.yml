@@ -1,0 +1,281 @@
+# Prebuilt rur-native releases. A version tag publishes a GitHub release; a push to main that touches
+# release files, or a manual run, does everything except publish, as a dry run that leaves the
+# built zips as workflow artifacts.
+#
+# Jobs: version (check the version), build (one zip per platform), smoke (run each zip on a fresh
+# runner), notes (release notes, tags only) and publish (tags only, the only job that can write).
+# The workflow never creates or moves a tag: the tag is pushed to the private repository and
+# mirrored here by the export.
+name: Release
+
+on:
+  push:
+    # Pushes to main with these paths are dry runs; path filters do not apply to tags
+    branches: [main]
+    # A tag of this form publishes
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+    paths:
+      - .github/workflows/release.yml
+      - tools/release/**
+      - package.json
+      - package-lock.json
+      - native/Cargo.toml
+      - native/Cargo.lock
+      - native/.cargo/config.toml
+      - native/build.rs
+      - native/tests/standalone.rs
+      - tools/native-app/build.mjs
+      - tools/native-host/**
+      # The license and notice files the zip ships
+      - LICENSE
+      - NOTICE
+      - THIRD_PARTY_NOTICES.md
+      - licenses/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per ref. A newer push to main may cancel an older dry run; a tag run is never cancelled.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  version:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # Full history, for the check that a tag is on main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Read the version, and for a tag check it
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = push ] && [ "$GITHUB_REF_TYPE" = tag ]; then
+            # Fails unless every manifest holds the version and the tag is exactly v<version>
+            VERSION=$(node tools/release/version.mjs --tag "$GITHUB_REF_NAME")
+            # The tagged commit must be on main (merge-base fails if it is not)
+            git fetch origin main:refs/remotes/origin/main
+            git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          else
+            VERSION=$(node tools/release/version.mjs)
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Release script self-checks
+        run: node --test tools/release/test.mjs
+
+  build:
+    if: ${{ !github.event.repository.private }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # os and arch are the words in the zip's name (rur-native-<version>-<os>-<arch>.zip)
+          # rustflags: Windows links the C runtime in, so the binary needs no Visual C++ redistributable
+          - { runner: windows-latest, os: windows, arch: x86_64, target: x86_64-pc-windows-msvc, suffix: .exe, rustflags: '-C target-feature=+crt-static' }
+          # The oldest Ubuntu runner, for the lowest glibc the binary asks for
+          - { runner: ubuntu-22.04, os: linux, arch: x86_64, target: x86_64-unknown-linux-gnu, suffix: '' }
+          - { runner: macos-15, os: macos, arch: aarch64, target: aarch64-apple-darwin, suffix: '' }
+    env:
+      RELEASE_OS: ${{ matrix.os }}
+      RELEASE_ARCH: ${{ matrix.arch }}
+      RELEASE_TARGET: ${{ matrix.target }}
+      EXE_SUFFIX: ${{ matrix.suffix }}
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      # Where `node tools/native-app/build.mjs --prepare` puts the downloaded FreeType source
+      RUR_FREETYPE_SRC: ${{ github.workspace }}/.cache/native-app/source/freetype-2.14.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The same toolchain as ci.yml. No build cache here: a release starts clean, so nothing a
+      # pull request's CI run saved can reach a release binary.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch, 2026-10-16
+        with:
+          toolchain: "1.90.0"
+      # Build tools only; none of these packages ship in the zip. mesa-vulkan-drivers is the software
+      # Vulkan the installed release tests need to draw a PNG, because the runner has no GPU.
+      - name: Linux desktop build libraries and software Vulkan for release tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
+            libgl1-mesa-dev mesa-vulkan-drivers
+      - name: Install npm packages
+        run: npm ci
+      - name: Download and verify FreeType
+        run: node tools/native-app/build.mjs --prepare
+      - name: Build public default features from a clean target
+        working-directory: native
+        shell: bash
+        env:
+          # Marks the binary as a release build, so it uses standalone defaults and never the
+          # checkout it was built in (native/src/paths.rs). Read at compile time.
+          RUR_RELEASE_BUILD: '1'
+        run: cargo build --profile dist --locked --bin rur-native --target "$RELEASE_TARGET"
+      # The `installed_*` tests in native/tests/standalone.rs are ignored in ordinary `cargo test`
+      # runs because they need a binary built with RUR_RELEASE_BUILD=1. This is where they run: against
+      # the marked binary built above, before it is packaged.
+      - name: Installed release validation
+        working-directory: native
+        shell: bash
+        env:
+          RUR_TEST_STANDALONE_BINARY: ${{ github.workspace }}/native/target/${{ matrix.target }}/dist/rur-native${{ matrix.suffix }}
+        run: |
+          set -euo pipefail
+          # The project comparison tests also run a checkout binary, which cargo builds for the tests.
+          # It has to be unmarked: if it were marked, both binaries would be standalone and the
+          # comparison would prove nothing. The `release` profile builds it away from the marked
+          # `dist` binary, which stays untouched for packaging.
+          unset RUR_RELEASE_BUILD
+          # --ignored runs only the ignored tests, which are the installed_* ones
+          TEST_ARGS=(--ignored)
+          # Windows runners have no GPU. The smoke job still checks scene export there; the
+          # project comparisons and render-service place checks run on every platform.
+          if [ "$RELEASE_OS" = windows ]; then
+            # Headless captures draw on a GPU
+            TEST_ARGS+=(--skip installed_headless_uses_the_selected_project_for_local_images)
+            TEST_ARGS+=(--skip installed_saved_frames_stay_inside_the_named_output)
+            TEST_ARGS+=(--skip installed_default_captures_and_batch_summaries_stay_in_state)
+            TEST_ARGS+=(--skip installed_headless_selects_its_place_through_a_linked_root)
+            # Sequences create a GPU device even when PNG output is disabled.
+            TEST_ARGS+=(--skip installed_service_standbys_keep_the_selected_place_for_sequence)
+          fi
+          # The parser inventory is an ordinary test, which the --ignored run below does not
+          # include. Run it here so that a new path option, positional input or request field fails
+          # the release build until the path check covers it.
+          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" path_contract::
+          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" -- "${TEST_ARGS[@]}"
+      - name: Generate licenses and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/release/licenses.mjs --target "$RELEASE_TARGET" --out release/THIRD_PARTY_LICENSES.txt --freetype "$RUR_FREETYPE_SRC"
+          node tools/release/package.mjs --binary "native/target/$RELEASE_TARGET/dist/rur-native$EXE_SUFFIX" --os "$RELEASE_OS" --arch "$RELEASE_ARCH" --licenses release/THIRD_PARTY_LICENSES.txt --out release --commit "$GITHUB_SHA"
+      - name: Upload the zip
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary-${{ matrix.os }}-${{ matrix.arch }}
+          path: release/*.zip
+          if-no-files-found: error
+      # The release carries the exact FreeType source the binaries were built with (the GPL's
+      # Corresponding Source). One copy is enough: every platform downloads the same checked archive.
+      - name: Preserve the exact FreeType source archive used by the build
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: freetype-source
+          path: .cache/native-app/source/freetype-2.14.2.tar.gz
+          if-no-files-found: error
+
+  smoke:
+    if: ${{ !github.event.repository.private }}
+    needs: [version, build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # png: whether the story is drawn on the GPU or only exported.
+          # Windows runners have no GPU, so there the story runs through layout, scene, glyph and
+          # image export with --no-png. Linux uses software Vulkan; macOS uses the runner's Metal device.
+          # No runner has Roblox Studio, so Studio's fonts and textures are not checked anywhere.
+          - { runner: windows-latest, os: windows, arch: x86_64, png: 'false' }
+          - { runner: ubuntu-22.04, os: linux, arch: x86_64, png: 'true' }
+          - { runner: macos-15, os: macos, arch: aarch64, png: 'true' }
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_OS: ${{ matrix.os }}
+      RELEASE_ARCH: ${{ matrix.arch }}
+      SMOKE_PNG: ${{ matrix.png }}
+    steps:
+      # Only for the smoke script and the example project it renders. The checkout goes into a
+      # subfolder and the script extracts the zip into a temporary folder outside it, so the binary
+      # never runs inside a checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: inputs
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: binary-${{ matrix.os }}-${{ matrix.arch }}
+          path: archives
+      - name: Linux software Vulkan
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+      - name: Installed binary smoke test outside the checkout
+        shell: bash
+        run: node inputs/tools/release/smoke.mjs --zip "archives/rur-native-$VERSION-$RELEASE_OS-$RELEASE_ARCH.zip" --version "$VERSION" --png "$SMOKE_PNG"
+
+  notes:
+    if: ${{ !github.event.repository.private && github.event_name == 'push' && github.ref_type == 'tag' }}
+    needs: version
+    runs-on: ubuntu-22.04
+    steps:
+      # Full history, for the commit subjects since the previous release
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Public commit subjects and installation instructions
+        run: node tools/release/notes.mjs --tag "$GITHUB_REF_NAME" --out release-notes.md
+      - name: Upload the release notes
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  publish:
+    if: ${{ !github.event.repository.private && github.event_name == 'push' && github.ref_type == 'tag' }}
+    needs: [version, build, smoke, notes]
+    runs-on: ubuntu-22.04
+    # The only job that can write
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      # No checkout, repository scripts, or build tools in this job: it only handles the artifacts
+      # the earlier jobs made.
+      - name: Download the zips
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: assets
+      - name: Download the FreeType source archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: freetype-source
+          path: assets
+      - name: Download the release notes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: notes
+      - name: Hash every release asset
+        working-directory: assets
+        run: sha256sum -- *.zip *.tar.gz > ../SHA256SUMS
+      - name: Attest build provenance of the zips
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: assets/*.zip
+      # --verify-tag: the tag must already exist. This never creates or moves one.
+      - name: Publish the release for the existing tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --verify-tag --title "rur-native $TAG" --notes-file notes/release-notes.md -R "$GITHUB_REPOSITORY" assets/*.zip assets/*.tar.gz SHA256SUMS

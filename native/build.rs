@@ -9,6 +9,8 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/glyphs/rur_glyph.c");
     println!("cargo:rerun-if-env-changed=RUR_FREETYPE_SRC");
+    // src/paths.rs reads RUR_RELEASE_BUILD at compile time; rebuild when it changes
+    println!("cargo:rerun-if-env-changed=RUR_RELEASE_BUILD");
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let source = std::env::var_os("RUR_FREETYPE_SRC")
         .map(PathBuf::from)

@@ -21,17 +21,49 @@ use crate::{
 
 const LOAD_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Reads a batch manifest, a JSON array of `{scene, out}` entries.
+fn read_manifest(batch: &Path) -> Result<Value> {
+    let bytes = fs::read(batch).with_context(|| format!("Reading {}", batch.display()))?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+fn manifest_entries(manifest: &Value) -> Result<&Vec<Value>> {
+    manifest
+        .as_array()
+        .context("Batch must be an array of {scene, out} paths")
+}
+
+/// Checks every entry's `scene` and `out`, so a release binary refuses an unusable path as a plain
+/// error instead of a missing file or an output written to the wrong place.
+fn validate_manifest_paths(manifest: &Value) -> Result<()> {
+    for entry in manifest_entries(manifest)? {
+        for field in ["scene", "out"] {
+            crate::paths::request_path(entry, field).map_err(anyhow::Error::msg)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn run(options: NativeOptions) -> Result<()> {
+    // A release binary validates the whole manifest before it starts a GPU, so a bad later entry
+    // cannot leave the outputs of the earlier ones behind.
+    let checked_manifest = match &options.batch {
+        Some(batch) if crate::paths::is_standalone() => {
+            let manifest = read_manifest(batch)?;
+            validate_manifest_paths(&manifest)?;
+            Some(manifest)
+        }
+        _ => None,
+    };
     let mut assets = AssetStore::new(options.repo.clone(), options.offline);
     let mut gpu = pollster::block_on(GpuRenderer::headless())?;
     let mut preparer = DrawPreparer::new();
     if let Some(batch) = &options.batch {
-        let manifest: Value = serde_json::from_slice(
-            &fs::read(batch).with_context(|| format!("Reading {}", batch.display()))?,
-        )?;
-        let entries = manifest
-            .as_array()
-            .context("Batch must be an array of {scene, out} paths")?;
+        let manifest = match checked_manifest {
+            Some(manifest) => manifest,
+            None => read_manifest(batch)?,
+        };
+        let entries = manifest_entries(&manifest)?;
         let base = batch.parent().unwrap_or(Path::new("."));
         let mut results = Vec::new();
         for (index, entry) in entries.iter().enumerate() {
@@ -84,6 +116,11 @@ pub fn run(options: NativeOptions) -> Result<()> {
                 entries.len(),
                 options.out.display()
             );
+        }
+        // A standalone batch writes under the state directory by default, which the user did not
+        // choose, so say where the summary went
+        if crate::paths::is_standalone() {
+            eprintln!("Saved {}", options.out.join("batch.json").display());
         }
         return Ok(());
     }
@@ -533,14 +570,18 @@ pub fn fnv1a(bytes: &[u8]) -> String {
 /// a frame that repeats one already stored (a still stretch, an A/B side identical to the other in a
 /// directory beside it) costs neither the bytes nor the PNG encode. The store is shared by the
 /// directories under one parent (the `{before,after}-{run}` of tools/native-app/scroll-bench.mjs);
-/// `rur clean` drops entries no frame links to any more.
+/// `rur clean` drops entries no frame links to any more. Standalone builds keep the store inside
+/// the named output directory instead, so a capture writes only there.
 struct FrameStore {
     directory: std::path::PathBuf,
 }
 
 impl FrameStore {
     fn new(out: &Path) -> Result<Self> {
-        let directory = out.parent().unwrap_or(out).join(".frames");
+        // A release build writes only inside the directory it was told to write to; checkout builds
+        // keep the store beside it, shared with the sibling directories of one benchmark.
+        let parent = if crate::paths::is_standalone() { out } else { out.parent().unwrap_or(out) };
+        let directory = parent.join(".frames");
         fs::create_dir_all(&directory).with_context(|| format!("Creating {}", directory.display()))?;
         Ok(Self { directory })
     }

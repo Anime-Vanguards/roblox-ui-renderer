@@ -547,7 +547,15 @@ impl Service {
                 self.send(&mut stream, 200, body).map_err(io)
             }
             ("GET", "/stories") => {
-                let project = request.query.get("project").map(PathBuf::from).unwrap_or_else(|| self.repo.join("examples/project"));
+                // Without ?project= the listing uses the same default project as a render
+                let requested = request.query.get("project");
+                if let Some(project) = requested {
+                    // An empty value is a mistake, not "no project": it would list the cwd
+                    if let Err(error) = crate::paths::validate_path_value("project", project) {
+                        return self.send(&mut stream, 400, json!({"error": error})).map_err(io);
+                    }
+                }
+                let project = requested.map(PathBuf::from).unwrap_or_else(|| crate::paths::default_project(&self.repo));
                 let project = std::path::absolute(&project).unwrap_or(project);
                 self.send(&mut stream, 200, json!({"stories": self.stories(&project)})).map_err(io)
             }
@@ -619,7 +627,7 @@ impl Service {
         }
         let argv: Vec<String> = input["argv"].as_array().ok_or("argv must be a list")?.iter().map(|arg| arg.as_str().unwrap_or_default().to_string()).collect();
         let args = crate::engine::cli::parse(&argv)?;
-        let out = PathBuf::from(input["out"].as_str().ok_or("out is required")?);
+        let out = PathBuf::from(crate::paths::request_path(input, "out")?);
         let options = RenderOptions {
             png: input["png"].as_bool().unwrap_or(true),
             offline: input["offline"].as_bool().unwrap_or(false),
@@ -785,7 +793,7 @@ impl Service {
         }
         let argv: Vec<String> = input["argv"].as_array().ok_or("argv must be a list")?.iter().map(|arg| arg.as_str().unwrap_or_default().to_string()).collect();
         let args = crate::engine::cli::parse(&argv)?;
-        let out = PathBuf::from(input["out"].as_str().ok_or("out is required")?);
+        let out = PathBuf::from(crate::paths::request_path(input, "out")?);
         let offline = input["offline"].as_bool().unwrap_or(false);
         let (spec, options) = crate::sequence::parse_options(&input["sequence"], offline)?;
         let started = Instant::now();

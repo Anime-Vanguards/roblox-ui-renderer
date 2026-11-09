@@ -54,23 +54,57 @@ pub struct HeadlessGpu {
 /// The Vulkan loader's settings a caller chose (a capture tool's layers, a driver list): left as they are
 const LOADER_SETTINGS: [&str; 5] = ["VK_LOADER_LAYERS_DISABLE", "VK_LOADER_LAYERS_ENABLE", "VK_INSTANCE_LAYERS", "VK_LOADER_DRIVERS_SELECT", "VK_LOADER_DRIVERS_DISABLE"];
 
+/// What is set for the loader when the caller chose none of [`LOADER_SETTINGS`]: no implicit layers and no Dozen
+const LOADER_DEFAULTS: [(&str, &str); 2] = [("VK_LOADER_LAYERS_DISABLE", "~implicit~"), ("VK_LOADER_DRIVERS_DISABLE", "*dzn*")];
+
+/// True when `is_set` finds none of [`LOADER_SETTINGS`]. A setting with an empty value counts as chosen.
+fn no_loader_setting_chosen(is_set: impl Fn(&str) -> bool) -> bool {
+    LOADER_SETTINGS.iter().all(|name| !is_set(name))
+}
+
+fn no_loader_setting_in_environment() -> bool {
+    no_loader_setting_chosen(|name| std::env::var_os(name).is_some())
+}
+
+/// A release build sets the loader's defaults once, at startup, and keeps them for the life of the process: for
+/// every adapter it tries (the fallback one too) and for the helpers it starts. Checkout builds still set them
+/// only around the probe in `native_vulkan`; setting and removing them there is the code they have always run.
+///
+/// # Safety
+/// Must run before any thread starts. On Linux and macOS another thread reading the environment while it
+/// changes is unsound, which is why a release build does not change it later (see the `paths` module comment).
+pub unsafe fn initialize_loader_environment() {
+    if !crate::paths::is_standalone() || !no_loader_setting_in_environment() {
+        return;
+    }
+    // SAFETY: the caller guarantees that no other thread exists yet
+    unsafe {
+        for (name, value) in LOADER_DEFAULTS {
+            std::env::set_var(name, value);
+        }
+    }
+}
+
 /// The discrete GPU all backends would pick (Vulkan's first), found without implicit layers or Dozen (Vulkan on D3D12)
 async fn native_vulkan(options: &wgpu::RequestAdapterOptions<'_, '_>) -> Option<wgpu::Adapter> {
-    let own = LOADER_SETTINGS.iter().all(|name| std::env::var_os(name).is_none());
-    if own {
+    // A release build has already set them for good at startup, and leaves a caller's alone
+    let set_around_probe = !crate::paths::is_standalone() && no_loader_setting_in_environment();
+    if set_around_probe {
         // SAFETY: Windows guards the environment block; the loader reads these while the instance starts
         unsafe {
-            std::env::set_var("VK_LOADER_LAYERS_DISABLE", "~implicit~");
-            std::env::set_var("VK_LOADER_DRIVERS_DISABLE", "*dzn*");
+            for (name, value) in LOADER_DEFAULTS {
+                std::env::set_var(name, value);
+            }
         }
     }
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::VULKAN, ..Default::default() });
     let adapter = instance.request_adapter(options).await.ok().filter(|adapter| adapter.get_info().device_type == wgpu::DeviceType::DiscreteGpu);
-    if own {
+    if set_around_probe {
         // SAFETY: as above
         unsafe {
-            std::env::remove_var("VK_LOADER_LAYERS_DISABLE");
-            std::env::remove_var("VK_LOADER_DRIVERS_DISABLE");
+            for (name, _) in LOADER_DEFAULTS {
+                std::env::remove_var(name);
+            }
         }
     }
     adapter
@@ -2364,6 +2398,21 @@ fn default_lut_bytes() -> Vec<u8> {
 mod tests {
     use super::super::packet::{RenderPass, TextureLevel};
     use super::*;
+
+    #[test]
+    fn loader_defaults_yield_to_every_setting_a_caller_chose() {
+        assert!(no_loader_setting_chosen(|_| false));
+        for setting in LOADER_SETTINGS {
+            assert!(!no_loader_setting_chosen(|name| name == setting));
+        }
+    }
+
+    #[test]
+    fn loader_defaults_are_loader_settings() {
+        for (name, _) in LOADER_DEFAULTS {
+            assert!(LOADER_SETTINGS.contains(&name));
+        }
+    }
 
     #[test]
     fn calibrated_glsl_passes_naga_validation() {

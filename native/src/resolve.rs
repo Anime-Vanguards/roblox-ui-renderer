@@ -26,9 +26,14 @@ pub struct Resolver {
     repo: PathBuf,
     assets: PathBuf,
     offline: bool,
+    /// No Node helper (a binary outside a checkout): only local content resolves, and what needs a
+    /// download is reported as needing the rur CLI from a checkout
+    local_only: bool,
     helper: Option<Helper>,
     content_roots: Option<Vec<PathBuf>>,
     viewports: Value,
+    /// Missing cloud fonts already reported when `local_only`, so each is printed once
+    reported_fonts: std::collections::HashSet<String>,
     /// Cache files that matched their download record, by the length and modification time they had then
     verified: HashMap<PathBuf, (u64, Option<SystemTime>)>,
 }
@@ -38,6 +43,15 @@ struct Helper {
     input: ChildStdin,
     output: BufReader<ChildStdout>,
     next: u64,
+}
+
+/// Adds why an uncached asset can't be downloaded here to the "offline and not cached" error.
+fn with_helper_hint(error: String) -> String {
+    if error == "offline and not cached" {
+        format!("{error}; {}", crate::paths::HELPER_REQUIRED)
+    } else {
+        error
+    }
 }
 
 impl Drop for Helper {
@@ -65,7 +79,8 @@ impl Resolver {
     pub fn new(repo: impl Into<PathBuf>, offline: bool) -> Self {
         let repo = repo.into();
         let assets = crate::state_dir(&repo).join("assets");
-        Self { repo, assets, offline, helper: None, content_roots: None, viewports: Value::Null, verified: HashMap::new() }
+        let local_only = !crate::paths::has_asset_helper(&repo);
+        Self { repo, assets, offline, local_only, helper: None, content_roots: None, viewports: Value::Null, reported_fonts: Default::default(), verified: HashMap::new() }
     }
 
     pub fn set_offline(&mut self, offline: bool) {
@@ -86,6 +101,7 @@ impl Resolver {
             }
             match self.local(uri) {
                 Some(result) => {
+                    let result = if self.local_only { result.map_err(with_helper_hint) } else { result };
                     results.insert(uri.clone(), result);
                 }
                 None => remote.push(uri.clone()),
@@ -123,6 +139,16 @@ impl Resolver {
     /// Downloads the cloud fonts a run reported missing (scene.diagnostics); true when any arrived,
     /// so the run is repeated with them (cli/rur.mjs fetchMissingFonts).
     pub fn fetch_fonts(&mut self, diagnostics: &Value) -> Result<bool, String> {
+        if self.local_only {
+            // Nothing to download with: say once per font that the helper is needed
+            for font in diagnostics["missingFontAssets"].as_array().into_iter().flatten() {
+                let key = font.to_string();
+                if self.reported_fonts.insert(key.clone()) {
+                    eprintln!("Missing font {key}: {}", crate::paths::HELPER_REQUIRED);
+                }
+            }
+            return Ok(false);
+        }
         if self.offline {
             return Ok(false);
         }
@@ -172,7 +198,7 @@ impl Resolver {
         }
         let bytes = std::fs::read(&file).ok()?;
         // A file rur did not download under this name is downloaded again by the helper
-        if !self.offline && !self.downloaded(&file, &bytes) {
+        if !self.offline && !self.local_only && !self.downloaded(&file, &bytes) {
             return None;
         }
         if allow_decal && is_model(&bytes) {
@@ -244,6 +270,9 @@ impl Resolver {
     }
 
     fn helper_call(&mut self, mut request: Value) -> Result<Value, String> {
+        if self.local_only {
+            return Err(crate::paths::HELPER_REQUIRED.into());
+        }
         if self.helper.is_none() {
             self.helper = Some(self.start_helper()?);
         }
@@ -273,7 +302,7 @@ impl Resolver {
         let node = std::env::var_os("RUR_NODE").unwrap_or_else(|| "node".into());
         let mut command = Command::new(node);
         command
-            .arg(self.repo.join("cli").join("native-assets.mjs"))
+            .arg(crate::paths::asset_helper(&self.repo)?)
             .current_dir(&self.repo)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -398,13 +427,37 @@ fn model_texture(text: &str) -> Option<String> {
 
 /// cli/assets.mjs studioContentRoots
 fn content_roots() -> Vec<PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).or_else(|| {
+        std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("AppData").join("Local"))
+    });
+    content_roots_with(
+        std::env::var_os("RUR_ROBLOX_CONTENT").map(PathBuf::from),
+        || roblox_install::RobloxStudio::locate().ok().map(|studio| studio.content_path().to_path_buf()),
+        local,
+        crate::paths::is_standalone(),
+    )
+}
+
+/// The folders that hold Studio's `content` folder, best first:
+/// 1. the one `RUR_ROBLOX_CONTENT` names,
+/// 2. the Windows installs under `local`, newest first,
+/// 3. release builds only: the one the Studio locator finds.
+///
+/// The environment and the locator are parameters so tests can pass their own.
+///
+/// The locator is the one the font lookup uses: it knows Studio's macOS application bundle as well
+/// as Windows installs. Checkout builds keep their lookup and its order, so they never ask it.
+fn content_roots_with(
+    content: Option<PathBuf>,
+    locate_studio: impl FnOnce() -> Option<PathBuf>,
+    local: Option<PathBuf>,
+    standalone: bool,
+) -> Vec<PathBuf> {
+    let parent_of = |content_folder: &Path| content_folder.parent().map(Path::to_path_buf);
     let mut roots = Vec::new();
-    if let Some(content) = std::env::var_os("RUR_ROBLOX_CONTENT") {
-        if let Some(parent) = Path::new(&content).parent() {
-            roots.push(parent.to_path_buf());
-        }
+    if let Some(root) = content.as_deref().and_then(parent_of) {
+        roots.push(root);
     }
-    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).or_else(|| std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("AppData").join("Local")));
     if let Some(local) = local {
         if let Ok(entries) = std::fs::read_dir(local.join("Roblox").join("Versions")) {
             let mut installs: Vec<(std::time::SystemTime, PathBuf)> = entries
@@ -417,12 +470,43 @@ fn content_roots() -> Vec<PathBuf> {
             roots.extend(installs.into_iter().map(|(_, dir)| dir));
         }
     }
+    // The locator comes after the Versions lookup so that on Windows a release binary picks the same
+    // textures as a checkout build, which never asks it. It stays for the machines the Versions
+    // lookup cannot see: Linux, macOS and Windows without a Versions folder.
+    if standalone {
+        if let Some(root) = locate_studio().as_deref().and_then(parent_of) {
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
     roots
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standalone_images_use_the_studio_locator_after_explicit_content() {
+        // The locator finds a content folder in each platform's layout
+        for (content, root) in [
+            ("C:/Roblox/Versions/version-example/content", "C:/Roblox/Versions/version-example"),
+            ("/Applications/RobloxStudio.app/Contents/Resources/content", "/Applications/RobloxStudio.app/Contents/Resources"),
+            ("/opt/studio/content", "/opt/studio"),
+        ] {
+            let locate = || Some(PathBuf::from(content));
+            assert_eq!(content_roots_with(None, locate, None, true), vec![PathBuf::from(root)]);
+            // An explicit content folder comes first
+            assert_eq!(
+                content_roots_with(Some(PathBuf::from("override/content")), locate, None, true),
+                vec![PathBuf::from("override"), PathBuf::from(root)],
+            );
+        }
+        assert_eq!(content_roots_with(None, || None, None, true), Vec::<PathBuf>::new());
+        // A checkout build never asks the locator
+        assert!(content_roots_with(None, || panic!("checkout must not query the locator"), None, false).is_empty());
+    }
 
     #[test]
     fn asset_ids_and_thumbnail_keys_follow_cli_assets() {
@@ -443,7 +527,7 @@ mod tests {
         let assets = std::env::temp_dir().join(format!("rur-asset-records-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&assets);
         std::fs::create_dir_all(assets.join("downloaded")).unwrap();
-        let resolver = |offline| Resolver { repo: assets.clone(), assets: assets.clone(), offline, helper: None, content_roots: None, viewports: Value::Null, verified: HashMap::new() };
+        let resolver = |offline| Resolver { repo: assets.clone(), assets: assets.clone(), offline, local_only: false, helper: None, content_roots: None, viewports: Value::Null, reported_fonts: Default::default(), verified: HashMap::new() };
         let (mut online, mut offline) = (resolver(false), resolver(true));
         let file = assets.join("123.png");
         let real = [137u8, 80, 78, 71, 1];
@@ -451,6 +535,16 @@ mod tests {
         // A file another tool wrote: the helper downloads it again; offline it is used
         std::fs::write(&file, real).unwrap();
         assert_eq!(online.local("rbxassetid://123"), None);
+        let mut standalone = resolver(false);
+        standalone.local_only = true;
+        assert_eq!(standalone.local("rbxassetid://123"), Some(Ok(file.clone())));
+        let missing = standalone.resolve_all(&["rbxassetid://456".into(), "rbxassetid://456".into(), "rur-viewport://1".into()]);
+        assert_eq!(missing.len(), 2);
+        assert!(missing.values().all(|result| result.as_ref().unwrap_err().contains(crate::paths::HELPER_REQUIRED)));
+        let fonts = json!({"missingFontAssets": ["rbxassetid://789", "rbxassetid://789"]});
+        assert!(!standalone.fetch_fonts(&fonts).unwrap());
+        assert!(!standalone.fetch_fonts(&fonts).unwrap());
+        assert_eq!(standalone.reported_fonts.len(), 1);
         assert_eq!(offline.local("rbxassetid://123"), Some(Ok(file.clone())));
         // rur's download (its record matches)
         std::fs::write(assets.join("downloaded").join("123.png.json"), record.to_string()).unwrap();
@@ -473,6 +567,8 @@ mod tests {
         assert_eq!(resolver.local(&format!("file://{path}")), Some(Ok(PathBuf::from(&path))));
         assert_eq!(resolver.local(&format!("file:///{}", path.replace(' ', "%20"))), Some(Ok(PathBuf::from(&path))));
         assert!(matches!(resolver.local("file:///nowhere/at/all.png"), Some(Err(message)) if message.starts_with("no such file")));
+        let missing = resolver.resolve_all(&["file:///nowhere/at/all.png".into()]);
+        assert!(!missing.values().next().unwrap().as_ref().unwrap_err().contains(crate::paths::HELPER_REQUIRED));
         let _ = std::fs::remove_file(&file);
     }
 }

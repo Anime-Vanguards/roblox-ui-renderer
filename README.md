@@ -50,8 +50,24 @@ keyboard, and change its UI Labs controls while it runs.
 
 ## Quick start
 
-You need Rust 1.90+ with a C++ build toolchain, Node 18+ and a Roblox Studio install, whose fonts and
-`rbxasset://` textures rur reads (it ships none). [docs/setup.md](docs/setup.md) has the details.
+Download a prebuilt `rur-native` zip from [Releases](https://github.com/Anime-Vanguards/roblox-ui-renderer/releases)
+and extract it, or add this to `rokit.toml`:
+
+```toml
+rur-native = "Anime-Vanguards/roblox-ui-renderer@0.1.0"
+```
+
+Run `rur-native --version` to check the install. `rur-native --project <your-project>` opens the
+storybook, and `rur-native render --story <story.luau> --project <your-project> --dir out/render`
+renders headless. The storybook and PNG renders need a graphics driver, and fonts and textures come from
+your Roblox Studio install. A release binary works on local content only: downloading assets needs the
+Node CLI below. On Linux and macOS use rokit 1.0 or later, since 0.2.x cannot select an executable whose
+name differs from this repository's. [Setup](docs/setup.md#release-binaries) covers the platforms, where
+the state goes and how to verify a download.
+
+To use the Node CLI or work on rur, build from a checkout. You need Rust 1.90+ with a C++ build
+toolchain, Node 18+ and a Roblox Studio install, whose fonts and `rbxasset://` textures rur reads (it
+ships none). [docs/setup.md](docs/setup.md) has the details.
 
 ```powershell
 git clone https://github.com/Anime-Vanguards/roblox-ui-renderer

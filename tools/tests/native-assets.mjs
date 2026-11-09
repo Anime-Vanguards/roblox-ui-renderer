@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { NativeAssetWorker } from "../../cli/native-assets.mjs";
@@ -39,6 +39,15 @@ const request = async payload => {
 };
 const timer = setTimeout(() => child.kill(), 30000);
 try {
+	const link = path.join(directory, "linked");
+	fs.symlinkSync(root, link, process.platform === "win32" ? "junction" : "dir");
+	const linked = spawnSync(process.execPath, [path.join(link, "cli/native-assets.mjs"), "--offline"], {
+		cwd: directory, windowsHide: true, encoding: "utf8", timeout: 10000,
+		env: { ...process.env, RUR_STATE_DIR: directory },
+		input: '{"id":1,"images":[]}\n{"command":"quit"}\n',
+	});
+	assert.equal(linked.status, 0, linked.stderr);
+	assert.deepEqual(JSON.parse(linked.stdout), { id: 1, images: [] }, "the helper starts through a linked folder");
 	const worker = new NativeAssetWorker({ offline: true });
 	const direct = await worker.prepare({ id: 7, images: [], scene: { nodes: [{ text: { lines: [{ glyphs: [[0, 41, 0, 18]] }] } }] } });
 	assert.deepEqual(direct, { id: 7, images: [] }, "the helper answers images only (glyphs are rasterized natively)");
