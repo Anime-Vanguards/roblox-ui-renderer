@@ -10,6 +10,7 @@ import { ROOT, isMain, version } from "./version.mjs";
 import { crc32, inspect, packageRelease } from "./package.mjs";
 import { legalFiles, licenses, normalPackages } from "./licenses.mjs";
 import { notes } from "./notes.mjs";
+import { fileStates } from "./file-states.mjs";
 
 // Runs `run` with an empty temporary folder and removes it afterwards
 function temporary(run) {
@@ -52,6 +53,30 @@ test("release scripts start through a linked folder", () => temporary(dir => {
 	assert.equal(result.trim(), version(ROOT));
 	// This file is the entry point of its own test run, so it is its own main
 	assert.equal(isMain(import.meta.url), true);
+}));
+
+test("smoke file inventory excludes a sandbox through linked temporary roots", () => temporary(dir => {
+	// The temporary folder can itself be a link (macOS), so start from its real location
+	const base = fs.realpathSync(dir);
+	const real = path.join(base, "real");
+	const alias = path.join(base, "linked");
+	const sandbox = path.join(real, "sandbox");
+	fs.mkdirSync(sandbox, { recursive: true });
+	fs.symlinkSync(real, alias, process.platform === "win32" ? "junction" : "dir");
+	const watched = path.join(real, "watched.txt");
+	fs.writeFileSync(watched, "before");
+
+	// Reached through the link, the folder lists its files by their real paths, without the sandbox
+	const before = fileStates([alias], sandbox);
+	assert.deepEqual([...before.keys()], [watched]);
+	// A root named twice, and a sandbox named through the link, change nothing
+	assert.deepEqual(fileStates([real, alias], path.join(alias, "sandbox")), before);
+	// What the run writes into the sandbox is not a change
+	fs.writeFileSync(path.join(sandbox, "capture.png"), "new capture");
+	assert.deepEqual(fileStates([alias], sandbox), before);
+	// Changes outside the sandbox must still be detected
+	fs.writeFileSync(watched, "changed outside the sandbox");
+	assert.notDeepEqual(fileStates([alias], sandbox), before);
 }));
 
 test("an entry point that cannot be resolved is compared as written", () => temporary(dir => {

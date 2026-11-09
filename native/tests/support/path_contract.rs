@@ -32,20 +32,30 @@ pub fn path_flags() -> Vec<&'static str> {
 
 /// One profile command's positional inputs: its name, the names of its inputs in order, and how
 /// many of them are required.
-type PositionalPaths = (&'static str, Vec<&'static str>, usize);
+type PositionalPaths<'a> = (&'a str, Vec<&'a str>, usize);
 
 /// The production table of positional profile paths, read from the source that checks them. Each
 /// entry is one line, for example `("diff", &["before", "after"], 2),`.
-pub fn positional_paths() -> Vec<PositionalPaths> {
-    let source = include_str!("../../src/profile_cli.rs");
+pub fn positional_paths() -> Vec<PositionalPaths<'static>> {
+    read_positional_paths(include_str!("../../src/profile_cli.rs"))
+}
+
+/// The table of positional paths in `source`, which may have either kind of line ending: GitHub's
+/// Windows runners check the source out with CRLF.
+fn read_positional_paths(source: &str) -> Vec<PositionalPaths<'_>> {
     let table = source
         .split_once("const POSITIONAL_PATHS:")
         .unwrap()
         .1
-        .split_once("\n];")
+        .split_once("];")
         .unwrap()
         .0;
-    let entries = table.lines().filter(|line| line.trim().starts_with('('));
+    // End the table at `];` and let `lines` take the line endings off. Ending it at `\n];` would
+    // leave a `\r` after the last entry on a CRLF checkout, and the count would not parse.
+    let entries = table
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('('));
     entries
         .map(|entry| {
             // The command comes first among the strings, then the input names
@@ -551,6 +561,45 @@ fn service_endpoints(service: &str) -> BTreeSet<&str> {
         }
     }
     endpoints
+}
+
+/// The inventories read production source, and a checkout may give that source either line
+/// ending, so each of them must read the same from LF and from CRLF text.
+#[test]
+fn source_inventory_ignores_line_endings() {
+    // A small service with one flag, one endpoint, a parser and a test module to leave out
+    const SERVICE: &str = concat!(
+        "fn dispatch() {\n",
+        "    let flag = \"--offline\";\n",
+        "    match request {\n",
+        "        (\"GET\", \"/health\") => (),\n",
+        "    }\n",
+        "}\n",
+        "#[cfg(test)]\n",
+        "mod tests { const FLAG: &str = \"--test-only\"; }"
+    );
+    let profile_source = include_str!("../../src/profile_cli.rs").replace("\r\n", "\n");
+    let expected_paths = read_positional_paths(&profile_source);
+    for ending in ["\n", "\r\n"] {
+        // A file may or may not end with a line ending
+        for final_ending in [false, true] {
+            let mut profile = profile_source.trim_end().replace('\n', ending);
+            if final_ending {
+                profile.push_str(ending);
+            }
+            assert_eq!(read_positional_paths(&profile), expected_paths);
+        }
+        let service = SERVICE.replace('\n', ending);
+        assert_eq!(
+            flags(without_tests(&service)),
+            flags(without_tests(SERVICE))
+        );
+        assert_eq!(service_endpoints(&service), service_endpoints(SERVICE));
+        assert_eq!(
+            parser_fingerprint(parser_body(&service, "fn dispatch()")),
+            parser_fingerprint(parser_body(SERVICE, "fn dispatch()"))
+        );
+    }
 }
 
 /// Inventories the fields that are read, not a second list of path fields: an added field fails

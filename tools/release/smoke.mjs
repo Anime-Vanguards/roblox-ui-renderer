@@ -16,6 +16,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { ROOT, options } from "./version.mjs";
 import { inspect } from "./package.mjs";
+import { fileStates } from "./file-states.mjs";
 
 const args = options(process.argv.slice(2));
 const drawPng = args.png === "true";
@@ -65,24 +66,10 @@ for (const name of ["RUR_STATE_DIR", "RUR_CACHE_DIR", "RUR_REPO", "RUR_PROJECT",
 // The size and modification time of every file in the places a stray write could land: the
 // checkout, the runner's workspace and user folders (as the runner sets them, not the sandbox's), the
 // extracted zip and the project. The sandbox itself is skipped, since the run writes there.
-function fileStates() {
-	const states = new Map();
-	const walk = dir => {
-		if (!dir || !fs.existsSync(dir)) return;
-		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-			const file = path.join(dir, entry.name);
-			if (file === sandbox || entry.isSymbolicLink()) continue;
-			if (entry.isDirectory()) walk(file);
-			else if (entry.isFile()) {
-				const stat = fs.statSync(file);
-				states.set(file, `${stat.size}:${stat.mtimeMs}`);
-			}
-		}
-	};
+function outsideFiles() {
 	const runnerFolders = [ROOT, process.env.GITHUB_WORKSPACE, process.env.HOME, process.env.USERPROFILE, process.env.LOCALAPPDATA];
-	for (const dir of new Set(runnerFolders)) walk(dir);
-	for (const dir of [bin, project]) walk(dir);
-	return states;
+	const watchedFolders = [...runnerFolders, bin, project];
+	return fileStates(watchedFolders, sandbox);
 }
 
 // Runs the executable from inside the project, as a user would, and returns its output
@@ -99,7 +86,7 @@ function expectedStateDir() {
 	return path.join(xdgCache, "rur");
 }
 
-const before = fileStates();
+const before = outsideFiles();
 const executable = path.join(bin, "rur-native" + (process.platform === "win32" ? ".exe" : ""));
 
 assert.equal(run(executable, ["--version"]).stdout.trim(), `rur-native ${args.version}`);
@@ -113,7 +100,7 @@ if (drawPng) assert.equal(fs.readFileSync(path.join(out, "render.png")).subarray
 
 assert.ok(!fs.existsSync(path.join(project, ".cache")));
 assert.ok(fs.existsSync(expectedStateDir()), "the per-user cache folder was created");
-assert.deepEqual(fileStates(), before, "files changed outside the redirected cache, the output and the temporary folders");
+assert.deepEqual(outsideFiles(), before, "files changed outside the redirected cache, the output and the temporary folders");
 
 console.log(`release smoke: ${args.version}, standalone story, ${drawPng ? "PNG" : "scene export"}, redirected cache, input/user files unchanged`);
 console.log(`smoke output: ${sandbox}`);

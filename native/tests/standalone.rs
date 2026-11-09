@@ -1200,6 +1200,18 @@ fn mentions_path(text: &str, path: &Path) -> bool {
     forward(text).contains(&forward(path.to_str().unwrap()))
 }
 
+/// Asserts that a capture's JSON answer names the folder `expected`. The two are compared by
+/// their resolved locations: when the working directory is reached through a link (macOS's /var,
+/// or a linked temporary folder on Linux), the binary may report the link or its target.
+fn assert_reports_output(stdout: &[u8], expected: &Path) {
+    let answer: serde_json::Value = serde_json::from_slice(stdout).unwrap();
+    let reported = Path::new(answer["output"].as_str().unwrap());
+    assert_eq!(
+        reported.canonicalize().unwrap(),
+        expected.canonicalize().unwrap()
+    );
+}
+
 /// A capture without `--out` lands under the state directory and leaves the current directory
 /// alone. The old default `out/native`, named on the command line, is still relative to the
 /// caller: an output the user names is never moved.
@@ -1207,9 +1219,12 @@ fn mentions_path(text: &str, path: &Path) -> bool {
 #[ignore = "requires RUR_TEST_STANDALONE_BINARY from a marked release build"]
 fn installed_default_captures_and_batch_summaries_stay_in_state() {
     let install = Installation::new("default-output");
-    // Run from a folder of its own, so anything written beside the caller shows up in it
+    // Run from a folder of its own, so anything written beside the caller shows up in it. It is
+    // reached through a link, as a working directory may be (macOS's temporary folders are links).
+    let real_cwd = install.dir.join("working");
     let cwd = install.dir.join("cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::create_dir_all(&real_cwd).unwrap();
+    link_directory(&real_cwd, &cwd);
     let state = install.cache.join("state");
     let story = install.project.join("story.luau");
     for explicit in [false, true] {
@@ -1249,8 +1264,7 @@ fn installed_default_captures_and_batch_summaries_stay_in_state() {
         for file in ["render.png", "scene.json", "benchmark.json"] {
             assert!(out.join(file).is_file(), "{}", out.join(file).display());
         }
-        let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(Path::new(answer["output"].as_str().unwrap()), out);
+        assert_reports_output(&output.stdout, &out);
         if explicit {
             assert!(out.join(".frames").is_dir());
         } else {
@@ -1276,6 +1290,33 @@ fn installed_default_captures_and_batch_summaries_stay_in_state() {
         &summary
     ));
     assert!(!install.project.join("out").exists());
+
+    // A checkout build resolves a relative output against --repo. With the (linked) working
+    // directory as that repo, it reports the same folder as the installed build does.
+    let checkout = Path::new(env!("CARGO_BIN_EXE_rur-native"));
+    let output = installed(checkout, &cwd, &install.cache)
+        .env("RUR_STATE_DIR", &state)
+        .args([
+            "--headless",
+            "--repo",
+            ".",
+            "--out",
+            "out/native",
+            "--viewport",
+            "32x32",
+            "--time",
+            "0",
+            "--project",
+        ])
+        .arg(&install.project)
+        .arg("--roots")
+        .arg(install.project.join("src"))
+        .arg("--story")
+        .arg(&story)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_reports_output(&output.stdout, &real_cwd.join("out/native"));
 }
 
 /// The tail of a story: it draws the frame `assert_story_ran` looks for.

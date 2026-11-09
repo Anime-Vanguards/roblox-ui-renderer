@@ -24,6 +24,7 @@ on:
       - native/.cargo/config.toml
       - native/build.rs
       - native/tests/standalone.rs
+      - native/tests/support/**
       - tools/native-app/build.mjs
       - tools/native-host/**
       # The license and notice files the zip ships
