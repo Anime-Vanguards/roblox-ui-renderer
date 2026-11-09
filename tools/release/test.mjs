@@ -10,7 +10,7 @@ import { ROOT, isMain, version } from "./version.mjs";
 import { crc32, inspect, packageRelease } from "./package.mjs";
 import { legalFiles, licenses, normalPackages } from "./licenses.mjs";
 import { notes } from "./notes.mjs";
-import { fileStates } from "./file-states.mjs";
+import { fileStates, outsideFileStates } from "./file-states.mjs";
 
 // Runs `run` with an empty temporary folder and removes it afterwards
 function temporary(run) {
@@ -68,7 +68,7 @@ test("smoke file inventory excludes a sandbox through linked temporary roots", (
 
 	// Reached through the link, the folder lists its files by their real paths, without the sandbox
 	const before = fileStates([alias], sandbox);
-	assert.deepEqual([...before.keys()], [watched]);
+	assert.deepEqual([...before.keys()], [real, watched]);
 	// A root named twice, and a sandbox named through the link, change nothing
 	assert.deepEqual(fileStates([real, alias], path.join(alias, "sandbox")), before);
 	// What the run writes into the sandbox is not a change
@@ -77,6 +77,90 @@ test("smoke file inventory excludes a sandbox through linked temporary roots", (
 	// Changes outside the sandbox must still be detected
 	fs.writeFileSync(watched, "changed outside the sandbox");
 	assert.notDeepEqual(fileStates([alias], sandbox), before);
+}));
+
+test("smoke watches inputs and real rur locations without walking runner bookkeeping", t => temporary(dir => {
+	// A made-up runner. Each real location is its own folder, so a write is traced to the one it hit.
+	const base = fs.realpathSync(dir);
+	const folder = name => {
+		const file = path.join(base, name);
+		fs.mkdirSync(file, { recursive: true });
+		return file;
+	};
+	const checkout = folder("checkout");
+	const workspace = folder("workspace");
+	const home = folder("home"); // HOME
+	const profile = folder("profile"); // USERPROFILE
+	const systemHome = folder("system-home"); // what os.homedir() returns
+	const local = folder("local");
+	const xdg = folder("xdg");
+	const temp = folder("temp");
+	const otherTemp = folder("other-temp");
+	const sandbox = folder("temp/rur-release-smoke-test");
+	const bin = folder("temp/rur-release-smoke-test/bin");
+	const project = folder("temp/rur-release-smoke-test/project");
+	const runnerLogs = folder("home/runners/version/_diag");
+	const unrelatedCache = folder("local/another-tool");
+	const env = { HOME: home, USERPROFILE: profile, LOCALAPPDATA: local, XDG_CACHE_HOME: xdg, TMPDIR: otherTemp, TMP: temp, TEMP: temp };
+	const inputs = [checkout, workspace, bin, project];
+	const snapshot = () => outsideFileStates(inputs, sandbox, { env, home: systemHome, temp });
+	const before = snapshot();
+
+	// Reading either noisy folder recursively would fail, even if none of its files changed.
+	const readDirectory = fs.readdirSync;
+	t.mock.method(fs, "readdirSync", (file, ...args) => {
+		assert.ok(![runnerLogs, path.dirname(runnerLogs), unrelatedCache].includes(file), `walked unrelated folder: ${file}`);
+		return readDirectory(file, ...args);
+	});
+	fs.writeFileSync(path.join(runnerLogs, "Worker.log"), "runner bookkeeping changed");
+	fs.writeFileSync(path.join(unrelatedCache, "state"), "another tool wrote here");
+	fs.writeFileSync(path.join(temp, "runner.log"), "unrelated temporary file");
+	fs.writeFileSync(path.join(sandbox, "output.png"), "allowed output");
+	assert.deepEqual(snapshot(), before);
+
+	// A file written in `root` must show up as new, then as changed, then as removed
+	function assertFileChangesAreSeen(root) {
+		const previous = snapshot();
+		fs.mkdirSync(root, { recursive: true });
+		const file = path.join(root, "state");
+		fs.writeFileSync(file, "first");
+		const created = snapshot();
+		assert.notDeepEqual(created, previous, root);
+		assert.ok(created.has(file), root);
+		fs.writeFileSync(file, "changed contents");
+		const changed = snapshot();
+		assert.notDeepEqual(changed, created, root);
+		fs.unlinkSync(file);
+		assert.notDeepEqual(snapshot(), changed, root);
+	}
+
+	// An empty folder, then a file, directly in `root` must show up and leave no trace once removed.
+	// In a temporary folder only an entry with a rur name counts.
+	function assertStrayEntriesAreSeen(root) {
+		const [folderName, fileName] = root === temp ? ["rur-empty", "rur-spool.txt"] : [".stray-folder", ".stray-file"];
+		const previous = snapshot();
+		const empty = path.join(root, folderName);
+		fs.mkdirSync(empty);
+		assert.notDeepEqual(snapshot(), previous);
+		assert.equal(snapshot().get(empty), "directory");
+		fs.rmdirSync(empty);
+		assert.deepEqual(snapshot(), previous);
+		const file = path.join(root, fileName);
+		fs.writeFileSync(file, "stray output");
+		assert.notDeepEqual(snapshot(), previous);
+		fs.unlinkSync(file);
+		assert.deepEqual(snapshot(), previous);
+	}
+
+	// Every input root and each real fallback cache must catch a file's creation, change and removal
+	const caches = [
+		...[home, profile, systemHome].flatMap(file => [path.join(file, ".cache/rur"), path.join(file, "Library/Caches/rur")]),
+		path.join(local, "rur"), path.join(xdg, "rur"),
+	];
+	const rurTemporaryEntries = [path.join(temp, "rur-spool"), path.join(otherTemp, "RUR-worker")];
+	for (const root of [...inputs, ...caches, ...rurTemporaryEntries]) assertFileChangesAreSeen(root);
+	// Each real home, and the temporary folder, also catch entries made directly in them
+	for (const root of [home, profile, systemHome, temp]) assertStrayEntriesAreSeen(root);
 }));
 
 test("an entry point that cannot be resolved is compared as written", () => temporary(dir => {
@@ -90,6 +174,138 @@ test("an entry point that cannot be resolved is compared as written", () => temp
 		process.argv[1] = original;
 	}
 }));
+
+test("smoke ignores only Windows profile bookkeeping in the real homes", t => temporary(dir => {
+	const base = fs.realpathSync(dir);
+	const homes = ["home", "profile", "system-home"].map(name => path.join(base, name));
+	const sandbox = path.join(base, "sandbox");
+	const temp = path.join(base, "temp");
+	for (const folder of [...homes, sandbox, temp]) fs.mkdirSync(folder);
+	const env = { HOME: homes[0], USERPROFILE: homes[1] };
+	const snapshot = () => outsideFileStates([], sandbox, { env, home: homes[2], temp, platform: "win32" });
+	const before = snapshot();
+	const hive = "NtUsEr.DaT{00000000-0000-0000-0000-000000abcdef}";
+	const names = [
+		"NTUSER.DAT", "ntuser.dat.LOG", "ntuser.dat.LOG1", "ntuser.dat.LOG2", "NtUsEr.InI",
+		`${hive}.TM.blf`, `${hive}.TMContainer00000000000000000001.regtrans-ms`,
+		`${hive}.tmcontainer00000000000000000002.REGTRANS-MS`,
+	];
+	const bookkeeping = new Set(homes.flatMap(home => names.map(name => path.join(home, name))));
+	// A hive can also be locked by Windows. The inventory must skip it before trying to stat it.
+	const stat = fs.statSync;
+	t.mock.method(fs, "statSync", (file, ...args) => {
+		assert.ok(!bookkeeping.has(file), "read Windows profile bookkeeping");
+		return stat(file, ...args);
+	});
+	for (const file of bookkeeping) fs.writeFileSync(file, "registry created");
+	assert.deepEqual(snapshot(), before);
+	for (const file of bookkeeping) fs.appendFileSync(file, " and flushed");
+	assert.deepEqual(snapshot(), before);
+	for (const file of bookkeeping) fs.unlinkSync(file);
+	assert.deepEqual(snapshot(), before);
+
+	// Similar names and arbitrary log files still count, in every home, including changes/removals.
+	const watchedNames = [
+		".stray-file", "ntuser.dat.extra", "ntuser.dat.LOG3", "other.blf", "other.regtrans-ms",
+		"ntuser.dat{not-a-guid}.TM.blf", `${hive}.TMContainer1.regtrans-ms`, `${hive}.TM.blf.extra`,
+	];
+	for (const home of homes) {
+		for (const name of watchedNames) {
+			const file = path.join(home, name);
+			fs.writeFileSync(file, "stray output");
+			const created = snapshot();
+			assert.notDeepEqual(created, before, name);
+			fs.appendFileSync(file, " changed");
+			const changed = snapshot();
+			assert.notDeepEqual(changed, created, name);
+			fs.unlinkSync(file);
+			assert.notDeepEqual(snapshot(), changed, name);
+			assert.deepEqual(snapshot(), before);
+		}
+		// Even an exact registry name is suspicious when it is a directory.
+		const folder = path.join(home, "NTUSER.DAT");
+		bookkeeping.delete(folder);
+		fs.mkdirSync(folder);
+		assert.equal(snapshot().get(folder), "directory");
+		fs.rmdirSync(folder);
+	}
+}));
+
+test("smoke keeps registry filenames watched on other platforms and in recursive roots", () => temporary(dir => {
+	const base = fs.realpathSync(dir);
+	const sandbox = path.join(base, "sandbox");
+	const home = path.join(base, "home");
+	const temp = path.join(base, "temp");
+	const input = path.join(base, "input");
+	const cache = path.join(home, ".cache/rur");
+	const spool = path.join(temp, "rur-spool");
+	for (const folder of [sandbox, home, temp, input, cache, spool]) fs.mkdirSync(folder, { recursive: true });
+	for (const [platform, roots, folder] of [
+		["linux", [], home], ["darwin", [], home],
+		["win32", [input], input], ["win32", [], cache], ["win32", [], spool], ["win32", [home], home],
+	]) {
+		const snapshot = () => outsideFileStates(roots, sandbox, { env: {}, home, temp, platform });
+		const before = snapshot();
+		const file = path.join(folder, "NTUSER.DAT");
+		fs.writeFileSync(file, "watched contents");
+		assert.notDeepEqual(snapshot(), before);
+		fs.unlinkSync(file);
+	}
+}));
+
+// Each hook removes an entry exactly when the inventory reads it, without depending on timing.
+for (const [name, method, relative, directory] of [
+	["listed input file", "statSync", "input/state", false],
+	["listed home file", "statSync", "home/state", false],
+	["listed input directory", "statSync", "input/empty", true],
+	["listed home directory", "statSync", "home/empty", true],
+	["input root before stat", "statSync", "input", true],
+	["input root before resolution", "realpathSync", "input", true],
+	["input directory before listing", "readdirSync", "input/empty", true],
+	["input root before listing", "readdirSync", "input", true],
+	["home root before resolution", "realpathSync", "home", true],
+	["home root before listing", "readdirSync", "home", true],
+	["temporary entry before resolution", "realpathSync", "temp/rur-entry", false],
+	["temporary root before listing", "readdirSync", "temp", true],
+	["cache root before stat", "statSync", "home/.cache/rur", true],
+]) {
+	test(`smoke treats a vanished ${name} as absent and preserves other errors`, t => temporary(dir => {
+		const base = fs.realpathSync(dir);
+		const sandbox = path.join(base, "sandbox");
+		const input = path.join(base, "input");
+		const home = path.join(base, "home");
+		const temp = path.join(base, "temp");
+		for (const folder of [sandbox, input, home, temp]) fs.mkdirSync(folder);
+		const file = path.join(base, relative);
+		function createEntry() {
+			if (directory) fs.mkdirSync(file, { recursive: true });
+			else fs.writeFileSync(file, "temporary contents");
+		}
+		createEntry();
+		const read = fs[method];
+		let removed = false;
+		let failure;
+		t.mock.method(fs, method, (target, ...args) => {
+			if (target === file) {
+				if (failure) throw failure;
+				if (!removed) {
+					if (directory) fs.rmdirSync(file);
+					else fs.unlinkSync(file);
+					removed = true;
+				}
+			}
+			return read(target, ...args);
+		});
+		const snapshot = () => outsideFileStates([input], sandbox, { env: {}, home, temp, platform: "linux" });
+		assert.ok(!snapshot().has(file), "the vanished entry must not leave a directory marker either");
+		assert.ok(removed, "the deterministic removal hook ran");
+		createEntry();
+		for (const code of ["EACCES", "EIO", "ENOTDIR"]) {
+			failure = Object.assign(new Error("inventory read failed"), { code });
+			assert.throws(snapshot, error => error === failure);
+		}
+	}));
+}
 
 test("installer ZIP is flat, binary first, only one executable, with license and exact source", () => temporary(dir => {
 	assert.equal(crc32(Buffer.from("123456789")), 0xcbf43926); // the standard CRC-32 check value

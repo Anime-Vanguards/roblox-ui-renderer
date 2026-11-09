@@ -5,6 +5,7 @@
 //! fields in the source instead, and fails until each one is either a checked path or listed here
 //! as a value that is not a path. The installed tests take their option list from the production
 //! table (`path_flags`), never from a copy.
+use super::process::LockedLaunch;
 use std::{collections::BTreeSet, path::Path};
 
 /// The string literals of `source`: the pieces between an opening and a closing quote.
@@ -343,7 +344,7 @@ fn engine_dir(native: &Path) -> std::path::PathBuf {
     let output = std::process::Command::new(env!("CARGO"))
         .current_dir(native)
         .args(["metadata", "--locked", "--format-version", "1"])
-        .output()
+        .output_locked()
         .unwrap();
     assert!(
         output.status.success(),

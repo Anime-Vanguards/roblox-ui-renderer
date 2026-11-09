@@ -45,6 +45,34 @@ outside the checkout and runs it as an installed copy would run. The workflow us
 `--png false` still runs the story, lays it out and exports the scene and local assets, but skips GPU
 drawing, which the Windows runners cannot do.
 
+Before and after the commands, the smoke inventories the checkout, `GITHUB_WORKSPACE`, the extracted
+binary's folder and the copied project recursively. These are the input checks used by the other
+release smoke scripts too. It excludes the sandbox when walking an outside root, while still checking
+the binary and project explicitly inside it.
+
+To catch leaked redirection, it also watches the real user's `.cache/rur`, `Library/Caches/rur`,
+`$XDG_CACHE_HOME/rur` and `%LOCALAPPDATA%/rur` recursively. Home means `os.homedir()`, `HOME` and
+`USERPROFILE` before redirection, with duplicates removed. Their top-level files and directory names
+are checked without descending into unrelated folders. Finally, entries whose names start with `rur`
+(case insensitive) in the real temporary folders (`os.tmpdir()`, `TMPDIR`, `TMP`, `TEMP`) are checked
+recursively, except this smoke's sandbox. The list is rebuilt after the run to catch newly created
+cache and temp entries, including empty directories. Directory timestamps are not compared.
+
+On Windows only, the shallow home listings skip `NTUSER.DAT` (the user registry hive),
+`ntuser.dat.LOG`, `ntuser.dat.LOG1` and `ntuser.dat.LOG2` (hive recovery logs), `ntuser.ini`
+(profile metadata), and the hive's transaction files: `NTUSER.DAT{GUID}.TM.blf` and
+`NTUSER.DAT{GUID}.TMContainer<20 digits>.regtrans-ms`. These names are case insensitive; Windows
+updates these files itself. Other home entries, including similarly named files and directories,
+remain watched. The exclusions do not apply to recursive input, cache or temporary roots.
+
+An entry removed while a snapshot resolves its path, reads its metadata or lists it is absent from
+that snapshot.
+Only `ENOENT` is ignored; permission, I/O and other errors still stop the smoke.
+
+This catches writes to rur's fallback locations and new home dotfiles or folders without walking the
+runner's diagnostic logs under `~/runners/<version>/_diag` or other unrelated user data. It does not
+claim to monitor every arbitrary path on the runner.
+
 ## Installed release validation
 
 `native/tests/standalone.rs` has two kinds of tests:

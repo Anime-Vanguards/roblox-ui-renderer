@@ -11,6 +11,10 @@
 //! commands. Only this suite reads that variable, never the renderer.
 use std::{path::Path, process::Command};
 
+#[path = "support/process.rs"]
+mod process;
+use process::{copy_executable, LockedLaunch};
+
 #[path = "support/path_contract.rs"]
 mod path_contract;
 
@@ -79,7 +83,7 @@ fn render_source(
         .arg("--dir")
         .arg(out)
         .args(more);
-    let output = command.output().unwrap();
+    let output = command.output_locked().unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -161,7 +165,7 @@ impl Installation {
         for folder in [exe.parent().unwrap(), &project, &cache] {
             std::fs::create_dir_all(folder).unwrap();
         }
-        std::fs::copy(binary, &exe).unwrap();
+        copy_executable(binary, &exe).unwrap();
         write_project(&project);
         Self {
             dir,
@@ -352,7 +356,7 @@ fn link_directory(target: &Path, alias: &Path) {
             .args(["/d", "/c", "mklink", "/J"])
             .arg(alias)
             .arg(target)
-            .output()
+            .output_locked()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
     }
@@ -381,7 +385,7 @@ fn install_cached_copy(install: &Installation, exe: &Path) -> std::path::PathBuf
     let app = install.cache.join("native-app");
     std::fs::create_dir_all(&app).unwrap();
     let cached = app.join(install.exe.file_name().unwrap());
-    std::fs::copy(exe, &cached).unwrap();
+    copy_executable(exe, &cached).unwrap();
     let manifest = serde_json::json!({
         "schema": 1,
         "executable": cached.file_name().unwrap().to_str().unwrap(),
@@ -408,7 +412,7 @@ fn run_batch(mut command: Command, jobs: &[serde_json::Value]) {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .spawn()
+        .spawn_locked()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
     for job in jobs {
@@ -554,7 +558,7 @@ fn checkout_copies_keep_root_based_assets_and_batch_state_without_startup_cache(
         let output = command()
             .arg("engine")
             .args(engine_arguments(&single_out))
-            .output()
+            .output_locked()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
         let scene = serde_json::from_slice(&std::fs::read(single_out).unwrap()).unwrap();
@@ -607,7 +611,7 @@ fn checkout_headless_keeps_the_first_roots_parent_as_the_asset_base() {
         .arg(story)
         .args(["--viewport", "32x32", "--out"])
         .arg(&out)
-        .output()
+        .output_locked()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let scene = serde_json::from_slice(&std::fs::read(out.join("scene.json")).unwrap()).unwrap();
@@ -640,7 +644,7 @@ fn installed_headless_uses_the_selected_project_for_local_images() {
         .arg(&story)
         .args(["--viewport", "64x64", "--out"])
         .arg(&out)
-        .output()
+        .output_locked()
         .unwrap();
     assert!(
         output.status.success(),
@@ -893,7 +897,7 @@ fn installed_batch_jobs_keep_the_startup_choice() {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .spawn()
+        .spawn_locked()
         .unwrap();
     let bad_arguments = serde_json::json!({"argv": ["--time", "invalid"]});
     let live_session = serde_json::json!({"argv": ["--session", "1"]});
@@ -967,7 +971,7 @@ fn installed_missing_user_cache_reports_an_error_without_panicking() {
         }
         let output = command
             .args(["render", "--no-png", "--story", "story.luau"])
-            .output()
+            .output_locked()
             .unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
@@ -1081,7 +1085,7 @@ fn installed_service_stories_use_the_current_or_environment_project() {
                 .args(["serve", "--port", &port.to_string(), "--idle", "30"])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .spawn()
+                .spawn_locked()
                 .unwrap(),
         );
         let body = get_stories(port);
@@ -1100,7 +1104,7 @@ fn installed_copy_uses_user_cache_and_current_project_without_node() {
     let bin = install.exe.parent().unwrap();
 
     // --version needs no project, state directory or Node
-    let version = install.command().arg("--version").output().unwrap();
+    let version = install.command().arg("--version").output_locked().unwrap();
     assert!(version.status.success());
     assert_eq!(
         String::from_utf8(version.stdout).unwrap().trim(),
@@ -1172,7 +1176,7 @@ fn installed_saved_frames_stay_inside_the_named_output() {
         .arg(&out)
         .arg("--story")
         .arg(install.project.join("story.luau"))
-        .output()
+        .output_locked()
         .unwrap();
     assert!(
         output.status.success(),
@@ -1254,7 +1258,7 @@ fn installed_default_captures_and_batch_summaries_stay_in_state() {
                 "--save-frames",
             ]);
         }
-        let output = command.output().unwrap();
+        let output = command.output_locked().unwrap();
         assert!(output.status.success(), "{output:?}");
         let out = if explicit {
             cwd.join("out/native")
@@ -1280,7 +1284,7 @@ fn installed_default_captures_and_batch_summaries_stay_in_state() {
         .env("RUR_STATE_DIR", &state)
         .arg("--batch")
         .arg(&batch)
-        .output()
+        .output_locked()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let summary = state.join("out/native/batch.json");
@@ -1313,7 +1317,7 @@ fn installed_default_captures_and_batch_summaries_stay_in_state() {
         .arg(install.project.join("src"))
         .arg("--story")
         .arg(&story)
-        .output()
+        .output_locked()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     assert_reports_output(&output.stdout, &real_cwd.join("out/native"));
@@ -1354,7 +1358,7 @@ fn installed_headless_selects_its_place_through_a_linked_root() {
             .arg(&story)
             .arg("--out")
             .arg(&out)
-            .output()
+            .output_locked()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
         let scene =
@@ -1784,7 +1788,7 @@ fn compare_recordings(
             .arg(&install.project)
             .args(["--roots", roots, "--no-snapshots"])
             .args(more)
-            .output()
+            .output_locked()
             .unwrap();
         // The recorder can exit successfully when its harness failed, so check what it saved
         assert_recording_ran(&output, &out, "edit");
@@ -1919,7 +1923,7 @@ fn installed_record_rejects_incomplete_output_flags() {
                         .env_remove("REE_PROFILE")
                         .args(["--profile", "caches"]);
                 }
-                assert_option_error(&command.args(&arguments).output().unwrap(), flag);
+                assert_option_error(&command.args(&arguments).output_locked().unwrap(), flag);
             }
         }
     }
@@ -1955,7 +1959,7 @@ fn installed_profile_rejects_incomplete_output_flags() {
                 .current_dir(&cwd)
                 .env("RUR_STATE_DIR", &state)
                 .args(arguments)
-                .output()
+                .output_locked()
                 .unwrap();
             assert_option_error(&output, "--out");
         }
@@ -1987,7 +1991,7 @@ fn run_profile(
         .env("RUR_STATE_DIR", state)
         .args(["profile", command])
         .args(arguments)
-        .output()
+        .output_locked()
         .unwrap()
 }
 
@@ -2056,7 +2060,7 @@ fn checkout_profile_empty_inputs_keep_the_current_folder() {
             .env("RUR_STATE_DIR", &install.cache)
             .args(["profile", command])
             .args(vec![""; input_count])
-            .output()
+            .output_locked()
             .unwrap();
         assert!(output.status.success(), "{command}: {output:?}");
         // The page is written beside the profile that was found in the current folder
@@ -2106,7 +2110,7 @@ fn installed_render_rejects_incomplete_controls_before_profiling() {
                     .env_remove("REE_PROFILE")
                     .args(["--profile", "caches"]);
             }
-            let output = command.args(&arguments).output().unwrap();
+            let output = command.args(&arguments).output_locked().unwrap();
             assert_option_error(&output, "--controls");
         }
     }
@@ -2136,7 +2140,7 @@ fn installed_file_or_json_options_keep_inline_json() {
         .args(["--mode", "edit", "--seconds", "0.01", "--fps", "1"])
         .args(["--context", "{}", "--out"])
         .arg(&out)
-        .output()
+        .output_locked()
         .unwrap();
     assert_recording_ran(&recording, &out, "edit");
 }
@@ -2164,7 +2168,7 @@ fn installed_headless_batch_rejects_unusable_paths_before_outputs() {
                 .arg(&manifest)
                 .arg("--out")
                 .arg(&summary_out)
-                .output()
+                .output_locked()
                 .unwrap();
             assert!(!output.status.success(), "{output:?}");
             let error = String::from_utf8_lossy(&output.stderr);
@@ -2197,7 +2201,7 @@ fn installed_commands_reject_incomplete_path_flags() {
                     .env("RUR_STATE_DIR", &state)
                     .arg(subcommand)
                     .args(arguments)
-                    .output()
+                    .output_locked()
                     .unwrap();
                 assert_option_error(&output, flag);
             }
@@ -2225,7 +2229,7 @@ fn installed_batch_rejects_incomplete_path_flags() {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .spawn()
+        .spawn_locked()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
     // The flag each job is expected to be refused for, in the order the jobs are sent
@@ -2309,7 +2313,7 @@ fn checkout_profile_reports_keep_their_original_output_defaults() {
     write_profile(&file);
     for subcommand in ["report", "diff"] {
         let output = profile_command(&install, subcommand, &file)
-            .output()
+            .output_locked()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
     }
@@ -2344,7 +2348,7 @@ fn installed_profile_defaults_stay_in_state_and_honor_named_outputs() {
             } else {
                 state.join("out").join(format!("profile-{subcommand}"))
             };
-            let output = run.output().unwrap();
+            let output = run.output_locked().unwrap();
             assert!(output.status.success(), "{output:?}");
             assert!(out.join(profile_page(subcommand)).is_file());
         }
@@ -2367,7 +2371,7 @@ fn installed_profile_defaults_stay_in_state_and_honor_named_outputs() {
         .arg("--harness")
         .arg(&harness)
         .args(["--profile", "caches"])
-        .output()
+        .output_locked()
         .unwrap();
     assert!(!output.status.success());
     assert!(!cwd.join("ree-profile").exists());
@@ -2396,7 +2400,7 @@ fn installed_profile_defaults_stay_in_state_and_honor_named_outputs() {
             "--dump-scene",
         ])
         .arg(&out)
-        .output()
+        .output_locked()
         .unwrap();
     assert_recording_ran(&output, &out, "play");
     assert!(out.join("profile/profile.json").is_file());
@@ -2476,7 +2480,7 @@ fn installed_record_environment_profiles_use_standalone_defaults() {
                 command.arg(option).arg(&out);
             }
 
-            let output = command.output().unwrap();
+            let output = command.output_locked().unwrap();
             let recorded = output_option.is_some();
             if recorded {
                 assert_recording_ran(&output, &out, "edit");
@@ -2558,7 +2562,7 @@ fn installed_record_profiles_honor_environment_outputs() {
                         command.arg("--out").arg(&out);
                     }
 
-                    let output = command.output().unwrap();
+                    let output = command.output_locked().unwrap();
                     if names_recording_output {
                         assert_recording_ran(&output, &out, "edit");
                     } else {
@@ -2657,7 +2661,7 @@ fn installed_service_rejects_unusable_paths_before_work() {
             .args(["serve", "--port", &port.to_string(), "--idle", "120"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn()
+            .spawn_locked()
             .unwrap(),
     );
     get_stories(port);
@@ -2816,7 +2820,7 @@ fn service_place_requests(name: &str, requests: &[PlaceRequest]) {
             .args(["serve", "--port", &port.to_string(), "--idle", "60"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn()
+            .spawn_locked()
             .unwrap(),
     );
     get_stories(port);
@@ -2916,7 +2920,7 @@ fn service_kept_project_changes(name: &str, expression: &str, choices: &[Project
             .args(["serve", "--port", &port.to_string(), "--idle", "60"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn()
+            .spawn_locked()
             .unwrap(),
     );
     get_stories(port);
@@ -3070,7 +3074,7 @@ fn installed_batch_reuses_matching_environments_and_preserves_job_errors() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .spawn_locked()
         .unwrap();
     // The fixture fails unless the job runs in the runner's own process
     let fixture = install.project.join("process.luau");
@@ -3155,7 +3159,7 @@ fn installed_batch_child_stops_when_the_runner_is_killed() {
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
-            .spawn()
+            .spawn_locked()
             .unwrap(),
     );
     let mut input = runner.0.stdin.take().unwrap();
@@ -3202,7 +3206,7 @@ fn installed_batch_preserves_child_startup_errors() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .spawn_locked()
         .unwrap();
     let mut input = runner.stdin.take().unwrap();
     writeln!(input, "{}", serde_json::json!({"argv": [], "env": {}})).unwrap();

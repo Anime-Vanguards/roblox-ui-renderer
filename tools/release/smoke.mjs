@@ -16,7 +16,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { ROOT, options } from "./version.mjs";
 import { inspect } from "./package.mjs";
-import { fileStates } from "./file-states.mjs";
+import { outsideFileStates } from "./file-states.mjs";
 
 const args = options(process.argv.slice(2));
 const drawPng = args.png === "true";
@@ -63,13 +63,13 @@ const env = {
 };
 for (const name of ["RUR_STATE_DIR", "RUR_CACHE_DIR", "RUR_REPO", "RUR_PROJECT", "RUR_OUT_DIR"]) delete env[name];
 
-// The size and modification time of every file in the places a stray write could land: the
-// checkout, the runner's workspace and user folders (as the runner sets them, not the sandbox's), the
-// extracted zip and the project. The sandbox itself is skipped, since the run writes there.
+// The files outside the sandbox that a stray write could change: the checkout, the runner's
+// workspace, the extracted binary and the project (the last two are inside the sandbox, so they are
+// named here), plus the real cache and temporary locations. See outsideFileStates for what is
+// watched and why the home folders are not walked. The real locations are read from process.env,
+// which the redirection in `env` above leaves alone.
 function outsideFiles() {
-	const runnerFolders = [ROOT, process.env.GITHUB_WORKSPACE, process.env.HOME, process.env.USERPROFILE, process.env.LOCALAPPDATA];
-	const watchedFolders = [...runnerFolders, bin, project];
-	return fileStates(watchedFolders, sandbox);
+	return outsideFileStates([ROOT, process.env.GITHUB_WORKSPACE, bin, project], sandbox);
 }
 
 // Runs the executable from inside the project, as a user would, and returns its output
