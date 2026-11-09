@@ -418,7 +418,8 @@ fn run_case(engine: &mut TextEngine, faces: &mut Faces, case: &Map<String, Value
 }
 
 /// runtime/tests/hinted.luau's check: SourceSans Pro Regular's "…" has a hinted advance of 24 px at
-/// 30 px (the hinted-metric cache, generated in process when missing).
+/// 30 px (the hinted-metric cache, generated in process when missing). The truncation ellipsis no longer
+/// uses it: Studio 0.746 measures it 23 px (data/studio/ellipsis.json SSP_20), its rounded 26.6 advance.
 #[test]
 fn hinted_ellipsis_advance() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -434,7 +435,7 @@ fn hinted_ellipsis_advance() {
     assert_eq!(engine.fonts.hinted_advance(face, 30.0, glyph), Some(24.0));
     assert_eq!(engine.fonts.hinted_advance(face, 30.5, glyph), None);
     let ellipsis = engine.ellipsis(face, 30.0);
-    assert_eq!(ellipsis.1, 24.0);
+    assert_eq!(ellipsis.1, 23.0);
 }
 
 /// A face recorded under one Studio version folder and asset cache is the same face read from another

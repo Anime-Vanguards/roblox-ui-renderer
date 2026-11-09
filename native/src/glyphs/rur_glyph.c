@@ -122,7 +122,9 @@ RurFace *rur_glyph_face_open(RurContext *context, const unsigned char *bytes, si
     FT_Face ft = face->face;
     face->context = context;
     face->flags = unhinted_truetype(ft) ? FT_LOAD_FORCE_AUTOHINT : FT_LOAD_DEFAULT;
-    face->height_units = ft->ascender - ft->descender;
+    /* the line height requested as S + 1 px includes the hhea line gap (layout.rs height_units) */
+    TT_HoriHeader *hhea = (TT_HoriHeader *)FT_Get_Sfnt_Table(ft, FT_SFNT_HHEA);
+    face->height_units = ft->ascender - ft->descender + (hhea ? hhea->Line_Gap : 0);
     face->upm = ft->units_per_EM;
     if (face->flags & FT_LOAD_FORCE_AUTOHINT) unmapped_glyphs_to_fallback_style(context->library, ft);
     /* FreeType 2.14 separates dotted Latin letters natively: rasterize.py's i/j backport is off */
@@ -258,7 +260,7 @@ int rur_glyph_layers(RurFace *face, unsigned glyph, int maximum, unsigned *glyph
 }
 
 /* metrics.py generate: the hinted advance (26.6 / 64) of the truncation glyph (U+2026, else ".") at the
- * physical sizes 1..maximum, the size requested like the renderer's (S + 1) * upm / (ascender - descender).
+ * physical sizes 1..maximum, the size requested like the renderer's (S + 1) * upm / (ascender - descender + lineGap).
  * advances holds maximum doubles. */
 int rur_glyph_truncation_advances(RurFace *face, int maximum, unsigned *glyph_out, double *advances) {
     if (!face || maximum < 1) return -1;

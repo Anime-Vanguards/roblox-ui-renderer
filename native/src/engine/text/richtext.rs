@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use super::fonts::FontRegistry;
-use super::layout::{Glyph, LayoutParams, Prepared, TextLayout, rich_size_for, shape_paragraph};
+use super::layout::{Glyph, LayoutParams, Prepared, TextLayout, rich_size_for, round_pen, shape_paragraph};
 use super::num::{f32r, lmax, tonumber};
 use super::utf8::Codepoint;
 use super::{KeyHasher, TextEngine};
@@ -588,6 +588,7 @@ impl TextEngine {
             flush_segment(&mut segment, &mut paragraphs, &mut self.fonts);
         }
         paragraph_sizes.push(base_size);
+        round_pen(&mut paragraphs);
         RichShaped { paragraphs, paragraph_sizes, cache_key }
     }
 }

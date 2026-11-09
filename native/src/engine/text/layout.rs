@@ -1,8 +1,9 @@
 //! Port of runtime/text/layout.luau: text measurement and line layout in physical pixels,
 //! reproducing Roblox's measured behaviour:
-//!   size S = floor(floor(TextSize) * pixelScale); font ppem = (S + 1) * unitsPerEm / (ascender - descender)
-//!   glyph advance = FT_MulFix(nominal, 16.16 scale) + floor(GPOS adjustment at the HarfBuzz scale),
-//!   in 26.6, rounded half up to a whole pixel.
+//!   size S = floor(floor(TextSize) * pixelScale);
+//!   font ppem = (S + 1) * unitsPerEm / (ascender - descender + lineGap)
+//!   glyph advance = FT_MulFix(nominal, 16.16 scale) + floor(GPOS adjustment at the HarfBuzz scale), in
+//!   26.6; the pen adds the exact advances and is rounded half up to a whole pixel (`round_pen`).
 //! Every measured rule keeps the comment of the Luau reference (and its measurement).
 //! All arithmetic is f64 like Luau numbers; float32 steps go through `f32r`.
 
@@ -296,10 +297,18 @@ pub fn rich_scaled_unfloored(unscaled: f64, pixel_scale: f64, family: Option<&st
     f32r(rescaled * multiplier * pixel_scale)
 }
 
+/// The hhea line height in font units, line gap included: Studio 0.746 sizes a face so that this is
+/// S + 1 px (Arimo, the only Studio face with a line gap: 85/85 TextBounds; earlier versions left the
+/// gap out).
+#[inline]
+pub fn height_units(font: &Font) -> f64 {
+    font.ascender - font.descender + font.line_gap
+}
+
 /// `TextLayout.Ppem`: FreeType's ppem for a line height of S + 1 px.
 #[inline]
 pub fn ppem(font: &Font, size: f64) -> f64 {
-    (size + 1.0) * font.units_per_em / (font.ascender - font.descender)
+    (size + 1.0) * font.units_per_em / height_units(font)
 }
 
 /// `TextLayout.PixelAdvance`.
@@ -312,7 +321,7 @@ pub fn pixel_advance(units: f64, scale: f64) -> f64 {
 /// scale (26.6 units per em) derived from it.
 #[inline]
 pub fn scales(font: &Font, size: f64) -> (f64, f64) {
-    let height = font.ascender - font.descender;
+    let height = height_units(font);
     let x_scale = idiv((size + 1.0) * 64.0 * 65536.0 + idiv(height, 2.0), height);
     let hb_scale = idiv(x_scale * font.units_per_em + 32768.0, 65536.0);
     (x_scale, hb_scale)
@@ -324,13 +333,31 @@ fn mul_fix(a: f64, b: f64) -> f64 {
     if (a < 0.0) != (b < 0.0) { -result } else { result }
 }
 
-/// `TextLayout.GlyphAdvance`. Measured (3570/3570 Studio TextBounds samples, 146/146 prefix widths): a
-/// glyph's advance is the nominal advance scaled with FT_MulFix plus the GPOS adjustment scaled with
-/// the HarfBuzz scale and floored, in 26.6; the pen then moves by that advance rounded half up.
+/// `TextLayout.GlyphAdvance`: a glyph's advance in px, exact in 26.6: the nominal advance scaled with
+/// FT_MulFix plus the GPOS adjustment scaled with the HarfBuzz scale and floored. `round_pen` turns a
+/// text's advances into whole-pixel pen steps.
 #[inline]
 pub fn glyph_advance(nominal: f64, adjustment: f64, x_scale: f64, hb_scale: f64, units_per_em: f64) -> f64 {
-    let advance26 = mul_fix(nominal, x_scale) + idiv(adjustment * hb_scale, units_per_em);
-    idiv(advance26 + 32.0, 64.0)
+    (mul_fix(nominal, x_scale) + idiv(adjustment * hb_scale, units_per_em)) / 64.0
+}
+
+/// The pen moves by the exact 26.6 advances and is rounded half up to whole pixels, rather than each
+/// advance being rounded: every glyph's advance becomes round(pen after it) - round(pen before it). One
+/// pen runs through the whole text, across rich text runs, line breaks and newlines, so a line is
+/// round(pen at its end) - round(pen at its start) px wide. Measured (Studio 0.746, 1.5x): the
+/// text-bounds, sweep and wrap datasets (data/studio/), 528/528 digit strings in four faces at TextSize
+/// 8-40 ("11111" in Montserrat Bold at 18 px is 31, where rounding each 6.11 px advance gives 30),
+/// "1<font>1</font>111" = "11111", and wrapped text after a newline (wrap-1.5x.json 538/540; restarting
+/// the pen per paragraph gives 531, per line 489). Earlier Studio versions rounded each advance.
+pub fn round_pen(paragraphs: &mut [Vec<Glyph>]) {
+    let mut pen = 0.0;
+    let mut rounded = 0.0;
+    for glyph in paragraphs.iter_mut().flatten() {
+        pen += glyph.advance * 64.0;
+        let next = idiv(pen + 32.0, 64.0);
+        glyph.advance = next - rounded;
+        rounded = next;
+    }
 }
 
 /// Code points that continue an emoji sequence: variation selectors, ZWJ, skin tone modifiers, the
@@ -831,6 +858,7 @@ impl TextEngine {
         let mut shaped = Vec::new();
         shape_paragraph(&mut self.fonts, &paragraph, face, size, None, &mut shaped);
         result.push(shaped);
+        round_pen(&mut result);
         self.scratch_codepoints = points;
 
         let value = Arc::new(result);
@@ -851,8 +879,10 @@ impl TextEngine {
         value
     }
 
-    /// `TextLayout.Ellipsis`: the truncation glyphs ("…", else "...") with hinted advances (159/159
-    /// Studio samples across three faces and TextSize 8-60), and their width.
+    /// `TextLayout.Ellipsis`: the truncation glyphs ("…", else "...") and their width. They start a pen of
+    /// their own after the kept text's whole-pixel width: Studio 0.746 reports round(kept pen) +
+    /// round(ellipsis advance) (159/159 samples across three faces and TextSize 8-60; earlier versions
+    /// used FreeType's hinted advance).
     pub fn ellipsis(&mut self, face: FaceId, size: f64) -> Arc<(Vec<Glyph>, f64)> {
         let key = (face, size.to_bits());
         if let Some(found) = self.ellipsis_cache.get(&key) {
@@ -863,19 +893,8 @@ impl TextEngine {
         let points = super::utf8::codepoints(text);
         let mut glyphs = Vec::new();
         shape_paragraph(&mut self.fonts, &points, face, size, None, &mut glyphs);
-        let (x_scale, _) = scales(&font, size);
-        let mut width = 0.0;
-        for glyph in glyphs.iter_mut() {
-            match self.fonts.hinted_advance(glyph.face, size, glyph.glyph) {
-                Some(hinted) => glyph.advance = hinted,
-                None => {
-                    let nominal = font.advance(glyph.glyph) as f64;
-                    let fixed = idiv(nominal.abs() * x_scale + 32768.0, 65536.0);
-                    glyph.advance = (fixed / 64.0).ceil();
-                }
-            }
-            width += glyph.advance;
-        }
+        round_pen(std::slice::from_mut(&mut glyphs));
+        let width = glyphs.iter().map(|glyph| glyph.advance).sum();
         let value = Arc::new((glyphs, width));
         self.ellipsis_cache.insert(key, value.clone());
         value

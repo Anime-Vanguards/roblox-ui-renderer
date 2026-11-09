@@ -292,8 +292,9 @@ fn text_bold_strength(text: &Value, run: Option<&Value>, font: &Value, ppem: f64
     }
     let ascender = to_number(font.get("ascender"));
     let descender = to_number(font.get("descender"));
+    let line_gap = font.get("lineGap").map_or(0.0, |gap| to_number(Some(gap)));
     let units = to_number(font.get("unitsPerEm"));
-    let size = js_round(ppem * (ascender - descender) / units) - 1.0;
+    let size = js_round(ppem * (ascender - descender + line_gap) / units) - 1.0;
     if size > 0.0 { 2.0 * size } else { 0.0 }
 }
 

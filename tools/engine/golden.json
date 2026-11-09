@@ -17,7 +17,7 @@
 			"status": "ok"
 		},
 		"fast/edit/device-probe": {
-			"digest": "1cb7b2031e8977645cbb154ec78b1d9a7e8d26e5d290219e4dbc7d3f45cbdff7",
+			"digest": "40a1b5cd9999b044227cfe2849ad69bc6c57023c835f9f876a53ba7745dd1418",
 			"status": "ok"
 		},
 		"fast/edit/gradient-edges": {
@@ -37,7 +37,7 @@
 			"status": "ok"
 		},
 		"fast/edit/group-misc": {
-			"digest": "026894dbddfdb3b63a14c500e85954000b669ef4f3b999ea9a48946177d59327",
+			"digest": "18c614282d6dc099c4b33541aacf52a6de61a0e54dc6320dacdb1118edd49a09",
 			"status": "ok"
 		},
 		"fast/edit/group-probe-bigarea": {
@@ -109,7 +109,7 @@
 			"status": "ok"
 		},
 		"fast/edit/input-device-flow": {
-			"digest": "00a6c4d784b3fef1296e44959dc97cc81ca131ee78e196246d7176f80d8b57dc",
+			"digest": "dcfdd98c227edd9d9e645b658e294987067324a8e9fcf8587e45c7227cf41952",
 			"status": "ok"
 		},
 		"fast/edit/interaction-autobuttoncolor": {
@@ -117,23 +117,23 @@
 			"status": "ok"
 		},
 		"fast/edit/interaction-scroll": {
-			"digest": "58082d50900869826bcc2998d72368a946b9795db4e800a349f0bf47dae0fe5b",
+			"digest": "9ad513501fbb3d18b49f00f9ca8a1d322875abd09ea2fec4b7156fb3a946d530",
 			"status": "ok"
 		},
 		"fast/edit/interaction-textbox": {
-			"digest": "04717e3a077f5f23e71d0a18d3dd08338883a2600b2d56d32904640b203d1fa0",
+			"digest": "3c904026aa3d1719eaafb5143cc1e755a4cb1b4e97190a00cc5c245e76d6fa22",
 			"status": "ok"
 		},
 		"fast/edit/interaction-textbox+actions": {
-			"digest": "a9671d156e1646f1597ba65f69a16122696cc2f6169786fe17b877c5bf92dab3",
+			"digest": "a2d2d994ab8f99265a53adf76428c47822de9ff1b72e1d5d599e07208448f25f",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize": {
-			"digest": "8de257ecafc43cdf477c5462fd8cef26512bd176663151ead03f9f4ad7fe31fd",
+			"digest": "6922aab474f417c68a182d308d4c470f88755015b8cfc98750ddbfd5133c0a8f",
 			"status": "ok"
 		},
 		"fast/edit/layout-dynamic": {
-			"digest": "b162e649b66a42b8652d94b2bfb17ce6303a45e17446ad06462de7394525a355",
+			"digest": "bd810bd962c5b7fcbc98050fc21b6a05696846995d9627ba6a71ad1f5a867682",
 			"status": "ok"
 		},
 		"fast/edit/layout-flex": {
@@ -145,39 +145,39 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-richscaled-quads": {
-			"digest": "f3c38a6d4dc5fc164e0aaa30d40586bea6aadd488bd7cbfc3b4b8ba5280f24ac",
+			"digest": "6fa9f690654b9fe61f7f4c7915ea8e6228cd6022eb8fd47eaafac8a21707a151",
 			"status": "ok"
 		},
 		"fast/edit/layout-text-narrow": {
-			"digest": "31c340840cb3036e9f9a9ffb6eb6c1391ce66891bc32c124862300804f29d4f5",
+			"digest": "4015eab516cd1b53f51a27884cac0b4f57b10565b628415d3a1fc916350a5bc5",
 			"status": "ok"
 		},
 		"fast/edit/layout-text-overflow": {
-			"digest": "c40e9c9610c98d2a0e63a9d00369bbe6e4183f334dd6ebc72b714129341028cc",
+			"digest": "2b3bb5453343ebc21b918b252e11a75c82551ae7ac638808a1afd5717488e6ec",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen": {
-			"digest": "1cc673311ce62ab72fcfec652459cd2ac22a53df0f23f606be4791ca8cd35f7a",
+			"digest": "8d9b0e021a346ab0f2fa73ad0a5482b3f8a93a9843ebdb437473da5afec741f2",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen2": {
-			"digest": "c0e7af0575aeea626a0375db5fa7641e59fa8ba3d0a5d0402183bb05c0f0d000",
+			"digest": "aba0aa1e04ccf56333a45883b54c7b11e4689d12b64736e883b9caeabddbb2be",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen3": {
-			"digest": "8ecd3e3a35e4a72f607e994ae4fdf6d0b65a4a0170c80d7c89bd5da1609bbe81",
+			"digest": "67ae4b169037c85c1a5336bec710657a25198a3876bc3e0e7cf7ed8cfa33bc38",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate": {
-			"digest": "eed5e013167d8ef7efceda034c360d63186d27d95038104f8c5ce1e4d3456075",
+			"digest": "0a4540c0b4d5679dcfca4c4758a5ff2edbaa348fb0c84b0ce6f501cf0d688a3b",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate2": {
-			"digest": "8e34754eee4fe94fd8dc8b7307fe6507e82ccb46c2d6bd74a65317e68be7cec1",
+			"digest": "2bd583f2946bc4bcdbe997f03e019ee06e2c0bbee73b5e79acc802ffaefe69b9",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate3": {
-			"digest": "51a1a2f1ee22ff3ad9b5947d51de0ae7c6d2bda7f1d78b97edbbf961a9763346",
+			"digest": "31e06188ac01e5c4f7ccf8207e58c575b817bb50d7dc50700c86cec325cd0a34",
 			"status": "ok"
 		},
 		"fast/edit/live-rotated-cull": {
@@ -185,15 +185,15 @@
 			"status": "ok"
 		},
 		"fast/edit/live-scroll": {
-			"digest": "4aa8eac9dbf366d09488b7339f1cb490c39e2165a95347476e8bf279cb052a4e",
+			"digest": "7d10e1aad69297509b3b3b15de5004584b756f968f1037d7a12091ba6835a25c",
 			"status": "ok"
 		},
 		"fast/edit/live-stress": {
-			"digest": "066e321c8958571883973f486bbc882946b2109a057cdfe9251bb3b5c2a942b1",
+			"digest": "7bd5689412a18f00e12fc2da36394765e174492e57fc539c477f0bcd664dbac6",
 			"status": "ok"
 		},
 		"fast/edit/probe-errors": {
-			"digest": "d271fdf98223f837326869f253481d6d83c8d513bd746eea4b16e30dd342575e",
+			"digest": "465ce782e2b02a0e97ec3151f3f50c0a4e69ed9a68f90c8925db692b1b69ca3b",
 			"status": "ok"
 		},
 		"fast/edit/probe-ids": {
@@ -201,7 +201,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-input": {
-			"digest": "9588c73569fe5bb75947acb00f94e283aeaf0878cf3ef81f8bc2ca6dc28491af",
+			"digest": "3135e552c36c918240204b68086b45f7e3ba3f79b9b1ffeb8329fd7505bf9dc6",
 			"status": "ok"
 		},
 		"fast/edit/probe-scheduler": {
@@ -209,7 +209,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
-			"digest": "b68856e0b059872ee4b23db4c91cf53f60fbccaf8c4ec4511ca23d8aae30d12f",
+			"digest": "b92421b1abed7f70f8bc0f0b3855fa71f70d0d1a829e4777351142e0595459fa",
 			"status": "ok"
 		},
 		"fast/edit/rects": {
@@ -217,7 +217,7 @@
 			"status": "ok"
 		},
 		"fast/edit/rotation": {
-			"digest": "ead366b3d8f8b47f02de07d0d90658f8e4080df4cbd2754de186f68624be1368",
+			"digest": "40676985e8b0219f9f4398f65d0ba06b13d361907552a452a628859c96c2334c",
 			"status": "ok"
 		},
 		"fast/edit/rotation-clip-offscreen": {
@@ -257,7 +257,7 @@
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-e": {
-			"digest": "67f748403c4f721b507f4b457e375b14bd8737c9fbae256ea0470311687800af",
+			"digest": "e874fdc1d4418b9448881dee805b85ed93da48544fd61e6b65e942fa05ca36fd",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-f": {
@@ -321,19 +321,19 @@
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull": {
-			"digest": "f8bedc202ca9c9aa69d8d5689514acdb46b3ad03f248f0b63bbc8625a020515b",
+			"digest": "fe35c7655f40797d3e1a1f1dab6919d5939103b3b00b69bf52cf940bd589ab88",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull3": {
-			"digest": "22cdf3f53db6778fe7a7ec34f77d1451ea6b3a9b5a1f5e2165d01043f611f21b",
+			"digest": "ba0adab1733745b965946ab01a9ae8035220a388ed6ace4b0a2ab185297bbc2d",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull4": {
-			"digest": "807f3f05e760cbf5693c8c145205b6c5248b7540a125c8012fa5e52b1ac3ff65",
+			"digest": "d9b4d53d5fe9077ea195c8af96da4af92ac7cf97494634fed0012050f8df21e2",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull5": {
-			"digest": "f2fc59e30e9eba6a6019c37c73ae80e993d46bfaf5067ec2b8898e3591090956",
+			"digest": "2d7fde6c04b891f48645bd1e5447d105ef93832888ddce2131fa72e74a687c7e",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-surface": {
@@ -353,7 +353,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stories-scroll-noclip": {
-			"digest": "968ef4b8b5a5f6f218acd93716b8ea8b2c104786e197ae8c4eb5504cbca1b5e3",
+			"digest": "6117b1939ca1f1e52f91644d4f39ff3cd8f131eb6c96036a0c8fab68c3a8d6fa",
 			"status": "ok"
 		},
 		"fast/edit/stroke-button": {
@@ -381,7 +381,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-misc": {
-			"digest": "b76d73f12bacd3b8335aaec5460101d21a030b420f5d9ecd86e0bf64533765c8",
+			"digest": "e6540db6d089c55a54c470d997deb8bc026d55c4abdc84bcf150fd43a7f29c38",
 			"status": "ok"
 		},
 		"fast/edit/stroke-modes": {
@@ -409,11 +409,11 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-probe-scaledui": {
-			"digest": "1b4449f0d1134ff208488fcfd36470400fb0e66e30c961f3cd8fb9f3138d6bc7",
+			"digest": "9be045d823ce744b7faf5332d7ff7cdd99c1d05b04e3ef124a810a01e410ab3c",
 			"status": "ok"
 		},
 		"fast/edit/stroke-probe-scaledui2": {
-			"digest": "e3a262ab2588da43279411bdea88d8c20d9b43ae6e884fd95fe852052208aa58",
+			"digest": "d77a94a64b6bb8ff5b2996e6b0c35e8fed375efba0b5d32ae0d9a509d36e5bd9",
 			"status": "ok"
 		},
 		"fast/edit/stroke-radius": {
@@ -429,7 +429,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-a": {
-			"digest": "2cf5bae4e775214734afb0a492496e48752a92f4b4bc4d82a7d3047a012d683c",
+			"digest": "499af245d5fabbde7f19dd456ce7b77417b55373e93c6418fb9da5c22ca13b02",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-b": {
@@ -441,15 +441,15 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-d": {
-			"digest": "c866967594c5addb24131fa53d271aca85d432b0aff680ba93d66990a39bc80d",
+			"digest": "b2b13946ce5bac428834fb4107f8f63f63c0b8b4341970d2e335206740a1257b",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-e": {
-			"digest": "bd4e04b5ba4e0bb8b3527a2dab1094d89248f785b310d983fcfe1e689b5f8e3c",
+			"digest": "10d373cf6f323789e5d613a1abc023833cb58bce908bf153bc2463ecf9e3ca93",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-uiscale": {
-			"digest": "9796cbcd9a8e898422d87d3593d82fc7915ba6147a36acea75b0d0797b59c085",
+			"digest": "56ee468d1c2d279a0ef027b6394c6e50dc00757f3b504ab8f16b2b64f2168684",
 			"status": "ok"
 		},
 		"fast/edit/stroke-zindex": {
@@ -461,27 +461,27 @@
 			"status": "ok"
 		},
 		"fast/edit/text-baseline": {
-			"digest": "c0020a096b4ac37f5e321493df1752712de890ca35c3085460f45d0e508540fc",
+			"digest": "f7167b7c6c13c3aeaeed6c8bdd9599bf9d92bb1fa507639c00edd284dadebd51",
 			"status": "ok"
 		},
 		"fast/edit/text-fontfaces": {
-			"digest": "9064a772867fcd17f5f3d829eb436735b0536e165ae9e8589f021b12bcc6ee74",
+			"digest": "d1eb91ccba095571a355f9149d2ace5d4f020803f5b720b1073c7ff4edacfb46",
 			"status": "ok"
 		},
 		"fast/edit/text-fonts": {
-			"digest": "04df9a1b7ff53049eef9a94a8a2cdbccb293877dda0deddf791601bb686f4e28",
+			"digest": "63aa181ebd591e73d49c1823d90f6bd92db1ff195a003613ca029ec1a7919cd9",
 			"status": "ok"
 		},
 		"fast/edit/text-glow": {
-			"digest": "dd0fea1c59b248d4f79f9b8d4ab712107e3f4083779a9bd06a25a01663598660",
+			"digest": "5e03c1fea0c84f518eb9b17ca1ff6b723385822d28508a96ed5a3dcace61b04e",
 			"status": "ok"
 		},
 		"fast/edit/text-gradient": {
-			"digest": "aae48a08efd1522ae6b2fa74cfb3e9d0ba50246e0af5b1d55aaa79a40162101e",
+			"digest": "afacc2a3921500b5ca4aff57e63f7375b4de170d51e3b3c2ab6f0bf4ce92afb6",
 			"status": "ok"
 		},
 		"fast/edit/text-gradient-degenerate": {
-			"digest": "b0e5af466c5a493bfe949aac2027cb0b28e3b12e750c17a9b3973d164b0600eb",
+			"digest": "63a8b73000a827c12103b018994a2e17b1c79af3db2b8e9b7b153bdb0611e2bf",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-blend": {
@@ -489,51 +489,51 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-case": {
-			"digest": "ec3e07f295c139b1aaf51e3923a1985c64a8f1012ed95f28301096bc258d5bd0",
+			"digest": "5b70dcaeb24a378863e247e4e34e286c2c036ecb93aec7ebf5449d164ec81c14",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor": {
-			"digest": "3465d624ff0136a2c49d2ba3cb1e6023a80364193fb745787e6b699175a34ec7",
+			"digest": "fc2460509c5a4274e5e4c8a2fa6908d7ebf83fac252c6a68dd379cbb6b32d138",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor2": {
-			"digest": "464ae4b764318878188d2d516b689e6173dc8b31a607bb91cfc0af9986ac1326",
+			"digest": "c4fc4aa1d8a5029f9ab4101ecaaf5f1f9d5e95e205ef6a3801ab713ae5252d81",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-emoji": {
-			"digest": "57afc0f7c1d7338cecb4fed177ed5b209a59627fe784add93737b2a5cfae40d5",
+			"digest": "f177965321a9d7184362c2da1fa63243f1fcff9e905a571440f1d40d5f237aab",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-fracsize": {
-			"digest": "75506fe0052bace1f5321e8633dd89fef05918557a1b433c792e01cb20a395fd",
+			"digest": "8e9f65d1c6e256e005a7de284876085fd57c80f37557668a4e97057db6ac373b",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-fracsize2": {
-			"digest": "0bad62f04d259164b4bf72123541dd92fd77f721e7df15e76a34cbfb0657e270",
+			"digest": "6bdf58d51328b4ee6c89fcb583f7168036cf5460e655ae05b644e1f1b9c580f2",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradient": {
-			"digest": "e74f5179c67f23affdff6a9e62ecbf45a1f5a5d5da67cc988cd8cf97c4c54987",
+			"digest": "3b6dd3aa109563b40543e9fdcf0b66f1091de60c953f5a8fb840c007daccf733",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradient2": {
-			"digest": "daa412b5643815439d4881fc23347a966eac9a87bff0e7acb02b3e94367f0eac",
+			"digest": "4394b78e572eab5d6342b7a768f2bd69f03f2c281077a018a8cddd37959953e7",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradstroke": {
-			"digest": "c95329e13af5b6db1e2c338a320ae14d82d0c2c707f0d5e4f9ed3569704eea0a",
+			"digest": "9e17f3620627c1741e6fc2a59b27346643a8d15f17ac38135ed9e24dff9615c3",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-graphemes": {
-			"digest": "b16d2944508deccccd547afe1a877f970aa409ae889fed16307fbf2ee41524bd",
+			"digest": "4e84b4e484b6b116d0ecf6997876c1b3892a13058c51d3d955cde43a2b35762b",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-grouptext": {
-			"digest": "9116767b3f0775000f850138e795d95d3b40f3c04bbd09b012ebe4395209309e",
+			"digest": "34d30fb06894b184c93ac9ed5f4b9b6d6011268894a2edbb33e06e479b175ceb",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-overlap": {
-			"digest": "a89ab2c81ec23a10ad7cb7f9b432b297a42ac2b45db9663b3ab93dd155f039ed",
+			"digest": "8f22d23630929f29e30057ffd060caf5a622f4e55a20ea1976c5dd269e5f48f5",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-place": {
@@ -541,35 +541,35 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-quadties": {
-			"digest": "f06be3e6b0facc23bcfce9ce4f62c33db2d01a08c9336d43e745dbb1a9b41174",
+			"digest": "14a1b00746b82fe4243480376bd32219acadfe6860fa8e4a602bf81a23d0c668",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rich": {
-			"digest": "d6406886b6a6e5ccf2589075711556616def5007e2c31b23fd7bfc3ef92403b2",
+			"digest": "9e247d1ee5e48db556b9e58ae4643f240a996b990c97dcd214c264282911c2fa",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richcap": {
-			"digest": "98dee428307d9955fe312a1492f40c0f88f3952b22732cd8031389b201687b27",
+			"digest": "aeb0d55a0e3613dbffec8749e8d6ad07401825e228d3471aceeec07673544421",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richscaled": {
-			"digest": "a703eca3fea7597f43841b100e122bb803e3d2ad2dce65d1c974268eea4bb4d3",
+			"digest": "519e0bcc6be31c836afdb965bcc5eae8d387b743f8351ba6ed49185ef0674dd0",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richscaled1": {
-			"digest": "fbe3409a1d58269dc051c5b3e739afcd733c09dabda77717e34bda20598d0ed9",
+			"digest": "3b6496c2e391fb943cd43ebae14c9aa2a6ee8233ea75b9babe6f67ef046a6466",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rotate": {
-			"digest": "fec34a946d562a9cb4ba8bf31c961fbcfbaf6790322ffd03abfaa545c0f26c65",
+			"digest": "2ba7a41ee24c5d2b75f1debb53a51cc2a7b8042af02553450b15c83ced13da97",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rotation-size": {
-			"digest": "7498677db3173bd792d96042eac9dd18854f6bfc4c3fe10164faf1ba40eb512c",
+			"digest": "fe0fad54b5e3a321057be8a2f0ab7d876dd3cb0bf7448bb7f43411654d1c063b",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-selfclip": {
-			"digest": "9dfdcf6cb55c714e68b2445eddd5945c3773ae25f104a149673ca462b6b99444",
+			"digest": "54c2677d98da523d19c899cd91f1efd9c37bb0c9e3069d6d8a62490e220f3db1",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-strokequad": {
@@ -577,23 +577,23 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-synth": {
-			"digest": "df216bc16f2f6b9a8c8f6fb79ff88a8b7285c5ec0d65c3b4e083a0c80ad20439",
+			"digest": "ad244f0ecd2feba62744068f2c47eaca74540b7a2f615e360dcc93a7918dec8d",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-uiscale": {
-			"digest": "edd25af4c90b3a4b03d7d3b2166fa5881b2aa65141837f59369827df7fe8b5fc",
+			"digest": "823285e17091bc91e21d067637dc30cf700d54fd2513df81b98465bbc8198d24",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-view": {
-			"digest": "81f61fd207b5218c13c84071e6b47ba4ac464f51b54b8d6fd82317d24fbfdb52",
+			"digest": "6ee632cfa333a7a4c3e3c551eb63a98dd652e2b7c2dae16f9ae5d7a47a787334",
 			"status": "ok"
 		},
 		"fast/edit/text-raster": {
-			"digest": "d47ab71205a145c48cfe00531bdbdf6b7efaac1ffd15f015d9137f1fd279f93f",
+			"digest": "e15192830aa8269e95a920608d61dd7bd994c3acaa41aa91b696ef03018d5952",
 			"status": "ok"
 		},
 		"fast/edit/text-stroke": {
-			"digest": "a63c24aa55d57118830127a8fbd50373a12f523b876c012928b07d88f7c599b8",
+			"digest": "bed137c26c87a4b766eb524d520b245fc0d2724505876172e1183371ce28cd1d",
 			"status": "ok"
 		},
 		"fast/edit/viewport-models": {
@@ -601,15 +601,15 @@
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
-			"digest": "99dc1582a9a582f36cac92af8148279eb76fc79cad138a64d5901a91a0a346c0",
+			"digest": "339bb9dcd2ea6c30749f5e95a75d3fdcd14b27b4d08cdf45bfa1da2742a384b0",
 			"status": "live"
 		},
 		"fast/live/interaction-textbox/120hz-click": {
-			"digest": "2379190e3cb8ab1f8adbbd49cf3b7c07b43e03d674673617f34f38de464b40c3",
+			"digest": "cbe8b0ecc42c29c8d520a6ebf0184e992bf30252fefebf77701dce9bac978b5a",
 			"status": "live"
 		},
 		"fast/live/live-scroll/60hz-default": {
-			"digest": "7103e7822576d4c0d76b39373a1858d88e3bb11a4191743e06f8cd1abc7fb74b",
+			"digest": "28742c006e9866ee3931bc49d4487bd892ffea6ccdbc63379dae676f48118be7",
 			"status": "live"
 		},
 		"fixtures/edit/anim-mount": {
@@ -2021,7 +2021,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-07T20:35:36.682Z",
+	"recorded": "2026-11-09T15:51:54.444Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

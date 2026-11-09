@@ -13,7 +13,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 /// Bump when the generation (size request, load flags, glyph choice) changes
-pub const GENERATOR_VERSION: u32 = 1;
+pub const GENERATOR_VERSION: u32 = 2;
 /// The cache file format (version 1 was metrics.py's, keyed by the Python environment)
 const CACHE_VERSION: f64 = 2.0;
 

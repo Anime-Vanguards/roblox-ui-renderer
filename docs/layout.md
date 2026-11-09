@@ -103,7 +103,7 @@ How rur's layout (`native/src/engine/layout/`) computes `AbsolutePosition`, `Abs
   makes it fit. `TextBounds.X` of wrapped text spans every line, including lines the box height cuts off.
 - Word wrap takes a break opportunity only when more of the next word fits on a fresh line; otherwise it
   breaks inside the word.
-- TextTruncate measures the ellipsis (U+2026) with its hinted advance; AtEnd keeps the longest prefix of
+- TextTruncate measures the ellipsis (U+2026) by its own rounded advance; AtEnd keeps the longest prefix of
   whole words that fits beside it (or a character prefix of the first word); SplitWord keeps the longest
   character prefix plus its trailing whitespace. Truncated text's `TextBounds` measure what is shown.
 - TextScaled picks the largest whole size at which no word breaks and all lines fit. Plain text steps

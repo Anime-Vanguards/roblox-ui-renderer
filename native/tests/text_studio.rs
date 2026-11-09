@@ -4,8 +4,9 @@
 //! when the asset cache lacks it.
 //!
 //! text_bounds / text_wrap only reported hit rates in Luau; here the hit counts (and the known misses)
-//! are pinned to what the Luau reference produced when it was retired:
-//! text-bounds-1.5x.json 3570/3570, sweep-1.5x.json 4785/4785, wrap-1.5x.json 539/540.
+//! are pinned. The datasets were re-measured in Studio 0.746 (2026-11-09) with the same probes
+//! (tools/studio/measure-text.luau, measure-sweep.luau, measure-wrap.luau, layout-probe-ellipsis3.luau):
+//! text-bounds-1.5x.json 3557/3570, sweep-1.5x.json 4785/4785, wrap-1.5x.json 538/540.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -159,9 +160,13 @@ fn text_bounds(engine: &mut TextEngine, file: &str) -> (usize, usize, BTreeMap<S
 fn text_bounds_dataset() {
     let mut engine = engine();
     let (hits, total, per_font, misses) = text_bounds(&mut engine, "data/studio/text-bounds-1.5x.json");
-    assert_eq!((hits, total), (3570, 3570), "text-bounds-1.5x.json misses: {misses:#?}");
+    assert_eq!((hits, total), (3557, 3570), "text-bounds-1.5x.json misses: {misses:#?}");
     assert_eq!(per_font.len(), 14);
-    assert!(per_font.values().all(|&(hit, count)| hit == 255 && count == 255), "{per_font:?}");
+    // Known misses: kerned strings in Arimo (the face with a line gap) and LegacyArial, 1 px each
+    let known: BTreeMap<&str, usize> = [("Arimo-Regular", 247), ("LegacyArial-Regular", 250)].into_iter().collect();
+    for (key, &(hit, count)) in &per_font {
+        assert_eq!((hit, count), (known.get(key.as_str()).copied().unwrap_or(255), 255), "{key}: {misses:#?}");
+    }
 }
 
 #[test]
@@ -218,9 +223,40 @@ fn text_wrap() {
     for miss in &misses {
         println!("  {miss}");
     }
-    assert_eq!((hits, total), (539, 540), "wrap-1.5x.json misses: {misses:#?}");
-    // The one known miss, identical to the Luau reference's.
-    assert_eq!(misses, vec!["SourceSansPro s=14 w=30 t=3 \"a  b   c    d\" studio=(10,42) ours=(34,42) lines=2".to_string()]);
+    assert_eq!((hits, total), (538, 540), "wrap-1.5x.json misses: {misses:#?}");
+    // The known misses: runs of spaces at a break (the Luau reference missed the same kind of case).
+    assert_eq!(
+        misses,
+        vec![
+            "SourceSansPro s=20 w=30 t=3 \"a  b   c    d\" studio=(14,60) ours=(44,60) lines=2".to_string(),
+            "FredokaOne s=14 w=30 t=3 \"a  b   c    d\" studio=(11,42) ours=(38,42) lines=2".to_string(),
+        ]
+    );
+}
+
+/// The pen adds exact advances and rounds once (Studio 0.746 TextBounds at 1.5x, Montserrat Bold at 18 px:
+/// rich TextSize 16 under UIScale 0.8, and plain TextSize 12). Rounding each advance made "1 Egg" 42 and
+/// put "E" a pixel closer to the "1" than Studio draws it.
+#[test]
+fn pen_rounding() {
+    let mut engine = engine();
+    let family = family("Montserrat");
+    let mut width = |text: &str, rich: bool, text_size: f64, scale: Option<f64>| {
+        let mut params = LayoutParams::new(text.as_bytes(), &family, 700.0, "normal", text_size, 1.5);
+        params.scale = scale;
+        engine.layout(&params, rich).width
+    };
+    for (text, expected) in [("50 Eggs", 65.0), ("10 Eggs", 62.0), ("3 Eggs", 54.0), ("1 Egg", 43.0), ("1 E", 21.0), ("1E", 17.0), ("0 E", 25.0)] {
+        assert_eq!(width(text, true, 16.0, Some(0.8)), expected, "rich {text} under UIScale 0.8");
+        assert_eq!(width(text, false, 12.0, None), expected, "{text}");
+    }
+    for (text, expected) in [("11111", 31.0), ("00000", 53.0), ("iiiii", 23.0)] {
+        assert_eq!(width(text, false, 12.0, None), expected, "{text}");
+    }
+    // The pen runs on across rich text runs
+    assert_eq!(width("1<font color='#ff0000'>1</font>111", true, 12.0, None), 31.0);
+    assert_eq!(width("0<font color='#f00'>0</font><font color='#0f0'>0</font>00", true, 12.0, None), 53.0);
+    assert_eq!(width("i<font color='#f00'>i</font>i<font color='#0f0'>i</font>i", true, 12.0, None), 23.0);
 }
 
 /// Emoji sequences (fixtures/text-probe-emoji.luau, Studio TextBounds at 1.5x, FredokaOne 32): a variation
