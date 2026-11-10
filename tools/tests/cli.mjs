@@ -398,7 +398,7 @@ console.log(JSON.stringify({ summary, contacted }));
 	// (the mount is startup's, the run after it frames')
 	assert.deepEqual(profile.phases, ["startup", "frames"]);
 	assert.ok(profile.work.script_insns > 0, JSON.stringify(profile.work));
-	assert.ok(profile.ree_caches.some(cache => cache.name === "layout records" && cache.hits + cache.misses > 0), JSON.stringify(profile.ree_caches));
+	assert.ok(profile.emulator.caches.some(cache => cache.name === "layout records" && cache.hits + cache.misses > 0), JSON.stringify(profile.emulator));
 	assert.match(result.stderr, /heap at end: .* reachable in /);
 	// the profile viewer reads it: the Caches view as text lists the layout's caches; every view as a PNG
 	const viewer = spawnSync(process.execPath, [path.join("cli", "rur.mjs"), "profile", "render", summary.profile, "--view", "caches", "--out", "-"], { cwd: root, encoding: "utf8", windowsHide: true, env: { ...process.env, RUR_STATE_DIR: path.join(dir, "state") } });

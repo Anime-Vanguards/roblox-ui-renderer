@@ -157,6 +157,9 @@ pub fn start_fresh_profiled(args: &Args, spec: &SequenceSpec, profile: Option<pr
                             frames: u64::from(spec.frames),
                             seconds: spec.from.max(0.0) + f64::from(spec.frames.saturating_sub(1)) / spec.fps,
                             fps: spec.fps,
+                            // (rur's VMs have no script timeout: nothing installs the emulator's watchdog on them, so a run has none)
+                            script_timeouts: 0,
+                            host_backstop_timeouts: 0,
                         };
                         match session.finish(run) {
                             Ok(summary) => eprint!("{summary}"),
@@ -845,7 +848,7 @@ mod tests {
         assert_eq!(snapshots.first().unwrap()["label"], "start");
         assert_eq!(snapshots.last().unwrap()["label"], "end");
         assert!(snapshots.last().unwrap()["reachable"]["bytes"].as_u64().unwrap() > 0, "{}", snapshots.last().unwrap()["reachable"]);
-        let caches = profile["ree_caches"].as_array().unwrap();
+        let caches = profile["emulator"]["caches"].as_array().unwrap();
         let records = caches.iter().find(|cache| cache["name"] == "layout records").unwrap_or_else(|| panic!("the layer's caches: {caches:?}"));
         let (hits, misses) = (records["hits"].as_u64().unwrap(), records["misses"].as_u64().unwrap());
         assert!(misses > 0, "a run lays every record out at least once: {records}");

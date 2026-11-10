@@ -148,7 +148,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/story_render.rs",
         "pub fn cli(",
-        0x44483cf7af4097e0,
+        0x949e74e3d6142f5d,
     ),
     (
         Crate::Native,
@@ -202,19 +202,19 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Engine,
         "src/record/run.rs",
         "pub fn parse(",
-        0x33d01c615a8b3286,
+        0x1743072293f5d4ec,
     ),
     (
         Crate::Engine,
         "src/profiler/diff.rs",
         "pub fn cli(",
-        0x27935c9b0915f010,
+        0xa7ed00a48958209,
     ),
     (
         Crate::Engine,
         "src/profiler/diff.rs",
         "pub fn report_cli(",
-        0x820ad33259ceb03f,
+        0x644c530ada719982,
     ),
     (
         Crate::Engine,

@@ -696,7 +696,8 @@ pub fn cli(argv: &[String]) -> i32 {
                 Err(_) => "failed".into(),
             };
             let (frames, seconds, fps) = clock;
-            let run = profiler::Run { command: "render".into(), status, harness: source_file(&args), frames, seconds, fps };
+            // (rur's VMs have no script timeout: nothing installs the emulator's watchdog on them, so a run has none)
+            let run = profiler::Run { command: "render".into(), status, harness: source_file(&args), frames, seconds, fps, script_timeouts: 0, host_backstop_timeouts: 0 };
             match session.finish(run) {
                 Ok(summary) => {
                     eprint!("{summary}");
