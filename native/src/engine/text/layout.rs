@@ -1,7 +1,8 @@
 //! Port of runtime/text/layout.luau: text measurement and line layout in physical pixels,
 //! reproducing Roblox's measured behaviour:
 //!   size S = floor(floor(TextSize) * pixelScale);
-//!   font ppem = (S + 1) * unitsPerEm / (ascender - descender + lineGap)
+//!   font ppem = (S + 1) * unitsPerEm / (ascender - descender + lineGap); a face with a line gap gets
+//!   its ascender - descender requested at that share of S + 1 px, cut to 26.6 (`scales`)
 //!   glyph advance = FT_MulFix(nominal, 16.16 scale) + floor(GPOS adjustment at the HarfBuzz scale), in
 //!   26.6; the pen adds the exact advances and is rounded half up to a whole pixel (`round_pen`).
 //! Every measured rule keeps the comment of the Luau reference (and its measurement).
@@ -298,8 +299,10 @@ pub fn rich_scaled_unfloored(unscaled: f64, pixel_scale: f64, family: Option<&st
 }
 
 /// The hhea line height in font units, line gap included: Studio 0.746 sizes a face so that this is
-/// S + 1 px (Arimo, the only Studio face with a line gap: 85/85 TextBounds; earlier versions left the
-/// gap out).
+/// S + 1 px (earlier versions left the gap out). Measured on every Studio face with a line gap (Arimo,
+/// Ubuntu, Permanent Marker, AccanthisADFStd, Guru) and on Poppins, a cloud family:
+/// data/studio/text-bounds-linegap-1.5x.json and -1x.json, where a face sized without the gap keeps 8 to
+/// 111 of its 255 widths at DPI 1.5.
 #[inline]
 pub fn height_units(font: &Font) -> f64 {
     font.ascender - font.descender + font.line_gap
@@ -318,11 +321,18 @@ pub fn pixel_advance(units: f64, scale: f64) -> f64 {
 }
 
 /// `TextLayout.Scales`: the FreeType 16.16 x scale for a line height of S + 1 px and the HarfBuzz font
-/// scale (26.6 units per em) derived from it.
+/// scale (26.6 units per em) derived from it. The scale is FreeType's for a real-dimension size request:
+/// the face's ascender - descender at `request` 26.6 px. Without a line gap that is the whole line,
+/// (S + 1) * 64. With one it is the line's share without the gap, cut to a whole 26.6 unit, so the scale
+/// is a hair under (S + 1) / (ascender - descender + lineGap): Studio 0.746's widths fit only the cut
+/// request (text-bounds-1.5x.json 3570/3570 where the uncut scale left 13 Arimo and LegacyArial strings
+/// 1 px wide; the line gap datasets 3059/3060 at 1.5x and 3047/3060 at 1x, uncut 2980 and 2975).
 #[inline]
 pub fn scales(font: &Font, size: f64) -> (f64, f64) {
-    let height = height_units(font);
-    let x_scale = idiv((size + 1.0) * 64.0 * 65536.0 + idiv(height, 2.0), height);
+    let real = font.ascender - font.descender;
+    let line = (size + 1.0) * 64.0;
+    let request = if font.line_gap == 0.0 { line } else { (line * real / height_units(font)).floor() };
+    let x_scale = idiv(request * 65536.0 + idiv(real, 2.0), real);
     let hb_scale = idiv(x_scale * font.units_per_em + 32768.0, 65536.0);
     (x_scale, hb_scale)
 }

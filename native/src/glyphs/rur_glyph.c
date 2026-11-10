@@ -46,6 +46,8 @@ typedef struct {
     unsigned char *bytes;
     FT_Int32 flags;
     long height_units;
+    /* ascender - descender, the dimension FreeType's size request scales (height_units less the line gap) */
+    long real_units;
     long upm;
 } RurFace;
 
@@ -124,7 +126,8 @@ RurFace *rur_glyph_face_open(RurContext *context, const unsigned char *bytes, si
     face->flags = unhinted_truetype(ft) ? FT_LOAD_FORCE_AUTOHINT : FT_LOAD_DEFAULT;
     /* the line height requested as S + 1 px includes the hhea line gap (layout.rs height_units) */
     TT_HoriHeader *hhea = (TT_HoriHeader *)FT_Get_Sfnt_Table(ft, FT_SFNT_HHEA);
-    face->height_units = ft->ascender - ft->descender + (hhea ? hhea->Line_Gap : 0);
+    face->real_units = ft->ascender - ft->descender;
+    face->height_units = face->real_units + (hhea ? hhea->Line_Gap : 0);
     face->upm = ft->units_per_EM;
     if (face->flags & FT_LOAD_FORCE_AUTOHINT) unmapped_glyphs_to_fallback_style(context->library, ft);
     /* FreeType 2.14 separates dotted Latin letters natively: rasterize.py's i/j backport is off */
@@ -138,15 +141,21 @@ void rur_glyph_face_close(RurFace *face) {
     free(face);
 }
 
+/* Python floor division */
+static long long floor_div(long long a, long long b) {
+    return (a >= 0) == (b > 0) ? a / b : -((llabs(a) + llabs(b) - 1) / llabs(b));
+}
+
 /* rasterize.py set_ppem: the line height S + 1 requested as exact 16.16 scales. Python's round() is
- * round-half-even, like nearbyint in the default rounding mode. */
+ * round-half-even, like nearbyint in the default rounding mode. A face with a line gap gets its
+ * ascender - descender requested at its share of the line, cut to 26.6 (layout.rs scales). */
 static int set_ppem(RurFace *face, double ppem) {
     long long hu = face->height_units;
-    if (hu == 0 || face->upm == 0) return -1;
+    long long real = face->real_units;
+    if (hu == 0 || real == 0 || face->upm == 0) return -1;
     long long line26 = (long long)nearbyint(ppem * (double)face->height_units / (double)face->upm * 64.0);
-    long long scale = (line26 * 65536 + hu / 2);
-    /* Python floor division */
-    scale = (scale >= 0) == (hu > 0) ? scale / hu : -((llabs(scale) + llabs(hu) - 1) / llabs(hu));
+    long long real26 = hu == real ? line26 : floor_div(line26 * real, hu);
+    long long scale = floor_div(real26 * 65536 + real / 2, real);
     FT_Size_RequestRec request;
     request.type = FT_SIZE_REQUEST_TYPE_SCALES;
     request.width = (FT_Long)scale;

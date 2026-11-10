@@ -20,7 +20,12 @@ datasets in `data/studio/`, its pixels from `rur compare` captures of the `text-
 ## Metrics and shaping
 
 - A face is sized so that its hhea line height, line gap included (`ascender - descender + lineGap`), is
-  S + 1 px for pixel size S. Arimo is the only Studio face with a line gap.
+  S + 1 px for pixel size S. Of Studio's faces Arimo, Ubuntu, Permanent Marker, AccanthisADFStd and Guru have
+  a line gap, and so do cloud families such as Poppins.
+- The scale is FreeType's for a size request of `ascender - descender` in 26.6 pixels. Without a line gap
+  that is the whole line, `(S + 1) x 64`. With one it is the line's share without the gap cut to a whole
+  unit, `floor((S + 1) x 64 x (ascender - descender) / (ascender - descender + lineGap))`, so the face is a
+  hair smaller than the plain ratio gives.
 - Glyph advances are FreeType's in 26.6 fixed point, `FT_MulFix(advance, x_scale)` plus the GPOS (or legacy
   `kern` table) adjustment. The pen adds these exact advances and is rounded half up to a whole pixel at
   each glyph, so a span of text is round(pen at its end) - round(pen at its start) px wide. One pen runs

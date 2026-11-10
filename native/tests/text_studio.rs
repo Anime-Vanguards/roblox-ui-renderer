@@ -6,7 +6,9 @@
 //! text_bounds / text_wrap only reported hit rates in Luau; here the hit counts (and the known misses)
 //! are pinned. The datasets were re-measured in Studio 0.746 (2026-11-09) with the same probes
 //! (tools/studio/measure-text.luau, measure-sweep.luau, measure-wrap.luau, layout-probe-ellipsis3.luau):
-//! text-bounds-1.5x.json 3557/3570, sweep-1.5x.json 4785/4785, wrap-1.5x.json 538/540.
+//! text-bounds-1.5x.json 3570/3570, sweep-1.5x.json 4785/4785, wrap-1.5x.json 538/540. The faces with a line
+//! gap were measured on 2026-11-10 (tools/studio/measure-linegap.luau): text-bounds-linegap-1.5x.json
+//! 3059/3060 and text-bounds-linegap-1x.json 3047/3060.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -29,22 +31,29 @@ fn engine() -> TextEngine {
 /// An engine that has the cloud fonts these texts ask for (the CJK fallback): a checkout's asset cache holds
 /// only what its renders drew, so they are downloaded as a render downloads them.
 fn engine_with_cloud_fonts(texts: &[Value]) -> TextEngine {
-    let ask = |engine: &mut TextEngine| {
+    engine_with(|engine| {
         let family = family("SourceSansPro");
         for text in texts {
             engine.layout(&LayoutParams::new(text.as_str().unwrap().as_bytes(), &family, 400.0, "normal", 14.0, 1.5), false);
         }
-    };
+    })
+}
+
+/// An engine that has the cloud fonts the layouts of `ask` reach for (a cloud family's file arrives first,
+/// then its faces).
+fn engine_with(ask: impl Fn(&mut TextEngine)) -> TextEngine {
+    let mut fetched = Vec::new();
+    for _ in 0..4 {
+        let mut engine = engine();
+        ask(&mut engine);
+        if engine.fonts.missing_assets.is_empty() {
+            return engine;
+        }
+        fetched.push(Resolver::new(repo(), false).fetch_fonts(&json!({ "missingFontAssets": engine.fonts.missing_assets })));
+    }
     let mut engine = engine();
     ask(&mut engine);
-    if engine.fonts.missing_assets.is_empty() {
-        return engine;
-    }
-    let fetched = Resolver::new(repo(), false).fetch_fonts(&json!({ "missingFontAssets": engine.fonts.missing_assets }));
-    let mut fresh = self::engine();
-    ask(&mut fresh);
-    assert!(fresh.fonts.missing_assets.is_empty(), "cloud fonts {:?} are not cached and did not download ({fetched:?})", fresh.fonts.missing_assets);
-    fresh
+    panic!("cloud fonts {:?} are not cached and did not download ({fetched:?})", engine.fonts.missing_assets);
 }
 
 fn read_json(relative: &str) -> Value {
@@ -98,6 +107,11 @@ fn text_truncate() {
 
 /// runtime/tests/text_bounds.luau over one dataset: (hits, total, per-font hits/total, first 25 misses).
 fn text_bounds(engine: &mut TextEngine, file: &str) -> (usize, usize, BTreeMap<String, (usize, usize)>, Vec<String>) {
+    text_bounds_at(engine, file, 1.5)
+}
+
+/// A measure-text.luau dataset taken at Studio's DPI `scale` (a row may name its `family`, a cloud one).
+fn text_bounds_at(engine: &mut TextEngine, file: &str, scale: f64) -> (usize, usize, BTreeMap<String, (usize, usize)>, Vec<String>) {
     let weights: BTreeMap<&str, f64> = [
         ("Thin", 100.0),
         ("ExtraLight", 200.0),
@@ -112,7 +126,6 @@ fn text_bounds(engine: &mut TextEngine, file: &str) -> (usize, usize, BTreeMap<S
     .into_iter()
     .collect();
     let data = read_json(file);
-    let scale = 1.5;
     let strings = data["strings"].as_array().unwrap();
     let (mut hits, mut total) = (0, 0);
     let mut per_font: BTreeMap<String, (usize, usize)> = BTreeMap::new();
@@ -126,7 +139,7 @@ fn text_bounds(engine: &mut TextEngine, file: &str) -> (usize, usize, BTreeMap<S
             Some(s) => ((s + 0.25) / scale).floor(),
             None => row["size"].as_f64().unwrap(),
         };
-        let family = family(font);
+        let family = row.get("family").and_then(Value::as_str).map_or_else(|| family(font), str::to_string);
         let widths = row["widths"].as_array().unwrap();
         for (index, text) in strings.iter().enumerate() {
             let text = text.as_str().unwrap();
@@ -160,12 +173,42 @@ fn text_bounds(engine: &mut TextEngine, file: &str) -> (usize, usize, BTreeMap<S
 fn text_bounds_dataset() {
     let mut engine = engine();
     let (hits, total, per_font, misses) = text_bounds(&mut engine, "data/studio/text-bounds-1.5x.json");
-    assert_eq!((hits, total), (3557, 3570), "text-bounds-1.5x.json misses: {misses:#?}");
+    // (3557 before a face with a line gap had its size request cut to 26.6: 13 Arimo and LegacyArial
+    // strings were 1 px wide)
+    assert_eq!((hits, total), (3570, 3570), "text-bounds-1.5x.json misses: {misses:#?}");
     assert_eq!(per_font.len(), 14);
-    // Known misses: kerned strings in Arimo (the face with a line gap) and LegacyArial, 1 px each
-    let known: BTreeMap<&str, usize> = [("Arimo-Regular", 247), ("LegacyArial-Regular", 250)].into_iter().collect();
-    for (key, &(hit, count)) in &per_font {
-        assert_eq!((hit, count), (known.get(key.as_str()).copied().unwrap_or(255), 255), "{key}: {misses:#?}");
+    assert!(per_font.values().all(|&(hit, count)| hit == 255 && count == 255), "{per_font:?}");
+}
+
+/// Every Studio face with an hhea line gap (Arimo, Ubuntu, Permanent Marker, AccanthisADFStd, Guru) and
+/// Poppins, a cloud family with a larger one: Studio 0.746 TextBounds at DPI 1.5 and at DPI 1.
+#[test]
+fn line_gap_faces() {
+    let rows = read_json("data/studio/text-bounds-linegap-1x.json");
+    let weight = |name: &Value| match name.as_str().unwrap() {
+        "Regular" => 400.0,
+        "Medium" => 500.0,
+        "SemiBold" => 600.0,
+        _ => 700.0,
+    };
+    let mut engine = engine_with(|engine| {
+        for row in rows["rows"].as_array().unwrap() {
+            let family = row.get("family").and_then(Value::as_str).map_or_else(|| family(row["font"].as_str().unwrap()), str::to_string);
+            engine.layout(&LayoutParams::new(b"a", &family, weight(&row["weight"]), "normal", 20.0, 1.5), false);
+        }
+    });
+    // Known misses: one Permanent Marker string at DPI 1.5 (1 px), and at DPI 1 the two trailing spaces of
+    // "Hello  " in Guru, which Studio measures narrower at 13 of the 17 sizes
+    for (file, scale, known) in [
+        ("data/studio/text-bounds-linegap-1.5x.json", 1.5, ("PermanentMarker-Regular", 254)),
+        ("data/studio/text-bounds-linegap-1x.json", 1.0, ("Guru-Regular", 242)),
+    ] {
+        let (_, total, per_font, misses) = text_bounds_at(&mut engine, file, scale);
+        assert_eq!((per_font.len(), total), (12, 3060), "{file}");
+        for (key, &(hit, count)) in &per_font {
+            let expected = if key == known.0 { known.1 } else { 255 };
+            assert_eq!((hit, count), (expected, 255), "{file} {key}: {misses:#?}");
+        }
     }
 }
 
