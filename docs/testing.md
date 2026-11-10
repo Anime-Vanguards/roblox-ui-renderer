@@ -14,7 +14,7 @@ right in Studio. Refactors of the renderer must keep 0 mismatches in the regress
 |---|---|
 | `cargo test --release` (unit tests in `native/src`, `native/tests/image_math.rs`, `paint.rs`) | nothing beyond the build, except `engine::input::tests::textbox_focus_caret_and_editing`, which needs Studio's fonts, and three that draw with the GPU (`render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph`, `render::gpu::tests::partial_redraws_match_whole_frames`, `render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas`); glyph tests use `RUR_TEST_FONT` or a system font and skip without one |
 | `native/tests/text_studio.rs`, `text_hinted.rs` | Studio's fonts (they fail without them) |
-| `native/tests/text_corpus.rs` | `out/golden/text-corpus.json`, a local artifact; skips without it |
+| `native/tests/text_corpus.rs` | `out/golden/text-corpus.json`, a local artifact; skips without it (see "Text corpus") |
 | `tools/tests/asset_*.mjs`, `native-assets.mjs`, `native-build-lock.mjs`, `places.mjs`, `web-bundle-directories.mjs`, `tools/analysis/image_assets_test.mjs` | Node only (HTTP is mocked) |
 | `tools/engine/golden.mjs --fast` | the built engine and Studio's fonts; the network for cloud fonts a fixture uses |
 | `tools/tests/cli.mjs`, `kept-runs.mjs`, `examples.mjs` | the built engine and Studio's fonts; `kept-runs` also a GPU (it renders through the render service) |
@@ -35,6 +35,19 @@ digests come from the maintainers' project, so outside it they are for your own 
   `--freeze-fonts` copies the font files the engine reads into `out/golden/fonts` so later runs read those.
 - An entry already found identical is not run again while nothing it reads changed (`--rerun` runs all).
 - `--write` records; do it only after `rur compare` shows the change is right in Studio, and list what moved.
+
+## Text corpus
+
+`native/tests/text_corpus.rs` replays 85 399 frozen text cases (layouts, rich text parses, line pens, size
+helpers) and requires identical output. The corpus is the engine's own output: it was first recorded from the
+Luau implementation the text engine was ported from, and a change of text measurement re-records the cases it
+moves.
+
+- `RUR_TEXT_CORPUS_UPDATE=<file> cargo test --release --test text_corpus` writes the corpus to `<file>` with
+  the current output of every differing layout case. Use it only for a change that Studio measurements
+  verify (`native/tests/text_studio.rs` and its datasets in `data/studio/`), say which rule moved how many
+  cases, and keep the corpus it replaces beside the new one.
+- A differing case that a deliberate change does not explain is a regression, not something to record.
 
 ## Renderer regressions
 

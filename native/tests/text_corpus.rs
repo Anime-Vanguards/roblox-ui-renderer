@@ -1,9 +1,16 @@
-//! Regression test of the text engine (native/src/engine/text) against golden output: replays
-//! `out/golden/text-corpus.json` (85 399 cases recorded from the Luau reference implementation
-//! runtime/text, which the text engine ported bit-exactly, before that runtime was retired on
-//! 2026-09-27; see notes/rust-engine.md "Text API") and requires every output to be identical
-//! (numbers bit-exact). Override the corpus with RUR_TEXT_CORPUS. Skips (with a message) when the
-//! corpus is not present, since it needs the local Studio fonts.
+//! Regression test of the text engine (native/src/engine/text) against frozen output: replays
+//! `out/golden/text-corpus.json` (85 399 cases: layouts, object layouts, rich text parses, line pens and
+//! size helpers) and requires every output to be identical (numbers bit-exact). Override the corpus with
+//! RUR_TEXT_CORPUS. Skips (with a message) when the corpus is not present, since it needs the local
+//! Studio fonts.
+//!
+//! The cases and their first outputs were recorded from the Luau reference implementation runtime/text,
+//! which the text engine ported bit-exactly, before that runtime was retired on 2026-09-27 (see
+//! notes/rust-engine.md "Text API"). Since then the corpus holds the engine's own output: a change of
+//! text measurement that Studio verifies re-records the cases it moves (RUR_TEXT_CORPUS_UPDATE and its
+//! narrower forms, below), and the corpus before it is kept beside it. So the test says that nothing
+//! moved unintended; whether the output is Studio's is tests/text_studio.rs's matter. The parses, line
+//! pens and size helpers are still the reference's.
 //!
 //! The expected output depends on the font files, so the corpus is replayed with the frozen font set
 //! beside it (`out/golden/fonts`, written by `node tools/engine/golden.mjs --freeze-fonts`; override
@@ -280,12 +287,12 @@ fn differences(expected: &Value, actual: &Value, path: &str, out: &mut Vec<Strin
                 match b.get(key) {
                     Some(other) if same(value, other) => {}
                     Some(other) => differences(value, other, &format!("{path}.{key}"), out),
-                    None => out.push(format!("{path}.{key}: missing in Rust (Luau {value})")),
+                    None => out.push(format!("{path}.{key}: missing now (frozen {value})")),
                 }
             }
             for key in b.keys() {
                 if !a.contains_key(key) {
-                    out.push(format!("{path}.{key}: extra in Rust ({})", b[key]));
+                    out.push(format!("{path}.{key}: extra now ({})", b[key]));
                 }
             }
         }
@@ -294,7 +301,7 @@ fn differences(expected: &Value, actual: &Value, path: &str, out: &mut Vec<Strin
                 let text = value.to_string();
                 if text.len() > 300 { format!("{}...", &text[..300]) } else { text }
             };
-            out.push(format!("{path}: Luau {} vs Rust {}", clip(expected), clip(actual)));
+            out.push(format!("{path}: frozen {} vs now {}", clip(expected), clip(actual)));
         }
     }
 }
@@ -500,7 +507,7 @@ fn missing_font_files(corpus: &Value, places: &Places, engine: &TextEngine) -> V
 }
 
 #[test]
-fn text_engine_matches_luau_corpus() {
+fn text_engine_matches_frozen_corpus() {
     let path = corpus_path();
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping: no text corpus at {} (the frozen corpus of out/golden; notes/rust-engine.md, Text API)", path.display());
@@ -551,6 +558,11 @@ fn text_engine_matches_luau_corpus() {
     // RUR_TEXT_CORPUS_UPDATE_RICHSCALED=<file>: the same for every differing "text" case of rich TextScaled
     // text (Studio-verified changes of its size search; any other difference still fails the test).
     let update_rich_scaled = std::env::var("RUR_TEXT_CORPUS_UPDATE_RICHSCALED").ok();
+    // RUR_TEXT_CORPUS_UPDATE=<file>: the same for every differing "layout" and "text" case, whatever
+    // differs (a Studio-verified change of the measurement itself: advances, sizes, truncation). Say in
+    // notes/text.md which rules moved how many cases, and keep the corpus it replaces. A case that names
+    // a face the corpus does not hold (a missing font file) still fails.
+    let update_measured = std::env::var("RUR_TEXT_CORPUS_UPDATE").ok();
     let rich_scaled = |case: &Map<String, Value>| -> bool {
         case.get("p").and_then(Value::as_object).is_some_and(|params| boolean(params, "rich") && boolean(params, "scaled"))
     };
@@ -578,6 +590,7 @@ fn text_engine_matches_luau_corpus() {
             entry.1 += 1;
         } else if (update_q.is_some() && kind == "text" && same(&without_q(expected), &without_q(&actual)))
             || (update_rich_scaled.is_some() && kind == "text" && rich_scaled(case) && !actual.to_string().contains("unknown face"))
+            || (update_measured.is_some() && (kind == "layout" || kind == "text") && !actual.to_string().contains("unknown face"))
         {
             updated.push((index, actual.clone()));
         } else if failures.len() < 40 {
@@ -585,14 +598,14 @@ fn text_engine_matches_luau_corpus() {
         }
     }
     let elapsed = started.elapsed();
-    if let Some(out) = update_q.as_ref().or(update_rich_scaled.as_ref()) {
+    if let Some(out) = update_q.as_ref().or(update_rich_scaled.as_ref()).or(update_measured.as_ref()) {
         let mut corpus = corpus.clone();
         let cases = corpus["cases"].as_array_mut().unwrap();
         for (index, actual) in &updated {
             cases[*index].as_object_mut().unwrap().insert("o".into(), actual.clone());
         }
         std::fs::write(out, serde_json::to_vec(&corpus).unwrap()).expect("write the updated corpus");
-        println!("{} text cases updated (quad scale / rich TextScaled): written with the current output to {out}", updated.len());
+        println!("{} cases updated (quad scale / rich TextScaled / measurement): written with the current output to {out}", updated.len());
     }
 
     // Cached results are shared: equal inputs give the identical Arc (the Luau identity rule).
@@ -678,5 +691,5 @@ fn text_engine_matches_luau_corpus() {
             if fonts.is_some() { "the frozen font set is incomplete" } else { "restore them (a render that uses a cloud font fetches it) or freeze a font set that has them" }
         ),
     };
-    assert_eq!(identical, total, "{} of {total} corpus cases differ from the Luau text engine{cause}", total - identical);
+    assert_eq!(identical, total, "{} of {total} cases differ from the frozen corpus{cause}", total - identical);
 }

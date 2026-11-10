@@ -1,8 +1,9 @@
 //! Text engine (phase 1 of the native engine, notes/rust-engine.md "Text API"): a bit-exact port of
 //! runtime/text (opentype.luau, fonts.luau, hinted.luau, richtext.luau, layout.luau) and of the text
 //! measurement in runtime/layout/init.luau (`LayoutText`: TextScaled, UITextSizeConstraint, automatic
-//! width). The Luau runtime's results (85 399 cases, frozen in `out/golden/text-corpus.json` when it
-//! was retired) are replayed by `native/tests/text_corpus.rs`.
+//! width). `native/tests/text_corpus.rs` replays 85 399 cases frozen in `out/golden/text-corpus.json`:
+//! the Luau runtime's results when it was retired, re-recorded where Studio-verified changes of text
+//! measurement moved them since.
 //!
 //! Entry point: [`TextEngine`] (font registry + the Luau caches). One per engine; not thread-safe
 //! (`&mut self`), results are shared `Arc`s: equal inputs return the identical `Arc` while cached, as the
