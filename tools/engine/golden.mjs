@@ -57,7 +57,7 @@
 // differing reply). Normalization: timings removed, the repository / frozen project paths as <repo>
 // / <project>, the Studio install as <studio-content>/ (its content folder) and <studio>/ (the rest of
 // its version folder), the frozen fonts as the files they froze, printed table / function addresses as
-// 0x?. Every run starts its wall clock at the same moment (RUR_EPOCH), so dates and countdowns stories
+// 0x?, a scene's editable-image files by their order (their names carry the process id). Every run starts its wall clock at the same moment (RUR_EPOCH), so dates and countdowns stories
 // print are part of the output.
 
 import fs from "node:fs";
@@ -598,8 +598,22 @@ function normalizeValue(value) {
 	return value;
 }
 
+// An EditableImage a scene draws is a file named by the engine's process id and its count of such images
+// (<repo>/.cache/editable-images/<pid>-<n>.png), so by the batch worker and by what it ran before: a scene
+// names its editable images by their order of creation, editable-images/0.png onwards
+const EDITABLE_IMAGE = /editable-images\/\d+-\d+\.png/g;
+function nameEditableImages(scene) {
+	if (!Array.isArray(scene.images) || !scene.images.some(uri => typeof uri === "string" && uri.search(EDITABLE_IMAGE) >= 0)) return scene;
+	const text = JSON.stringify(scene);
+	const count = name => Number(name.slice(name.lastIndexOf("-") + 1, -".png".length));
+	const names = [...new Set(text.match(EDITABLE_IMAGE))].sort((a, b) => count(a) - count(b));
+	const named = JSON.parse(text.replace(EDITABLE_IMAGE, name => `editable-images/${names.indexOf(name)}.png`));
+	named.images.sort();
+	return named;
+}
+
 function normalizeScene(scene) {
-	const copy = normalizeValue(scene);
+	const copy = nameEditableImages(normalizeValue(scene));
 	if (copy.diagnostics) {
 		delete copy.diagnostics.timings;
 		for (const key of ["fonts", "missingFontAssets"]) {
