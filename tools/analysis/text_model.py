@@ -82,7 +82,7 @@ def glyph_pieces(scene, node, stroke_px=0, join="round"):
             font_index, glyph_id, gx, ppem = glyph[0], glyph[1], glyph[2], glyph[3]
             font = fonts[font_index]
             span = font["ascender"] - font["descender"]
-            baseline = top + snap(font["ascender"] * ppem / font["unitsPerEm"] * span / (span + (font.get("lineGap") or 0)))
+            baseline = top + snap(font["ascender"] * ppem / font["unitsPerEm"] * (font.get("sizeUnits") or span) / (span + (font.get("lineGap") or 0)))
             bm, left, btop = bitmap(font["file"], ppem, glyph_id, stroke_px, join)
             if bm is None:
                 continue

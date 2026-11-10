@@ -651,7 +651,7 @@ impl Registry {
             Some(&index) => index,
             None => {
                 let font = &entry.font;
-                self.list.push(json!({
+                let mut row = json!({
                     "file": &*entry.path,
                     "unitsPerEm": number(font.units_per_em),
                     "ascender": number(font.ascender),
@@ -660,7 +660,14 @@ impl Registry {
                     "family": entry.family,
                     "weight": number(entry.weight),
                     "style": entry.style,
-                }));
+                });
+                // A face with a line gap is sized with it: its glyphs' ppem spreads these units over
+                // S + 1 px (the renderer reads ascender - descender without the field, as scenes saved
+                // before that rule mean)
+                if font.line_gap != 0.0 {
+                    row["sizeUnits"] = number(super::text::layout::height_units(font));
+                }
+                self.list.push(row);
                 let index = self.list.len() - 1;
                 self.index.insert(entry.path.to_string(), index);
                 index

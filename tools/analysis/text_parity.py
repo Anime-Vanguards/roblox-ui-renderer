@@ -69,10 +69,10 @@ def glyph_boxes(scene, atlas):
                 if not font:
                     continue
                 span = font["ascender"] - font["descender"]
-                size = round(glyph[3] * span / font["unitsPerEm"]) - 1
+                size = round(glyph[3] * (font.get("sizeUnits") or span) / font["unitsPerEm"]) - 1
                 if size > largest:
                     largest = size
-                    ascent = snap(font["ascender"] * glyph[3] / font["unitsPerEm"] * span / (span + (font.get("lineGap") or 0)))
+                    ascent = snap(font["ascender"] * glyph[3] / font["unitsPerEm"] * (font.get("sizeUnits") or span) / (span + (font.get("lineGap") or 0)))
             for glyph in line.get("glyphs") or []:
                 font_index, glyph_id, gx, ppem = glyph[0], glyph[1], glyph[2], glyph[3]
                 for entry in index.get((font_index, ppem, glyph_id), []):

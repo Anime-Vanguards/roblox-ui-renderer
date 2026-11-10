@@ -290,11 +290,13 @@ fn text_bold_strength(text: &Value, run: Option<&Value>, font: &Value, ppem: f64
     if !(requested >= 600.0) || !(face_weight < 600.0) {
         return 0.0;
     }
-    let ascender = to_number(font.get("ascender"));
-    let descender = to_number(font.get("descender"));
-    let line_gap = font.get("lineGap").map_or(0.0, |gap| to_number(Some(gap)));
-    let units = to_number(font.get("unitsPerEm"));
-    let size = js_round(ppem * (ascender - descender + line_gap) / units) - 1.0;
+    // the pixel size S of the ppem, as render/text.rs font_size reads it (the two must agree: the
+    // strength is part of the glyph's atlas key)
+    let size_units = match font.get("sizeUnits") {
+        Some(units) if units.is_number() => to_number(Some(units)),
+        _ => to_number(font.get("ascender")) - to_number(font.get("descender")),
+    };
+    let size = js_round(ppem * size_units / to_number(font.get("unitsPerEm"))) - 1.0;
     if size > 0.0 { 2.0 * size } else { 0.0 }
 }
 
@@ -919,6 +921,17 @@ pub fn build_scene_atlas(rasterizer: &mut Rasterizer, scene: &Value, out_dir: &P
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The synthetic bold strength is 2 S for the pixel size S of the ppem, whichever units the scene's
+    /// font spreads over S + 1 px (render/text.rs font_size reads the same size).
+    #[test]
+    fn bold_strength_reads_the_size_units() {
+        let text = json!({ "weight": 700 });
+        let sized = json!({"ascender":1854,"descender":-434,"unitsPerEm":2048,"lineGap":67,"sizeUnits":2355,"weight":400});
+        let saved = json!({"ascender":1854,"descender":-434,"unitsPerEm":2048,"lineGap":67,"weight":400});
+        assert_eq!(text_bold_strength(&text, None, &sized, 55.0 * 2048.0 / 2355.0), 108.0);
+        assert_eq!(text_bold_strength(&text, None, &saved, 55.0 * 2048.0 / 2288.0), 108.0);
+    }
 
     #[test]
     fn js_numbers_format_like_javascript() {

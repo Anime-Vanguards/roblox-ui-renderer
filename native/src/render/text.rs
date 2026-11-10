@@ -129,14 +129,22 @@ fn color(v: &Value, fallback: [f64; 3]) -> [f64; 3] {
 fn premul(c: f64, a: f64) -> u8 {
     ((c * a + 127.0) / 255.0).floor().clamp(0.0, 255.0) as u8
 }
-fn font_size(font: &Value, ppem: f64) -> f64 {
-    snap(ppem * (n(font, "ascender", 0.0) - n(font, "descender", 0.0)) / n(font, "unitsPerEm", 1.0))
-        - 1.0
+/// The font units a glyph's ppem spreads over S + 1 px: the scene font's `sizeUnits` (a face with a line
+/// gap, sized with the gap: engine/text/layout.rs height_units), else ascender - descender (every other
+/// face, and scenes saved before faces with a line gap were sized with it).
+pub(crate) fn size_units(font: &Value) -> f64 {
+    n(font, "sizeUnits", n(font, "ascender", 0.0) - n(font, "descender", 0.0))
 }
+/// The pixel size S of a glyph's ppem.
+fn font_size(font: &Value, ppem: f64) -> f64 {
+    snap(ppem * size_units(font) / n(font, "unitsPerEm", 1.0)) - 1.0
+}
+/// The baseline below the line top: the ascender's share of the S + 1 px line, line gap included
+/// (text-baseline).
 fn ascent(font: &Value, ppem: f64) -> f64 {
     let span = n(font, "ascender", 0.0) - n(font, "descender", 0.0);
     snap(
-        n(font, "ascender", 0.0) * ppem / n(font, "unitsPerEm", 1.0) * span
+        n(font, "ascender", 0.0) * ppem / n(font, "unitsPerEm", 1.0) * size_units(font)
             / (span + n(font, "lineGap", 0.0)),
     )
 }
@@ -2119,6 +2127,22 @@ mod tests {
         node["strokes"][0]["transparency"] = serde_json::json!(0);
         node["text"]["runs"][0]["stroke"]["transparency"] = serde_json::json!(0);
         assert_eq!(glyph_requirements(&node, &fonts, 1.5), requirements);
+    }
+    /// Arimo's metrics at S = 54: a scene of today sizes the face with its line gap and says so
+    /// (`sizeUnits`); a scene saved before sized it over ascender - descender. Both are 54 px text whose
+    /// baseline is the ascender's share of the 55 px line, 1854 * 55 / 2355 = 43.3.
+    #[test]
+    fn line_gap_faces_keep_their_size_and_baseline() {
+        let sized = serde_json::json!({"ascender":1854,"descender":-434,"unitsPerEm":2048,"lineGap":67,"sizeUnits":2355});
+        let saved = serde_json::json!({"ascender":1854,"descender":-434,"unitsPerEm":2048,"lineGap":67});
+        for (font, units) in [(&sized, 2355.0), (&saved, 2288.0)] {
+            let ppem = 55.0 * 2048.0 / units;
+            assert_eq!(font_size(font, ppem), 54.0);
+            assert_eq!(ascent(font, ppem), 43.0);
+        }
+        let plain = serde_json::json!({"ascender":984,"descender":-273,"unitsPerEm":1000,"lineGap":0});
+        assert_eq!(font_size(&plain, 55.0 * 1000.0 / 1257.0), 54.0);
+        assert_eq!(ascent(&plain, 55.0 * 1000.0 / 1257.0), 43.0);
     }
     #[test]
     fn shaped_positions_share_largest_run_baseline() {
