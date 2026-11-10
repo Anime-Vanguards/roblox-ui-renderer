@@ -12,6 +12,10 @@
 			"digest": "49a5fd66f280d4262ca0dc6bc75dad186f59e8667cddabb35a275c74777dd4e4",
 			"status": "ok"
 		},
+		"fast/edit/canvasgroup-rotated-gradient": {
+			"digest": "4da9cc8645f5423b85bba73afbea3dc6d3b76c3dcaf638f2da7701a809a1aa8a",
+			"status": "ok"
+		},
 		"fast/edit/corners": {
 			"digest": "1804f157281b8b7c5d0abfa17e0e5a498f95b04f9fbeddb77d41bf1a36625402",
 			"status": "ok"
@@ -624,8 +628,16 @@
 			"digest": "0a3b9f7df660a55be1b276ae696d10541804b81766aeb7578ae4c7ce9e10477c",
 			"status": "ok"
 		},
+		"fixtures/edit/canvasgroup-rotated-gradient": {
+			"digest": "fa4ade2e12a324d308820ff073f325f046d473b66729f65034b25faa51ad896e",
+			"status": "ok"
+		},
 		"fixtures/edit/corners": {
 			"digest": "4337e5cbd1205d659e5e4ec2aac764a156d8f330c3777d5f8b4298524689d3ed",
+			"status": "ok"
+		},
+		"fixtures/edit/device-probe": {
+			"digest": "a27eabc16db0ac3a76fda05694563175653cf5131de34b0b974c97e3eefbb2d0",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-edges": {
@@ -714,6 +726,10 @@
 		},
 		"fixtures/edit/image-probe-ties-far": {
 			"digest": "b17728e1cba82a33cd19fe6019fda07cb70c98e652e5d705b56549583de953b1",
+			"status": "ok"
+		},
+		"fixtures/edit/input-device-flow": {
+			"digest": "8686e5007bf74bf751a51878fda0dc244cd44c129650e845730b90a0388c98cf",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-autobuttoncolor": {
@@ -826,6 +842,10 @@
 		},
 		"fixtures/edit/rotation-clip-offscreen": {
 			"digest": "2eab2702515f2b51a8fca5320a51c4d9d7d212912421acd697995dbdfbb66f3b",
+			"status": "ok"
+		},
+		"fixtures/edit/screen-layers": {
+			"digest": "c22453cdb53c82b2c08e09051136bc555b6c4bc1aecf2b99ef773182e73e57a1",
 			"status": "ok"
 		},
 		"fixtures/edit/scrollbars": {
@@ -1100,6 +1120,10 @@
 			"digest": "4a39ebd467a31b2f8ee5deca3932461a4ec343f4d7d4a72e15898ba08703cf0c",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-emoji": {
+			"digest": "e557f3fdc7b2ff134f4692787e242bd144e4cd8cb647512e30e120d492a68cbc",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-fracsize": {
 			"digest": "35d8e71056c6398fa6b2798547cd8d683bffc420e881cac1c82346895c4c3121",
 			"status": "ok"
@@ -1208,8 +1232,16 @@
 			"digest": "22c3b2950f3279c7b1a85980ee0ce025d45f18e12171dd6a6e655afbb44df539",
 			"status": "ok"
 		},
+		"fixtures/play/canvasgroup-rotated-gradient": {
+			"digest": "0ba198bf1f539d006e7ec88b521c7a53f9c58e5f8acd80f28679ecb4311f1b14",
+			"status": "ok"
+		},
 		"fixtures/play/corners": {
 			"digest": "e609904a1a1c307fc67314b6308284e5c96b05564088a57b0171ddca33757d94",
+			"status": "ok"
+		},
+		"fixtures/play/device-probe": {
+			"digest": "c24fcce9f94e76243cb6c65c43c4b216ab38f35edcb164656681a6d8b9638135",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-edges": {
@@ -1298,6 +1330,10 @@
 		},
 		"fixtures/play/image-probe-ties-far": {
 			"digest": "43a2b44e13d56a03bcce72127d6d106122a118a1a638d0dfe37faf41fa405c24",
+			"status": "ok"
+		},
+		"fixtures/play/input-device-flow": {
+			"digest": "2a94aa77a0e8d53b804cb3326cec742dfab75f710ed965ce0df701cf8b48ce12",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-autobuttoncolor": {
@@ -1410,6 +1446,10 @@
 		},
 		"fixtures/play/rotation-clip-offscreen": {
 			"digest": "1544c8e9c69ea46e02b1145de3eefbe00972098cebf63ae33b1e61914d54c2bf",
+			"status": "ok"
+		},
+		"fixtures/play/screen-layers": {
+			"digest": "d114ca16557bb06f11ffef26ce4f6dd66b963ba0300c7b94611b737aa02e7903",
 			"status": "ok"
 		},
 		"fixtures/play/scrollbars": {
@@ -1682,6 +1722,10 @@
 		},
 		"fixtures/play/text-probe-decor2": {
 			"digest": "012c86d3a68d6163f2c45a145c27a9b4055bd4f7665385d074c602f29c746d38",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-emoji": {
+			"digest": "05f1d04cc7dca6e8c9dec96c85628a247c2f2b96efc25647d9af0f3e14d4d266",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize": {
