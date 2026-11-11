@@ -18,6 +18,8 @@ pub mod input;
 pub mod memtrace;
 #[cfg(feature = "desktop")]
 pub mod microprofiler_ui;
+// (written by story_render, which the browser module does not have)
+#[cfg(feature = "desktop")]
 pub mod placeholder;
 pub mod places;
 pub mod paths;
