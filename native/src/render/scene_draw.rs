@@ -1508,6 +1508,13 @@ impl DrawPreparer {
             return Ok(());
         }
         self.stats.nodes_prepared += 1;
+        if node["path2d"].is_object() {
+            // (a Path2D's node holds its stroke only)
+            if parts == "all" || parts == "over" {
+                self.path2d(ctx, node);
+            }
+            return Ok(());
+        }
         let physical = physical_rect(node, self.scale);
         let radii = if in_group {
             [0.; 4]
@@ -1690,6 +1697,38 @@ impl DrawPreparer {
             }
         }
         Ok(())
+    }
+    /// A Path2D's stroke (path2d.rs): its coverage in its colour, as one layer over the box it covers. The layer
+    /// is kept by what it shows relative to its own corner in whole pixels, so a path that moves by whole pixels
+    /// (a scroll) reuses it.
+    fn path2d(&mut self, ctx: &mut BuildContext, node: &Value) {
+        let Some(stroke) = super::path2d::Stroke::of(node) else { return };
+        let scale = self.scale;
+        let mesh = stroke.mesh(scale);
+        let Some([x0, y0, x1, y1]) = super::path2d::Stroke::extent(&mesh) else { return };
+        // (a box no texture holds: a path far larger than any screen)
+        let (width, height) = ((x1 - x0) as u64, (y1 - y0) as u64);
+        if width > 16384 || height > 16384 {
+            return;
+        }
+        let (width, height) = (width as u32, height as u32);
+        let at = Rect::new(x0 as f64 - ctx.origin[0], y0 as f64 - ctx.origin[1], width as f64, height as f64);
+        let clip = clip_rect(node, ctx.origin, scale);
+        if Self::culled(ctx, at.bounds(), clip) {
+            return;
+        }
+        let key = format!(
+            "path2d:{:032x}:{}",
+            super::path2d::Stroke::mesh_hash(&mesh, x0, y0),
+            serde_json::to_string(&(stroke.thickness, stroke.color, [width, height])).unwrap_or_default()
+        );
+        let raster = move || {
+            let alpha = stroke.coverage(&mesh, x0, y0, width as usize, height as usize);
+            stroke.shade(&alpha)
+        };
+        let probation = u64::from(width) * u64::from(height) <= 65536;
+        let (.., id) = self.cached_layer_with(key, at.x as i32, at.y as i32, width, height, Box::new(raster), probation);
+        self.layer(ctx, at, id, clip, 0, &[]);
     }
     pub(crate) fn layer(
         &mut self,

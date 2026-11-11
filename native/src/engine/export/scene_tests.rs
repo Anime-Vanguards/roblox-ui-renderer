@@ -770,3 +770,137 @@ fn rotation_clipping_legacy() {
     run(Options { clips_descendants_supports_rotation: false, ..options(600.0, 500.0, 1.0) }, ROTATION_CLIPPING, &[("Modern", false)]);
 }
 
+/// A Path2D is a node of its own under its parent's: its segments on the screen, its stroke, the box the stroke
+/// reaches. It draws after its parent and before the parent's GuiObjects of its ZIndex wherever it sits among them,
+/// follows its parent when the parent moves, and takes the clip its parent's children get.
+const PATH2D: &str = r#"
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+local Names = {}
+local function Box(Parent, Name, X, Y, W, H)
+	local F = Instance.new("Frame", Parent)
+	F.Name = Name
+	F.Position = UDim2.fromOffset(X, Y)
+	F.Size = UDim2.fromOffset(W, H)
+	Names[Id(F)] = Name
+	return F
+end
+local function Path(Parent, Name, Points, Thickness)
+	local P = Instance.new("Path2D")
+	P.Name = Name
+	P.Thickness = Thickness
+	P.Color3 = Color3.new(1, 0.5, 0)
+	P:SetControlPoints(Points)
+	P.Parent = Parent
+	Names[Id(P)] = Name
+	return P
+end
+local Point, Offset = Path2DControlPoint.new, UDim2.fromOffset
+local A = Box(Root, "A", 100, 50, 200, 100)
+local Child = Box(A, "Child", 10, 10, 20, 20)
+-- (made after Child: it still draws before it)
+local Line = Path(A, "Line", { Point(Offset(0, 0)), Point(UDim2.new(1, 0, 0.5, 10)) }, 4)
+local function Nodes(Result)
+	local ByName = {}
+	for _, Node in Result.nodes do ByName[Node.name] = Node end
+	return ByName
+end
+local function Draw(Result)
+	local Out = {}
+	for _, Entry in Result.layers[1].draw do table.insert(Out, Names[Entry]) end
+	return table.concat(Out, " ")
+end
+
+local Result = Check(Root, "first")
+local N = Nodes(Result)
+assert(N.Line.class == "Path2D" and N.Line.parent == N.A.id and N.Line.matrix == nil and N.Line.rotation == 0)
+assert(Same(N.Line.path2d.segments, { { 100, 50, 300, 110 } }), "a line's two points on the screen")
+assert(N.Line.path2d.thickness == 4 and N.Line.path2d.closed == nil)
+assert(math.abs(N.Line.path2d.color[2] - 0.5) < 0.01 and N.Line.path2d.transparency == nil)
+-- the curve's bounds grown by (Thickness + 1) / 2: what GetBoundingRect answers
+local Rect = Line:GetBoundingRect()
+assert(Same(N.Line.rect, { 97.5, 47.5, 205, 65 }), "the box the stroke reaches")
+assert(Rect.Min == Vector2.new(97.5, 47.5) and Rect.Width == 205 and Rect.Height == 65)
+assert(Same(N.Line.path2d.origin, { 97.5, 47.5 }))
+assert(Draw(Result) == "A Line Child", Draw(Result))
+
+-- ZIndex among the parent's children; equal paths in child order; a Global root sorts it among every descendant
+Line.ZIndex = 2
+assert(Draw(Check(Root, "above")) == "A Child Line")
+Line.ZIndex = 1
+local Curve = Path(A, "Curve", { Point(Offset(0, 100), Offset(0, 0), Offset(50, -50)), Point(Offset(100, 100), Offset(-50, -50), Offset(0, 0)), Point(Offset(200, 100)) }, 2)
+Result = Check(Root, "two paths")
+assert(Draw(Result) == "A Line Curve Child", Draw(Result))
+assert(#Nodes(Result).Curve.path2d.segments == 2 and #Nodes(Result).Curve.path2d.segments[1] == 8 and #Nodes(Result).Curve.path2d.segments[2] == 4, "a cubic, then a line")
+Curve.Closed = true
+assert(#Nodes(Check(Root, "closed")).Curve.path2d.segments == 3 and Nodes(Check(Root, "closed")).Curve.path2d.closed == true)
+Curve.Closed = false
+Root.ZIndexBehavior = Enum.ZIndexBehavior.Global
+Child.ZIndex = 0
+Curve.ZIndex = 3
+assert(Draw(Check(Root, "global")) == "Child A Line Curve", Draw(Check(Root, "global")))
+Root.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Child.ZIndex = 1
+Curve.ZIndex = 1
+
+-- unchanged: nothing is rebuilt; the parent moves: the path's node is, with its segments where the parent is
+Check(Root, "settled")
+assert(#Check(Root, "idle").rebuilt == 0, "an unchanged path is not rebuilt")
+A.Position = UDim2.fromOffset(120, 50)
+Result = Check(Root, "moved")
+assert(table.find(Result.rebuilt, Id(Line)) and table.find(Result.rebuilt, Id(Curve)), "a path follows its parent")
+assert(Same(Nodes(Result).Line.path2d.segments, { { 120, 50, 320, 110 } }))
+-- its own points and properties
+Line:UpdateControlPoint(2, Point(UDim2.new(1, 0, 1, 0)))
+Result = Check(Root, "points")
+assert(Same(Nodes(Result).Line.path2d.segments, { { 120, 50, 320, 150 } }) and not table.find(Result.rebuilt, Id(Curve)))
+Line.Thickness = 10
+assert(Nodes(Check(Root, "thickness")).Line.path2d.thickness == 10)
+-- a turned parent turns the points about its centre: the node has no matrix
+A.Rotation = 90
+Result = Check(Root, "turned")
+local Turned = Nodes(Result).Line.path2d.segments[1]
+assert(math.abs(Turned[1] - 270) < 0.001 and math.abs(Turned[2] - 0) < 0.001 and math.abs(Turned[3] - 170) < 0.001 and math.abs(Turned[4] - 200) < 0.001, table.concat(Turned, " "))
+assert(Nodes(Result).Line.matrix == nil)
+A.Rotation = 0
+
+-- not drawn: Visible false, or an invisible parent
+Line.Visible = false
+Result = Check(Root, "hidden")
+assert(Draw(Result) == "A Curve Child" and Nodes(Result).Line.visible == false)
+Line.Visible = true
+A.Visible = false
+assert(Draw(Check(Root, "parent hidden")) == "")
+A.Visible = true
+
+-- the clip of the parent's children: a clipping parent's rectangle, never a turned one's
+A.ClipsDescendants = true
+Result = Check(Root, "clipped")
+assert(Same(Nodes(Result).Line.clip, { 120, 50, 200, 100 }) == Modern, "a clipping parent clips its path (not before rotated clipping)")
+A.Rotation = 30
+assert(Nodes(Check(Root, "turned clip")).Line.clip == nil, "a turned parent adds no clip")
+A.Rotation = 0
+A.ClipsDescendants = false
+
+-- removed: its node goes
+Curve.Parent = nil
+Result = Check(Root, "removed")
+assert(Nodes(Result).Curve == nil and Draw(Result) == "A Line Child")
+-- a path of the root itself resolves against the screen
+local Screen = Path(Root, "Screen", { Point(UDim2.fromScale(0, 0)), Point(UDim2.fromScale(1, 1)) }, 1)
+Result = Check(Root, "screen")
+assert(Same(Nodes(Result).Screen.path2d.segments, { { 0, 0, 600, 500 } }))
+assert(Draw(Result) == "Screen A Line Child", Draw(Result))
+"#;
+
+#[test]
+fn path2d_nodes_order_clip_and_rebuild() {
+    run(Options { clips_descendants_supports_rotation: true, ..options(600.0, 500.0, 1.0) }, PATH2D, &[("Modern", true)]);
+}
+
+/// Before Roblox clipped rotated elements no ancestor clipped a Path2D (its announcement; notes/path2d.md)
+#[test]
+fn path2d_legacy_rotation_clipping_has_no_clip() {
+    run(Options { clips_descendants_supports_rotation: false, ..options(600.0, 500.0, 1.0) }, PATH2D, &[("Modern", false)]);
+}
+

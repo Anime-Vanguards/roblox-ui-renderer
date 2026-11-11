@@ -196,6 +196,38 @@
 			"digest": "7bd5689412a18f00e12fc2da36394765e174492e57fc539c477f0bcd664dbac6",
 			"status": "ok"
 		},
+		"fast/edit/path2d-curves": {
+			"digest": "d90332cf9c96a839b7f6503094d58ab5bd0719eb2ae387f4cb0185dd2fa3988a",
+			"status": "ok"
+		},
+		"fast/edit/path2d-edges": {
+			"digest": "64206355de7eb3d39f260c1d8a3991ad5acdb8be17de136dbbf30b5b563f1df4",
+			"status": "ok"
+		},
+		"fast/edit/path2d-layout": {
+			"digest": "d3d0d69c8b18be01900624e2a3c95cc91e436363798643b7f66bb9b36ff83541",
+			"status": "ok"
+		},
+		"fast/edit/path2d-order": {
+			"digest": "07d2f35596306e9ab246b14b0f58f46bc7015d9bd4d1f812ee886f1d38554d5c",
+			"status": "ok"
+		},
+		"fast/edit/path2d-strokes": {
+			"digest": "171e0deeba740882a11bf251751e17693b7ef7ae77e390ea00adbc2ab231860a",
+			"status": "ok"
+		},
+		"fast/edit/path2d-thick": {
+			"digest": "b5be0c2cae4fc77c1a0a631128823bca93bb672d94b3c2e4353bf70c9a9b2e58",
+			"status": "ok"
+		},
+		"fast/edit/path2d-zindex": {
+			"digest": "165f52ca0dd4be02417f18b86e60f46ca6f4d232ca4247dbe0276024bcf206a8",
+			"status": "ok"
+		},
+		"fast/edit/path2d-zindex-global": {
+			"digest": "85d260fb91b0f545e750cd48469ea0353d1b759e712462c84cdf66f6dfedf6fe",
+			"status": "ok"
+		},
 		"fast/edit/probe-errors": {
 			"digest": "02f743ac49c06f7b444fec2801fc03faffe57d2ba4eab2a3ae9f30b383e9f3a6",
 			"status": "ok"
@@ -213,7 +245,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
-			"digest": "b92421b1abed7f70f8bc0f0b3855fa71f70d0d1a829e4777351142e0595459fa",
+			"digest": "3e6dd02fd5cb2044b7d5715224cfb790151b40e18b4b16bd5df3582acb88f8fb",
 			"status": "ok"
 		},
 		"fast/edit/rects": {
@@ -812,6 +844,38 @@
 			"digest": "9ef76d066f6c90accdae0fdf77555102597a61b0f674cb8f5d31e59ac8158708",
 			"status": "ok"
 		},
+		"fixtures/edit/path2d-curves": {
+			"digest": "3f9693bf5e41fa92e261e3115c7ae8bb4db6c87334c463abf8d3607dfa829bb7",
+			"status": "ok"
+		},
+		"fixtures/edit/path2d-edges": {
+			"digest": "e8163dd6436c3e10b4a07db70441448b8490eadd072e19d977d6b8be579df1a0",
+			"status": "ok"
+		},
+		"fixtures/edit/path2d-layout": {
+			"digest": "ef625b2b12a04f94a53282a6d842ef19073242e32e2a8dbba8e093149914f72c",
+			"status": "ok"
+		},
+		"fixtures/edit/path2d-order": {
+			"digest": "50465da46180737d688d68d33f1834458fb876ad25a3cc4599e2ee75ce253a5f",
+			"status": "ok"
+		},
+		"fixtures/edit/path2d-strokes": {
+			"digest": "1a65eef23c7a0d0d56f1ff730d7df669d4844ef24f4b0926a484bc332cffb13a",
+			"status": "ok"
+		},
+		"fixtures/edit/path2d-thick": {
+			"digest": "1059bf4b0a395125cf0d37770a63f187fb0fad777bbd6879d59fcb5f6ede0fcf",
+			"status": "ok"
+		},
+		"fixtures/edit/path2d-zindex": {
+			"digest": "5b3143f2d3c75b12d2cf4bf3ee034b58029ff09abe19f1a25cc50804046b852a",
+			"status": "ok"
+		},
+		"fixtures/edit/path2d-zindex-global": {
+			"digest": "ee30569130fefa049a6b1b751bc052bf60e4c7cf42d980d7a9de02c2e6313cfd",
+			"status": "ok"
+		},
 		"fixtures/edit/probe-errors": {
 			"digest": "a9bbe7418d30fe406695a9765361a6554251cf99bf93e5aa8311349724ec29db",
 			"status": "ok"
@@ -829,7 +893,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
-			"digest": "aff6a9b6ba52db0c165d1699144f587a96f51b36303ac058d788947588ba84cc",
+			"digest": "1986a1120a64d7ce6c0bfb4fe35461df981a9d18dca64eb90054de91a3dc078e",
 			"status": "ok"
 		},
 		"fixtures/edit/rects": {
@@ -1416,6 +1480,38 @@
 			"digest": "8f316ad4ab9ac79cbcae723c9a0eb9e632d7f8566ce5f747c5c9f6473fef52d6",
 			"status": "ok"
 		},
+		"fixtures/play/path2d-curves": {
+			"digest": "35cf0a21b203d32572f4f1838679ef0fb9c14f92609e1b437061b327b489ea07",
+			"status": "ok"
+		},
+		"fixtures/play/path2d-edges": {
+			"digest": "0b6715873f6edff63a83126b5cdd6f10f3915e0f01433b992c55ca132e598b72",
+			"status": "ok"
+		},
+		"fixtures/play/path2d-layout": {
+			"digest": "2019a5025aee2600b75da9372841e80cc3a21267ca0d0fa49bfbf9a4f6b30d2b",
+			"status": "ok"
+		},
+		"fixtures/play/path2d-order": {
+			"digest": "5ff34554cbabdae2d7dfe030ada2a979fee7cf8c1ea59646ff0aa029afb54da8",
+			"status": "ok"
+		},
+		"fixtures/play/path2d-strokes": {
+			"digest": "28c64029b742d7eb00f9c742429c6c81c08639c9143aecf6f4c1e13e21d59699",
+			"status": "ok"
+		},
+		"fixtures/play/path2d-thick": {
+			"digest": "f0f97f52b6bb768331725aad7c3ed27e6e7f31cab92e28de1b63207d388d57eb",
+			"status": "ok"
+		},
+		"fixtures/play/path2d-zindex": {
+			"digest": "71b9d3c2f975ed7cfa9abb1b0c742fc26961cedbf51837b70c7aa35bf7e311cc",
+			"status": "ok"
+		},
+		"fixtures/play/path2d-zindex-global": {
+			"digest": "b9593667b70b9eddfe9716cd1342348b4d0d72b50b6c567c0ad9eb24edc27563",
+			"status": "ok"
+		},
 		"fixtures/play/probe-errors": {
 			"digest": "f401d261bde0ee47680cac49c6955f5febb9a9cce6ac5a2a453e8e06f435647d",
 			"status": "ok"
@@ -1433,7 +1529,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "cba955da8619ff4999157924f71aa6d9b68ed3288cc8f4e78f8581ab897e7e7a",
+			"digest": "574fd355d679076d5d887b5c5b5c02e19f659ed7471ce894c4094f3f30e0d421",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
@@ -2065,7 +2161,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-10T13:12:56.279Z",
+	"recorded": "2026-11-11T21:18:26.134Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

@@ -3,7 +3,8 @@
 //! lists, scroll bar entries), node appearance (background, border, corner, strokes, shadows,
 //! gradient, image with its @2x density variant, group) and geometry from the layout records
 //! (`engine.layout`: rect, rotation matrix, AbsolutePosition under rotation, clips with scroll
-//! windows, text glyph runs and fonts, scroll bars, AutomaticSize culling).
+//! windows, text glyph runs and fonts, scroll bars, AutomaticSize culling), and the Path2Ds of each
+//! node as nodes of their own ([`path_json`]).
 //!
 //! Two paths share one traversal ([`Walk`]), as scene.luau's Scene.Build with and without a cache:
 //! - [`build`]: the one-shot export (CLI dumps, the session's `scene` command): every node, with
@@ -28,6 +29,8 @@ use crate::engine::GuiEngine;
 use super::{
     ClassId, Engine, InstanceId, K, NameId, Reflection, State,
     layout::{BoxSlots, Layout, Record, absolute_position, record::{Transform, compose, rotation_about}},
+    path2d::{self, Segment},
+    path2d_layout,
     text::{FaceId, Line, TextEngine, TextLayout, XAlign, is_space, line_pen, ppem, reveal::LineReveal},
     value::{ContentValue, Value},
 };
@@ -178,6 +181,7 @@ pub(crate) struct Classes {
     ui_shadow: Option<ClassId>,
     ui_gradient: Option<ClassId>,
     player_gui: Option<ClassId>,
+    path2d: Option<ClassId>,
     grid_layouts: [Option<ClassId>; 4],
 }
 
@@ -200,6 +204,7 @@ impl Classes {
             ui_shadow: id("UIShadow"),
             ui_gradient: id("UIGradient"),
             player_gui: id("PlayerGui"),
+            path2d: id("Path2D"),
             grid_layouts: [id("UIListLayout"), id("UIGridLayout"), id("UIPageLayout"), id("UITableLayout")],
         }
     }
@@ -212,6 +217,8 @@ struct Names {
     text_stroke_color3: Option<NameId>,
     text_truncate: Option<NameId>,
     max_visible_graphemes: Option<NameId>,
+    closed: Option<NameId>,
+    color3: Option<NameId>,
 }
 
 impl Names {
@@ -223,6 +230,8 @@ impl Names {
             text_stroke_color3: id("TextStrokeColor3"),
             text_truncate: id("TextTruncate"),
             max_visible_graphemes: id("MaxVisibleGraphemes"),
+            closed: id("Closed"),
+            color3: id("Color3"),
         }
     }
 }
@@ -306,10 +315,16 @@ impl Ctx<'_> {
         }
     }
 
-    /// The children a walk visits in order: GuiChildren, sorted by ZIndex (then child order) unless
-    /// the root is Global.
+    /// The children a walk visits in order: the instance's own Path2Ds, then its GuiChildren, sorted by
+    /// ZIndex (then that order) unless the root is Global. Measured (fixtures/path2d-order.luau, Studio
+    /// 0.747): a path draws under its parent's GuiObjects of the same ZIndex wherever it sits among them,
+    /// and over an earlier path of the same ZIndex; under a Global root it takes its place by ZIndex among
+    /// every descendant, as if it were its parent's first child.
     fn ordered_children(&self, id: InstanceId, global: bool) -> Vec<InstanceId> {
         let mut children = Vec::new();
+        if self.c.path2d.is_some() {
+            children.extend(self.children(id).iter().copied().filter(|&child| self.is_exactly(child, self.c.path2d)));
+        }
         self.gui_children_into(id, &mut children);
         if !global {
             // (stable: equal ZIndex keeps the child order)
@@ -1244,6 +1259,70 @@ fn export_node(
     node
 }
 
+/// A Path2D's node: `rect` is the box its stroke can reach (GUI pixels), and `path2d` what draws: the curve's
+/// segments on the screen (a line's two points, a quadratic's three, a cubic's four, as x, y pairs; the parent's
+/// rotation is in them, so the node has no matrix), the stroke's thickness and colour (Path2D.Transparency is not
+/// drawn: Studio 0.747 keeps it and draws the path opaque whatever it is). `origin` is
+/// `rect`'s corner when the segments were made: a renderer that finds `rect` moved (a predicted scroll) moves the
+/// segments by the difference. A path draws over its parent's own content (background, text, stroke) and is cut
+/// by the clip its parent's children get, never by its parent's rounded corners.
+#[allow(clippy::too_many_arguments)]
+fn path_json(ctx: &Ctx, id: InstanceId, record: &Record, parent: u32, clip: Option<[f64; 4]>, visible: bool, z: &ZInfo, path: Option<String>) -> Map<String, Json> {
+    let instance = ctx.state.dom.at(id);
+    let frame = path2d_layout::frame_of(record);
+    let points = path2d::control_points(ctx.state, ctx.reflection, id);
+    let closed = matches!(ctx.get_opt(id, ctx.n.closed), Some(Value::Bool(true)));
+    let curve = path2d::Curve::new(&points, closed, &frame);
+    let thickness = ctx.number(id, K::Thickness as NameId).unwrap_or(1.0);
+    // (what GetBoundingRect answers: the stroke's quads reach half a pixel past the thickness on each side,
+    // render/path2d.rs, and a path of no thickness reaches nothing)
+    let reach = path2d::margin(thickness as f32) as f64;
+    let rect = match curve.bounds() {
+        Some((least, most)) => {
+            let (x, y) = (least[0] as f64 - reach, least[1] as f64 - reach);
+            [x, y, most[0] as f64 + reach - x, most[1] as f64 + reach - y]
+        }
+        None => [record.x, record.y, 0.0, 0.0],
+    };
+    let rect = rect.map(float32);
+    let mut node = Map::new();
+    node.insert("id".into(), Json::from(instance.serial));
+    node.insert("class".into(), Json::String(ctx.class_name(id).into()));
+    node.insert("name".into(), Json::String(instance.name.to_string()));
+    node.insert("path".into(), Json::String(path.unwrap_or_else(|| ctx.state.dom.full_name(ctx.reflection, id))));
+    node.insert("zIndex".into(), number(ctx.number(id, K::ZIndex as NameId).unwrap_or(1.0)));
+    node.insert("parent".into(), Json::from(parent));
+    node.insert("rect".into(), numbers(&rect));
+    node.insert("rotation".into(), Json::from(0));
+    if let Some(clip) = clip {
+        node.insert("clip".into(), numbers(&clip));
+    }
+    node.insert("visible".into(), Json::Bool(visible));
+    let segments: Vec<Json> = curve
+        .segments
+        .iter()
+        .map(|segment| {
+            let points: Vec<[f32; 2]> = match *segment {
+                Segment::Line(start, end) => vec![start, end],
+                Segment::Quadratic(start, control, end) => vec![start, control, end],
+                Segment::Cubic(start, first, second, end) => vec![start, first, second, end],
+            };
+            Json::Array(points.iter().flatten().map(|&value| number(float32(value as f64))).collect())
+        })
+        .collect();
+    let mut stroke = Map::new();
+    stroke.insert("segments".into(), Json::Array(segments));
+    stroke.insert("origin".into(), numbers(&rect[..2]));
+    stroke.insert("thickness".into(), number(thickness));
+    stroke.insert("color".into(), ctx.color(ctx.get_opt(id, ctx.n.color3)));
+    if closed {
+        stroke.insert("closed".into(), Json::Bool(true));
+    }
+    node.insert("path2d".into(), Json::Object(stroke));
+    z.write(&mut node);
+    node
+}
+
 /// A node's image URIs (`images`): its image, its scroll bar images and their @2x variants.
 /// (`known`: URIs the caller will skip anyway; the node's own image is not copied for them)
 fn node_images(node: &Map<String, Json>, known: &FxHashSet<String>, images: &mut Vec<String>) {
@@ -1738,6 +1817,10 @@ impl Walk<'_, '_, '_, '_> {
         let skippable = retained && !self.global;
         let inputs = skippable.then(|| SubtreeInputs { parent_id, matrix, clip, suppressed, scrolled, owners: owners.cloned() });
         for &child in children.iter() {
+            if self.ctx.is_exactly(child, self.ctx.c.path2d) {
+                self.visit_path(child, id, parent_id, flat, tree, clip, suppressed, owners);
+                continue;
+            }
             if let Some(inputs) = &inputs {
                 if self.reuse_subtree(child, inputs, flat) {
                     continue;
@@ -1748,6 +1831,100 @@ impl Walk<'_, '_, '_, '_> {
             if let Some(inputs) = &inputs {
                 self.record_subtree(child, inputs, before, flat);
             }
+        }
+    }
+
+    /// A Path2D of `parent` (whose node is `parent_id`): its node and its draw entry. The path is drawn where
+    /// its parent's rectangle is, so the node is rebuilt when the parent's record changes; it is not drawn under
+    /// a parent that draws nothing (AutomaticSize culling) or when its own Visible is false.
+    #[allow(clippy::too_many_arguments)]
+    fn visit_path(
+        &mut self,
+        path: InstanceId,
+        parent: InstanceId,
+        parent_id: u32,
+        flat: &mut Vec<Draw>,
+        tree: &mut Vec<GlobalItem>,
+        clip: Option<[f64; 4]>,
+        suppressed: bool,
+        owners: Option<&Rc<[u32]>>,
+    ) {
+        let ctx = self.ctx;
+        let Some(record) = ctx.record(parent) else { return };
+        // Before Roblox clipped rotated elements (a place that keeps ClipsDescendantsSupportsRotation off) no
+        // ancestor clipped a Path2D: its announcement says so; not measured (notes/path2d.md)
+        let modern = ctx.engine.options.clips_descendants_supports_rotation;
+        let clip = if modern { clip } else { None };
+        let owners: Option<Rc<[u32]>> = if self.presentation() && !modern { Some(Rc::from(Vec::new())) } else { owners.cloned() };
+        self.sequence += 1;
+        let serial = ctx.state.dom.at(path).serial;
+        let visible = record.visible && !matches!(ctx.get(path, K::Visible as NameId), Some(Value::Bool(false)));
+        let z = ZInfo { culled: suppressed, clip_owners: owners, rotation_cull: None, display_order: None, enabled: None };
+        match self.cache.as_deref_mut() {
+            None => {
+                let mut node = path_json(ctx, path, record, parent_id, clip, visible, &z, None);
+                node.insert("order".into(), Json::from(self.sequence));
+                self.nodes.push(Json::Object(node));
+            }
+            Some(cache) => {
+                let (version, _) = cache.versions.of(path);
+                let structure = cache.versions.structure;
+                cache.exported.push((serial, path));
+                let reused = cache.entries.get_mut(path).is_some_and(|entry| {
+                    let same = entry.sent
+                        && entry.version == version
+                        && entry.structure == structure
+                        && entry.record_version == record.version
+                        && entry.parent == Some(parent_id)
+                        && entry.z == z
+                        && entry.clip == clip;
+                    if same {
+                        entry.exported = cache.frame;
+                    }
+                    same
+                });
+                if !reused {
+                    cache.misses += 1;
+                    let mut entry = cache.entries.take(path).unwrap_or_default();
+                    let path_version = cache.versions.path_of(path);
+                    let name = match &entry.path {
+                        Some((version, name)) if *version == path_version => name.clone(),
+                        _ => {
+                            let name = ctx.state.dom.full_name(ctx.reflection, path);
+                            entry.path = Some((path_version, name.clone()));
+                            name
+                        }
+                    };
+                    self.nodes.push(Json::Object(path_json(ctx, path, record, parent_id, clip, visible, &z, Some(name))));
+                    entry.built = true;
+                    entry.sent = true;
+                    entry.exported = cache.frame;
+                    entry.version = version;
+                    entry.structure = structure;
+                    entry.record_version = record.version;
+                    entry.parent = Some(parent_id);
+                    entry.z = z;
+                    entry.matrix = None;
+                    entry.clip = clip;
+                    cache.entries.set(path, entry);
+                }
+            }
+        }
+        if !visible || suppressed {
+            return;
+        }
+        if self.global {
+            tree.push(GlobalItem {
+                id: serial,
+                z: ctx.number(path, K::ZIndex as NameId).unwrap_or(1.0),
+                sequence: self.sequence,
+                group: false,
+                post: false,
+                skip_self: false,
+                children: Vec::new(),
+            });
+        } else {
+            flat.push(Draw::Id(serial as i64));
         }
     }
 

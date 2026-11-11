@@ -7,7 +7,7 @@ Everything that runs or draws a story is native (`native/`, Rust):
   with your Luau running on an embedded, patched Luau VM), plus the GUI layer rur adds to it
   (`native/src/engine`): layout, text, input, the scene export, story mounting and sessions;
 - the renderer (`native/src/render`, wgpu): Studio's measured raster rules for fills, borders, UICorner,
-  UIStroke, UIGradient, images and 9-slice, text, shadows, CanvasGroups, scroll bars and rotation;
+  UIStroke, UIGradient, images and 9-slice, text, shadows, CanvasGroups, Path2D strokes, scroll bars and rotation;
 - the glyph rasterizer (`native/src/glyphs.rs`, `glyphs/rur_glyph.c`): FreeType 2.14.2, compiled in.
 
 One binary (`rur-native`) is the desktop storybook, the renderer of `rur render` (one-shot or through a warm

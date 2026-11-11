@@ -8,6 +8,7 @@ pub mod images;
 mod node_records;
 pub mod packet;
 pub mod paint;
+pub mod path2d;
 pub mod sampling;
 mod scene_draw;
 pub mod text;

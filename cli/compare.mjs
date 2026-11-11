@@ -347,6 +347,24 @@ local function Visit(Node, RelativePath, Hidden)
 			Entry.props = Props
 			table.insert(Nodes, Entry)
 			Visit(Child, Entry.path, Hidden or not Entry.visible)
+		elseif Child:IsA("Path2D") then
+			-- A path has no Absolute* members: its rectangle is the box its stroke reaches. One with fewer than
+			-- two points reaches nothing (GetBoundingRect answers every number there is): its parent's corner
+			local Found, Bounds = pcall(Child.GetBoundingRect, Child)
+			local Origin = Node.AbsolutePosition
+			local Reaches = Found and Bounds.Width < 1e30
+			table.insert(Nodes, {
+				hidden = Hidden or nil,
+				path = RelativePath .. "/" .. Child.Name,
+				class = Child.ClassName,
+				x = if Reaches then Bounds.Min.X else Origin.X,
+				y = if Reaches then Bounds.Min.Y else Origin.Y,
+				w = if Reaches then Bounds.Width else 0,
+				h = if Reaches then Bounds.Height else 0,
+				r = 0,
+				visible = Child.Visible,
+				props = { pathThickness = Child.Thickness, pathColor = { math.floor(Child.Color3.R * 255 + 0.5), math.floor(Child.Color3.G * 255 + 0.5), math.floor(Child.Color3.B * 255 + 0.5) } },
+			})
 		elseif Child:IsA("Folder") then
 			Visit(Child, RelativePath .. "/" .. Child.Name, Hidden)
 		end
@@ -711,6 +729,10 @@ function propertyDiffs(props, node) {
 	if (props.textTransparency !== undefined && node.text) {
 		check("TextTransparency", props.textTransparency, node.text.transparency ?? 0, near(props.textTransparency, node.text.transparency ?? 0, 0.005));
 		if (props.textTransparency < 0.999) check("TextColor3", props.textColor, color255(node.text.color), nearColor(props.textColor, color255(node.text.color)));
+	}
+	if (props.pathThickness !== undefined && node.path2d) {
+		check("Thickness", props.pathThickness, node.path2d.thickness, near(props.pathThickness, node.path2d.thickness, 0.005));
+		check("Color3", props.pathColor, color255(node.path2d.color), nearColor(props.pathColor, color255(node.path2d.color)));
 	}
 	if (props.groupTransparency !== undefined) {
 		const group = node.group || {};

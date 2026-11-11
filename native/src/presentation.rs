@@ -176,7 +176,11 @@ impl Translations {
             },
             None => None,
         };
+        // (a Path2D of a scroller is drawn against its window, not its canvas: it moves with the scroller, never
+        // with the scroller's own scroll; notes/path2d.md)
+        let fixed = node.or_else(|| scene.node(id)).is_some_and(|node| node.get("path2d").is_some());
         let (inherited, own) = match (parent, inherited) {
+            (Some(_), Some(inherited)) if fixed => (inherited, [0.0; 2]),
             (Some(parent), Some(inherited)) => (inherited, self.offsets.get(&parent).copied().unwrap_or([0.0; 2])),
             _ => ([0.0; 2], [0.0; 2]),
         };
@@ -1282,6 +1286,31 @@ mod tests {
             "nodes":[{"id":1,"rect":[0,0,400,300],"clipOwners":[],"scroll":{
                 "window":[0,0,400,300],"canvas":[0,0,400,2000],"canvasPosition":[0,0],"maxRange":[0,1700],"direction":"Y","epoch":0}}]}),
         )
+    }
+
+    /// A scroller's own Path2D is drawn against its window, so a predicted scroll leaves it where it is, while a
+    /// path of a scrolled child moves with the child (the renderer moves its segments by `rect` against `origin`).
+    #[test]
+    fn a_scrollers_own_path_does_not_scroll_and_a_scrolled_childs_does() {
+        let path = |id: u64, parent: u64| {
+            json!({"id": id, "parent": parent, "class": "Path2D", "rect": [10.0, 20.0, 50.0, 5.0], "clipOwners": [1],
+                "path2d": {"segments": [[12.5, 22.5, 57.5, 22.5]], "origin": [10.0, 20.0], "thickness": 4, "color": [1, 1, 1]}})
+        };
+        let source = scene(&json!({"viewport": {"width": 400, "height": 300, "scale": 1.0}, "layers": [{"draw": [1, 2, 3, 4]}],
+            "nodes": [
+                {"id": 1, "rect": [0, 0, 400, 300], "clipOwners": [], "scroll": {
+                    "window": [0, 0, 400, 300], "canvas": [0, 0, 400, 2000], "canvasPosition": [0, 0], "maxRange": [0, 1700], "direction": "Y", "epoch": 0}},
+                path(2, 1),
+                {"id": 3, "parent": 1, "rect": [0, 0, 100, 100], "clipOwners": [1]},
+                path(4, 3),
+            ]}));
+        let projected = project_scroll_scene(&source, &HashMap::from([(1, [0.0, 40.0])])).unwrap();
+        let rect = |id: u64| projected.node(id).unwrap()["rect"].clone();
+        assert_eq!(rect(2), json!([10.0, 20.0, 50.0, 5.0]));
+        assert_eq!(rect(3), json!([0.0, -40.0, 100, 100]));
+        assert_eq!(rect(4), json!([10.0, -20.0, 50.0, 5.0]));
+        let stroke = crate::render::path2d::Stroke::of(projected.node(4).unwrap()).unwrap();
+        assert_eq!(stroke.segments, vec![vec![[12.5, -17.5], [57.5, -17.5]]]);
     }
 
     #[test]

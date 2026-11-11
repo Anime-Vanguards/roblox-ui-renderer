@@ -1,4 +1,4 @@
-# Compositing: fills, images, CanvasGroups, gradients, strokes, shadows
+# Compositing: fills, images, CanvasGroups, gradients, strokes, shadows, paths
 
 How the renderer (`native/src/render/`, the uber shader `shaders/uber.*.glsl`) turns a scene into pixels
 the way Studio does. All numbers are for Studio at device scale 1.5 on a D3D11 GPU; `rur compare` reports
@@ -75,6 +75,22 @@ Fixtures: `corners`, `strokes`, `stroke-*`.
 - Features Studio gates off (`Inset`, `ShowBehindParent`, `Mode = Text`) are ignored, as in Studio.
 
 Fixtures: `shadows*`, `shadow-probe-*`.
+
+## Path2D
+
+- A Path2D draws its curve as a stroke of its Color3, `Thickness` wide: a strip of triangles along the curve with
+  a ramp on each long edge and square ends, as measured in Studio 0.747. Straight segments are one piece; curved
+  ones are cut at up to thirty places, fewer where the curve is flat to a pixel.
+- Corners are bevels: two triangles join one segment's end to the next one's start. A closed path's last corner,
+  at its first point, is not joined and keeps a notch.
+- Where the stroke overlaps itself (the inside of a corner, a crossing) partly covered pixels are covered twice.
+- `Transparency` is not drawn: Studio keeps the value and draws the path opaque.
+- It draws over its parent's background, text and UIStroke and under the parent's GuiObject children of the same
+  ZIndex; paths of one ZIndex draw in child order. Clipping ancestors and CanvasGroups clip it; the parent's
+  UICorner does not.
+
+Fixtures: `path2d-strokes`, `path2d-edges`, `path2d-curves`, `path2d-thick`, `path2d-order`, `path2d-zindex`,
+`path2d-zindex-global`, `path2d-layout`.
 
 ## Scroll bars
 

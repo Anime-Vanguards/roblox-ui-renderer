@@ -190,7 +190,8 @@ node cli/inspect.mjs diff out/before out/after            # layout and visual ch
 ```
 
 Rects are logical screen pixels (`AbsolutePosition` / `AbsoluteSize`; with `--topbar-inset`, scripts read a
-ScreenGui's content `AbsolutePosition` the inset higher, as in Roblox). Tree lines show what is not drawn as it
+ScreenGui's content `AbsolutePosition` the inset higher, as in Roblox). A Path2D's rect is the box its stroke
+reaches (`GetBoundingRect`), and its line reads `path=4#ff8000 segments=2`. Tree lines show what is not drawn as it
 reads (`[culled, not drawn: AutomaticSize, centre outside clip]`, `[2 wrapped lines dropped]`, `[missing glyph
 ...]`). A typical loop: render, look at `render.png` or a crop, query the tree for the element that looks
 wrong, edit the source, render to a second directory and `diff` the two.

@@ -93,6 +93,17 @@ How rur's layout (`native/src/engine/layout/`) computes `AbsolutePosition`, `Abs
 - Rotated descendants of a clipping, unrotated frame are clipped by it in the current (modern) rotation
   clipping mode, with a coarse cull; `--rotation-clipping disabled` selects the legacy behaviour.
 
+## Path2D
+
+- A Path2D has no rectangle of its own. Its control points resolve against its parent's: `Position` like a
+  GuiObject's Position, `LeftTangent` and `RightTangent` like sizes. A rotated parent turns the path with it.
+- A UIScale scales the parent's rectangle, not the path's offsets or `Thickness`; UIPadding does not move it; in
+  a ScrollingFrame it resolves against the window and does not scroll.
+- `GetPositionOnCurve`, `GetTangentOnCurve`, their `ArcLength` forms, `GetLength` and `GetBoundingRect` answer from
+  the parent's laid-out rectangle, in Roblox's float32 digits. The curve itself is the engine's
+  ([its documentation](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/engine.md)); by
+  length it answers what a client answers, which near a tight bend is not the point at that share of the length.
+
 ## Text boxes
 
 - Size under UIScale: `floor(floor(TextSize * UIScale) * DPI)` physical px, the product in float32.

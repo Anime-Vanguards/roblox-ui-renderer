@@ -15,6 +15,7 @@ pub mod input;
 pub mod layers;
 pub mod layout;
 pub mod order;
+pub mod path2d_layout;
 pub mod session;
 pub mod story;
 pub mod text;
@@ -44,13 +45,15 @@ pub fn options() -> Options {
 /// The GUI layer's state in an engine (an emulator [`Extension`]): the text port's engine (fonts and
 /// layout caches, made on first use), the layout port's state (records, invalidation stamps,
 /// caches; set by `layout::install`), runtime/input's (`input::install`) and the LayerCollectors'
-/// draw order among equal DisplayOrders (`layers::install`).
+/// draw order among equal DisplayOrders (`layers::install`), and the rectangles Path2Ds resolve against.
 #[derive(Default)]
 pub struct Gui {
     pub text: RefCell<Option<text::TextEngine>>,
     pub layout: RefCell<Option<layout::Layout>>,
     pub input: RefCell<Option<Rc<input::Input>>>,
     pub layer_order: RefCell<layers::LayerOrder>,
+    /// Where the parents of Path2Ds were at the last frame's layout (`path2d_layout::install`)
+    pub path_frames: RefCell<path2d_layout::Frames>,
 }
 
 impl Extension for Gui {
@@ -65,8 +68,8 @@ impl Extension for Gui {
 /// What rur adds to every engine (Engine.Start installs it after the core's behaviours, derived
 /// views and world, before the DataModel): TextService's measurements and ContentText, the layout
 /// (Absolute* / TextBounds getters, CanvasPosition, pages, the Render-phase pass) and runtime/input
-/// (live UserInputService state, GuiState, scrolling, TextBox, drag), and the LayerCollectors' tie
-/// order (`--all-layers`).
+/// (live UserInputService state, GuiState, scrolling, TextBox, drag), the LayerCollectors' tie
+/// order (`--all-layers`), and where a Path2D's parent is (the emulator's curve queries ask).
 pub struct GuiLayer;
 
 impl Layer for GuiLayer {
@@ -74,6 +77,7 @@ impl Layer for GuiLayer {
         engine.extension_or_insert_with(Gui::default);
         text_service::install(engine, &mut engine.behaviors.borrow_mut());
         layout::install(engine);
+        path2d_layout::install(engine);
         input::install(engine);
         layers::install(engine);
     }

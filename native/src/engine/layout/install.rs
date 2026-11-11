@@ -174,6 +174,12 @@ pub fn update_all(engine: &Engine) {
     });
 }
 
+/// The LayerCollectors that are displayed (`Pass::displayed_roots`), in draw order.
+pub fn displayed_roots(engine: &Engine) -> Vec<InstanceId> {
+    let game = engine.world().game;
+    with_pass(engine, |pass| pass.displayed_roots(game)).unwrap_or_default()
+}
+
 /// `Layout.Invalidate()`: the next Ensure / UpdateAll lays everything out again.
 pub fn invalidate(engine: &Engine) {
     if let Ok(mut guard) = engine.layout().try_borrow_mut() {

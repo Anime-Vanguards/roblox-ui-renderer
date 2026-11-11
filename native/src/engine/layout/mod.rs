@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub use install::{ensure, ensure_with_state, install, invalidate, mark_changed, pages, update_all};
+pub use install::{displayed_roots, ensure, ensure_with_state, install, invalidate, mark_changed, pages, update_all};
 pub use record::{Rect, Record, ScrollBars, TextInfo, Transform, absolute_position};
 
 use crate::engine::GuiEngine;
