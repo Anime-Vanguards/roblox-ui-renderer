@@ -317,7 +317,9 @@ pub fn border_stroke_alpha_modes(
         } else if sharp && d == 0.0 {
             mode = Mode::Hard;
             margin = 0.0;
-        } else if sharp && d <= 3.0 && !rotated {
+        } else if sharp && d <= 2.0 * scale && !rotated {
+            // (up to 2 logical px: at 1.5x an edge 3 px out has no margin and one 3.375 px out has it, at 1x
+            // one 1.5 px out has none and one 2.5 px out has it: fixtures/stroke-sweep.luau at both scales)
             margin = 0.0;
         }
         Quadrant {
@@ -427,7 +429,13 @@ pub fn border_stroke_alpha_modes(
                 2
             }];
             let m = q.margin;
-            if x < x0 - d - m || x >= x1 + d + m || y < y0 - d - m || y >= y1 + d + m {
+            // The outer bounds are single-precision sums: at 1x a Thickness of 1.4 puts the left bound on a
+            // pixel centre (460 - 1.4 - 0.1 rounds to 458.5), which is drawn, and the right bound on one too
+            // (500 + 1.4 + 0.1 rounds to 501.5), which is not (fixtures/stroke-fringe.luau at 1x, column 8)
+            let (df, mf) = (d as f32, m as f32);
+            let low = |edge: f64| ((edge as f32 - df) - mf) as f64;
+            let high = |edge: f64| ((edge as f32 + df) + mf) as f64;
+            if x < low(x0) || x >= high(x1) || y < low(y0) || y >= high(y1) {
                 continue;
             }
             let u = (x - x0).min(x1 - x);
@@ -996,6 +1004,55 @@ mod tests {
         let center = stroke([12.0, 12.0, 0.0, 0.0], 9.0, "Center");
         assert!((at(&center, 11, 4) - 0.5167).abs() < 0.001);
     }
+    #[test]
+    fn a_sharp_stroke_gets_its_margin_past_two_logical_px() {
+        // fixtures/stroke-sweep.luau at 1x: a sharp Outer stroke of Thickness 1.5 has its half pixel on the
+        // left and top only, one of 2.5 on every side
+        let stroke = |thickness: f64| {
+            border_stroke_alpha(
+                Rect::new(8.0, 8.0, 8.0, 8.0),
+                [0.0; 4],
+                thickness,
+                "Outer",
+                "Round",
+                [0, 0],
+                [24, 24],
+                super::super::geometry::IDENTITY,
+                false,
+                1.0,
+            )
+        };
+        let thin = stroke(1.5);
+        assert_eq!(thin[12 * 24 + 6], 0.5);
+        assert_eq!(thin[12 * 24 + 17], 0.0);
+        let wide = stroke(2.5);
+        assert_eq!(wide[12 * 24 + 5], 0.5);
+        assert_eq!(wide[12 * 24 + 18], 0.5);
+        assert_eq!(wide[18 * 24 + 12], 0.5);
+    }
+
+    #[test]
+    fn a_ring_stroke_bound_on_a_pixel_centre_follows_single_precision() {
+        // fixtures/stroke-fringe.luau at 1x, column 8: Thickness 1.4 (single precision) around a frame from
+        // 460 to 500: the pixel centred 458.5 holds 40 % of the stroke, the one centred 501.5 nothing
+        let a = border_stroke_alpha(
+            Rect::new(460.0, 20.0, 40.0, 100.0),
+            [8.0; 4],
+            1.4f32 as f64,
+            "Outer",
+            "Round",
+            [450, 60],
+            [60, 1],
+            super::super::geometry::IDENTITY,
+            false,
+            1.0,
+        );
+        assert!((a[8] - 0.4).abs() < 1e-6, "{}", a[8]);
+        assert_eq!(a[9], 1.0);
+        assert_eq!(a[50], 1.0);
+        assert_eq!(a[51], 0.0);
+    }
+
     #[test]
     fn inner_stroke_has_a_hole() {
         let a = border_stroke_alpha(
