@@ -401,7 +401,10 @@ impl DrawPreparer {
         });
         let tint = color(&image["color"], [1.; 3]).map(|v| quantize(v) as f64 / 255.);
         let pixelated = image["resample"] == "Pixelated";
-        self.turned_quads_record(ctx, node, TurnedSource::Asset(asset), quads, tint, fade, pixelated, false, p, radii);
+        // Under a UIGradient a turned image's edges are not anti-aliased, as a turned Frame's and a turned
+        // CanvasGroup's are not (fixtures/image-probe-rotfit.luau Shine1 to Shine3: no pixel outside the quad)
+        let hard = node["gradient"].is_object();
+        self.turned_quads_record(ctx, node, TurnedSource::Asset(asset), quads, tint, fade, pixelated, hard, p, radii);
     }
     /// A turned quad of texture (IMAGE_ROTATED): an image's quads, or a CanvasGroup's texture over its rect
     #[allow(clippy::too_many_arguments)]
