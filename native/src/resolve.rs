@@ -174,6 +174,9 @@ impl Resolver {
         if lower.starts_with("rbxthumb://") {
             let key = thumbnail_key(&trimmed["rbxthumb://".len()..]);
             return match self.cached(&key) {
+                // A cache entry holding the UnapprovedImage icon (a Blocked thumbnail cached before the placeholder
+                // rule) is left to the helper, which draws Studio's placeholder (cli/assets.mjs fetchThumbnail)
+                Some(file) if unapproved_icon(&file) => None,
                 Some(file) if !file.to_string_lossy().ends_with(".bin") => Some(Ok(file)),
                 Some(_) => None,
                 None if self.offline => Some(Err("offline and not cached".into())),
@@ -366,6 +369,19 @@ fn asset_id(uri: &str) -> Option<String> {
 
 /// cli/assets.mjs fetchThumbnail's cache key: `thumb-<type>-<id>-<w>x<h>-webp`, non-word characters
 /// as `_`
+/// The UnapprovedImage icon's bytes (4,085, sha256 below): what the thumbnail service served for a Blocked
+/// thumbnail before cli/assets.mjs drew Studio's placeholder in its place
+fn unapproved_icon(file: &Path) -> bool {
+    use sha2::{Digest, Sha256};
+    const SHA256: &str = "6eb7d741e290870a88e2cbbe6aaa55c0e6ff638de4daa01244dc2863ddfacbbf";
+    if std::fs::metadata(file).map(|m| m.len()).ok() != Some(4085) {
+        return false;
+    }
+    std::fs::read(file).is_ok_and(|bytes| {
+        Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect::<String>() == SHA256
+    })
+}
+
 fn thumbnail_key(query: &str) -> String {
     let mut params: BTreeMap<String, String> = BTreeMap::new();
     for pair in query.split('&') {

@@ -455,6 +455,9 @@ const BLOCKED_PLACEHOLDERS = {
 	Avatar: { md5: "5c2d7bd09200921254a731f35c6594e1", length: 41357 },
 };
 
+// The UnapprovedImage icon (the PNG rendition the service's Blocked imageUrl serves)
+const UNAPPROVED_IMAGE_MD5 = "4cbf45bd6a776b83a681b35f937d5641";
+
 function blockedPlaceholder(type) {
 	const known = BLOCKED_PLACEHOLDERS[type];
 	if (!known) return null;
@@ -505,7 +508,17 @@ async function fetchThumbnail(uri, { offline = false } = {}) {
 	// unused)
 	const key = `thumb-${type}-${id}-${w}x${h}-webp`.replace(/[^\w-]/g, "_");
 	const cached = cachedFile(key);
-	if (cached) return { file: cached, ...sniff(fs.readFileSync(cached)) };
+	if (cached) {
+		const bytes = fs.readFileSync(cached);
+		// A cache entry written before the placeholder rule holds the UnapprovedImage icon the service returns
+		// for a Blocked thumbnail; Studio draws the placeholder there (17 such entries were found in one cache;
+		// fixtures/image-probe-thumb-blocked.luau Blocked150)
+		if (crypto.createHash("md5").update(bytes).digest("hex") === UNAPPROVED_IMAGE_MD5) {
+			const placeholder = blockedPlaceholder(type);
+			if (placeholder) return { file: path.join(ASSET_DIR, `placeholder-${BLOCKED_PLACEHOLDERS[type].md5}.png`), ...sniff(placeholder) };
+		}
+		return { file: cached, ...sniff(bytes) };
+	}
 	if (offline) throw new Error("offline and not cached");
 
 	const size = `${w}x${h}`;
