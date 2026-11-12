@@ -891,6 +891,14 @@ fn tied(pen: f64, steps: f64) -> bool {
 }
 
 /// ExportText's lines and content box (the parts that move with the label).
+/// A glyph's whole pixel in whole-pixel text: its pen rounded half up, and its offset (a `kern` pair's second half,
+/// a GPOS x offset) rounded on its own as `(int)(offset + 0.5)`, which rounds a negative offset toward zero:
+/// -0.58 px is 0, -1.52 is -1, -2.98 is -2 (fixtures/text-probe-kernoffset.luau, Permanent Marker pairs of -20 to
+/// -92 units at 28 sizes: 139 of 140 second glyphs; rounding pen and offset together gave 26).
+fn whole_glyph_x(pen: f64, offset: f64) -> f64 {
+    (pen + 0.5).floor() + (offset + 0.5).trunc()
+}
+
 fn text_lines(
     ctx: &Ctx,
     text: &TextEngine,
@@ -1021,7 +1029,7 @@ fn text_lines(
                     let steps = if !subpixel || glyph_size > 32.0 * pixel_scale { 1.0 } else { 4.0 };
                     let exact = segment_x + glyph.pen - segment_pen + glyph.offset;
                     pens.push((exact, glyph_size, steps));
-                    entry.push(number((exact * steps + 0.5).floor() / steps));
+                    entry.push(number(if subpixel { (exact * steps + 0.5).floor() / steps } else { whole_glyph_x(segment_x + glyph.pen - segment_pen, glyph.offset) }));
                     entry.push(number(round(face_ppem, 5)));
                     if rich {
                         entry.push(Json::from(run_index));
@@ -2456,6 +2464,17 @@ mod tests {
     /// the pen in logical pixels (fixtures/text-probe-tie.luau, layout-text-overflow.luau and
     /// layout-textpen2.luau at 1.5x): the same pen rounds up in a left-aligned line at 30 px and down in
     /// a right-aligned one whose box ends at 660 px.
+    /// Whole-pixel text rounds a glyph's offset on its own, (int)(offset + 0.5): a negative one toward zero
+    #[test]
+    fn whole_pixel_glyph_offsets_round_toward_zero() {
+        assert_eq!(super::whole_glyph_x(30.0, -0.516), 30.0);
+        assert_eq!(super::whole_glyph_x(30.0, -1.52), 29.0);
+        assert_eq!(super::whole_glyph_x(30.0, -2.98), 28.0);
+        assert_eq!(super::whole_glyph_x(30.0, -2.5), 28.0);
+        assert_eq!(super::whole_glyph_x(30.0, 0.5), 31.0);
+        assert_eq!(super::whole_glyph_x(29.5, -0.25), 30.0);
+    }
+
     #[test]
     fn tied_quarter_pens_round_by_the_line_start() {
         assert_eq!(tie_step(54.625, 30.0, 30.0, 1.5, 30.0, 4.0, 0.0), 54.75);
