@@ -1,6 +1,7 @@
 -- Controller and touch input through UserInputService:CreateVirtualInput(): PreferredInput, the glyph
 -- lookup, ContextActionService priority / Pass / Sink, a sunk ButtonA not activating the selection,
 -- GuiService:Select picking a selectable descendant, and a finger's one Touch InputObject.
+-- compare-unstable: Studio's VirtualInput raises "CoreGUI has keyboard focus" unless Studio has the keyboard focus, which captures never take (Studio is started without activation)
 return function(Target)
 	local Input = game:GetService("UserInputService")
 	local Actions = game:GetService("ContextActionService")
