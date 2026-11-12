@@ -75,22 +75,20 @@ return function(Target)
 	end
 
 	-- row 1: a rotated clipping grandparent, a clipping parent under a rotated grandparent, a rotated path parent in a clip.
-	-- (The turned frames draw nothing: the renderer's edge of a turned fill differs from Studio's by a few levels in
-	-- a few pixels, and this scene is about the paths.)
 	do
-		local Outer = Cell(0, 1, { ClipsDescendants = true, Rotation = 15, BackgroundTransparency = 1, Size = UDim2.fromOffset(150, 80), Position = UDim2.fromOffset(25, 10 + 118 + 10) })
-		local Inner = Box(Outer, 20, 10, 110, 60, RED, { BackgroundTransparency = 1 })
+		local Outer = Cell(0, 1, { ClipsDescendants = true, Rotation = 15, Size = UDim2.fromOffset(150, 80), Position = UDim2.fromOffset(25, 10 + 118 + 10) })
+		local Inner = Box(Outer, 20, 10, 110, 60, RED)
 		Path(Inner, { { -50, 30 }, { 160, 30 } }, WHITE)
 	end
 	do
-		local Outer = Cell(1, 1, { Rotation = 15, BackgroundTransparency = 1, Size = UDim2.fromOffset(150, 80), Position = UDim2.fromOffset(10 + 198 + 15, 10 + 118 + 10) })
-		local Inner = Box(Outer, 20, 10, 110, 60, RED, { ClipsDescendants = true, BackgroundTransparency = 1 })
+		local Outer = Cell(1, 1, { Rotation = 15, Size = UDim2.fromOffset(150, 80), Position = UDim2.fromOffset(10 + 198 + 15, 10 + 118 + 10) })
+		local Inner = Box(Outer, 20, 10, 110, 60, RED, { ClipsDescendants = true })
 		Path(Inner, { { -50, 30 }, { 160, 30 } }, WHITE)
 		Path(Inner, { { 50, -20 }, { 50, 80 } }, BLUE)
 	end
 	do
 		local Outer = Cell(2, 1, { ClipsDescendants = true })
-		local Inner = Box(Outer, 40, 20, 100, 60, RED, { Rotation = 30, BackgroundTransparency = 1 })
+		local Inner = Box(Outer, 40, 20, 100, 60, RED, { Rotation = 30 })
 		Path(Inner, { { -80, 30 }, { 180, 30 } }, WHITE)
 		Path(Inner, { { 50, -60 }, { 50, 120 } }, BLUE)
 	end

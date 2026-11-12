@@ -2,7 +2,9 @@
 //! `out/golden/text-corpus.json` (85 399 cases: layouts, object layouts, rich text parses, line pens and
 //! size helpers) and requires every output to be identical (numbers bit-exact). Override the corpus with
 //! RUR_TEXT_CORPUS. Skips (with a message) when the corpus is not present, since it needs the local
-//! Studio fonts.
+//! Studio fonts, and when the corpus found is not the one this commit was recorded against
+//! (`tests/text-corpus.sha256`): `out/` is local state, so a build tree or an old worktree keeps its own
+//! copy, and replaying a stale one fails tens of thousands of cases for no fault of the engine.
 //!
 //! The cases and their first outputs were recorded from the Luau reference implementation runtime/text,
 //! which the text engine ported bit-exactly, before that runtime was retired on 2026-09-27 (see
@@ -462,6 +464,12 @@ fn face_keys_ignore_where_fonts_live() {
     assert_eq!(places.path("C:/r/.cache/assetsX/1.ttf"), "C:/r/.cache/assetsX/1.ttf");
 }
 
+/// The sha256 of a corpus file's bytes, as `tests/text-corpus.sha256` records the frozen one's.
+fn corpus_digest(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn corpus_path() -> PathBuf {
     if let Ok(path) = std::env::var("RUR_TEXT_CORPUS") {
         return PathBuf::from(path);
@@ -513,6 +521,16 @@ fn text_engine_matches_frozen_corpus() {
         eprintln!("skipping: no text corpus at {} (the frozen corpus of out/golden; notes/rust-engine.md, Text API)", path.display());
         return;
     };
+    let digest = corpus_digest(&bytes);
+    let recorded = include_str!("text-corpus.sha256").trim();
+    if digest != recorded && std::env::var_os("RUR_TEXT_CORPUS_ANY").is_none() {
+        eprintln!(
+            "skipping: the text corpus at {} is not the one this commit was recorded against (sha256 {digest}, recorded {recorded}): a stale copy of out/golden. \
+             Copy the corpus of a checkout at this commit there or name it with RUR_TEXT_CORPUS (and its fonts with RUR_TEXT_CORPUS_FONTS); RUR_TEXT_CORPUS_ANY=1 replays this one anyway",
+            path.display()
+        );
+        return;
+    }
     let corpus: Value = serde_json::from_slice(&bytes).expect("corpus JSON");
     let paths = corpus["paths"].as_object().expect("paths");
     let fonts = frozen_fonts(&path);
@@ -604,8 +622,10 @@ fn text_engine_matches_frozen_corpus() {
         for (index, actual) in &updated {
             cases[*index].as_object_mut().unwrap().insert("o".into(), actual.clone());
         }
-        std::fs::write(out, serde_json::to_vec(&corpus).unwrap()).expect("write the updated corpus");
+        let bytes = serde_json::to_vec(&corpus).unwrap();
+        std::fs::write(out, &bytes).expect("write the updated corpus");
         println!("{} cases updated (quad scale / rich TextScaled / measurement): written with the current output to {out}", updated.len());
+        println!("its sha256, for native/tests/text-corpus.sha256 once it replaces the frozen corpus: {}", corpus_digest(&bytes));
     }
 
     // Cached results are shared: equal inputs give the identical Arc (the Luau identity rule).

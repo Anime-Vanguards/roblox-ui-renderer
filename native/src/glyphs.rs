@@ -46,6 +46,8 @@ unsafe extern "C" {
         join: c_int,
         bold: c_long,
         italic: c_int,
+        light: c_int,
+        shift: c_long,
         out: *mut RurGlyph,
     ) -> c_int;
     fn rur_glyph_free(buffer: *mut u8);
@@ -300,10 +302,24 @@ fn text_bold_strength(text: &Value, run: Option<&Value>, font: &Value, ppem: f64
     if size > 0.0 { 2.0 * size } else { 0.0 }
 }
 
+/// The quarter-pixel phase of a glyph's pen in a text drawn at quarter pixels (`subpixel`: 4), None in
+/// a scene saved before (whole-pixel pens, fully hinted glyphs). render/text.rs reads it the same way.
+pub(crate) fn text_quarter(text: &Value, x: Option<&Value>, rotated: bool) -> Option<u8> {
+    if text.get("subpixel").and_then(Value::as_f64) != Some(4.0) {
+        return None;
+    }
+    if rotated {
+        return Some(0);
+    }
+    let x = x.and_then(Value::as_f64).unwrap_or(0.0);
+    Some((((x - x.floor()) * 4.0 + 0.5).floor() as u8) & 3)
+}
+
 /// cli/rur.mjs textGlyphStyle
-fn text_glyph_style(join: Option<&str>, bold: f64) -> Option<String> {
+fn text_glyph_style(join: Option<&str>, bold: f64, quarter: Option<u8>) -> Option<String> {
     let bold = (bold != 0.0 && !bold.is_nan()).then(|| format!("b{}", js_number_string(bold)));
-    let parts: Vec<String> = join.map(str::to_string).into_iter().chain(bold).collect();
+    let quarter = quarter.map(|quarter| format!("q{quarter}"));
+    let parts: Vec<String> = join.map(str::to_string).into_iter().chain(bold).chain(quarter).collect();
     if parts.is_empty() { None } else { Some(parts.join("+")) }
 }
 
@@ -361,13 +377,14 @@ pub fn atlas_entries(scene: &Value) -> Vec<AtlasEntry> {
                 };
                 let run = row.get(4).and_then(|position| index(runs, position)).filter(|run| truthy(Some(run)));
                 let bold = text_bold_strength(text, run, font, ppem);
+                let quarter = text_quarter(text, row.get(2), node.get("matrix").is_some_and(Value::is_array));
                 want(AtlasEntry {
                     font_file: file.to_string(),
                     ppem,
                     glyph,
                     stroke_px: 0.0,
                     font_index,
-                    style: text_glyph_style(None, bold),
+                    style: text_glyph_style(None, bold, quarter),
                 });
                 let tag = run.and_then(|run| run.get("stroke")).filter(|tag| truthy(Some(tag)));
                 let chosen: Vec<&Value> = match tag {
@@ -383,7 +400,7 @@ pub fn atlas_entries(scene: &Value) -> Vec<AtlasEntry> {
                             glyph,
                             stroke_px: px,
                             font_index,
-                            style: text_glyph_style(text_stroke_join(stroke), bold),
+                            style: text_glyph_style(text_stroke_join(stroke), bold, quarter),
                         });
                     }
                 }
@@ -421,14 +438,18 @@ pub struct GlyphLayer {
 type Layers = Arc<[(u32, [u8; 4], bool)]>;
 
 /// rasterize.py parse_style: (join, bold strength, italic) of "miter+b108+i"
-fn parse_style(style: Option<&str>) -> (c_int, i64, bool) {
-    let (mut join, mut bold, mut italic) = (0, 0i64, false);
+fn parse_style(style: Option<&str>) -> (c_int, i64, bool, Option<u8>) {
+    let (mut join, mut bold, mut italic, mut quarter) = (0, 0i64, false, None);
     for token in style.unwrap_or("").split('+') {
         match token {
             "round" => join = 0,
             "miter" => join = 1,
             "bevel" => join = 2,
             "i" => italic = true,
+            "q0" => quarter = Some(0),
+            "q1" => quarter = Some(1),
+            "q2" => quarter = Some(2),
+            "q3" => quarter = Some(3),
             _ => {
                 if let Some(digits) = token.strip_prefix('b') {
                     if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -438,7 +459,7 @@ fn parse_style(style: Option<&str>) -> (c_int, i64, bool) {
             }
         }
     }
-    (join, bold, italic)
+    (join, bold, italic, quarter)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -571,7 +592,8 @@ impl Rasterizer {
                 let mut out = Vec::with_capacity(layers.len());
                 for &(layer, color, foreground) in layers.iter() {
                     // A layer is an outline (FreeType loads layers without FT_LOAD_COLOR too)
-                    out.push(GlyphLayer { bitmap: self.rasterize(file, ppem, layer, 0.0, None)?, color, foreground });
+                    let quarter = style.and_then(|style| style.split('+').find(|token| token.starts_with('q') && token.len() == 2));
+                    out.push(GlyphLayer { bitmap: self.rasterize(file, ppem, layer, 0.0, quarter)?, color, foreground });
                 }
                 let bitmap = Arc::new(GlyphBitmap { width: 0, rows: 0, left: 0, top: 0, coverage: Box::new([]), layers: out });
                 self.fonts.get_mut(file).unwrap().bitmaps.insert(key, bitmap.clone());
@@ -589,7 +611,7 @@ impl Rasterizer {
                 return Ok(found.clone());
             }
         }
-        let (join, bold, italic) = parse_style(style);
+        let (join, bold, italic, quarter) = parse_style(style);
         let font = self.font(file)?;
         let mut out = RurGlyph { width: 0, rows: 0, left: 0, top: 0, buffer: std::ptr::null_mut() };
         let status = unsafe {
@@ -601,6 +623,8 @@ impl Rasterizer {
                 join,
                 bold.clamp(c_long::MIN as i64, c_long::MAX as i64) as c_long,
                 c_int::from(italic),
+                c_int::from(quarter.is_some()),
+                c_long::from(quarter.unwrap_or(0)) * 16,
                 &mut out,
             )
         };
@@ -921,6 +945,20 @@ pub fn build_scene_atlas(rasterizer: &mut Rasterizer, scene: &Value, out_dir: &P
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A quarter-pixel text's glyph takes the bitmap of its pen's quarter, half up; rotated text the
+    /// unshifted one at every pen; a scene saved before quarter pens has no phase.
+    #[test]
+    fn quarter_phase_of_a_pen() {
+        let text = json!({ "subpixel": 4 });
+        let phase = |x: f64, rotated: bool| text_quarter(&text, Some(&json!(x)), rotated);
+        assert_eq!([phase(12.0, false), phase(12.25, false), phase(12.5, false), phase(12.75, false)], [Some(0), Some(1), Some(2), Some(3)]);
+        assert_eq!(phase(-0.25, false), Some(3));
+        assert_eq!(phase(33.078125, true), Some(0));
+        assert_eq!(phase(105.796875, true), Some(0));
+        assert_eq!(text_quarter(&json!({}), Some(&json!(12.25)), false), None);
+        assert_eq!(text_glyph_style(Some("round"), 0.0, Some(3)).as_deref(), Some("round+q3"));
+    }
 
     /// The synthetic bold strength is 2 S for the pixel size S of the ppem, whichever units the scene's
     /// font spreads over S + 1 px (render/text.rs font_size reads the same size).

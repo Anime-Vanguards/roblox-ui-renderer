@@ -42,12 +42,11 @@ return function(Target)
 	-- the story's own frame holds a path
 	Path(Target, { Point(Offset(680, 20), Offset(0, 0), Offset(60, 0)), Point(UDim2.new(1, -20, 0, 120), Offset(0, -60), Offset(0, 0)) }, 5, ORANGE)
 
-	-- a turned parent, and a parent turned inside it (they draw nothing: the renderer's edge of a turned fill
-	-- differs from Studio's by a few levels in a few pixels, and this scene is about the paths)
+	-- a turned parent, and a parent turned inside it
 	do
-		local Turned = Box(Target, 60, 190, 160, 90, { Rotation = 30, BackgroundTransparency = 1 })
+		local Turned = Box(Target, 60, 190, 160, 90, { Rotation = 30 })
 		Path(Turned, { Point(Offset(0, 0), Offset(0, 0), Offset(60, 0)), Point(UDim2.new(1, 0, 1, 0)) }, 4)
-		local Inner = Box(Turned, 90, 10, 60, 40, { Rotation = 45, BackgroundTransparency = 1 })
+		local Inner = Box(Turned, 90, 10, 60, 40, { Rotation = 45 })
 		Path(Inner, { Point(Offset(0, 0)), Point(UDim2.new(1, 0, 1, 0)), Point(UDim2.new(0, 0, 1, 0)) }, 4, GREEN, true)
 	end
 	-- a UIScale scales the parent, not the path's offsets or its thickness

@@ -597,6 +597,23 @@ impl TextEngine {
 mod tests {
     use super::*;
 
+    /// A nominal advance is the font units times the 16.16 scale rounded to 16.16 and again to 26.6, as
+    /// HarfBuzz reads FreeType's advance: one 1/64 px above FT_MulFix's single rounding where the first
+    /// rounding carries (1108 units at scale 80530: 1362, not 1361).
+    #[test]
+    fn nominal_advances_round_twice() {
+        use super::super::layout::{ft_advance, round_pen, Glyph};
+        assert_eq!(ft_advance(1108.0, 80530.0), 1362.0);
+        assert_eq!(ft_advance(500.0, 103439.0), 789.0);
+        // the exact pens before and after each glyph stay beside the whole-pixel advances
+        let glyph = |advance: f64| Glyph { glyph: 1, face: 0, x: 0.0, x_offset: 0.0, advance, cluster: 0, code: 97, size: 0.0, run: 0, pen: 0.0, end: 0.0, offset: 0.0 };
+        let mut line = vec![glyph(795.0 / 64.0), glyph(795.0 / 64.0), glyph(316.0 / 64.0)];
+        round_pen(std::slice::from_mut(&mut line));
+        assert_eq!(line.iter().map(|glyph| glyph.pen * 64.0).collect::<Vec<_>>(), [0.0, 795.0, 1590.0]);
+        assert_eq!(line[2].end * 64.0, 1906.0);
+        assert_eq!(line.iter().map(|glyph| glyph.advance).collect::<Vec<_>>(), [12.0, 13.0, 5.0]);
+    }
+
     #[test]
     fn attributes_and_entities() {
         let attributes = parse_attributes(br#"font  color = "red" size='4' x="a'b" y=  ""#);

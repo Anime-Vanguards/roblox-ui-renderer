@@ -437,6 +437,9 @@ pub struct GlyphInfo {
     pub cluster: u32,
     pub advance: i64,
     pub x_offset: i64,
+    /// A `kern` table pair's value in font units, on the pair's first glyph and on its second: the pair is
+    /// scaled whole and then halved (layout.rs `shape_paragraph`), so it is not in `advance` or `x_offset`.
+    pub kern: [i64; 2],
 }
 
 const DEFAULT_GSUB: [&[u8; 4]; 8] = [b"ccmp", b"locl", b"rlig", b"liga", b"clig", b"calt", b"rclt", b"rvrn"];
@@ -818,11 +821,8 @@ impl Font {
                 let key = glyphs[index].glyph as u64 * 65536 + glyphs[next].glyph as u64;
                 if let Some(&value) = pairs.get(&key) {
                     if value != 0 {
-                        let value = value as i64;
-                        let half = value.div_euclid(2);
-                        glyphs[index].advance += half;
-                        glyphs[next].advance += value - half;
-                        glyphs[next].x_offset += value - half;
+                        glyphs[index].kern[0] += value as i64;
+                        glyphs[next].kern[1] += value as i64;
                     }
                 }
                 index = next;
@@ -835,7 +835,7 @@ impl Font {
     pub fn shape(&self, codepoints: &[(u32, u32)], extra: Option<&[&str]>) -> Vec<GlyphInfo> {
         let mut glyphs: Vec<GlyphInfo> = codepoints
             .iter()
-            .map(|&(code, cluster)| GlyphInfo { glyph: self.cmap.get(&code).copied().unwrap_or(0), cluster, advance: 0, x_offset: 0 })
+            .map(|&(code, cluster)| GlyphInfo { glyph: self.cmap.get(&code).copied().unwrap_or(0), cluster, advance: 0, x_offset: 0, kern: [0; 2] })
             .collect();
         self.apply_gsub(&mut glyphs, extra);
         for info in glyphs.iter_mut() {

@@ -32,6 +32,12 @@ pub struct Glyph {
     pub code: u32,
     pub size: f64,
     pub run: u32,
+    /// The exact pen before the glyph in px (26.6 steps), from the start of the text (`round_pen`).
+    pub pen: f64,
+    /// The exact pen after the glyph in px.
+    pub end: f64,
+    /// The GPOS x offset in px, exact in 26.6 (`x_offset` is it in whole pixels).
+    pub offset: f64,
 }
 
 /// One laid-out line (`TextLayout.Line`). `first` / `last` are the 1-based glyph range in the
@@ -343,12 +349,20 @@ fn mul_fix(a: f64, b: f64) -> f64 {
     if (a < 0.0) != (b < 0.0) { -result } else { result }
 }
 
+/// A glyph's unhinted advance in 26.6 as HarfBuzz reads it from FreeType: FT_Get_Advance's 16.16 value
+/// (the font units times the scale over 64, rounded) rounded again to 26.6. The two roundings land one
+/// 1/64 px above FT_MulFix for a few advances.
+#[inline]
+pub fn ft_advance(units: f64, x_scale: f64) -> f64 {
+    idiv(idiv(units * x_scale + 32.0, 64.0) + 512.0, 1024.0)
+}
+
 /// `TextLayout.GlyphAdvance`: a glyph's advance in px, exact in 26.6: the nominal advance scaled with
 /// FT_MulFix plus the GPOS adjustment scaled with the HarfBuzz scale and floored. `round_pen` turns a
 /// text's advances into whole-pixel pen steps.
 #[inline]
 pub fn glyph_advance(nominal: f64, adjustment: f64, x_scale: f64, hb_scale: f64, units_per_em: f64) -> f64 {
-    (mul_fix(nominal, x_scale) + idiv(adjustment * hb_scale, units_per_em)) / 64.0
+    (ft_advance(nominal, x_scale) + idiv(adjustment * hb_scale, units_per_em)) / 64.0
 }
 
 /// The pen moves by the exact 26.6 advances and is rounded half up to whole pixels, rather than each
@@ -363,7 +377,9 @@ pub fn round_pen(paragraphs: &mut [Vec<Glyph>]) {
     let mut pen = 0.0;
     let mut rounded = 0.0;
     for glyph in paragraphs.iter_mut().flatten() {
+        glyph.pen = pen / 64.0;
         pen += glyph.advance * 64.0;
+        glyph.end = pen / 64.0;
         let next = idiv(pen + 32.0, 64.0);
         glyph.advance = next - rounded;
         rounded = next;
@@ -457,19 +473,33 @@ pub fn shape_paragraph(fonts: &mut FontRegistry, codepoints: &[Codepoint], face:
                     code,
                     size,
                     run: 0,
+                    pen: 0.0,
+                    end: 0.0,
+                    offset: 0.0,
                 });
                 continue;
             }
+            // A `kern` table pair (HarfBuzz's fallback kerning): the pair's value is scaled to 26.6 and
+            // floored, then split: its floored half on the first glyph's advance, the rest on the second
+            // glyph's advance and offset. Studio 0.747's quarter-pixel pens in Permanent Marker
+            // (fixtures/text-fonts.luau: pairs of -10 and -20 units at 1229/1024 are -13 and -25, where
+            // scaling each half gave -14 and -26).
+            let scaled = |units: i64| idiv(units as f64 * hb_scale, units_per_em);
+            let kern_first = idiv(scaled(info.kern[0]), 2.0);
+            let kern_second = scaled(info.kern[1]) - idiv(scaled(info.kern[1]), 2.0);
             out.push(Glyph {
                 glyph: info.glyph,
                 face: run_face,
                 x: 0.0,
-                x_offset: idiv(idiv(info.x_offset as f64 * hb_scale, units_per_em) + 32.0, 64.0),
-                advance: glyph_advance(nominal, info.advance as f64 - nominal, x_scale, hb_scale, units_per_em),
+                x_offset: idiv(idiv(info.x_offset as f64 * hb_scale, units_per_em) + kern_second + 32.0, 64.0),
+                advance: glyph_advance(nominal, info.advance as f64 - nominal, x_scale, hb_scale, units_per_em) + (kern_first + kern_second) / 64.0,
                 cluster: info.cluster,
                 code,
                 size,
                 run: 0,
+                pen: 0.0,
+                end: 0.0,
+                offset: (idiv(info.x_offset as f64 * hb_scale, units_per_em) + kern_second) / 64.0,
             });
         }
     }
@@ -904,7 +934,13 @@ impl TextEngine {
         let mut glyphs = Vec::new();
         shape_paragraph(&mut self.fonts, &points, face, size, None, &mut glyphs);
         round_pen(std::slice::from_mut(&mut glyphs));
-        let width = glyphs.iter().map(|glyph| glyph.advance).sum();
+        let width: f64 = glyphs.iter().map(|glyph| glyph.advance).sum();
+        // The ellipsis is a pen of its own: its exact pens sit below zero, under every pen of the text it
+        // follows, so the export starts a new stretch at it (export.rs text_lines)
+        for glyph in &mut glyphs {
+            glyph.pen -= width + 1.0;
+            glyph.end -= width + 1.0;
+        }
         let value = Arc::new((glyphs, width));
         self.ellipsis_cache.insert(key, value.clone());
         value

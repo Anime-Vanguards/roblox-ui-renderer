@@ -1,7 +1,5 @@
 -- Path2D among its parent's children and under clips: draw order by child order and ZIndex, ClipsDescendants (plain,
 -- rotated, an ancestor's), a CanvasGroup, a scrolled ScrollingFrame, hidden parents, a UIScale, padding and text.
--- (The scene keeps to what the renderer draws exactly as Studio 0.747 does, so that every pixel here is a path's
--- or its order's: a square UIStroke, a rounded fill without a stroke, and text of full blocks. notes/path2d.md.)
 --   node cli/rur.mjs compare --fixture fixtures/path2d-order.luau --viewport 800x480 --time 0.2 --background 0,0,0
 return function(Target)
 	local Point = Path2DControlPoint.new
@@ -82,7 +80,7 @@ return function(Target)
 		Path(Holder, DOWN, 10)
 	end
 	do
-		local Holder = Cell(2, 1, { ClipsDescendants = true, Rotation = 20, BackgroundTransparency = 1, Size = UDim2.fromOffset(140, 70), Position = UDim2.fromOffset(10 + 2 * 198 + 20, 10 + 118 + 15) })
+		local Holder = Cell(2, 1, { ClipsDescendants = true, Rotation = 20, Size = UDim2.fromOffset(140, 70), Position = UDim2.fromOffset(10 + 2 * 198 + 20, 10 + 118 + 15) })
 		Path(Holder, { { -30, 35 }, { 170, 35 } }, 10)
 		Path(Holder, { { 70, -30 }, { 70, 100 } }, 10, { Color3 = GREEN })
 	end
@@ -152,6 +150,10 @@ return function(Target)
 		local Corner = Instance.new("UICorner")
 		Corner.CornerRadius = UDim.new(0, 15)
 		Corner.Parent = Holder
+		local Stroke = Instance.new("UIStroke")
+		Stroke.Thickness = 2
+		Stroke.Color = BLUE
+		Stroke.Parent = Holder
 		Path(Holder, { UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0) }, 4)
 		Path(Holder, { { 10, 10 }, { 80, 10 } }, 4, { Color3 = GREEN })
 	end
@@ -165,6 +167,9 @@ return function(Target)
 		Stroke.Thickness = 6
 		Stroke.Color = RED
 		Stroke.Parent = Holder
+		local Corner = Instance.new("UICorner")
+		Corner.CornerRadius = UDim.new(0, 30)
+		Corner.Parent = Holder
 		Path(Holder, { UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0) }, 6)
 		Path(Holder, { { -3, 50 }, { 60, 50 } }, 6, { Color3 = GREEN })
 	end
@@ -179,10 +184,10 @@ return function(Target)
 		Label.BackgroundColor3 = GRAY
 		Label.Position = UDim2.fromOffset(10 + 3 * 198, 10 + 3 * 118)
 		Label.Size = UDim2.fromOffset(180, 100)
-		Label.Text = "\u{2588}\u{2588}\u{2588}\u{2588}"
-		Label.TextSize = 40
+		Label.Text = "HHHH"
+		Label.TextSize = 60
 		Label.TextColor3 = RED
-		Label.Font = Enum.Font.SourceSans
+		Label.Font = Enum.Font.SourceSansBold
 		Label.Parent = Target
 		Path(Label, ACROSS, 10)
 	end

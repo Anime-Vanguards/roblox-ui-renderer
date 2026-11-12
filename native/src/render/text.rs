@@ -47,6 +47,8 @@ struct Placement {
     /// Drawn: false for glyphs MaxVisibleGraphemes hides (the line's `shown` / `ellipsis`); they still
     /// place the baseline and are still atlas requirements
     shown: bool,
+    /// The pen's quarter-pixel phase (a text with `subpixel`: 4), None for whole-pixel text
+    quarter: Option<u8>,
     x: f64,
     baseline: f64,
 }
@@ -220,7 +222,14 @@ fn placements(text: &Value, fonts: &Value, rotated: bool) -> (Vec<Placement>, Ve
                 scale,
                 unsnapped: rotated,
                 shown: index < shown || index >= tail,
-                x: ox + snap(num(&glyph[2], 0.0)),
+                quarter: crate::glyphs::text_quarter(text, glyph.get(2), rotated),
+                // Quarter-pixel text: the whole pixel under the pen (its bitmap carries the quarter); rotated,
+                // the exact pen (the unshifted bitmap, resampled)
+                x: ox + match (text["subpixel"] == 4, rotated) {
+                    (true, true) => num(&glyph[2], 0.0),
+                    (true, false) => (num(&glyph[2], 0.0) + 0.125).floor(),
+                    (false, _) => snap(num(&glyph[2], 0.0)),
+                },
                 baseline: 0.0,
             };
             if size > largest {
@@ -462,6 +471,13 @@ fn glyph_keys(p: &Placement, stroke: f64, join: Option<&str>) -> Vec<GlyphKey> {
         }
         style.push_str(&format!("b{}", p.bold));
     }
+    let quarter = p.quarter.map(|quarter| format!("q{quarter}"));
+    let with_quarter = |style: &str| match &quarter {
+        Some(quarter) if style.is_empty() => quarter.clone(),
+        Some(quarter) => format!("{style}+{quarter}"),
+        None => style.to_string(),
+    };
+    let style = with_quarter(&style);
     let mut keys = vec![GlyphKey::new(
         p.font,
         p.ppem,
@@ -470,7 +486,8 @@ fn glyph_keys(p: &Placement, stroke: f64, join: Option<&str>) -> Vec<GlyphKey> {
         if style.is_empty() { None } else { Some(&style) },
     )];
     if p.bold > 0 {
-        keys.push(GlyphKey::new(p.font, p.ppem, p.glyph, stroke, join));
+        let plain = with_quarter(join.unwrap_or(""));
+        keys.push(GlyphKey::new(p.font, p.ppem, p.glyph, stroke, if plain.is_empty() { None } else { Some(&plain) }));
     }
     if p.italic {
         // Atlases built when italic was an atlas variant ("…+i", already slanted: drawn without the skew)
@@ -653,7 +670,7 @@ fn page_coverage(page: &crate::assets::TextureAsset, x: u32, y: u32, w: u32, h: 
 }
 /// Glyph bitmaps by their lookup inputs, valid while the glyph atlases are (TextLayerCache::begin_frame
 /// clears it when the assets change): a glyph is looked up and copied out of its page once
-type GlyphMemo = rustc_hash::FxHashMap<(u32, u64, u32, u64, u32, bool, u8), Option<GlyphBitmap>>;
+type GlyphMemo = rustc_hash::FxHashMap<(u32, u64, u32, u64, u32, bool, u8, Option<u8>), Option<GlyphBitmap>>;
 fn glyph_bitmap(
     p: &Placement,
     stroke: f64,
@@ -718,7 +735,7 @@ fn glyph_quad(
                 Some("bevel") => 2,
                 Some(_) => 3,
             };
-            let key = (p.font, p.ppem.to_bits(), p.glyph, stroke.to_bits(), p.bold, p.italic, join_code);
+            let key = (p.font, p.ppem.to_bits(), p.glyph, stroke.to_bits(), p.bold, p.italic, join_code, p.quarter);
             match memo.get(&key) {
                 Some(bitmap) if join_code != 3 => bitmap.clone(),
                 _ => {

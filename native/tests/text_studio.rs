@@ -200,7 +200,7 @@ fn line_gap_faces() {
     // Known misses: one Permanent Marker string at DPI 1.5 (1 px), and at DPI 1 the two trailing spaces of
     // "Hello  " in Guru, which Studio measures narrower at 13 of the 17 sizes
     for (file, scale, known) in [
-        ("data/studio/text-bounds-linegap-1.5x.json", 1.5, ("PermanentMarker-Regular", 254)),
+        ("data/studio/text-bounds-linegap-1.5x.json", 1.5, ("PermanentMarker-Regular", 255)),
         ("data/studio/text-bounds-linegap-1x.json", 1.0, ("Guru-Regular", 242)),
     ] {
         let (_, total, per_font, misses) = text_bounds_at(&mut engine, file, scale);

@@ -5,15 +5,15 @@
 			"status": "ok"
 		},
 		"fast/edit/anim-tweens": {
-			"digest": "4b32f1711bfd3430af0a9e819c63bb2735418e0404346a379f3cd0c0089f3e22",
+			"digest": "a883d1c1d7d26d99742d010dc2077c329ca24f1d9c07b8a2e98b59361b2474bb",
 			"status": "ok"
 		},
 		"fast/edit/canvasgroup": {
-			"digest": "49a5fd66f280d4262ca0dc6bc75dad186f59e8667cddabb35a275c74777dd4e4",
+			"digest": "a4beea685a5c3ab80488761208d7a8960c5cd3566cc5d1527d69ff31d370138a",
 			"status": "ok"
 		},
 		"fast/edit/canvasgroup-rotated-gradient": {
-			"digest": "4da9cc8645f5423b85bba73afbea3dc6d3b76c3dcaf638f2da7701a809a1aa8a",
+			"digest": "40332fca4b24aca5670b82c878aa05107b4fab682b106ebf523bffd4c932407d",
 			"status": "ok"
 		},
 		"fast/edit/corners": {
@@ -21,7 +21,7 @@
 			"status": "ok"
 		},
 		"fast/edit/device-probe": {
-			"digest": "2cd1747f2168008ebc7a4873bf3a10c8fa89c48eb9b43be63c885fac7d90f1a8",
+			"digest": "97a64511e02e331a77f3d561850b6277f2ace09c574f436db57ab7c1b79b1517",
 			"status": "ok"
 		},
 		"fast/edit/gradient-edges": {
@@ -41,7 +41,7 @@
 			"status": "ok"
 		},
 		"fast/edit/group-misc": {
-			"digest": "18c614282d6dc099c4b33541aacf52a6de61a0e54dc6320dacdb1118edd49a09",
+			"digest": "e88d76d32876202ccef003a334c5618a2b30408f91a65689731c9d32540a66c3",
 			"status": "ok"
 		},
 		"fast/edit/group-probe-bigarea": {
@@ -113,31 +113,31 @@
 			"status": "ok"
 		},
 		"fast/edit/input-device-flow": {
-			"digest": "e142e4a81a18c45875e83fe00794085241b3fd921d747136e9daee4ac2417429",
+			"digest": "97c6dd3fcb573b2a59e584f594cb2b9149a91db3bdbe1de5699e57a19f885752",
 			"status": "ok"
 		},
 		"fast/edit/interaction-autobuttoncolor": {
-			"digest": "9ed7536e5dd1b6f4d020b6c3d24a0adf50221b8efc60d9a4c2b91019c7530fd8",
+			"digest": "a6e9b4b70d5552ac774d51a9be105e2a30204163dc4ff0c53a5506f69429dce8",
 			"status": "ok"
 		},
 		"fast/edit/interaction-scroll": {
-			"digest": "3ff913625df63ab1e45b44ebf7d090214d7156c9f7791672bf28b10556967389",
+			"digest": "c95ffc2dac1197537a610a9cbd5058ab66ff0e9672afd131a842e2af50f804f9",
 			"status": "ok"
 		},
 		"fast/edit/interaction-textbox": {
-			"digest": "3c904026aa3d1719eaafb5143cc1e755a4cb1b4e97190a00cc5c245e76d6fa22",
+			"digest": "9373a18372bfad206806a78a2589f98b88848aef7ca836d464f77ce3c0c678ae",
 			"status": "ok"
 		},
 		"fast/edit/interaction-textbox+actions": {
-			"digest": "a7b65396e7e5b6987dd3a3c67652673f0b5d3651372f0268ae3e04dee3e9331a",
+			"digest": "06e0734382dc2156bd3a8f3e2be64263b6974b05611d96e9c4df9dcd024a8d7c",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize": {
-			"digest": "6922aab474f417c68a182d308d4c470f88755015b8cfc98750ddbfd5133c0a8f",
+			"digest": "65ce2bea20712a09b3c2e0255d51edec1dae7e35abf5d69dc70c28c72e9d8cec",
 			"status": "ok"
 		},
 		"fast/edit/layout-dynamic": {
-			"digest": "bd810bd962c5b7fcbc98050fc21b6a05696846995d9627ba6a71ad1f5a867682",
+			"digest": "d1ace324f3bcad52c99ee765e6b5fc3e1d56481fe8aed5a40c8432b924d62f2f",
 			"status": "ok"
 		},
 		"fast/edit/layout-flex": {
@@ -149,39 +149,39 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-richscaled-quads": {
-			"digest": "6fa9f690654b9fe61f7f4c7915ea8e6228cd6022eb8fd47eaafac8a21707a151",
+			"digest": "fe76b83beba09f4b288937c0cafea2149f2602eb59e0f62abdf3d4641f4158c0",
 			"status": "ok"
 		},
 		"fast/edit/layout-text-narrow": {
-			"digest": "4015eab516cd1b53f51a27884cac0b4f57b10565b628415d3a1fc916350a5bc5",
+			"digest": "d4725fcf78655c61d442df14f7fa8a74d649357f592eaf1e530aa1e6b3dba7e4",
 			"status": "ok"
 		},
 		"fast/edit/layout-text-overflow": {
-			"digest": "2b3bb5453343ebc21b918b252e11a75c82551ae7ac638808a1afd5717488e6ec",
+			"digest": "558cf2867342c32065e9be4149cba80689f63280bc39f0d264c1e5f4645a461f",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen": {
-			"digest": "8d9b0e021a346ab0f2fa73ad0a5482b3f8a93a9843ebdb437473da5afec741f2",
+			"digest": "38d2a93bff62dcc1b47b2ff3f86aeb290f31dc9f870579e37c682ce415c774f7",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen2": {
-			"digest": "aba0aa1e04ccf56333a45883b54c7b11e4689d12b64736e883b9caeabddbb2be",
+			"digest": "67322b009a476295ec46eac409338f087f7a3b902dc362183914dcbd99490f90",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen3": {
-			"digest": "67ae4b169037c85c1a5336bec710657a25198a3876bc3e0e7cf7ed8cfa33bc38",
+			"digest": "761755e4876efe4ec4338d00c44d1cdd6cb3a033b1b722827311ca3d0bf8dc61",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate": {
-			"digest": "0a4540c0b4d5679dcfca4c4758a5ff2edbaa348fb0c84b0ce6f501cf0d688a3b",
+			"digest": "dd9a4872fe1de39638aa51ce64c0a0765d7ae67c7bfb48ace3eb7b989ff2ab3b",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate2": {
-			"digest": "2bd583f2946bc4bcdbe997f03e019ee06e2c0bbee73b5e79acc802ffaefe69b9",
+			"digest": "f4042fad44b585272797a26dffd6237152debc22012f0c96c5a4c4ce7cea1692",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate3": {
-			"digest": "31e06188ac01e5c4f7ccf8207e58c575b817bb50d7dc50700c86cec325cd0a34",
+			"digest": "47b9620daed01a97f5ca9680937483e6e9b40f640963e0b4ded6589393e54e99",
 			"status": "ok"
 		},
 		"fast/edit/live-rotated-cull": {
@@ -189,11 +189,11 @@
 			"status": "ok"
 		},
 		"fast/edit/live-scroll": {
-			"digest": "563e047e40d5b61d5d74a09e8805b62c64ee246b44392b3764a2bf7624722be5",
+			"digest": "802de236e2ab2b76ce611d78a668a07e3da049d04fd6634858e2f6948760923b",
 			"status": "ok"
 		},
 		"fast/edit/live-stress": {
-			"digest": "7bd5689412a18f00e12fc2da36394765e174492e57fc539c477f0bcd664dbac6",
+			"digest": "e111a912f5b0f17422576b9efd5738026593f5c6b48d9015c901b42feff4bd4b",
 			"status": "ok"
 		},
 		"fast/edit/path2d-curves": {
@@ -205,11 +205,11 @@
 			"status": "ok"
 		},
 		"fast/edit/path2d-layout": {
-			"digest": "d3d0d69c8b18be01900624e2a3c95cc91e436363798643b7f66bb9b36ff83541",
+			"digest": "7c5723dbe43112adcb38554a462adef7da93f74d5db1e8845fff0f84f86022ef",
 			"status": "ok"
 		},
 		"fast/edit/path2d-order": {
-			"digest": "07d2f35596306e9ab246b14b0f58f46bc7015d9bd4d1f812ee886f1d38554d5c",
+			"digest": "85d4113bc8ad5eea506d84c9b9e46361141549326bcb2cf3466ec433b987debf",
 			"status": "ok"
 		},
 		"fast/edit/path2d-strokes": {
@@ -221,15 +221,15 @@
 			"status": "ok"
 		},
 		"fast/edit/path2d-zindex": {
-			"digest": "165f52ca0dd4be02417f18b86e60f46ca6f4d232ca4247dbe0276024bcf206a8",
+			"digest": "d20a2af791e94fa7f4fdfe44ab312dbb158930f670822edee2bcd7dc56ff8682",
 			"status": "ok"
 		},
 		"fast/edit/path2d-zindex-global": {
-			"digest": "85d260fb91b0f545e750cd48469ea0353d1b759e712462c84cdf66f6dfedf6fe",
+			"digest": "c0082622ef5085a82ac7813b914031fee88bfc40f040ece28e4b5e103ef77e58",
 			"status": "ok"
 		},
 		"fast/edit/probe-errors": {
-			"digest": "02f743ac49c06f7b444fec2801fc03faffe57d2ba4eab2a3ae9f30b383e9f3a6",
+			"digest": "6b4d10164a81d6c50e89f3db7ab7254f89ba1c0da3d067218de7fb36d9879209",
 			"status": "ok"
 		},
 		"fast/edit/probe-ids": {
@@ -237,7 +237,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-input": {
-			"digest": "86c68135d085a73b8a8ad69e165507fece7cfcf0cf7fd9232ec9e675896e2e87",
+			"digest": "530451f62261b1e8ba3caf433f693e5c6112b72e49a2c8ebfa3970977ee8c373",
 			"status": "ok"
 		},
 		"fast/edit/probe-scheduler": {
@@ -253,7 +253,7 @@
 			"status": "ok"
 		},
 		"fast/edit/rotation": {
-			"digest": "40676985e8b0219f9f4398f65d0ba06b13d361907552a452a628859c96c2334c",
+			"digest": "7240123766593bc760e5d216473dc91ed038dcff2cf427a82c1c4c9093703f04",
 			"status": "ok"
 		},
 		"fast/edit/rotation-clip-offscreen": {
@@ -293,7 +293,7 @@
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-e": {
-			"digest": "e874fdc1d4418b9448881dee805b85ed93da48544fd61e6b65e942fa05ca36fd",
+			"digest": "86a648a0b2f3a743221758b15d28d197ae885928a14469c0f835bf7ac56a5666",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-f": {
@@ -357,19 +357,19 @@
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull": {
-			"digest": "fe35c7655f40797d3e1a1f1dab6919d5939103b3b00b69bf52cf940bd589ab88",
+			"digest": "0afd20d1b6e87a1b7443fb97f2a4e9f48fb1be1468fc3a3ef87abb5b2b9833ba",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull3": {
-			"digest": "ba0adab1733745b965946ab01a9ae8035220a388ed6ace4b0a2ab185297bbc2d",
+			"digest": "85c6583dc506214ef5483ddb5d6760adac56cca891f4b528c145f4bd20d32b79",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull4": {
-			"digest": "d9b4d53d5fe9077ea195c8af96da4af92ac7cf97494634fed0012050f8df21e2",
+			"digest": "fd640cb752ef0529fb7b3af8281897ffec9f4ca412de790166cc1a68dae5da6e",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull5": {
-			"digest": "2d7fde6c04b891f48645bd1e5447d105ef93832888ddce2131fa72e74a687c7e",
+			"digest": "93aacae78d224390270bac104e7d1318c65a40074bf18ff3500f652657ffbf2b",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-surface": {
@@ -389,7 +389,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stories-scroll-noclip": {
-			"digest": "6117b1939ca1f1e52f91644d4f39ff3cd8f131eb6c96036a0c8fab68c3a8d6fa",
+			"digest": "22e78d042faeb93767bd57bf982581f3d5d1bde82da25a3859095580aaf19fe8",
 			"status": "ok"
 		},
 		"fast/edit/stroke-button": {
@@ -417,7 +417,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-misc": {
-			"digest": "e6540db6d089c55a54c470d997deb8bc026d55c4abdc84bcf150fd43a7f29c38",
+			"digest": "9f6af0dc8da7f3a389a8bda479441bb7e37ea68eff02f2e8f2304e37eb97ee68",
 			"status": "ok"
 		},
 		"fast/edit/stroke-modes": {
@@ -445,11 +445,11 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-probe-scaledui": {
-			"digest": "9be045d823ce744b7faf5332d7ff7cdd99c1d05b04e3ef124a810a01e410ab3c",
+			"digest": "16754a935e3d8a1c3a142eaa235636e57283f0663c9fcdd45829ec3929a1f3fa",
 			"status": "ok"
 		},
 		"fast/edit/stroke-probe-scaledui2": {
-			"digest": "d77a94a64b6bb8ff5b2996e6b0c35e8fed375efba0b5d32ae0d9a509d36e5bd9",
+			"digest": "7cc8d1c836e8b135ed9266ae15b41ad92c064a6965cb6fda6a12c963b257a39e",
 			"status": "ok"
 		},
 		"fast/edit/stroke-radius": {
@@ -465,27 +465,27 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-a": {
-			"digest": "499af245d5fabbde7f19dd456ce7b77417b55373e93c6418fb9da5c22ca13b02",
+			"digest": "e09102abcb8aff2257106063624ee3d0f4fde86ec281dcf764e22b0a0e57f20d",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-b": {
-			"digest": "0e811c5d6fbfaa7f890af7c274b1bd86b722b303cfa7a6fbcc61c2e7a4f2c305",
+			"digest": "bcb60b49f51948b5e8584549743819934de7b5520fd5e4647569097d4a640522",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-c": {
-			"digest": "c32fca03ca7b5e1423291a056902de65cf192f4fccbca7356c2bab466a7dee98",
+			"digest": "7f1ca09415506195b93ce34d0cec5e00e0bfd88e3d9181d6053624af941d1ecc",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-d": {
-			"digest": "b2b13946ce5bac428834fb4107f8f63f63c0b8b4341970d2e335206740a1257b",
+			"digest": "bf44f16440ab52a89258cf158b290dd540deff98a5a2d14d3362f39166826eaa",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-e": {
-			"digest": "10d373cf6f323789e5d613a1abc023833cb58bce908bf153bc2463ecf9e3ca93",
+			"digest": "115018c69bc01b8ee0953e53b14c997ba0ff4e2eeb8c0adda8a92fce94445bb0",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-uiscale": {
-			"digest": "56ee468d1c2d279a0ef027b6394c6e50dc00757f3b504ab8f16b2b64f2168684",
+			"digest": "72d763fdc12168918f622c80c56cf7a71f9d64b49b8abebe26c9d566833ed2c7",
 			"status": "ok"
 		},
 		"fast/edit/stroke-zindex": {
@@ -497,139 +497,155 @@
 			"status": "ok"
 		},
 		"fast/edit/text-baseline": {
-			"digest": "622e3f59af857518680ef651d11fc706cd7fd92ca1d33cb86fd73b3005a142e1",
+			"digest": "a5e0bb9f9af0bc23dc20a86aed1d5fb8738161752399ba424bc62c66cdfdf1a2",
 			"status": "ok"
 		},
 		"fast/edit/text-fontfaces": {
-			"digest": "c4ab5b6a4b204c1a0a2575f3046996a6507d2633c0fe8c7d18f9aa04a94c0b6c",
+			"digest": "22328d24f4b02fd3f2e29d28ef2779cdb1558a68bbdb68d35d69286fe40e00e0",
 			"status": "ok"
 		},
 		"fast/edit/text-fonts": {
-			"digest": "b086c0ceacf1a07795fcc089874706543724a86cfc09709b810f7c893abdbee2",
+			"digest": "6c5e3699db83cecd2fa2d914560cea14e575952bc88991d6f40f23de5b6d4722",
 			"status": "ok"
 		},
 		"fast/edit/text-glow": {
-			"digest": "5e03c1fea0c84f518eb9b17ca1ff6b723385822d28508a96ed5a3dcace61b04e",
+			"digest": "b69e0b1cdc159e1909e96524cb9410d52d03d3c0fb91bfa04aaccd6863e6681d",
 			"status": "ok"
 		},
 		"fast/edit/text-gradient": {
-			"digest": "afacc2a3921500b5ca4aff57e63f7375b4de170d51e3b3c2ab6f0bf4ce92afb6",
+			"digest": "bec8761784f5a910f40903ea074761768dd9df68ae051b12545040ed4c4e4500",
 			"status": "ok"
 		},
 		"fast/edit/text-gradient-degenerate": {
-			"digest": "63a8b73000a827c12103b018994a2e17b1c79af3db2b8e9b7b153bdb0611e2bf",
+			"digest": "7a7aa7f41fc6372b3cb9c91343cef3f5259031df82ec8155a688f80fffae6aff",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-blend": {
-			"digest": "0d9ebc0d0230f9e8819d6e53ef7b2c6fa37ed790bbc81ddef76c588caff89002",
+			"digest": "31640c39554e30e9579acea35fb4f8aa93cc6b4aca65849d1b74a174c232885a",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-case": {
-			"digest": "5b70dcaeb24a378863e247e4e34e286c2c036ecb93aec7ebf5449d164ec81c14",
+			"digest": "653996c4e062f722de652d65cd84fa6d4d33b38bc15e10faeb5c8af5dd52e4bb",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor": {
-			"digest": "14e9c8e24483877263c58aa68cd6fa77dec41bd485a3e76a3c93f1414568703d",
+			"digest": "9a6534690a89e9fac927c4b57266d8acb8faa0d41a8199f94b64c190bc79d43e",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor2": {
-			"digest": "c4fc4aa1d8a5029f9ab4101ecaaf5f1f9d5e95e205ef6a3801ab713ae5252d81",
+			"digest": "1db3592889926012e5f6b91c4d117bf79bf60953281e5278fea9fd90cb38d6d4",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-emoji": {
-			"digest": "75d49082ab5e7bbcb3912b066aeea9ace11eb21632ce774abd6434ef48066dc8",
+			"digest": "0b65bd75818156ba7da67352a04a86dd04f71eb7aa8270cc60a61fd4eda01635",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-fracsize": {
-			"digest": "4411d83a80cb096c4ec7b915253920a9d527f4cc63fe40bcbb3e650ea2555e36",
+			"digest": "5c34bde6c0e9dd60e1be424250aba11ab580df33f86aee0f92e237c1c83c3f47",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-fracsize2": {
-			"digest": "6bdf58d51328b4ee6c89fcb583f7168036cf5460e655ae05b644e1f1b9c580f2",
+			"digest": "ff1298e6bfb5b6480a23286bf161a176fd1763e166be6fd1c3b369c58b5b2a95",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradient": {
-			"digest": "3b6dd3aa109563b40543e9fdcf0b66f1091de60c953f5a8fb840c007daccf733",
+			"digest": "d0a7df8be456615f341eb82a9745e107c1266ff019da00c07f6ce8b0a349b2d5",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradient2": {
-			"digest": "e9f309d58b4ee13c84337769f53eea1cee18b557c997e744cea3965b4225e586",
+			"digest": "3dab88c5347f268e87269bd170f426132b870748b8344d7d7cb914445bff5d03",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradstroke": {
-			"digest": "9e17f3620627c1741e6fc2a59b27346643a8d15f17ac38135ed9e24dff9615c3",
+			"digest": "14e300ae7af368637dbdcb1df1ac2e49f4f36888ef76c266733b6d96f4b6f45f",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-graphemes": {
-			"digest": "4e84b4e484b6b116d0ecf6997876c1b3892a13058c51d3d955cde43a2b35762b",
+			"digest": "802dc44815783cfa504bfd98a412e1d3d6b58046141690e26e0cc0129e21e5d9",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-grouptext": {
-			"digest": "34d30fb06894b184c93ac9ed5f4b9b6d6011268894a2edbb33e06e479b175ceb",
+			"digest": "468ea0e6d6b47b5406ad6694f7437db97f036645c8c2190a24c1301b6f353bdc",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-overlap": {
-			"digest": "8f22d23630929f29e30057ffd060caf5a622f4e55a20ea1976c5dd269e5f48f5",
+			"digest": "85ad834b89dfc36be7db329b074f54d7227b9c6dd2a18dca10a6abbbdbde100f",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-place": {
-			"digest": "c6b6209055e3f4464208b65bc49429a35b99af92f321da478f7b83c09118e479",
+			"digest": "564fdbf5b6cffe912790e084c977a3814ff7ea6bf951da5bf95146f2d61cc027",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-quadties": {
-			"digest": "14a1b00746b82fe4243480376bd32219acadfe6860fa8e4a602bf81a23d0c668",
+			"digest": "f2384e23e3a6d8d8bba5fbf1f095aa4b89c43cf62de28cbcd5a7390771495064",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rich": {
-			"digest": "9e247d1ee5e48db556b9e58ae4643f240a996b990c97dcd214c264282911c2fa",
+			"digest": "19daa08bedfa8f733149b18c03eb6f475fd6dd7d64a2351c75f2f55e1e32f97f",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richcap": {
-			"digest": "aeb0d55a0e3613dbffec8749e8d6ad07401825e228d3471aceeec07673544421",
+			"digest": "dcdd08854da4b1229f77c8d7a2adde83b2633f2d5be78515dd70e1b85c27cc80",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richscaled": {
-			"digest": "519e0bcc6be31c836afdb965bcc5eae8d387b743f8351ba6ed49185ef0674dd0",
+			"digest": "4ddb0b19a61f769d7ea0da83063d2dd51d4de9784576edbb0b0b4654b4d5386f",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richscaled1": {
-			"digest": "3b6496c2e391fb943cd43ebae14c9aa2a6ee8233ea75b9babe6f67ef046a6466",
+			"digest": "09e85defaff7d7dc4c95b86948592b7f7e3627f5b62e2dd20f9fe6a4cf5b5e08",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rotate": {
-			"digest": "2ba7a41ee24c5d2b75f1debb53a51cc2a7b8042af02553450b15c83ced13da97",
+			"digest": "49e15606493beb438d746781d5bcbbf2de99a974a1f142903bc47c032218741d",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-rotate-quarter": {
+			"digest": "070fa19780663dcc0c30d8a0d9e82cbf324ebbe28bd7dbbd5de7bb3dfa8dac95",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rotation-size": {
-			"digest": "fe0fad54b5e3a321057be8a2f0ab7d876dd3cb0bf7448bb7f43411654d1c063b",
+			"digest": "4bbe3919ee56a23299e961a81d4604f702cf798346fe59ebb57a5420da4b30cd",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-selfclip": {
-			"digest": "54c2677d98da523d19c899cd91f1efd9c37bb0c9e3069d6d8a62490e220f3db1",
+			"digest": "f19a61720e06144af4f9d4367b4985dd71928c4cd5e2196d99906deacb4da8fe",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-strokequad": {
-			"digest": "5eb4c74cdcf522c57c06bac97acd3afa47bc820fa1bf4c1954da1aa95e5cb2cc",
+			"digest": "61e17557f57b59aa1a6a3063903b43fb697f8a31f07eb3f833a199550a52d81d",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-subpixel": {
+			"digest": "08e5c887b572fa3eb10e4f0a1a32755f52a9e14a1035f2590bd36daa6e57c01c",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-subpixel-size": {
+			"digest": "bce1f1ca6f8f66590b3278fcdebdbb1d6d065e79c5f58abb0d3412dc77af1520",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-synth": {
-			"digest": "d047b302e127f45da8acda184faacef757625c5aa6585f124578ff582369cd48",
+			"digest": "5c915fdc765d229c9c28abce17a0abbad96f0170d3077f6fe37d76a13c312b8c",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-tie": {
+			"digest": "ef0bb6ae5e8b8f2ab89c2ba8ffcb1b3778a5cb60c0e5e38b2cef403856a63e8f",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-uiscale": {
-			"digest": "823285e17091bc91e21d067637dc30cf700d54fd2513df81b98465bbc8198d24",
+			"digest": "8702c2312115f6eb8ab53d8e231bf856ff2f4dfc8446bebcb039329eeb6fb5cf",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-view": {
-			"digest": "6ee632cfa333a7a4c3e3c551eb63a98dd652e2b7c2dae16f9ae5d7a47a787334",
+			"digest": "bcab1d47a59a29babd3d497e0dccc6755b9e4af1c7e2d8d36ccf849b0a27d162",
 			"status": "ok"
 		},
 		"fast/edit/text-raster": {
-			"digest": "e15192830aa8269e95a920608d61dd7bd994c3acaa41aa91b696ef03018d5952",
+			"digest": "4807eaa7d42f311429008e77ec32be8183208e5bc89eeb50091bfbd309d2003e",
 			"status": "ok"
 		},
 		"fast/edit/text-stroke": {
-			"digest": "bed137c26c87a4b766eb524d520b245fc0d2724505876172e1183371ce28cd1d",
+			"digest": "5f7ed2c6a265dbc4f59fc2349052019e3b92fec5055c1982c54e0a68e62b9e5e",
 			"status": "ok"
 		},
 		"fast/edit/viewport-models": {
@@ -637,15 +653,15 @@
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
-			"digest": "9f3abd696d2962b31464dbb498c51f433405819e4f1b8613c46132c26d64a910",
+			"digest": "1c7d5a795be799cba669de0518b44964dd8d57ecda1eea77e7ea7685ea54ebc3",
 			"status": "live"
 		},
 		"fast/live/interaction-textbox/120hz-click": {
-			"digest": "cbe8b0ecc42c29c8d520a6ebf0184e992bf30252fefebf77701dce9bac978b5a",
+			"digest": "841ce98761397583e3d047ef4e195dd22951e2a924716c5bd4416c874fc88265",
 			"status": "live"
 		},
 		"fast/live/live-scroll/60hz-default": {
-			"digest": "435fb0fe711eb1d7496202887a2f7c41a79d093778af385fc1d0e43e7d9352f0",
+			"digest": "3edf119bf587bdf4763b0468dda1777a36810fcd6f43baec9d6ef472521e3a80",
 			"status": "live"
 		},
 		"fixtures/edit/anim-mount": {
@@ -653,15 +669,15 @@
 			"status": "ok"
 		},
 		"fixtures/edit/anim-tweens": {
-			"digest": "beeb8781342b21bb98608a1fa662e63a21c2a678148078b4e75ccb5ad2878d3e",
+			"digest": "08c9ca247923a5e7d701d5f31e6bc5ce9bfa19bb449cd10b3b8ca74960f258fa",
 			"status": "ok"
 		},
 		"fixtures/edit/canvasgroup": {
-			"digest": "0a3b9f7df660a55be1b276ae696d10541804b81766aeb7578ae4c7ce9e10477c",
+			"digest": "c5751669a39045b495bd032345b3f38ae77a81b991111d7aab0224b4364068e4",
 			"status": "ok"
 		},
 		"fixtures/edit/canvasgroup-rotated-gradient": {
-			"digest": "fa4ade2e12a324d308820ff073f325f046d473b66729f65034b25faa51ad896e",
+			"digest": "a42048f069046fef5dd3055088c4be8acb5ba87bfdf6ff968ee3c401cd3cd75f",
 			"status": "ok"
 		},
 		"fixtures/edit/corners": {
@@ -669,7 +685,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/device-probe": {
-			"digest": "a27eabc16db0ac3a76fda05694563175653cf5131de34b0b974c97e3eefbb2d0",
+			"digest": "59f58a2b5864970ca6963a80ea92b36ffd3a695e37366f73927edbf3d40d5718",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-edges": {
@@ -689,7 +705,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/group-misc": {
-			"digest": "a384c4ecb095346f8a21608db65628de69c5f380466788277e42fd5f9178c751",
+			"digest": "fc8964575404bf69370f757dd084f0a85ad021e2aa66d2e348863e67415c1f31",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-bigarea": {
@@ -761,31 +777,31 @@
 			"status": "ok"
 		},
 		"fixtures/edit/input-device-flow": {
-			"digest": "8686e5007bf74bf751a51878fda0dc244cd44c129650e845730b90a0388c98cf",
+			"digest": "a46ba05c8f440b3a445a6b463d72ab4f94a33a4f4a597142698df53852f11da0",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-autobuttoncolor": {
-			"digest": "837e0d1e004afa70f35f710c8f6307c2e8476a55522020d4c88c76644f985eae",
+			"digest": "ee8c3bd20ede424f06e033dd2087c6acd3ba74f908add09eff13a95a7c82fb93",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-scroll": {
-			"digest": "f2534509b9dbe75d1413eeea25e92c136ebac97e1f0626e2c4d78ee723ece749",
+			"digest": "836c83f0e6a957a4148401bde2c3852d1c53aaf83290eb6de5c85dc2b8f0c614",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-textbox": {
-			"digest": "9ee3f39ebd4296da9729add04789177ae90e6d938a2d15fb0a3d015e1707fa67",
+			"digest": "93d9f700025585cb66bc5729b83bb6185d0727ea08a16c999f0b7c10d43eadc9",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-textbox+actions": {
-			"digest": "b95a5fcedac298afecfa23ac28dc5d68d58756244f21fa834673fa555b9a8009",
+			"digest": "a21ce4674655f58562ca24f7efaf78eeeba6c4af927349cb7eb7e14d3b98aaea",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize": {
-			"digest": "f1882f2cbfdcb67d0f5aa3f7ecad8399fa78723c771cc79fc6b4b70fcd389cb4",
+			"digest": "4f522af5beca43a4d93764dafd879f374fc7c851874c870b5aa741b9745dd1bf",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-dynamic": {
-			"digest": "718137b57e85b34fb8a3a0a20a386ceb5d1bc66bc22d538dc8a49016aa4a9ede",
+			"digest": "f15cc0d43ce149b896be9ad46826f81c8ac9252c8a467e53716fee5ca74253ed",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-flex": {
@@ -797,39 +813,39 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-richscaled-quads": {
-			"digest": "80caba1a1518d0f09af9691ac50b6d2b8f78e9ec6abd2b5aafb3a72555e28cc6",
+			"digest": "e26445d31fe9b4c9d396f41a1d60fb95552df70eb421f8af3767e39751c02037",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-narrow": {
-			"digest": "14ca006a7ce195addb2b1bae3aca2e220bb3bd9af6c4a00d0c078672481a92b5",
+			"digest": "067c03e35a7fa82ea33ec869046d78008293dc2d69cc562a96d66e2c06d0f7ae",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-overflow": {
-			"digest": "548e4e835d25dca9c08433cf1c6b8fc5ef3db65a9b7bf67841d7e0a1f55cff2f",
+			"digest": "96fe5f5bc74d87ba73fbf7d776206d9c3220e1737fa9f34799ae5b64cb9465eb",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen": {
-			"digest": "405f67b189fb25bfa82f5b21ae5128256043fcb2302eb6a483c1c94b42efa5c1",
+			"digest": "5697126ff954933fac44099e8658059d3b58b53a015cbcab64c5f6f66f007626",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen2": {
-			"digest": "d6fb8d5deb94ada649c37728f15db4956acb68a4673eca4dce36bc6dac4128ef",
+			"digest": "f08e15108e7003ed4b9e0a0edbd7b74c7c034565f78644bb875cdaca62435261",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen3": {
-			"digest": "0da71fcc4df1c2b434237ef111fe9ffa61fa6bc7f456526d5d3b53cf9c29ab4d",
+			"digest": "809a114660f5b56a6b44588b1c057c1b014e8ee3749f1192b39b4b15fec258f0",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate": {
-			"digest": "e3f7a1dd57b6a297a5cdef274fee932b2dda88b15b0c11734ac18c592f86cc83",
+			"digest": "ab46ee052082b0da22bd6e648bf821856be0014113b850cf010e29ff24cfb9e5",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate2": {
-			"digest": "f074fea3735d547e131e1730bc5b1d2739d0866893d167cf6fbca1b3112e9fca",
+			"digest": "fbd2eb2e3e3af89d2f005b9d0ae2136de9eff8047c53fb7df53b75ae3464a873",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate3": {
-			"digest": "a5a7e90493ea3a813efd6796b700932af271ca379dad54497d51f9899b435899",
+			"digest": "0cdb0f7bf021948b76461968b8adf9a4a8776f7e7657ce8b243cb53eaa098581",
 			"status": "ok"
 		},
 		"fixtures/edit/live-rotated-cull": {
@@ -837,11 +853,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/live-scroll": {
-			"digest": "ded7cb037d72d88e684f7a7f423771cfd3249d96c38b7363bf7f5daa01263e49",
+			"digest": "7270f1048e29c78e1fa4abee9ba7d1931667c8cba83c880df8d0a9095808fb05",
 			"status": "ok"
 		},
 		"fixtures/edit/live-stress": {
-			"digest": "9ef76d066f6c90accdae0fdf77555102597a61b0f674cb8f5d31e59ac8158708",
+			"digest": "34dfb736c7863687485ec07b48a2451a2484ecfd57c03d3619e411bbe33031fb",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-curves": {
@@ -853,11 +869,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-layout": {
-			"digest": "ef625b2b12a04f94a53282a6d842ef19073242e32e2a8dbba8e093149914f72c",
+			"digest": "d8ffc0f5ac3f2a84b1385e76baa75a0de56df5c1689b832e80c9940dea8da56e",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-order": {
-			"digest": "50465da46180737d688d68d33f1834458fb876ad25a3cc4599e2ee75ce253a5f",
+			"digest": "489e922e07b77e67023c5b55dfcae3c957cec0244e79ee5aa3d2abfc758fad7c",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-strokes": {
@@ -869,15 +885,15 @@
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-zindex": {
-			"digest": "5b3143f2d3c75b12d2cf4bf3ee034b58029ff09abe19f1a25cc50804046b852a",
+			"digest": "0709b6cd5a290c107fa39bf298ae333c522fd338d22e8a5c53f56f17e01f8e72",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-zindex-global": {
-			"digest": "ee30569130fefa049a6b1b751bc052bf60e4c7cf42d980d7a9de02c2e6313cfd",
+			"digest": "461395470697abc8af079c9fec71d34e2f6befd1c530a1529830e48f7a142b2f",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-errors": {
-			"digest": "a9bbe7418d30fe406695a9765361a6554251cf99bf93e5aa8311349724ec29db",
+			"digest": "bc6f1bbb7f2ca6159ac8c06acfa429657614c27782e430057f1415b450aabd93",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-ids": {
@@ -885,7 +901,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-input": {
-			"digest": "955a66989731101475a2f650feafd700f8d68e8cd28a7c6529361d663e103ba5",
+			"digest": "4fae0fe5a988e6cd6ad62fddf0bbc14c640dadf4c8e1bdc5c037f730dbf330b9",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-scheduler": {
@@ -901,7 +917,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/rotation": {
-			"digest": "c548c8c6c5b2cc813e1f38a3f4e8a6dec1e5fb8f883345c52e925ef45d5414ff",
+			"digest": "507bf8e149c8b0aabfc687c120e8fdcc882ccf0016b9cf3dafd4d55a419bbfaf",
 			"status": "ok"
 		},
 		"fixtures/edit/rotation-clip-offscreen": {
@@ -941,7 +957,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-e": {
-			"digest": "92d9f3f47b00da598c67e448953b30fdb86b1758216e150c75a5df9075fbaa77",
+			"digest": "349d0cece7f25abf628e11fcc8866915e4aef799747d96f4ccc8e471901ab188",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-f": {
@@ -1005,19 +1021,19 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull": {
-			"digest": "c1cd9fb6afcbe5f2469d393db2000004664a8b31ecca773469b2146f4f7fff67",
+			"digest": "bad38d92ac01fb1b3eb3f89f9383227b5dc906351c928abeee30c93083ab68af",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull3": {
-			"digest": "454cb0ed97841e410e518993a612bb9338ae1d417da6077a6776173e8c3359ef",
+			"digest": "7f6a1e8e5cca4e84421e722454ca3e91a744ac7de41454b83cc3cdf6d836eec9",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull4": {
-			"digest": "0472775252707bafa97556a2dfb38271f7036a56f29c29a3b82ea407a97ce091",
+			"digest": "36fa962ea9cd261074f4282b69ecd7d6c79a30b57647d67fb6d6e58a9ba2411b",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull5": {
-			"digest": "0437e92f195c8b56149d4f35cbd0a148cc8a610e0fe7400451960dc3c81dc55c",
+			"digest": "f1c357268a2cd1c3a4ca604cde018a981079c55a327a3ff8cee500ee9fe6386a",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-surface": {
@@ -1037,7 +1053,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stories-scroll-noclip": {
-			"digest": "2292babe1e4adc664c0b3bcc3fa77875b43c41dcddbd39e369b945ef4e780b4d",
+			"digest": "bd2a967b20bb18ebb1009008d605e99450b45c3b3f3f4cc9b65d6b97f3a944fb",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-button": {
@@ -1065,7 +1081,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-misc": {
-			"digest": "e2c64a7dfac68b498ab8d43aa672c5be833f50ecbd21d16253b182fb27584229",
+			"digest": "bfb1a641e98e76e9d032d050464ffe6dd44e6539b03c02257d2abc99948c8ff3",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-modes": {
@@ -1093,11 +1109,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-scaledui": {
-			"digest": "39bb809e5b9192887840585d557c271d3d08e7d08b24d3ce8210ac85db91252f",
+			"digest": "5b314b6d67fbbb9cc82071bbb631462d312582d84c591bcd5ff41bb45fee3541",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-scaledui2": {
-			"digest": "f4008edba93d9f27f24dfa29076dce82d2a09c5429cb985ade009322adb0a25d",
+			"digest": "b41e78c84bf95d4697a957cabf214c1caf38953460566ef00a2281393468eaf8",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-radius": {
@@ -1113,27 +1129,27 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-a": {
-			"digest": "5bdf080960135c844549a7098427008feeb9cde33b958004d31482beeb6a4c94",
+			"digest": "cdc825ec73c7060b0c89c66d3f8c8b33a6f769978b89d0ec0956d993d571bad8",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-b": {
-			"digest": "c7a9376962ab65e4a9591d78018a719cdf0e0ddef7d0f0c71ac75d234955a1f7",
+			"digest": "895e394f0b53efdb6b252299d230239375e6e09aa90315a10f85553bbce21315",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-c": {
-			"digest": "02a0f8ca51ebb266d7d14263d198592e73552577e53e992387873bb9b4fdbd12",
+			"digest": "65ac34a5a4d570a53e2af5f6d8a80c089be4ad2aa01afe77b2dc3952dcec0a71",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-d": {
-			"digest": "aaf171026e04794ba739ea4eb058cda36314917da80b8b222bb2416a8d604b1a",
+			"digest": "97383d1404b5e70179b3b57935ff5d364e0bff10f669b93f8ff0923f936624a5",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-e": {
-			"digest": "2de0148c050f8feaff46c5163b67595a6233e8f4a5d58412c0e52dd1f3814d94",
+			"digest": "f37fa1f0f99ec11f4ac8dfd413b9c1034a2b9dc611a0c10347e1801503b0ef67",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-uiscale": {
-			"digest": "9527a47197e010c785f6029b8f83ecfc1ea492f5ee936df41cee65e8dbe1ff37",
+			"digest": "57d0eb2891beae174dab3f61afad28f8786c870cf3470245fb4fd85be85cb2f3",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-zindex": {
@@ -1145,139 +1161,155 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-baseline": {
-			"digest": "8c20b644c479a822c9c279a5d4b984c9ac8a93c7eace331b6df4dcc1ae1cc020",
+			"digest": "8f9c9048e4dac159c4e8e0425793faa815c2df3b5665f1cf9b3f9571e0b51a08",
 			"status": "ok"
 		},
 		"fixtures/edit/text-fontfaces": {
-			"digest": "94f5fd0f5e8b34aff27ab466174c2fd68172d9cb59f7c7037862697f2309ab08",
+			"digest": "050ddd22203c81e3d667a04e89bc438be67f0ac00191747eb68ed993a6959f93",
 			"status": "ok"
 		},
 		"fixtures/edit/text-fonts": {
-			"digest": "324579e299938d8ee3244285fc481e2de86c166c28e99ed497556da896c82edf",
+			"digest": "41f3c6e949cfbf34053d0613d7935add8d1b338de3991940b663ac5304243e9e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-glow": {
-			"digest": "63d4152d1f46ae9251286531b7c434b0d344fe30a91b22f5e11cb01e6b361fef",
+			"digest": "5a39ba2504f953426fe6c299790fac4264445102974cc98dbbee8dc2e2cfeb20",
 			"status": "ok"
 		},
 		"fixtures/edit/text-gradient": {
-			"digest": "9e4a3ba9336d0fc4ab82868bf3d73888dab56282a56e51e6fb4ae02c5ac966f3",
+			"digest": "5868cba50615acc2b23ecf3d55c71f0aeac6b5985e7f85eb2b8a9299dc66ac87",
 			"status": "ok"
 		},
 		"fixtures/edit/text-gradient-degenerate": {
-			"digest": "f30f65a8a01205a74e8481c15542966fbefc2395afa5194166533c5af2a6b834",
+			"digest": "10db89f9a799e3a07b2c37ccf8a12747ac1f1e71a6ab820cc74ec446854ea849",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-blend": {
-			"digest": "3c95e249cc173117fe0b4af53aaacb0c128c72e99a107b046ced42b57a80ab55",
+			"digest": "ad702ec8a6169d3a8994385216a9b4754a492fe643420770929ca6d5642c3d3d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-case": {
-			"digest": "7147f9ce5c7442b1416cf6a2804a565eb7503ce7684efce58c2bde216f1f9baa",
+			"digest": "b45180d75be60d8094d8021cff1b9b7f0800613f94ec461ba05dffae8e3bf7f0",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor": {
-			"digest": "2096881685f941c560f27c9ee8602b7b57c2d2ef38ddc538780ae4885fd3a2b4",
+			"digest": "33989808b902dd7f70a88c7f96f85f6143f9711294e0369342f220369bc92d07",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor2": {
-			"digest": "4a39ebd467a31b2f8ee5deca3932461a4ec343f4d7d4a72e15898ba08703cf0c",
+			"digest": "8e29e6279ee69b0f4ff9f137ae59bbd5d85e27030881003481b229f94e953593",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-emoji": {
-			"digest": "e557f3fdc7b2ff134f4692787e242bd144e4cd8cb647512e30e120d492a68cbc",
+			"digest": "9a5a8237e89bd14e845995ebd49985942536c4d9304a78d75aeb89efa16d4d78",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize": {
-			"digest": "35d8e71056c6398fa6b2798547cd8d683bffc420e881cac1c82346895c4c3121",
+			"digest": "039a44864ad1eadd020ff92022b114eb8e04a088a32cb0b22d860d0c868697fa",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize2": {
-			"digest": "9e52b20c5259ca2fc9fe628775144af33bef7d78630fe8db38a4cae5b8ead12b",
+			"digest": "3b3528887689bfee0db916d89c319f714d1137f4dab971f87869b5b53874343f",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradient": {
-			"digest": "40f77756f38f25b558f16eefaa033cf6492b1dcfc6642a18d5b8b96e5c6cee16",
+			"digest": "57ebd9802e813bcbd231ef268a85bac2788d92709cc0afc3467d39d4312ade91",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradient2": {
-			"digest": "99524c33d3770d7261b2f8398abf94ff15b2c92d86f56030a05ac81842777db6",
+			"digest": "6dcdeb5defdc3e2ed0573de8f55f48ced3309dfa335cd215317f379df033ac20",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradstroke": {
-			"digest": "df21f5e49aabdaff7c069f9bf93b1d1b6df1d22ea01d237d49b9f42a5d3a8dff",
+			"digest": "1fbf66febf9ae86d3e417277ce02554123380eddc422f32e1e7af968aa482279",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-graphemes": {
-			"digest": "d097e6f474f00de0fa99589e9d2042f21a573ac1d80f596be7db4db7995763a2",
+			"digest": "0b6b3303447a95eb88ed28ac53aba9e1aea0f521d378ecefca5317b3fcce94fb",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-grouptext": {
-			"digest": "89a704a5b20a13e1d030422796dc4798b78c5b6da7749ee7b390194699904245",
+			"digest": "6c8cb93b793ff4b16a807fc7769e68411ce29d96cc6037665ecf3a71117dcecc",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-overlap": {
-			"digest": "c029242fd9f5ac4af7bcf696a6e81235d00312a4f096f932304176790361d2f1",
+			"digest": "9d50a0543600e4504105584219c8b3ee359a28ed95a2c7820525a69430228f94",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-place": {
-			"digest": "14daf14a3cf478005604384b8c5a2b23cacab44cf841a3458d7311e39e684bb2",
+			"digest": "4617c093b413e9f9f3759c7dd2178ab4e9240cdf3939e8743f8b616beedb5fe1",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-quadties": {
-			"digest": "7c53c583ec17d48a3f662881a14df282d69d8d3e4469f57c0f7f47ed6edf55fa",
+			"digest": "76a4108d14b134af2b2040030b7866be75bc5c4bfbf42c527a8fa8fc48e6ba96",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rich": {
-			"digest": "e82716fcad9e4af35f0d6d7b49ca2db461aee89046b95cd5fbb522a1b071f51d",
+			"digest": "771999159189d1aca16231fd069720a009500c7290c70c82c7fa03ff995edce8",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richcap": {
-			"digest": "0a1f821c7069cb8e1edbf2ea9db1400dd81ec56fb8616796dce5afc4bd20cd59",
+			"digest": "e9db01642d18a0a4724b4e19283e8c918d5b9bfd1857173d6bcb82e34cc2c532",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled": {
-			"digest": "7a8b5ff60a3d6982ea84576d4de1529398ae68c5ac0049af18e261d26216e5eb",
+			"digest": "2839d87aa429635bcb01f85dd494289bade27b9757c40aa1f050093d93d66d36",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled1": {
-			"digest": "54124602b2a3e243929ab1877a12f2b956f0fb4ca238898d1cb14167bb03b8e0",
+			"digest": "dec9343ffac9f3ea04893de8c8bba8e2530649e7015adadd7134575b4abfa7ca",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate": {
-			"digest": "ab9944030e1cfb86968c0201138db9119a8c4385030d02f049d0ad8258d939cb",
+			"digest": "6dbb318f8ce19ec4ef8d960a416af71e3d46edd9ab33b864208460caeaa2669f",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-rotate-quarter": {
+			"digest": "dc7ecdb6d422604ca3289ac3c15f8017e0c56fdfa074da7577f0814dd8e4f0e8",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotation-size": {
-			"digest": "09fa828eb69f7b89e88154d73dd9b30b8bb46e360b4a8f65cfb051b5e9d6fca6",
+			"digest": "0522d9be66af716cf8f57859760c5a6de692693636b57c75a552efd3c5915093",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-selfclip": {
-			"digest": "cefbc78698252e84129eeeff446f47a015d55b32db97bd4a34144f80a801e3d3",
+			"digest": "0dbc36eab493a1753a09a02b4b6b3bdb345f1eff362eb1ee2f443f2aa204ae33",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-strokequad": {
-			"digest": "d9f202c9ccc73493127a94b7f26162139403041265e8d8fd14cf25de3dfadbb9",
+			"digest": "6ee54aab34a926468294abacc1a1d41e325097ddc841b587da9aa9fed0185cc6",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-subpixel": {
+			"digest": "a0f675d68da20d2fa690a98f793e9bd208d7f4861d9121a203461e4b7cc31535",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-subpixel-size": {
+			"digest": "864b885a5f5de462ef5459e1388d8262301069ca0370b2484ed2cd99a5764f49",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-synth": {
-			"digest": "16216ae57bc071582591ed5846a5c98c37b35343ee519eb263161643b37d9cd6",
+			"digest": "5493a0b0ce9b2a5eaa2dc78b1b3378163a5eb24c9b894aafdac7792dfc97ea0e",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-tie": {
+			"digest": "33abd6f0141a720763caa79bfadbdbb4766f354483f86296fd2091356f92058b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-uiscale": {
-			"digest": "f8a3d2e20178918de812ccfef701c822be4f2781a6c5bac2de5b56befbba1a37",
+			"digest": "94963e2569f110dfc6ba41ba574fa91269ca964b9b48c1363c0600bfab0e726d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-view": {
-			"digest": "70cefaa1a437fa56af352ca65306ccaaf4ed2c2631cb6a4a0042af5afcb43697",
+			"digest": "9ffa7ac94bc803f9ee1443a18a4be0f0b0a3c68bb5ee17ba9be9d1e51c57b97e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-raster": {
-			"digest": "531f0637f02aca1324b0a12331fb229f088defa8a6f4683d464a49c65275c2e4",
+			"digest": "ac1ce6af0af96554f450e3fbf2062b6cb5c3503b519e5ff1993778dea4945680",
 			"status": "ok"
 		},
 		"fixtures/edit/text-stroke": {
-			"digest": "6a71f5f583ad7b249a2bbf49eb9b64b493fee5daa1447c72050ea1f25e756395",
+			"digest": "f043104406b795bb0e84aab430023c4b83234743a5eb038b5b93984a5ed6552a",
 			"status": "ok"
 		},
 		"fixtures/edit/viewport-models": {
@@ -1289,15 +1321,15 @@
 			"status": "ok"
 		},
 		"fixtures/play/anim-tweens": {
-			"digest": "83fa95ae4a226ff7ab6ea38cb8d8640e90641de945fe4fdc21892b5b0779df6a",
+			"digest": "f853aaeafbbabcaa0cf8ffdd3285634d61c25265853cab3e9d60945ba7007137",
 			"status": "ok"
 		},
 		"fixtures/play/canvasgroup": {
-			"digest": "22c3b2950f3279c7b1a85980ee0ce025d45f18e12171dd6a6e655afbb44df539",
+			"digest": "355005bbf39cd4abc466c2002428c50544e00b23328d2b57ea14635a6c874d16",
 			"status": "ok"
 		},
 		"fixtures/play/canvasgroup-rotated-gradient": {
-			"digest": "0ba198bf1f539d006e7ec88b521c7a53f9c58e5f8acd80f28679ecb4311f1b14",
+			"digest": "bfb76fc2768c461f778cc2e84cfdee4765eade629386a32cfad26d23ffa6af81",
 			"status": "ok"
 		},
 		"fixtures/play/corners": {
@@ -1305,7 +1337,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/device-probe": {
-			"digest": "c24fcce9f94e76243cb6c65c43c4b216ab38f35edcb164656681a6d8b9638135",
+			"digest": "e2f37205015bb6c44b6f5d283d56cd1faa8d945a023eb6d0736a0e2ca8f9a2c8",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-edges": {
@@ -1325,7 +1357,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/group-misc": {
-			"digest": "7fb45396e8d798e92725cd506ca6c8ac5ab55fab072fa632dcfd67533c7019cd",
+			"digest": "ac37a1b635b0f2ebf3625bd351325f4490d295e2b4210003d416b671218848f8",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-bigarea": {
@@ -1397,31 +1429,31 @@
 			"status": "ok"
 		},
 		"fixtures/play/input-device-flow": {
-			"digest": "2a94aa77a0e8d53b804cb3326cec742dfab75f710ed965ce0df701cf8b48ce12",
+			"digest": "0a4b363048d4c67fe12e9bdec53ba99025a30505d6b1835e26fb85a316e5ea93",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-autobuttoncolor": {
-			"digest": "51004bcbde6349cd708e2d1dda05716985deb2005de76549a5385d8f7ce428a3",
+			"digest": "bf08ec92d873cb4bdb44a7cb35f714aaeed312d5972494a3d42ca6d0effa0e80",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-scroll": {
-			"digest": "36da6753dc555d11b0460df7befb0bff55554206f537e2da551deb1df9d84b77",
+			"digest": "85ced40ad7368f7cdaaa772babf4aefbf845e9657b86f3c08e9e0db26b95a5cc",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-textbox": {
-			"digest": "b5d6583a5a083bc5b5195306bd42477ccde913faf4e23783fd83a6beafea0a9f",
+			"digest": "9d803a3f4df8b64448479f8c2eea9ad5c32332758dd670253eb27b5b53cda1fc",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-textbox+actions": {
-			"digest": "558d433e9cfd09b0963340e4f304f08d2ba61501710c2c7d6427482360661912",
+			"digest": "238b146a335d45455c0326df1ad6fd20371d454768b161cf3bcbfe23fa1301c2",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize": {
-			"digest": "c5d263671902e46a58eea743d3d6ecf88fa65e8e8c38705e23b225e852a110c9",
+			"digest": "23ad86628c325e5c62263654bacaee807177d26f733e147951b5ca0769192d79",
 			"status": "ok"
 		},
 		"fixtures/play/layout-dynamic": {
-			"digest": "e631ca6b9129c7f11c313f6b799621e2c1f825832a30055e28584c01e93180e3",
+			"digest": "b80381cfe4ef8c720b14956a5f0d0950410bf8e766c107f472495351e50b18db",
 			"status": "ok"
 		},
 		"fixtures/play/layout-flex": {
@@ -1433,39 +1465,39 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-richscaled-quads": {
-			"digest": "3ce828f2f1d752d74a21a88dd8ef932b2cb16cecbb7f46243ea9107ff2d44f95",
+			"digest": "cc850ff8ad0a91359ec1150f12fbcd6987c1d5f5d00fb47cdc97610c1eb0b9ff",
 			"status": "ok"
 		},
 		"fixtures/play/layout-text-narrow": {
-			"digest": "e541ea90e89c1f0a32756d81afe5cb155439778355b699708417ab533e3662ca",
+			"digest": "7b3e3afc83c8a645236eaf272b832eaf4215310b3abc26a7a4f02e767acc8947",
 			"status": "ok"
 		},
 		"fixtures/play/layout-text-overflow": {
-			"digest": "a9c6bd4b1188fee563d57c5cb410a4732a33bc8c1d4c72286383cfabec4fa9ec",
+			"digest": "05c5321c82fbc5f06f12ad07a74728705cc0d954cd8480acc5d5b0b7a3c0e46e",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen": {
-			"digest": "64606bf9355966a334b1a57ca6bb4da2e183d61e5c5f8db8fff5b92a6c52fc53",
+			"digest": "eefc11ceeb0afc849124399aa374723002cfa87b9e90c0ed03f3889fb0e501b4",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen2": {
-			"digest": "b5a793ee9b3507106dc9161da5308bc11c9ead4e72485f6b4f4cd521f28ccbb5",
+			"digest": "aa824bed41e04166485de678c952059ea9a8cbbd81f194df57ebedb7f74d7f08",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen3": {
-			"digest": "9497ee65bc512b5394a8bd745ae45404c0d0d0194d21e649939b5f857f583a13",
+			"digest": "242fc07fe0e1c82465627e13b9ab91fd2fe334d6b40fced8821d972ce4f7214f",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate": {
-			"digest": "c643c79769ef986aa16a2da8fc6eea23219be519aa0368c79c172af7619aa23d",
+			"digest": "f6d0ec362d7cc09a4ef72490313d08eae7ba2631283a7f98efb49fde1aa8d596",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate2": {
-			"digest": "26c97dc151f1b167b5b2fcf0e439688915a54195dddf5dde003c6345a5de58a8",
+			"digest": "f89aaa850dc77e495256af6926575ade3b5e363e4768336182979bad155af5a7",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate3": {
-			"digest": "aa7b814f46ee449f93b4afac207e2addce8a3e972b883d9cfdda9c764b784e94",
+			"digest": "16a7fac2ba9f9cb6eba819730a0cc20efe54d1f9d06c468b1f5b04bdfbf03239",
 			"status": "ok"
 		},
 		"fixtures/play/live-rotated-cull": {
@@ -1473,11 +1505,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/live-scroll": {
-			"digest": "e2f78bad296e090c68b14a6caad1bc75b78e84399ddaf82bb96cffa6b387354b",
+			"digest": "0bac8e579bbf82111d2b53f97d42a1abc9ce92d3563a74a62ed51e26c952b274",
 			"status": "ok"
 		},
 		"fixtures/play/live-stress": {
-			"digest": "8f316ad4ab9ac79cbcae723c9a0eb9e632d7f8566ce5f747c5c9f6473fef52d6",
+			"digest": "4ee51a334f26afff2c72284a16578730c94420283361cb6d5336d30dd497d1ff",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-curves": {
@@ -1489,11 +1521,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/path2d-layout": {
-			"digest": "2019a5025aee2600b75da9372841e80cc3a21267ca0d0fa49bfbf9a4f6b30d2b",
+			"digest": "b9fd2458eb7438e1559d37bab2240e281313f475b11b54f76259bdeb68767477",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-order": {
-			"digest": "5ff34554cbabdae2d7dfe030ada2a979fee7cf8c1ea59646ff0aa029afb54da8",
+			"digest": "3e9a03e41fe70cc279ec88cd2f733bfa624bbafa9aa5ddaa202c313b8c679db7",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-strokes": {
@@ -1505,15 +1537,15 @@
 			"status": "ok"
 		},
 		"fixtures/play/path2d-zindex": {
-			"digest": "71b9d3c2f975ed7cfa9abb1b0c742fc26961cedbf51837b70c7aa35bf7e311cc",
+			"digest": "bf4b6b899e8bc0ce60f515be2b95406386e5f0d5199878f8239b3c2f7730faf1",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-zindex-global": {
-			"digest": "b9593667b70b9eddfe9716cd1342348b4d0d72b50b6c567c0ad9eb24edc27563",
+			"digest": "c54109d04ddebb82e8cefb5e357700461d4f5d84993746e9a2488437d1999055",
 			"status": "ok"
 		},
 		"fixtures/play/probe-errors": {
-			"digest": "f401d261bde0ee47680cac49c6955f5febb9a9cce6ac5a2a453e8e06f435647d",
+			"digest": "1c215923f73eed32ea08d960993e444bdb6e0c9e4131fea72f8d66ab4408c9cd",
 			"status": "ok"
 		},
 		"fixtures/play/probe-ids": {
@@ -1521,7 +1553,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-input": {
-			"digest": "d957ce35d8a4cf85a58e07f28c6faef335d5a4be4931bacdefc36b7d9b831a8e",
+			"digest": "1a9a744d2f034e344d68a7d39081de1e9f71cf1b11b897cf919440e97c3e2b13",
 			"status": "ok"
 		},
 		"fixtures/play/probe-scheduler": {
@@ -1537,7 +1569,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/rotation": {
-			"digest": "f6755aff506218e7f5493569e924524b467890e83d50c1dabc44d3106cb92578",
+			"digest": "2a192fd0489a89e1931e556258b996d4c2faf6ac7135e10b7193d95de9a1af4a",
 			"status": "ok"
 		},
 		"fixtures/play/rotation-clip-offscreen": {
@@ -1577,7 +1609,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-e": {
-			"digest": "8c2eed7d16f62e2d7d3cfbc7372ced3f3d56bdfdd716d6c89d183f7cac4c3637",
+			"digest": "1f716eef9bef5cc004bd8effa5afc5e64189e209112b60ebfaffe46f79b85b99",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-f": {
@@ -1641,19 +1673,19 @@
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull": {
-			"digest": "234ec612fa6659b0c958608c829f712e70c0bec5bcce4e3133300afdfcfb0fb0",
+			"digest": "52bbe2c7db5764ea976ae2dadc5fc371bab4fd64823609ec61ace68cdd018bdd",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull3": {
-			"digest": "678e250ffc2b3e68c132e3c393d9c80630b0a141f93bbe535dcd4406c41ff45b",
+			"digest": "59e6a80c9cdc49651a9c309e657a6f8c20b20dcaf8baa517771e3a644a958925",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull4": {
-			"digest": "14b6b60cd8dbefd3104a2dd3e1064da745514e36b8d77acd18a32535e0c4ba56",
+			"digest": "e71e4db62bb20e26a3ecd54010e20161b32066c07b42e6a0dc167e3339ef675e",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull5": {
-			"digest": "5aea43cf5c523b62b55fe4433e5ea23fa17ad71579a19c2944a6a0c9bc056b72",
+			"digest": "5e9c980507fa82e3d40f62eb4bf4cb40d075a120e0df76ab0b1dc26ac9592823",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-surface": {
@@ -1673,7 +1705,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/stories-scroll-noclip": {
-			"digest": "a2e97d22a63174937059631fb8a86d02c8a61bd21aeb60147d3d473dfdff1f61",
+			"digest": "1b747cdcf1bfdbc05673e3f9e70fcece4637a49f8722a1267a890957adc2eebd",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-button": {
@@ -1701,7 +1733,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/stroke-misc": {
-			"digest": "3b7e1294ce3018c7b2d6ac6d30a4fc080c00a9ba1d286f502d348e93369e76a3",
+			"digest": "9deef27382c3ad2f35640fa699597d4181d76e510b5092e550dc9da3f777e904",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-modes": {
@@ -1729,11 +1761,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-scaledui": {
-			"digest": "1c5c25adcfc95fc7d03875624349d4c86b2d87340a7602e0b47fd2df22f43123",
+			"digest": "6a8b63651b3421d7b31d5f35c73ad945cc44c8c48e839db9aa8e290f46109f8b",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-scaledui2": {
-			"digest": "9bedbfba075eb1c703ad54c699da4629b5775ff916c166e38b3945a9c47abd34",
+			"digest": "f56be3cdf3c0c3ff3ee9a4ed8c7c768e05d274e812a93175875948fd437e2ad6",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-radius": {
@@ -1749,27 +1781,27 @@
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-a": {
-			"digest": "bfbf3f4c6bcc560172dba9c7f6cca1a1c32c8378c4fd2a3fbed74acd5e6f04f8",
+			"digest": "c27ed890d01e0480974e38c849e99e663e617a280001f2ca2e99b258679b9192",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-b": {
-			"digest": "87de8f647fe755498b318e0f8a38c6f8ed42fab0285f6278a055175f244a07c1",
+			"digest": "c5e2c8d1ab4f40d446f3940fcdb209ecc9672592b0c22c319e76d21a7f9b1e1c",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-c": {
-			"digest": "2d08ea7e67dc7bd46a76c81e7cca0b5e10847e5224de338b1df89665a7768dc0",
+			"digest": "1683f2d41b813eb8502f23f483b1cd80d410fd9aed1abe75c995cd786539732d",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-d": {
-			"digest": "c5df6323d279b3103859f7fcb23e2484acad268adcbcb2019fd434fe3f82a276",
+			"digest": "ef71790b9d5a82c3466800e56eae2ab53cf5e25f3173769a0aa1aaa1456084e7",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-e": {
-			"digest": "963aae10b6094281fadd8705e079b248f50654c3f855ca575b661ba16e073f3f",
+			"digest": "3c31ded301f7690bf8d3080194ffe4b66dc1d3cbf35631ce4add1c2f671fb65e",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-uiscale": {
-			"digest": "3827413c3b815932fee55b9faedd2af44e8a308dd466acb2114b1eb60fbe2e50",
+			"digest": "9c444722d8f7340359c1bba4904fa5d79443284a866e9db503aded8c5a9cee4b",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-zindex": {
@@ -1781,139 +1813,155 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-baseline": {
-			"digest": "b8f7e8fb455ab49a6b2e4071b62949fae113de1da9cd57746d878fa6d06daf1d",
+			"digest": "b3c08b1961045aed4d577ed7908ccfed41c42b01e8b3d08080e8f1f8d34b34de",
 			"status": "ok"
 		},
 		"fixtures/play/text-fontfaces": {
-			"digest": "16e2a6a2677e2907051ff444e22b7911be73e8d0405190487980d728b7e8ea7e",
+			"digest": "5f52c9247c6a829b9eab70a7dbeed33c6c701b6d2f94cab642f74e396265f6b1",
 			"status": "ok"
 		},
 		"fixtures/play/text-fonts": {
-			"digest": "219c001c2e60fc97167ca5b31e4f1d196ebcb7c293f7aebe49ba55c80bdf55ce",
+			"digest": "40401fe547324da1519f828df7f475d076e336ac346a5a3025db8bb2af3ef3a1",
 			"status": "ok"
 		},
 		"fixtures/play/text-glow": {
-			"digest": "c477b8ed94e277e8b4bab254ef43e7238547e7b09561cfe9fd0fafb30fda4f97",
+			"digest": "406b9cc0fb2307a5f5e4915c9ed20c185710ebe6eef14357f87b8e20d922bec0",
 			"status": "ok"
 		},
 		"fixtures/play/text-gradient": {
-			"digest": "2071061af7f507fcd4e79327aeb5e8093652590d68550415f819196e41e5f746",
+			"digest": "07c8f0b42b3e3c3c03b34c1b4b11e3553290b33c02a4c5b8687df261a13396a7",
 			"status": "ok"
 		},
 		"fixtures/play/text-gradient-degenerate": {
-			"digest": "dc439291877aeb2be5b7a9d69e0cad9a470fffca9ef0a5c47c11e18876adbed2",
+			"digest": "426e5a04103ee9ab0fefd2b69b89182d00df129a57901a83a7160904dcf0ecc0",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-blend": {
-			"digest": "3c8443f410180c6e0d3a5a1481af3fe3e549dce7255a73d03530088b9049e630",
+			"digest": "663da8fedf83ac9af387b918395722ea9bcf9a056c4ec543dfca04b907870099",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-case": {
-			"digest": "2008b0540e16085b4b6e0cb4a084627c2160778dc8dbe22902e9cf8f41babfcf",
+			"digest": "acac3f2b9ef9565e57d49f668e005e163a4e38914be0a1b32af4ed314c749a98",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor": {
-			"digest": "f4f4376b666abec97511cf1b80df1f2d56183eb6a253eb711ced5d045eae86e8",
+			"digest": "ffc495d096dd97bbbcb97e61f36fbf6537a42cc8e4c4107a57363ff3f66ad157",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor2": {
-			"digest": "012c86d3a68d6163f2c45a145c27a9b4055bd4f7665385d074c602f29c746d38",
+			"digest": "5a171a094bfe908560498dd4722e39772aa9d2da12d217730a51af5443bd1318",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-emoji": {
-			"digest": "05f1d04cc7dca6e8c9dec96c85628a247c2f2b96efc25647d9af0f3e14d4d266",
+			"digest": "eaeb4a7817114ad6b9bc1a6a68fa57ddf3c1badfd31fe05a2bbd75c45642953c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize": {
-			"digest": "0a95d51cae6dee7179985f4c61a8e2e8e88274a2cdb02894f528c1e9ad7609b4",
+			"digest": "5093e29e1273d5eedb28a33ad98857f9007bf81a6252ba4f13a6492ad46a8107",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize2": {
-			"digest": "de6d7cebe74cada68b585c5a48edc091e425b996e9472238fa5a67fa59aa6afd",
+			"digest": "ef8f36ec3508b8ea2ed756ee031911d0aa26ed7fa639bc84c3988f42f558fbb7",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradient": {
-			"digest": "bcf9f56aa5fec65ed6d93e7508284561c312bd8d17a8947d9f5fc035425e8de5",
+			"digest": "6513ea47c34e238d3446cfb30f3d5bd8a425ab150911ffd85de97039562a2342",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradient2": {
-			"digest": "62555a08c8d90833b2bf14a506ee14222572688dd4869c7a73a74211cc383f33",
+			"digest": "ea3da26cfd255a4d766e34902d693c1a91332072e741fe53dfad5a6b482503d9",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradstroke": {
-			"digest": "c3a9bdf57772fb9f45538c94db8ec6328badb4d029f8951b2828d6f11e629dd6",
+			"digest": "f7bb9bba6ef0127563b84837aee4941daac6961735e741fcc4ac2aa81e95bb29",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-graphemes": {
-			"digest": "ae9559c7ab3eb1acc9d5c0640990b028a78e5dfb582466ac021ef20a7d8b620d",
+			"digest": "6ceaaae42179269d8ee5dff3db8c4fad89ec6146d7b3cc85f0a67ceb35683ce1",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-grouptext": {
-			"digest": "faddebcad0d5d2e784f9a0f0170a3703bff57dc0167b869cb724b250815a0808",
+			"digest": "a2d976f8697c31cf0afb383908993d42537309a3321ecdfd5b05ee416b64adf9",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-overlap": {
-			"digest": "796caece0be40558e0e3414b8e7f757c5c73b07a3728d168062201cce55fce43",
+			"digest": "418f702f2cc006806b1ffca17421b2e47d6d0cf9638a4e6d2fb67281c68ee55e",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-place": {
-			"digest": "8a5ad2f24951df5ac8a72e11a01a0b4c7908aeb1d8f399e5cd144711ff6cbf03",
+			"digest": "934eb5fa0a330238145c63f9f8025e4368b3f0a66864fb6ba4561b9b2d947a61",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-quadties": {
-			"digest": "61c3b6ff3d652e19b114da5500eea5c622038ef0edde95f1fa3de2fd795c1353",
+			"digest": "f6645ceeb0d5d9a353303cd9e21cddb3083ba2c907f80e35810960f7b45bf5b0",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rich": {
-			"digest": "155b3478bc4969cc5b540a1de2821f0e218dc4fd2718c8b2fe5e251ceb2b9e42",
+			"digest": "4a70393d0c62359ce7a74762172df9196c45ff09c985281e4c907024b4ccfdec",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richcap": {
-			"digest": "b9ce621e8a6f2237df826b34a422a0a3228cedf8e8fd9e59273c69a857c92bc4",
+			"digest": "b6b9a91d021f6b173bbb3141f06347cae064aeee4df473d55533cd98374180ba",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richscaled": {
-			"digest": "375e80eff3b423bc184f2e9119f5300449009d1ff61975a86531ba96e7a5404a",
+			"digest": "2206543211fa4b42bfed6422f8f0fa167c01111e1d6f3a9d0e337c0fe3d769e8",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richscaled1": {
-			"digest": "5836d49365becfff4fc265bede286db9b1d4cf8966966fefda93c0b54573ad00",
+			"digest": "143935d958ca078fac4caee9c54b04280abac7b263936cbeba55d6e62ee5451b",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotate": {
-			"digest": "50ab1a3089bb1a4d4f790c2b4cd6f0efc813f5e247f130b4c46c4dbfa0469c43",
+			"digest": "087dada80b8bea915d574fb6c0511e7631579807433390ea58803ed8e35b81cc",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-rotate-quarter": {
+			"digest": "5c7b8c9135f47b64814769274a5c5c729ac73285e84c94223bf8c2c9f75e483f",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotation-size": {
-			"digest": "3d906ef7902831ee18b257d4b6db4a51c7f60a255e1cbb15cb41112a8ed9c9ec",
+			"digest": "270833cd4cf5995343144e8038b0f0e0f5c2043aaddc6b1da89f0f19436e793a",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-selfclip": {
-			"digest": "585bbe061582f656a909b6dbd70672c782d0e07cd8eb00d2702cdeff7475f1d1",
+			"digest": "334b7c59554f7429c96700122b8da5bb2bc8fb188ad46c936646390dec2e0c68",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-strokequad": {
-			"digest": "ee9c43247e18966e0a3d4520c0e11acd290be5d7d4b67b2a1f9a91717f3a7ed5",
+			"digest": "a54e8bce686f0753d6af37843b60a8de8a000e78578ab9b5ca4ae02e532391cb",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-subpixel": {
+			"digest": "96672b1eb4361e7a5c8f9fe3afd73f39f76b76d0aea34d4af1707dc6a4a45cba",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-subpixel-size": {
+			"digest": "155622b9c35dc2db76ab5a92f449d26bf9d1c2230bc0e3e8e32a1ce16b72bdc3",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-synth": {
-			"digest": "9c21a57b7dbc279c0251bec18b2e7de9d5beda4cf2a1f53dc1f140fe15cf8bd8",
+			"digest": "aca3c667cb860c8b6220c4403505dfc93f9469bedd6781f091432b2af939bedd",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-tie": {
+			"digest": "2a5ffb15ae321f3d15e897b3976fb43de154a32d123c65d35c7810c41d84310e",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-uiscale": {
-			"digest": "2b91089b36cf33aea883b5b54be52a33e733d1ff757555bdd226a6647f1114eb",
+			"digest": "518827100e644a7545622e597edaa549d56a578c718f2af103f226c16f8c163e",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-view": {
-			"digest": "21dc2b5987a6b90a624c33cb86778753bd09ec8ae2a6f6d887dd891f09aa5005",
+			"digest": "a187746a1572bc242f56581c0569d1a0423b72d9323858a8f5190d65e13d9431",
 			"status": "ok"
 		},
 		"fixtures/play/text-raster": {
-			"digest": "e220894c79ab5ddafd05040551eb0f3c006258e521dd42b2087b7f34f9d60f54",
+			"digest": "e1cfcedbe2bfec0e4bfdff2bf3cff9939824ec245ccd4e4477cfe50dda133a8c",
 			"status": "ok"
 		},
 		"fixtures/play/text-stroke": {
-			"digest": "28b058828938fc77018f7a3b9e0c47969a07349a64ed137435fc68abd98b297c",
+			"digest": "dd453c714c51a75333db80f6772b6809444ed1f9e497a43f90f0cdb241b303d4",
 			"status": "ok"
 		},
 		"fixtures/play/viewport-models": {
@@ -1921,99 +1969,99 @@
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
-			"digest": "e04c66567b9295df32643ee766d4618a0462e9f3a82bc70ae0a485a24173277d",
+			"digest": "a287d1e9d1d476a019bb4621839b55ceabcdff9c2a9bbd68c72685fc7f7c83a8",
 			"status": "live"
 		},
 		"live/input/144hz-input-probe": {
-			"digest": "46f9e6974556438c8d760c0974d66f098432dd0a556633fedd7002960e9a642b",
+			"digest": "612e76c618e27c1a20504db52746eda4cfa424d5cf4cf8db723861d9198d2d47",
 			"status": "live"
 		},
 		"live/input/60hz-input-probe": {
-			"digest": "f3f540195c290a9d2283446b5ddd156a36a140674cbed98d5bce566ef75aaca9",
+			"digest": "0e9e1612c632c18525a800f6d6caf3b198388551b05824adaf11d8f15085301b",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-click": {
-			"digest": "2d56e06510c4a818db15f842dbb3837e488459b129c8d2d94e9e3c21c060a799",
+			"digest": "75bcf8add7775252a67058a8b02de02116880142210201faef173f56415f7796",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-default": {
-			"digest": "8005b886ff50831949b98268a10931a81a8e82fd1e997cfa55b6c3b32b455f02",
+			"digest": "e2a193eb20e1bee5919eee2a1b8d9c5459894b3622a6266075a36691f0eda25f",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/144hz-click": {
-			"digest": "b0473d15d9bee5781f50f62528b764a8b890143e0d13c7fcf6ef8c914f31da8c",
+			"digest": "d73d886a58f90efcb6fc945037034d72b0fbc62867327e40dfa15ae8c07dbc62",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/144hz-default": {
-			"digest": "6d63eee7407b10be41c1727b2a46c40b0a422ca9c7c8b23a0d24e192ac87f60d",
+			"digest": "615c8cf80b3334862fb73bf3467c2012e20df92a89fa6928d91065c8e73f6b94",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-click": {
-			"digest": "fef1b05e655cbef2a28081ff792e977078f1ec9b8758f22b2fd102c28486022a",
+			"digest": "5da9cdeb4e75c423b22ea055bbe562951c76c738e970fb05cd4653f63f453d17",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-default": {
-			"digest": "57f5fb64e513d647ffd6f64e76a52f629ec83f5d435e74a566664c9bcf37477e",
+			"digest": "e2855fd3206950379825e92cb8b2858ab3454a88b296df1f14af84e857e3724e",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-no-input": {
-			"digest": "8a020371103202eee25e21d30760d226b890484b215583612407d164eb74cbd8",
+			"digest": "d18d18ae2b541ef2c5eb470d86572537c55c2d241786868659d9ce71acf1d8e7",
 			"status": "live"
 		},
 		"live/interaction-scroll/120hz-click": {
-			"digest": "e612a401fd3795f71d0cb68f5658f750f9f6acda78516e2c3c29458e1c7ced98",
+			"digest": "cd009ea4a9a85db06088fe54bc96b1c22370a6cd647935d49ebb9a3edd8c81ed",
 			"status": "live"
 		},
 		"live/interaction-scroll/120hz-default": {
-			"digest": "0c7b7ad8f9e30e665d3a1b6ceb8f9c2bfc2e09c0a998254c9dc2d67c3b5f6e19",
+			"digest": "b25edb6ffa2bc8ba65d1edd74ea2649b6a4186f5076b478d585a2e0115df6ee3",
 			"status": "live"
 		},
 		"live/interaction-scroll/144hz-click": {
-			"digest": "4561299b98de5020a3d69a98e9a8af7ecbf6671f9b3b19b80846105879d53b6c",
+			"digest": "fe1863f53ec1d078cbecb64647add3ce90db9fa135cb1cf4610669272e1b6ac3",
 			"status": "live"
 		},
 		"live/interaction-scroll/144hz-default": {
-			"digest": "a2620233e87d02c248158b336432c0b06c9b56234414a09dab38bd68d849c28b",
+			"digest": "fc3ddf8cbc5655544dac7ae15ec992a76ecfaa2d8669b5fdf116cfb67a52f6af",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-click": {
-			"digest": "dfcd00e90010f487bf4de565b1825fe1994e3f147bf1b09cc588a0cb10935c06",
+			"digest": "077d7703ebaf6a85b98b323af02cace24fb434a5ed9897021d3a9bc75934b6e9",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-default": {
-			"digest": "b3265fd03caa9b57e459f401be1c27d45d0964a5478c8ee36c87924e093a78cb",
+			"digest": "08e8617bebc9ab81b6949555c42c44b2844fd24ad399863388adabffc4ad3a44",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-no-input": {
-			"digest": "1d1b4fe80e309fdc543026db53e2fae9fa03b17fd6210ad258560c28ab127066",
+			"digest": "c5e91610483a5636a9123ccb6037d21b5e2a9b2cd35524d69b3623b9259dda98",
 			"status": "live"
 		},
 		"live/interaction-textbox/120hz-click": {
-			"digest": "e5b48a534ab923fc49758ff980d787685c2f97f1ba7140d46731f7c5c395b019",
+			"digest": "a271a435c2a198c6fa6f39c358aeec073959b4312d8b04ec34482f91dcfb29c7",
 			"status": "live"
 		},
 		"live/interaction-textbox/120hz-default": {
-			"digest": "48ed0f041497ff9f25bb02a5f369e519d958267308a7db0a456a014a4bc7b2d6",
+			"digest": "3085d170bda4c35fedaff1eef7bd450cc9c58761e81006149d2c970351e1cfd0",
 			"status": "live"
 		},
 		"live/interaction-textbox/144hz-click": {
-			"digest": "20f34c5ce04af529fbb0a383ea3ba679017a99eb4e65190aabe3298a4aac194b",
+			"digest": "7a92a3e8571d19dfd6991ce1320a039daf7f89e10a0c2b396b6608cba3960cb7",
 			"status": "live"
 		},
 		"live/interaction-textbox/144hz-default": {
-			"digest": "e2ab4c60dcaa0a822a1b478702a99466981beba677f2f3cfa9c67400b6971dc9",
+			"digest": "159b7534fcba62fd8aa13a385f2b6a47e4f2d92c8a4701c656aa50dc089c0680",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-click": {
-			"digest": "a9a291367f1675773c85682d653ce82f21fc0474d073a4781f8930018cbbadf5",
+			"digest": "a26c3098a5bb899246f4ca01a701e33573d0e7550d2f13b5c613c56e04ab294e",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-default": {
-			"digest": "ce88619aaf124901332312ce7a7919df9021586fe16a4c95193f675adc9ac87a",
+			"digest": "b2531f06f820645252f52274573306432d751044761b1056356d17d4218d8d95",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-no-input": {
-			"digest": "420e5efe63b357c09f98c5d3c4c2a6b624819120f2bc02058bd50d9722d54a8a",
+			"digest": "0514151147a8595816c83d79fbb9df3f33e52a365e16fc12c906715775a64591",
 			"status": "live"
 		},
 		"live/live-rotated-cull/120hz-click": {
@@ -2053,115 +2101,115 @@
 			"status": "live"
 		},
 		"live/live-scroll/120hz-click": {
-			"digest": "9b16de9962d9bb00b2dade5a2f2565fb225cbc802b9b55ddaf7cad35bb2f9009",
+			"digest": "d6d5142ba49b2d68b35aaab9f146f9a5576321704f8adcc4a08ab36772f77f77",
 			"status": "live"
 		},
 		"live/live-scroll/120hz-default": {
-			"digest": "2b8e9a5681bca36f5663b93831e74fd5825f2f90130f97840cc174845f543d8a",
+			"digest": "edbf36e3f8c1b74ee8580d7aaaa67feeb59d490a008684ccdf162f63c5d6d021",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-click": {
-			"digest": "5a35c6d15d918b310d77681db267116d4fed9e8eeaf41e9e046f2e4c1ac5e4b3",
+			"digest": "135c8521651cd7a0c022379ffb1edaef960c45142a3b075b8ad589f4431f1361",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-default": {
-			"digest": "e3c44cb6bba3ad1020ce9657a161e9d2607d8ccf46480dc5982de13e1ab482c9",
+			"digest": "72192f7d47f9cf8d4119cdcad6b94cccfa2b27624e0b57dc9cb3eb716df8cc43",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-presentation": {
-			"digest": "2efd92bd59c0345a79184b6fca3e986472ae814136612114e3a26961f2b45d82",
+			"digest": "08be92aff2053fb8719bcbf3462227fe74fd64330e7675fb780f30ecb61e0c85",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-click": {
-			"digest": "045db81a963fa3c501266f05bfedb2f13392b53f15c8299b1a7346c3e16caeaf",
+			"digest": "d91daa24dc46531c557a15ce5a1d3502af5483eb1c969bc17152ae47dd35790b",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-default": {
-			"digest": "ca060ce09632bd04ffb869c0fdb48fe6d8b8199f86deae889d84fb0fee4dfd9c",
+			"digest": "43584a282d3cabc51aa0a44c738888326d20c8a0ea1307961eff90ace7a5142f",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-no-input": {
-			"digest": "202df7027674b72d8653f16734fc7599853711b8e7b0dd0d056583c0216e364e",
+			"digest": "4552ac356866e955420b78c360fb21caf43a7164e60a929a4b5e710330449d6e",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-presentation": {
-			"digest": "8dbd3d2cfed57d01a37f872c8ff54f7fc267919ff8bd2853e025c66f948f037f",
+			"digest": "3179609479052450510cdc3cfa5f19c4e542434ae7777ab6b808e2ad324789fd",
 			"status": "live"
 		},
 		"live/live-stress/120hz-click": {
-			"digest": "ecedc3086846793b5d2acaf6acc8f76b883464876842ae2f1e775b2b0be144ae",
+			"digest": "20be0391a38e43d7360108ac417aef01efeff0c861b7a0a28f0bcdbdfe134daa",
 			"status": "live"
 		},
 		"live/live-stress/120hz-default": {
-			"digest": "959145f88afa6232e016eaefd353ccb70eb6675a3f2cd81f4f7ec3adf8568951",
+			"digest": "297f4d918b175333d2e84e0264ed5577b34d40429838cb021c59fd8e958b9327",
 			"status": "live"
 		},
 		"live/live-stress/144hz-click": {
-			"digest": "9eaefef6efb782ab89e8f0818b8ebfaaa82baa31e860db8dcffb8cd1777897af",
+			"digest": "2f42390cd65b19af389310f5b2b4a5de09d273946817a6e4000979a78ea701b9",
 			"status": "live"
 		},
 		"live/live-stress/144hz-default": {
-			"digest": "a25e7751b958c5c246b515e7e71baa6f94467e9910900b431f1010233aee69b2",
+			"digest": "ebd9625140cd31615b3709580cac79ca938927105c270c96c3995bec9e0894ca",
 			"status": "live"
 		},
 		"live/live-stress/144hz-presentation": {
-			"digest": "2c002f3699c8a1e26b6ac0ffdb0555bb7d369f9c7e57009b32ffa784364d11be",
+			"digest": "c68674e2b84719d40037bfe6cb49d0f663e61ca5182262f7fa72c8f1ffb53590",
 			"status": "live"
 		},
 		"live/live-stress/60hz-click": {
-			"digest": "666b6e5f7a707dfc914ca6b0de6990d9e21e900ab9a62e1bcb6969ed9ae3654f",
+			"digest": "386750c7fc5e6b89bd3890c0f23d0d50b6b3c2b2d8840ce14f49b02218beb857",
 			"status": "live"
 		},
 		"live/live-stress/60hz-default": {
-			"digest": "84374352d0b0d61fcf2d63d4615c8fb0a977eb3e3a2f187ca6930faa94309c78",
+			"digest": "6536e60228d5a4cac1ed923358c69bb575543c61f0f2d2384d1c93e3278e917a",
 			"status": "live"
 		},
 		"live/live-stress/60hz-no-input": {
-			"digest": "b0340cd9fdd51da657b6b4ed6c123b782aebeb7813f8cc7e0e736c949b0276f8",
+			"digest": "9f8a463c3858c851d6a39f18b329f40b2692c4c27116268040c19e539b1c7331",
 			"status": "live"
 		},
 		"live/live-stress/60hz-presentation": {
-			"digest": "45202450b37a3446ea74d6990223fb47bba52d0df6d74d8a5cb0c53dbe886fac",
+			"digest": "e6f6970a8064a83e96209b7240eab8834c9474205432b21fc4b376a3113b4b86",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-click": {
-			"digest": "34e99b9b57e73897afe1f6b22eaaeb8b43817311767f626c7dd75c4c7923eef7",
+			"digest": "86bdc1ae6fc92a7ebe17bdddd6924366d43039bd36011c9d1cc2cc16d0cc974c",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-default": {
-			"digest": "64a2df8996cb1dab21a76cd055053a05bfc57c1823e227935846132d2080725c",
+			"digest": "50ea5b15e1d3511712de93c0013a5f5500e2bd8b23def4a893adb9a7b8891371",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-click": {
-			"digest": "212c7ed5b0811dc4da8906cbaec85c7c6dadf98df0f8d289393a5f4b63502426",
+			"digest": "b4b898a701374a2be848c4fa99ed21ff581fd58a4b463ff8d91593fb732c7ba0",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-default": {
-			"digest": "3d98a2edc5ea61a4ee5b5bc6c302a1fb8f6ce10b0b6cc57af86a3da46c9b5d44",
+			"digest": "9412f7359c747372539d00662bff15f65beed80f8f622a2d75247813c735861e",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-presentation": {
-			"digest": "d0223198baa2ec446ad8506f65283ea4212ab65b2ab8b8e2c8456e7c51715326",
+			"digest": "fe4501c1319b2a6f098ddc476e9bf454324182632f1a0f215142adb94329711c",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-click": {
-			"digest": "030a3ad78381e19107105934bc48f8adda3fda5bda9e79e6f0b1ba9f9027eeb0",
+			"digest": "22fd6b28683638791083f0f1c38796b56745c9ca6369058d53fc0b7c39dc869f",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-default": {
-			"digest": "071c633ae909a7c913079890821f3bb82933e8bb00d70608a7dc34f036a47921",
+			"digest": "cec87694832eaeb5692a6cdd13a7f6008490ca2496a520a5654a44d3bbec6d57",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-no-input": {
-			"digest": "e958d48448dc1dacc6ab02815dda5eccef48ca67ea178333920e4798a0fb02bd",
+			"digest": "e88d97714a9a10002a52f8c0907443b949f5d0999f1e409ab8a1c30f9c2cc62e",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-presentation": {
-			"digest": "e5d1738350fe24a6ae466164dba2349cb442b8f9ab8480d00b326eb447673588",
+			"digest": "8c98f723f6013de23325158eda63fd5abf50823f281c31af68197720afce56d7",
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-11T21:18:26.134Z",
+	"recorded": "2026-11-12T01:05:15.008Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

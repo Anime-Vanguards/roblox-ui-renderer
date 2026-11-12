@@ -752,12 +752,6 @@ fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::
                 json!({ "bold": face.weight >= 700.0, "italic": face.style == "italic", "weight": number(face.weight) }),
             );
         }
-        // A <font size> run's glyphs are rasterized at floor(f32(f32(size * UIScale) * DPI)) and drawn
-        // with their quads scaled by the unfloored size over it
-        if let Some(size) = run_style.size {
-            let unfloored = f32r(f32r(size * scale) * dpi);
-            entry.insert("quadScale".into(), number(unfloored / unfloored.floor().max(1.0)));
-        }
         result.push(Json::Object(entry));
     }
     Json::Array(result)
@@ -776,7 +770,27 @@ fn font_parts(ctx: &Ctx, id: InstanceId) -> (String, f64, &'static str) {
 #[derive(Default)]
 pub(crate) struct LineCache {
     layout: Option<Arc<TextLayout>>,
-    lines: Vec<(Json, Option<Json>)>,
+    lines: Vec<CachedLine>,
+}
+
+/// A line's glyph entries, its rich run segments, and each entry's exact pen from the line's start (with
+/// whether it is drawn at quarter pixels): a pen exactly halfway between two quarter pixels rounds by
+/// where the label is (`tie_quarter`), and rotated text keeps the exact pens.
+type CachedLine = (Json, Option<Json>, Vec<(f64, bool)>);
+
+/// The quarter pixel of a pen exactly halfway between two, as Studio 0.747 rounds it: the pen is added to
+/// the line's start in logical pixels in single precision and scaled back, so the tie falls up or down by
+/// that sum's rounding error. The line's start is its alignment anchor (`line_pen`: the content box's left
+/// edge, right edge or centre snapped to a device pixel) over the scale, less the whole device pixels from
+/// the line's start to the anchor times the scale's reciprocal. Measured at 1.5x: 258 of 258 tied pens of
+/// fixtures/text-probe-tie.luau, layout-textpen2.luau and layout-text-overflow.luau (rounding every tie up
+/// misses 26 of them).
+fn tie_quarter(pen: f64, line_px: f64, anchor: f64, pixel_scale: f64) -> f64 {
+    let scale = pixel_scale as f32;
+    let inverse = (1.0 / pixel_scale) as f32;
+    let origin = anchor as f32 / scale - (anchor - line_px) as f32 * inverse;
+    let device = f64::from((origin + pen as f32 * inverse) * scale);
+    (device * 4.0 + 0.5).floor() / 4.0 - line_px
 }
 
 /// ExportText's lines and content box (the parts that move with the label).
@@ -787,6 +801,7 @@ fn text_lines(
     id: InstanceId,
     record: &Record,
     pixel_scale: f64,
+    rotated: bool,
     cache: Option<&mut LineCache>,
 ) -> Option<(Json, Json)> {
     let info = record.text.as_ref()?;
@@ -819,7 +834,7 @@ fn text_lines(
         }
         None => None,
     };
-    let mut built: Vec<(Json, Option<Json>)> = Vec::new();
+    let mut built: Vec<CachedLine> = Vec::new();
     let reveal = text_reveal(ctx, text, id, result);
     let mut lines = Vec::with_capacity(result.lines.len());
     for (index, line) in result.lines.iter().enumerate() {
@@ -832,17 +847,30 @@ fn text_lines(
             content_x + (content_w - line_width) / 2.0
         };
         let line_top = top + line.top;
-        let (glyphs, runs) = match cached.and_then(|lines| lines.get(index)) {
-            Some((glyphs, runs)) => (glyphs.clone(), runs.clone()),
+        let (mut glyphs, runs, pens) = match cached.and_then(|lines| lines.get(index)) {
+            Some((glyphs, runs, pens)) => (glyphs.clone(), runs.clone(), pens.clone()),
             None => {
                 // Glyph entries: font index, glyph id, x (px from the pen), ppem (per glyph) and, for
                 // rich text, the 0-based index into `runs`
                 let mut glyphs = Vec::with_capacity(line.glyphs.len());
+                let mut pens = Vec::with_capacity(line.glyphs.len());
                 let mut run_index: u32 = 0;
+                // A stretch of one run on the line starts at a whole pixel (its first glyph's rounded x) and
+                // its glyphs follow by their exact pens; a truncation's ellipsis (a pen of its own, below the
+                // text's: `TextEngine::ellipsis`) goes on from the exact pen after the text it follows
+                let (mut segment_x, mut segment_pen, mut segment_run, mut last_pen) = (0.0, 0.0, u32::MAX, f64::INFINITY);
+                let mut last_end = 0.0;
                 for glyph in &line.glyphs {
                     if glyph.run != 0 {
                         run_index = glyph.run - 1;
                     }
+                    if glyph.run != segment_run {
+                        (segment_x, segment_pen, segment_run) = (glyph.x, glyph.pen, glyph.run);
+                    } else if glyph.pen < last_pen {
+                        (segment_x, segment_pen) = (last_end, glyph.pen);
+                    }
+                    last_pen = glyph.pen;
+                    last_end = segment_x + glyph.end - segment_pen;
                     if is_space(glyph.code) {
                         continue;
                     }
@@ -852,7 +880,12 @@ fn text_lines(
                     let mut entry = Vec::with_capacity(if rich { 5 } else { 4 });
                     entry.push(Json::from(font_index));
                     entry.push(Json::from(glyph.glyph));
-                    entry.push(number(round(glyph.x + glyph.x_offset, 3)));
+                    // The pen at Studio's quarter pixel: the exact pen from the line's start, rounded half up
+                    // (glyphs over 32 GUI pixels, 48 px at 1.5x and 32 at 1x: at its whole pixel)
+                    let steps = if glyph_size > 32.0 * pixel_scale { 1.0 } else { 4.0 };
+                    let exact = segment_x + glyph.pen - segment_pen + glyph.offset;
+                    pens.push((exact, steps == 4.0));
+                    entry.push(number((exact * steps + 0.5).floor() / steps));
                     entry.push(number(round(face_ppem, 5)));
                     if rich {
                         entry.push(Json::from(run_index));
@@ -876,14 +909,36 @@ fn text_lines(
                 });
                 let glyphs = Json::Array(glyphs);
                 if caching {
-                    built.push((glyphs.clone(), runs.clone()));
+                    built.push((glyphs.clone(), runs.clone(), pens.clone()));
                 }
-                (glyphs, runs)
+                (glyphs, runs, pens)
             }
         };
         // px: the whole device pixel Studio starts the pen at; ux: the unsnapped pen (only when not whole)
         let pen = line_pen(alignment, content_x, content_w, line_width, rich, false, pixel_scale);
         let exact_pen = round(line_pen(alignment, content_x, content_w, line_width, rich, true, pixel_scale), 3);
+        if rotated {
+            // Rotated text: Studio 0.747 draws every glyph's unshifted bitmap at its exact pen and resamples it
+            // (fixtures/text-probe-rotate-quarter.luau)
+            if let Some(list) = glyphs.as_array_mut() {
+                for (entry, &(exact, _)) in list.iter_mut().zip(&pens) {
+                    entry[2] = number(exact);
+                }
+            }
+        } else if pixel_scale != 1.0 && pens.iter().any(|&(exact, quarters)| quarters && (exact * 8.0).rem_euclid(2.0) == 1.0) {
+            let anchor = super::text::layout::snap_pixel(match alignment {
+                XAlign::Left => content_x,
+                XAlign::Right => content_x + content_w,
+                XAlign::Center => content_x + content_w / 2.0,
+            });
+            if let Some(list) = glyphs.as_array_mut() {
+                for (entry, &(exact, quarters)) in list.iter_mut().zip(&pens) {
+                    if quarters && (exact * 8.0).rem_euclid(2.0) == 1.0 {
+                        entry[2] = number(tie_quarter(exact, pen, anchor, pixel_scale));
+                    }
+                }
+            }
+        }
         let mut entry = Map::new();
         entry.insert("x".into(), number(round(left, 3)));
         entry.insert("px".into(), number(pen));
@@ -983,6 +1038,9 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     let mut export = Map::new();
     export.insert("size".into(), number(result.size));
     export.insert("textSize".into(), number(info.text_size));
+    // Glyph pens are quarter pixels and the glyphs lightly hinted (Studio 0.747; a scene without this
+    // field has whole-pixel pens and fully hinted glyphs)
+    export.insert("subpixel".into(), Json::from(4));
     export.insert("color".into(), ctx.color(color));
     export.insert("transparency".into(), number(ctx.number(id, K::TextTransparency as NameId).unwrap_or(0.0)));
     export.insert("lineHeight".into(), number(result.line_height));
@@ -1004,9 +1062,6 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     // The FontFace's requested weight (100-900) and style ("normal" / "italic")
     export.insert("weight".into(), number(info.weight));
     export.insert("style".into(), Json::String(info.style.clone()));
-    if let Some(quad_scale) = info.quad_scale {
-        export.insert("quadScale".into(), number(quad_scale));
-    }
     // Measured (fixtures/text-probe-selfclip.luau): the object's own ClipsDescendants also cuts its own
     // text (fill, strokes, decorations) to its rect, axis-aligned in screen space even when rotated; a
     // zero-width / zero-height clipping label draws no text. The renderers apply the cut (node rect /
@@ -1244,7 +1299,7 @@ fn export_node(
     geometry(ctx, id, record, matrix, clip, true, &mut node);
     if ctx.is(id, ctx.c.gui_object) {
         if ctx.is_text_object(id) {
-            if let Some((lines, content)) = text_lines(ctx, out.text, out.registry, id, record, out.pixel_scale, None) {
+            if let Some((lines, content)) = text_lines(ctx, out.text, out.registry, id, record, out.pixel_scale, matrix.is_some(), None) {
                 let mut text = text_static(ctx, out.text, id, record, out.pixel_scale).unwrap_or_default();
                 text.insert("lines".into(), lines);
                 text.insert("content".into(), content);
@@ -1674,7 +1729,7 @@ impl Walk<'_, '_, '_, '_> {
         if ctx.is(id, ctx.c.gui_object) {
             if ctx.is_text_object(id) {
                 if let Some((lines, content)) =
-                    text_lines(ctx, self.out.text, self.out.registry, id, record, self.out.pixel_scale, Some(&mut entry.lines))
+                    text_lines(ctx, self.out.text, self.out.registry, id, record, self.out.pixel_scale, matrix.is_some(), Some(&mut entry.lines))
                 {
                     let layout = &record.text.as_ref().expect("text lines").layout;
                     let reuse_text = reuse_style && entry.text_layout.as_ref().is_some_and(|l| Arc::ptr_eq(l, layout));
@@ -2226,6 +2281,22 @@ pub(crate) fn viewport_json(engine: &Engine) -> Json {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pen halfway between two quarter pixels falls by the single-precision sum of the line's start and
+    /// the pen in logical pixels (fixtures/text-probe-tie.luau, layout-text-overflow.luau and
+    /// layout-textpen2.luau at 1.5x): the same pen rounds up in a left-aligned line at 30 px and down in
+    /// a right-aligned one whose box ends at 660 px.
+    #[test]
+    fn tied_quarter_pens_round_by_the_line_start() {
+        assert_eq!(tie_quarter(54.625, 30.0, 30.0, 1.5), 54.75);
+        assert_eq!(tie_quarter(54.625, 551.0, 660.0, 1.5), 54.5);
+        assert_eq!(tie_quarter(54.625, 538.0, 645.0, 1.5), 54.75);
+        assert_eq!(tie_quarter(55.875, 772.0, 807.0, 1.5), 56.0);
+        assert_eq!(tie_quarter(55.875, 1637.0, 1672.0, 1.5), 55.75);
+        // whole scales are exact: every tie rounds up
+        assert_eq!(tie_quarter(54.625, 551.0, 660.0, 1.0), 54.75);
+        assert_eq!(tie_quarter(54.625, 551.0, 660.0, 2.0), 54.75);
+    }
 
     /// The integer path gives exactly `tonumber(string.format("%.9g", f))` (the formatting path).
     #[test]
