@@ -49,6 +49,13 @@ Fixtures: `image-probe-*` (the ones with Studio's own `rbxasset://` textures).
 - The texture holds premultiplied colour; the composite unpremultiplies, multiplies by GroupColor3 and the
   group's UIGradient, and applies GroupTransparency and the group's UICorner.
 - Very large groups are capped (an area and a side limit, `render/geometry.rs group_texture_dims`).
+- The group's border is drawn over the composite on the pixels a Frame's border takes: as opaque as the
+  background times the group's opacity, under the group's UIGradient, not tinted by GroupColor3. The fill in
+  the texture covers the whole rect in every BorderMode.
+- A turned group renders in its own axes into a texture and the texture is drawn as a turned quad, sampled
+  like a turned image. What is inside keeps the anti-aliased edges of turned elements unless the group is
+  turned by a quarter turn. Its UIGradient is evaluated at each pixel's place in the group, and the quad's
+  edges are then not anti-aliased, like those of a turned Frame under a UIGradient.
 
 Fixtures: `group-resample`, `group-misc`, `group-blend`, `canvasgroup*`, `group-probe-*`.
 

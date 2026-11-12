@@ -389,6 +389,25 @@ impl DrawPreparer {
             let scale = number(&node["scale"], 1.);
             if scale == 0. { 1. } else { scale }
         });
+        let tint = color(&image["color"], [1.; 3]).map(|v| quantize(v) as f64 / 255.);
+        let pixelated = image["resample"] == "Pixelated";
+        self.turned_quads_record(ctx, node, TurnedSource::Asset(asset), quads, tint, fade, pixelated, false, p, radii);
+    }
+    /// A turned quad of texture (IMAGE_ROTATED): an image's quads, or a CanvasGroup's texture over its rect
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn turned_quads_record(
+        &mut self,
+        ctx: &mut BuildContext,
+        node: &Value,
+        source: TurnedSource,
+        quads: Vec<super::images::ImageQuad>,
+        tint: [f64; 3],
+        fade: f64,
+        pixelated: bool,
+        hard: bool,
+        p: PhysicalRect,
+        radii: [f64; 4],
+    ) {
         if quads.is_empty() {
             return;
         }
@@ -427,15 +446,24 @@ impl DrawPreparer {
         {
             return;
         }
-        let Some((texture, levels)) = self.image_source_texture(asset) else {
-            return;
+        // (image slot, the batch's layer, texels, levels, premultiplied)
+        let (slot, texture, layer, size, levels, premultiplied) = match source {
+            TurnedSource::Asset(asset) => {
+                let Some((texture, levels)) = self.image_source_texture(asset) else {
+                    return;
+                };
+                (0., Some(texture), None, [asset.width as f64, asset.height as f64], levels, false)
+            }
+            TurnedSource::Layer(layer, size) => (8., None, Some(layer), size.map(f64::from), 1, true),
         };
-        let quarter =
-            (m[1].abs() < 1e-6 && m[2].abs() < 1e-6) || (m[0].abs() < 1e-6 && m[3].abs() < 1e-6);
+        let quarter = !self.group_cache.fringe
+            && ((m[1].abs() < 1e-6 && m[2].abs() < 1e-6) || (m[0].abs() < 1e-6 && m[3].abs() < 1e-6));
         let rounded = radii.iter().any(|v| *v > 0.);
-        let flags = (image["resample"] == "Pixelated") as u8
+        let flags = pixelated as u8
             | ((quarter as u8) << 1)
-            | ((rounded as u8) << 2);
+            | ((rounded as u8) << 2)
+            | ((premultiplied as u8) << 3)
+            | ((hard as u8) << 4);
         let (maps, diagonal) = if quarter {
             ([inv, inv], [0., 0., 1.])
         } else {
@@ -447,11 +475,38 @@ impl DrawPreparer {
         }
         self.push(bounds);
         self.push(screen);
-        self.push([0., quads.len() as f64, flags as f64, levels as f64]);
-        let tint = color(&image["color"], [1.; 3]).map(|v| quantize(v) as f64 / 255.);
+        self.push([slot, quads.len() as f64, flags as f64, levels as f64]);
         self.push([tint[0], tint[1], tint[2], fade]);
         self.push(radii.map(|r| r.max(0.)));
         let gradient = node.get("gradient").filter(|v| v.is_object());
+        // A CanvasGroup's UIGradient is the gradient's field at each pixel's own place in the group's axes
+        // (gradients.rs GradientMesh::at), a texture over the record's pixels in image slot 1: flag 32
+        let field = gradient.filter(|_| premultiplied).map(|g| {
+            let (w, h) = ((raster[2] - raster[0]).max(1.) as u32, (raster[3] - raster[1]).max(1.) as u32);
+            let mesh = super::gradients::gradient_mesh(g, [p.raw.x, p.raw.y, p.raw.w, p.raw.h], [255.; 3], 255., bounds);
+            let key = format!(
+                "gradient-turned:{w}:{h}:{:?}:{:?}:{:?}",
+                inv.map(f64::to_bits),
+                [raster[0].to_bits(), raster[1].to_bits()],
+                mesh.bits()
+            );
+            self.group_texture(key, w, h, super::packet::TextureFormat::Rgba32Float, || {
+                let mut bytes = Vec::with_capacity(w as usize * h as usize * 16);
+                for j in 0..h {
+                    for i in 0..w {
+                        let local = apply(inv, raster[0] + i as f64 + 0.5, raster[1] + j as f64 + 0.5);
+                        for v in mesh.at(local) {
+                            bytes.extend_from_slice(&((v / 255.) as f32).to_le_bytes());
+                        }
+                    }
+                }
+                bytes
+            })
+        });
+        let gradient = gradient.filter(|_| field.is_none());
+        if field.is_some() {
+            self.packet.texels[start + 7][2] += 32.;
+        }
         self.push([gradient.is_some() as u8 as f64, 0., 0., 0.]);
         // The second triangle's map and the diagonal between the two (geometry.rs snapped_quad_maps); a
         // quarter turn keeps the one exact map
@@ -461,8 +516,8 @@ impl DrawPreparer {
         self.push([diagonal[0], diagonal[1], diagonal[2], 0.]);
         debug_assert_eq!(self.packet.texels.len() - start, 14);
         for q in quads {
-            let su = asset.width as f64 * (q.u1 - q.u0) / (q.x1 - q.x0);
-            let sv = asset.height as f64 * (q.v1 - q.v0) / (q.y1 - q.y0);
+            let su = size[0] * (q.u1 - q.u0) / (q.x1 - q.x0);
+            let sv = size[1] * (q.v1 - q.v0) / (q.y1 - q.y0);
             let rho = super::sampling::footprint_length(
                 [inv[0] * su, inv[1] * sv],
                 [inv[2] * su, inv[3] * sv],
@@ -493,11 +548,19 @@ impl DrawPreparer {
         }
         let mut batch = DrawBatch {
             blend: BlendMode::Image,
+            layer,
             ..DrawBatch::default()
         };
-        batch.image_slots[0] = Some(texture);
+        batch.image_slots[0] = texture;
+        batch.image_slots[1] = field;
         self.emit(ctx, start, batch);
     }
+}
+
+/// The texture of a turned quad: an image asset, or a CanvasGroup's render target and its size in texels
+pub(crate) enum TurnedSource<'a> {
+    Asset(&'a TextureAsset),
+    Layer(TextureId, [u32; 2]),
 }
 
 #[cfg(test)]

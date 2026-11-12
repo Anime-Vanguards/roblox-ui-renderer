@@ -49,6 +49,8 @@ vec4 imageTexel(int slot, ivec2 p, int lod) {
 		case 5: return texelFetch(sampler2D(uImage5, uPointSampler), p, lod);
 		case 6: return texelFetch(sampler2D(uImage6, uPointSampler), p, lod);
 		case 7: return texelFetch(sampler2D(uImage7, uPointSampler), p, lod);
+		// The batch's layer: a CanvasGroup's texture drawn as a turned quad (groups.rs composite_turned_group)
+		case 8: return texelFetch(sampler2D(uLayer, uPointSampler), p, lod);
 	}
 	return vec4(0.0);
 }
@@ -63,6 +65,7 @@ ivec2 imageSize(int slot, int lod) {
 		case 5: return textureSize(sampler2D(uImage5, uPointSampler), lod);
 		case 6: return textureSize(sampler2D(uImage6, uPointSampler), lod);
 		case 7: return textureSize(sampler2D(uImage7, uPointSampler), lod);
+		case 8: return textureSize(sampler2D(uLayer, uPointSampler), lod);
 	}
 	return ivec2(1);
 }
@@ -386,12 +389,17 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 	float hole = shape.z;
 	int flags = int(shape.w);
 	bool quarter = (flags & 1) != 0, rounded = (flags & 2) != 0;
+	// Flag 4: a UIGradient's fill or border. Studio draws a turned one without anti-aliased edges: the pixels
+	// whose centre lies in the quad (fixtures/group-probe-border.luau PlainTurnBanded)
+	bool hard = (flags & 4) != 0;
 	vec4 screen = rec(7);
 	float a;
 	if (quarter && !(X.x >= screen.x && X.x < screen.z && X.y >= screen.y && X.y < screen.w)) {
 		a = 0.0;
 	} else if (quarter && !rounded) {
 		a = 1.0;
+	} else if (hard) {
+		a = p.x >= -halfSize.x && p.x < halfSize.x && p.y >= -halfSize.y && p.y < halfSize.y ? 1.0 : 0.0;
 	} else if (!rounded) {
 		// Past a corner the coverage follows the nearer edge's ramp alone (a mitred corner), not the distance
 		// to the corner point
@@ -416,6 +424,11 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 		if (quarter) {
 			vec4 inner = rec(8);
 			if (X.x >= inner.x && X.x < inner.z && X.y >= inner.y && X.y < inner.w) {
+				a = 0.0;
+			}
+		} else if (hard) {
+			vec2 inner = halfSize - hole;
+			if (p.x >= -inner.x && p.x < inner.x && p.y >= -inner.y && p.y < inner.y) {
 				a = 0.0;
 			}
 		} else {
@@ -875,7 +888,7 @@ vec4 kindImage(ivec2 P, vec2 X) {
 }
 
 // IMAGE_ROTATED: inverse, (e, f, ox, oy) to local space, bounds (x0, y0, x1, y1), screen rect,
-// (slot, quads, flags: 1 pixelated, 2 quarter turn, 4 rounded, levels), tint + fade, radii, gradient
+// (slot, quads, flags: 1 pixelated, 2 quarter turn, 4 rounded, 8 premultiplied texture, 16 hard edges, 32 gradient field, levels), tint + fade, radii, gradient
 // (flag, offset), the second triangle's inverse and (e, f, ox, oy), the diagonal (a, b, c: the first triangle
 // where a (x - ox) + b (y - oy) + c >= 0; geometry.rs snapped_quad_maps), then from texel 14 per quad
 // (x0, y0, x1, y1), (u0, v0, u1, v1), (lod, wrap, unrounded, 0)
@@ -1040,6 +1053,9 @@ vec4 kindImageRotated(ivec2 P, vec2 X) {
 		coverage = rotatedCoverage(l - qb.xy - halfSize, halfSize, true, qs.z > 0.5 ? vec4(0.0) : rec(9), m);
 	} else if (quarter) {
 		coverage = X.x >= screen.x && X.x < screen.z && X.y >= screen.y && X.y < screen.w ? 1.0 : 0.0;
+	} else if ((flags & 16) != 0) {
+		// Flag 16: a CanvasGroup under a UIGradient has no anti-aliased edge (groups.rs composite_turned_group)
+		coverage = l.x >= bounds.x && l.x < bounds.z && l.y >= bounds.y && l.y < bounds.w ? 1.0 : 0.0;
 	} else {
 		vec2 halfSize = (bounds.zw - bounds.xy) * 0.5;
 		coverage = rotatedCoverage(l - bounds.xy - halfSize, halfSize, false, vec4(0.0), m);
@@ -1071,6 +1087,16 @@ vec4 kindImageRotated(ivec2 P, vec2 X) {
 		lod = fringeLod(l, bounds, vec2(imageSize(slot, 0)) * abs(uv.zw - uv.xy) / (qb.zw - qb.xy), m);
 	}
 	vec4 value = sampleAt(slot, levels, uvp, lod, qs.y > 0.5, pixelated);
+	// Flag 8: the texture holds premultiplied colour (a CanvasGroup's), filtered as it is
+	if ((flags & 8) != 0 && value.a > 0.0) {
+		value.rgb = min(value.rgb / value.a, vec3(1.0));
+	}
+	// Flag 32: a CanvasGroup's UIGradient, its field at this pixel's place in the group (image slot 1, over
+	// the record's pixels)
+	if ((flags & 32) != 0) {
+		vec4 f = imageTexel(1, P - ivec2(tr.zw), 0);
+		value *= f;
+	}
 	return shadeImage(value, l, coverage, 8, 10);
 }
 
@@ -1199,51 +1225,6 @@ vec4 kindGroup(ivec2 P, vec2 X) {
 	return fromBytes(ivec4(mulDiv255(ivec4(c8, 0), A).rgb, A));
 }
 
-// GROUP_ROTATED (groups.rs composite_rotated_group): (layer x, y, tinted, tint lut row), (opacity byte),
-// radii, clip shape: inverse, (e, f, ox, oy), (hw, hh, rounded, 0). GroupColor3 on the layer bytes, then
-// the layer at the opacity byte through an anti-aliased clip path (approximated, not measured)
-vec4 kindGroupRotated(ivec2 P, vec2 X) {
-	vec4 h = rec(3);
-	ivec4 texel = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), P - ivec2(h.xy), 0));
-	ivec3 rgb = texel.rgb;
-	int A = texel.a;
-	if (h.z > 0.5) {
-		ivec3 u = unpremul(rgb, A);
-		ivec3 tintedU = lut3(int(h.w), u);
-		rgb = ivec3(mulDiv255(tintedU.r, A), mulDiv255(tintedU.g, A), mulDiv255(tintedU.b, A));
-	}
-	vec4 m = rec(6), tr = rec(7), shape = rec(8);
-	vec2 p = toLocal(m, tr, X);
-	float coverage;
-	if (shape.z > 0.5) {
-		vec4 radii = rec(5);
-		float r = quadrantRadius(p, radii);
-		vec2 q = abs(p) - shape.xy + r;
-		coverage = clamp(0.5 - (length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r), 0.0, 1.0);
-	} else {
-		coverage = clamp(0.5 - sdBox(p, shape.xy), 0.0, 1.0);
-	}
-	if (coverage <= 0.0) {
-		DISCARD
-	}
-	vec4 layer = vec4(ivec4(rgb, A)) / 255.0;
-	if (rec(4).y > 0.5) {
-		// The UIGradient in the group's own axes (image slot 0): the field at this local point, bilinear so a
-		// hard step stays smooth at any angle
-		vec2 q = p + shape.xy - 0.5;
-		ivec2 q0 = ivec2(floor(q));
-		vec2 w = q - vec2(q0);
-		ivec2 top = ivec2(ceil(2.0 * shape.xy)) - 1;
-		vec4 f00 = imageTexel(0, clamp(q0, ivec2(0), top), 0);
-		vec4 f10 = imageTexel(0, clamp(q0 + ivec2(1, 0), ivec2(0), top), 0);
-		vec4 f01 = imageTexel(0, clamp(q0 + ivec2(0, 1), ivec2(0), top), 0);
-		vec4 f11 = imageTexel(0, clamp(q0 + ivec2(1, 1), ivec2(0), top), 0);
-		vec4 f = mix(mix(f00, f10, w.x), mix(f01, f11, w.x), w.y);
-		layer = vec4(layer.rgb * f.rgb, layer.a) * f.a;
-	}
-	return layer * (rec(4).x / 255.0) * coverage;
-}
-
 // A text quad's image texel (the glyph bitmap with a transparent 1 px border, like the atlas padding),
 // premultiplied bytes: mode 3 tints the glyph coverage with the quad's colour, mode 4 reads the
 // CPU-shaded image (border included)
@@ -1318,7 +1299,7 @@ vec4 kindTextQuad(ivec2 P, vec2 X) {
 }
 
 // SEGMENT (groups.rs flush_segment): texel (k, l) of a CanvasGroup texture takes the pixel of the
-// screen scratch (uLayer) under its centre, (floor((2k + 1) W / (2 NW)), floor((2l + 1) H / (2 NH))), as
+// screen scratch (uLayer) under its centre, (floor((2k + 1) W / (2 NW)), floor((2l + 1) H / (2 NH))), the centre on the 1/256 texel grid, as
 // premultiplied bytes; the batch's premultiplied blend is round(C + D (255 - A) / 255). (W, H, NW, NH),
 // (smooth, 0, 0, 0): smooth samples the scratch bilinearly at the texel centre instead (text; exact rational
 // position ((2k + 1) W - N) / (2N), 8-bit weights, rounded half up; notes/images.md)
@@ -1346,7 +1327,13 @@ vec4 kindSegment(ivec2 P, vec2 X) {
 		}
 		return fromBytes(v);
 	}
-	ivec4 texel = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), ((2 * P + 1) * W) / (2 * N), 0));
+	// What is drawn into the texture has its edges on the rasterizer's 1/256 texel grid (rounded to the
+	// nearest): a texel whose centre lies within 1/512 texel left of or above a pixel's edge takes that
+	// pixel (fixtures/group-probe-bigtex.luau Row8.Bar8: the edge 0.0014 texel right of a centre)
+	ivec2 num = (2 * P + 1) * W, den = 2 * N;
+	ivec2 at = num / den, rest = num - at * den;
+	at += ivec2(greaterThanEqual(rest * 512, 1024 * N - 2 * W));
+	ivec4 texel = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), min(at, W - 1), 0));
 	if (texel.a == 0) {
 		DISCARD
 	}
@@ -1417,7 +1404,6 @@ void main() {
 		case 6: outColor = kindImage(P, X); break;
 		case 7: outColor = kindImageRotated(P, X); break;
 		case 11: outColor = kindGroup(P, X); break;
-		case 14: outColor = kindGroupRotated(P, X); break;
 		case 15: outColor = kindTextQuad(P, X); break;
 		case 17: outColor = kindSegment(P, X); break;
 		case 18: outColor = kindLayer(P, X); break;

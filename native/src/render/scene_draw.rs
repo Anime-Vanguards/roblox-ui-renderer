@@ -1493,7 +1493,9 @@ impl DrawPreparer {
         parts: &str,
     ) -> Result<(), DrawError> {
         let previous = std::mem::replace(&mut self.layer_node, node["id"].as_u64().unwrap_or(0));
+        self.group_cache.fringe = node["fringe"] == true;
         let result = self.draw_node_body(ctx, node, scene, assets, in_group, parts);
+        self.group_cache.fringe = false;
         self.layer_node = previous;
         result
     }
@@ -1910,13 +1912,16 @@ impl DrawPreparer {
             self.push(t)
         }
         let radii = radii.map(|v| v.max(0.).min(r.w / 2.).min(r.h / 2.));
-        let quarter =
-            (m[1].abs() < 1e-9 && m[2].abs() < 1e-9) || (m[0].abs() < 1e-9 && m[3].abs() < 1e-9);
+        let quarter = !self.group_cache.fringe
+            && ((m[1].abs() < 1e-9 && m[2].abs() < 1e-9) || (m[0].abs() < 1e-9 && m[3].abs() < 1e-9));
+        let rounded = radii.iter().any(|v| *v > 0.);
         self.push([
             r.w / 2.,
             r.h / 2.,
             hole,
-            ((quarter as u8) | ((radii.iter().any(|v| *v > 0.) as u8) << 1)) as f64,
+            ((quarter as u8)
+                | ((rounded as u8) << 1)
+                | (((matches!(paint, Paint::Gradient { .. }) && !rounded) as u8) << 2)) as f64,
         ]);
         self.push(radii);
         self.push(extent);
@@ -1944,10 +1949,30 @@ impl DrawPreparer {
         if node["bg"].is_object() {
             self.stats.backgrounds += 1;
         }
-        let result = self.background_inner(ctx, node, p, radii, in_group);
+        let result = self.background_inner(ctx, node, p, radii, in_group, None);
         self.stats.background_ms += start.elapsed().as_secs_f64() * 1000.;
         result
     }
+    /// The border of a CanvasGroup, drawn on the group's target over its composited texture. Measured on
+    /// fixtures/group-probe-border.luau (Studio 0.747): the border lies on the pixels a Frame's border would,
+    /// in every BorderMode, turned or not; it is as opaque as the background times the group's opacity
+    /// (`opacity`, of 255), takes the group's UIGradient like a Frame's border and not its GroupColor3; the
+    /// texture under it holds the fill over the whole rect and the children, which an Inset or Middle border
+    /// covers. A UICorner leaves it out, as on a Frame.
+    pub(crate) fn group_border(
+        &mut self,
+        ctx: &mut BuildContext,
+        node: &Value,
+        p: PhysicalRect,
+        radii: [f64; 4],
+        opacity: u8,
+    ) -> Result<(), DrawError> {
+        if number(&node["border"]["size"], 0.) <= 0. {
+            return Ok(());
+        }
+        self.background_inner(ctx, node, p, radii, false, Some(opacity as f64 / 255.))
+    }
+    /// `ring`: only the border, its opacity scaled by the value (group_border)
     fn background_inner(
         &mut self,
         ctx: &mut BuildContext,
@@ -1955,6 +1980,7 @@ impl DrawPreparer {
         p: PhysicalRect,
         radii: [f64; 4],
         in_group: bool,
+        ring: Option<f64>,
     ) -> Result<(), DrawError> {
         if !node["bg"].is_object() {
             return Ok(());
@@ -1964,7 +1990,7 @@ impl DrawPreparer {
         if node["interaction"]["bg"].is_array() {
             colour = color(&node["interaction"]["bg"], [255.; 3]).map(|v| v / 255.)
         }
-        let a = alpha8(1. - number(&bg["transparency"], 0.));
+        let a = alpha8((1. - number(&bg["transparency"], 0.)) * ring.unwrap_or(1.));
         if a == 0 {
             return Ok(());
         }
@@ -1997,7 +2023,9 @@ impl DrawPreparer {
         // background's transparency. With a UIGradient the outer edges round ties down, ceil(v - 0.5)
         // (fixtures/gradient-edges.luau). Rotated frames: the fill first, then the border as a ring on top whose
         // inner edge fringes into the fill like its outer edge (fixtures/rotation.luau).
-        let border_size = number(&border["size"], 0.) * self.scale;
+        // A CanvasGroup fills its whole rect in its texture; its border is drawn over the composite
+        // (group_border)
+        let border_size = if in_group { 0. } else { number(&border["size"], 0.) * self.scale };
         if border_size > 0. && !radii.iter().any(|v| *v > 0.) {
             let inset = if border["mode"] == "Inset" {
                 border_size
@@ -2009,15 +2037,17 @@ impl DrawPreparer {
             let mut fill = Rect::new(r.x + inset, r.y + inset, r.w - 2. * inset, r.h - 2. * inset);
             if !p.snapped {
                 let fb = transformed_bounds(m, fill, 2.);
-                self.rotated_fill(
-                    ctx,
-                    fill,
-                    [0.; 4],
-                    m,
-                    clip,
-                    paint_for(colour, [fb[0], fb[1]], false),
-                    0.,
-                );
+                if ring.is_none() {
+                    self.rotated_fill(
+                        ctx,
+                        fill,
+                        [0.; 4],
+                        m,
+                        clip,
+                        paint_for(colour, [fb[0], fb[1]], false),
+                        0.,
+                    );
+                }
                 let outer = Rect::new(
                     fill.x - border_size,
                     fill.y - border_size,
@@ -2071,7 +2101,7 @@ impl DrawPreparer {
                     let fill_colour = colour.map(|v| quantize(v) as f64);
                     // Straight bytes blended like an image (BlendMode::Image): Studio blends a gradient in
                     // float with one rounding, round((c A + D (255 - A)) / 255)
-                    let parts = super::gradients::border_gradient_meshes(
+                    let mut parts = super::gradients::border_gradient_meshes(
                         &gradient,
                         raw,
                         outer,
@@ -2080,6 +2110,10 @@ impl DrawPreparer {
                         fill_colour,
                         a as f64,
                     );
+                    if ring.is_some() && fill.w > 0. && fill.h > 0. {
+                        // The quad of the fill is the last (border_gradient_meshes)
+                        parts.pop();
+                    }
                     // The pixels come from the quads' meshes alone (GradientMesh::field): keyed relative
                     // to the layer when every mesh is exact there, so a scrolled frame is rasterized once
                     let origin = [outer.x, outer.y];
@@ -2098,12 +2132,12 @@ impl DrawPreparer {
                     let key = match local {
                         Some(local) => format!(
                             "gradborder-local:{}",
-                            serde_json::to_string(&(local, [outer.w, outer.h], border_colour, fill_colour, a))
+                            serde_json::to_string(&(local, [outer.w, outer.h], border_colour, fill_colour, a, ring.is_some()))
                                 .unwrap_or_default()
                         ),
                         None => format!(
                             "gradborder-straight:{}",
-                            serde_json::to_string(&(&gradient, raw, outer.bounds(), fill.bounds(), border_colour, fill_colour, a))
+                            serde_json::to_string(&(&gradient, raw, outer.bounds(), fill.bounds(), border_colour, fill_colour, a, ring.is_some()))
                                 .unwrap_or_default()
                         ),
                     };
@@ -2131,14 +2165,19 @@ impl DrawPreparer {
                     paint_for(color(&border["color"], [0.; 3]), [0., 0.], false),
                     hole,
                 );
-                self.rect_paint(
-                    ctx,
-                    fill.translated(m[4], m[5]),
-                    clip,
-                    paint_for(colour, [0., 0.], true),
-                    None,
-                );
+                if ring.is_none() {
+                    self.rect_paint(
+                        ctx,
+                        fill.translated(m[4], m[5]),
+                        clip,
+                        paint_for(colour, [0., 0.], true),
+                        None,
+                    );
+                }
             }
+            return Ok(());
+        }
+        if ring.is_some() {
             return Ok(());
         }
         if !p.snapped {

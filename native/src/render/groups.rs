@@ -18,7 +18,6 @@ use crate::{
 };
 
 const GROUP: u32 = 11;
-const GROUP_ROTATED: u32 = 14;
 const SEGMENT: u32 = 17;
 const LAYER: u32 = 18;
 
@@ -42,6 +41,11 @@ pub(crate) struct GroupCache {
     bytes: usize,
     frame: u64,
     disposable: Vec<TextureId>,
+    /// The inverse matrices (logical px) of the turned groups whose textures are being built, innermost last
+    unturn: Vec<Transform>,
+    /// The node being drawn lies in a turned group's texture and is turned on the screen by other than a
+    /// quarter turn: its edges are anti-aliased in the texture too (localized)
+    pub(crate) fringe: bool,
 }
 
 impl GroupCache {
@@ -78,7 +82,7 @@ enum ScreenSegment {
 }
 
 impl DrawPreparer {
-    fn group_texture(
+    pub(crate) fn group_texture(
         &mut self,
         key: String,
         width: u32,
@@ -167,6 +171,10 @@ impl DrawPreparer {
         if node["culled"].as_bool().unwrap_or(false) {
             return Ok(());
         }
+        // The group's matrix on the screen, before it is taken into an outer turned group's space
+        let turn: Transform = std::array::from_fn(|i| component(&node["matrix"], i, IDENTITY[i]));
+        let local = self.localized(node);
+        let node = local.as_ref().unwrap_or(node);
         // The group's own UIShadows are drawn on the target outside its texture (not tinted, faded or cut
         // by the group) and before the opacity test: a group whose alpha8(1 - GroupTransparency) is 0 still
         // draws them. Its border UIStrokes surround the composite and are not faded either.
@@ -179,22 +187,34 @@ impl DrawPreparer {
         let rect = physical.rect;
         let radii = radius(&node["corner"], self.scale);
         if !physical.snapped {
-            let width = self.packet.width;
-            let height = self.packet.height;
-            if width == 0 || height == 0 {
+            // A turned group renders in its own axes into a texture, as an unturned one does, and the texture
+            // is drawn as a turned quad, sampled like a turned image (measured on
+            // fixtures/group-probe-border.luau and group-probe-turned.luau: what is inside is filtered,
+            // its edges soft at every angle but a whole-pixel quarter turn)
+            let mut flat = node.clone();
+            if let Some(object) = flat.as_object_mut() {
+                object.remove("matrix");
+                object.remove("absolute");
+            }
+            let level = physical_rect(&flat, self.scale);
+            let rect = level.rect;
+            if rect.w <= 0.0 || rect.h <= 0.0 {
                 return Ok(());
             }
-            let mut child = self.group_pass(width, height, [0.0, 0.0])?;
-            let target = child.target;
-            self.draw_entries(
-                &mut child,
-                array(&entry["draw"]),
-                scene,
-                assets,
-                node_id(&node["id"]),
-            )?;
-            self.finish_pass(child);
-            self.composite_rotated_group(pass, node, target, physical, radii, opacity);
+            let dims = group_texture_dims(rect.x, rect.y, rect.w, rect.h, self.scale);
+            let space = GroupSpace { l: rect.x, t: rect.y, w: rect.w as u32, h: rect.h as u32, nw: dims.0, nh: dims.1 };
+            let mut texture = self.group_pass(space.nw, space.nh, [space.l, space.t])?;
+            self.group_cache.unturn.push(invert(turn));
+            let built = self.build_group_texture(&mut texture, entry, &flat, scene, assets, space);
+            self.group_cache.unturn.pop();
+            built?;
+            let target = texture.target;
+            self.finish_pass(texture);
+            // Under a UIGradient the quad's own edges are not anti-aliased, as a turned Frame's are not
+            // (fixtures/group-probe-border.luau Turn..Banded and PlainTurnBanded)
+            let hard = node["gradient"].is_object();
+            self.composite_turned_group(pass, node, target, [space.nw, space.nh], level, radii, opacity, hard);
+            self.group_border(pass, node, physical, radii, opacity)?;
         } else {
             if rect.w <= 0.0 || rect.h <= 0.0 {
                 return Ok(());
@@ -212,6 +232,7 @@ impl DrawPreparer {
             let target = texture.target;
             self.finish_pass(texture);
             self.composite_group(pass, node, target, physical, radii, opacity, space);
+            self.group_border(pass, node, physical, radii, opacity)?;
         }
         self.group_inset_shadows(pass, node, scene, assets)?;
         self.group_strokes(pass, node, scene, assets)?;
@@ -334,6 +355,8 @@ impl DrawPreparer {
         for item in array(&entry["draw"]) {
             if item.is_object() {
                 let inner = node_id(&item["group"]).and_then(|id| scene.node(id));
+                let local = inner.and_then(|inner| self.localized(inner));
+                let inner = local.as_ref().or(inner);
                 // Descendants keep only the clips inside the group (texture_clip_node)
                 let owned = inner.and_then(|inner| texture_clip_node(inner, node, self.scale, resampled));
                 let inner = owned.as_ref().or(inner);
@@ -360,6 +383,8 @@ impl DrawPreparer {
             let Some(child) = scene.node(id.unsigned_abs()) else {
                 continue;
             };
+            let local = self.localized(child);
+            let child = local.as_ref().unwrap_or(child);
             let owned = texture_clip_node(child, node, self.scale, resampled);
             let child = owned.as_ref().unwrap_or(child);
             if child["culled"].as_bool().unwrap_or(false) {
@@ -888,86 +913,69 @@ impl DrawPreparer {
         self.emit(pass, start, batch);
     }
 
-    fn composite_rotated_group(
+    /// A node as the texture of the turned group being built sees it: its matrix taken into the group's own
+    /// axes, the identity for a child that is not turned again. It stays a turned node there: Studio draws
+    /// it by its rotation on the screen, with the anti-aliased edges of a turned fill unless that is a
+    /// quarter turn (`fringe`; fixtures/group-probe-turned.luau: a child's edge on a texel boundary leaves the
+    /// texel beyond it half covered, at every angle but 90, 180 and 270 degrees). None outside one.
+    fn localized(&self, node: &Value) -> Option<Value> {
+        let inverse = *self.group_cache.unturn.last()?;
+        let matrix: Transform = std::array::from_fn(|i| component(&node["matrix"], i, IDENTITY[i]));
+        let mut local = multiply(inverse, matrix);
+        if (0..4).all(|i| (local[i] - IDENTITY[i]).abs() < 1e-6) && local[4].abs() < 1e-3 && local[5].abs() < 1e-3 {
+            local = IDENTITY;
+        }
+        let quarter = (matrix[1].abs() < 1e-6 && matrix[2].abs() < 1e-6)
+            || (matrix[0].abs() < 1e-6 && matrix[3].abs() < 1e-6);
+        let mut moved = node.clone();
+        let object = moved.as_object_mut()?;
+        object.remove("absolute");
+        object.insert("matrix".into(), serde_json::json!(local));
+        object.insert("fringe".into(), Value::Bool(!quarter));
+        Some(moved)
+    }
+
+    /// The texture of a turned group over its unturned rect (`level`), drawn through the group's matrix as a
+    /// turned image is (image_records.rs turned_quads_record): GroupColor3 as the tint, the opacity as the fade,
+    /// the UIGradient and the corner radii as an image's
+    #[allow(clippy::too_many_arguments)]
+    fn composite_turned_group(
         &mut self,
         pass: &mut BuildContext,
         node: &Value,
         texture: TextureId,
-        physical: PhysicalRect,
+        size: [u32; 2],
+        level: PhysicalRect,
         radii: [f64; 4],
         opacity: u8,
+        hard: bool,
     ) {
-        let rect = physical.rect;
-        let tint = color(&node["group"]["color"], [1.0; 3]).map(quantize);
-        let tinted = tint.iter().any(|value| *value < 255);
-        let x = -pass.origin[0];
-        let y = -pass.origin[1];
-        let start = self.begin(
-            pass,
-            [
-                x,
-                y,
-                x + self.packet.width as f64,
-                y + self.packet.height as f64,
-            ],
-            clip_rect(node, pass.origin, self.scale),
-            GROUP_ROTATED,
-        );
-        self.push([x, y, if tinted { 1.0 } else { 0.0 }, 257.0]);
-        let gradient = node["gradient"].is_object();
-        self.push([opacity as f64, if gradient { 1.0 } else { 0.0 }, 0.0, 0.0]);
-        self.push(radii.map(|r| r.max(0.0).min(rect.w / 2.0).min(rect.h / 2.0)));
-        for block in local_texels(
-            invert(node_transform(node, pass.origin, self.scale)),
-            [x, y],
-            [rect.x + rect.w / 2.0, rect.y + rect.h / 2.0],
-        ) {
-            self.push(block);
-        }
-        self.push([
-            rect.w / 2.0,
-            rect.h / 2.0,
-            if radii.iter().any(|r| *r > 0.0) {
-                1.0
-            } else {
-                0.0
-            },
-            0.0,
-        ]);
-        let mut batch = DrawBatch {
-            layer: Some(texture),
-            ..Default::default()
+        let tint = color(&node["group"]["color"], [1.0; 3]).map(|v| quantize(v) as f64 / 255.0);
+        let raw = level.raw;
+        let quad = super::images::ImageQuad {
+            x0: raw.x,
+            y0: raw.y,
+            x1: raw.x + raw.w,
+            y1: raw.y + raw.h,
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+            wrap: false,
+            unrounded: false,
         };
-        if tinted {
-            batch.lut = Some(self.group_texture(
-                format!("tint:{tint:?}"),
-                256,
-                258,
-                TextureFormat::Rgba8,
-                || tint_lut(tint),
-            ));
-        }
-        if gradient {
-            // The UIGradient turns with the group: its field over the unrotated rect, sampled at each pixel's
-            // local point. Colour and alpha only: GroupColor3 and the opacity byte are applied around it
-            let width = rect.w.ceil().max(1.0);
-            let height = rect.h.ceil().max(1.0);
-            let bounds = [0.0, 0.0, width, height];
-            let mesh = gradient_mesh(&node["gradient"], [0.0, 0.0, rect.w, rect.h], [255.0; 3], 255.0, bounds);
-            batch.image_slots[0] = Some(self.group_texture(
-                format!("gradient-rotated:{width}:{height}:{}", node["gradient"]),
-                width as u32,
-                height as u32,
-                TextureFormat::Rgba32Float,
-                || {
-                    mesh.field(bounds)
-                        .into_iter()
-                        .flat_map(|v| (v / 255.0).to_le_bytes())
-                        .collect()
-                },
-            ));
-        }
-        self.emit(pass, start, batch);
+        self.turned_quads_record(
+            pass,
+            node,
+            super::image_records::TurnedSource::Layer(texture, size),
+            vec![quad],
+            tint,
+            opacity as f64 / 255.0,
+            false,
+            hard,
+            level,
+            radii,
+        );
     }
 }
 

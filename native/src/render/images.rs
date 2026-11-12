@@ -14,6 +14,11 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 /// snaps and samples it like any axis-aligned image (measured on a close button's Line_1 / Line_2
 /// images, notes/images.md round 4).
 pub fn translated_image_node(node: &Value) -> Option<Value> {
+    // A node in a turned CanvasGroup's texture holds its matrix in the group's axes (groups.rs localized):
+    // on the screen it is turned, and it is drawn as a turned node
+    if node.get("fringe").is_some() {
+        return None;
+    }
     let m = node.get("matrix")?.as_array()?;
     let at = |i: usize| m.get(i).and_then(Value::as_f64);
     if at(0)? != 1. || at(1)? != 0. || at(2)? != 0. || at(3)? != 1. {
