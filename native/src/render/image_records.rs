@@ -494,7 +494,7 @@ impl DrawPreparer {
         let gradient = node.get("gradient").filter(|v| v.is_object());
         // A CanvasGroup's UIGradient is the gradient's field at each pixel's own place in the group's axes
         // (gradients.rs GradientMesh::at), a texture over the record's pixels in image slot 1: flag 32
-        let field = gradient.filter(|_| premultiplied).map(|g| {
+        let field = gradient.map(|g| {
             let (w, h) = ((raster[2] - raster[0]).max(1.) as u32, (raster[3] - raster[1]).max(1.) as u32);
             let mesh = super::gradients::gradient_mesh(g, [p.raw.x, p.raw.y, p.raw.w, p.raw.h], [255.; 3], 255., bounds);
             let key = format!(

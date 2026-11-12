@@ -247,6 +247,12 @@ impl GradientMesh {
         let local = [p[0] - self.origin[0], p[1] - self.origin[1]];
         self.form.shade(local, p[0].floor() as i64, p[1].floor() as i64).map(f64::from)
     }
+    /// The field's RGBA where a turned element draws the device pixel (`px`, `py`): `local` is that pixel's
+    /// centre in the element's own axes (the space of the rect the gradient spans). The gradient turns with
+    /// its element and keeps its steps, its table and the screen's dither (fixtures/gradient-probe-turned.luau)
+    pub fn at_turned(&self, local: [f64; 2], px: i64, py: i64) -> [f32; 4] {
+        self.form.shade([local[0] - self.origin[0], local[1] - self.origin[1]], px, py)
+    }
     /// Everything the field depends on, as bits (a cache key)
     pub fn bits(&self) -> Vec<u64> {
         let form = &self.form;

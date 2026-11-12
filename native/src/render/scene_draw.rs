@@ -142,6 +142,27 @@ mod tests {
         assert_eq!(turned, plain);
     }
     #[test]
+    fn a_turned_frame_keeps_its_gradients_steps() {
+        // fixtures/gradient-probe-turned.luau: black to white on a frame turned 180 degrees runs right to
+        // left in the 256 steps and squared colours of an unturned frame (the pixel half a percent in is
+        // 255 / 16, not 1), without a fringe
+        let mut scene = SceneStore::default();
+        scene.apply(&json!({"viewport":{"width":200,"height":40,"scale":1},"nodes":[{"id":1,"rect":[10,10,100,10],"matrix":[-1,0,0,-1,120,30],"bg":{"color":[1,1,1]},"gradient":{"color":[[0,0,0,0],[1,1,1,1]]}}],"layers":[{"draw":[1]}],"fonts":[],"images":[]})).unwrap();
+        let assets = AssetStore::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap(),
+            true,
+        );
+        let packet = DrawPreparer::new().prepare(&scene, &assets).unwrap();
+        let pixels = &packet.textures[0].levels[0].bytes;
+        assert_eq!(pixels.len(), 100 * 10 * 4);
+        assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));
+        assert!((253..=254).contains(&pixels[0]), "{}", pixels[0]);
+        assert!((180..=182).contains(&pixels[49 * 4]), "{}", pixels[49 * 4]);
+        assert!((15..=16).contains(&pixels[99 * 4]), "{}", pixels[99 * 4]);
+    }
+    #[test]
     fn square_gradient_does_not_apply_a_corner_mask() {
         let mut scene = SceneStore::default();
         scene.apply(&json!({"viewport":{"width":8,"height":8,"scale":1},"nodes":[{"id":1,"rect":[0,0,5,5],"bg":{"color":[1,1,1]},"gradient":{"color":[[0,1,0,0],[1,0,1,0]]}}],"layers":[{"draw":[1]}],"fonts":[],"images":[]})).unwrap();
@@ -1888,6 +1909,65 @@ impl DrawPreparer {
         self.solid(paint);
         self.emit(ctx, start, DrawBatch::default());
     }
+    /// A turned frame under a UIGradient (Studio 0.747, fixtures/gradient-probe-turned.luau): the pixels whose
+    /// centres lie in the turned rect, without a fringe, each shaded where it lies in the frame's own axes like
+    /// an unturned one's: the gradient turns with its frame and keeps its steps, its table and the screen's
+    /// dither. `parts` are local rects with the colour the gradient multiplies, a later one over an earlier
+    /// (the border's outer rect, then the fill); None leaves the rect empty.
+    #[allow(clippy::too_many_arguments)]
+    fn turned_gradient_fill(
+        &mut self,
+        ctx: &mut BuildContext,
+        gradient: &Value,
+        raw: [f64; 4],
+        m: Transform,
+        clip: Option<[f64; 4]>,
+        a: u8,
+        parts: &[(Rect, Option<[f64; 3]>)],
+    ) {
+        let Some(&(outer, _)) = parts.first() else { return };
+        let bounds = transformed_bounds(m, outer, 0.);
+        let (x, y) = (bounds[0], bounds[1]);
+        let (w, h) = ((bounds[2] - bounds[0]) as u32, (bounds[3] - bounds[1]) as u32);
+        if w == 0 || h == 0 || Self::culled(ctx, bounds, clip) {
+            return;
+        }
+        let meshes: Vec<(Rect, Option<super::gradients::GradientMesh>)> = parts
+            .iter()
+            .map(|(rect, colour)| {
+                let mesh = colour.map(|c| {
+                    super::gradients::gradient_mesh(gradient, raw, c.map(|v| quantize(v) as f64), a as f64, rect.bounds())
+                });
+                (*rect, mesh)
+            })
+            .collect();
+        let key = format!(
+            "fill-turned:{}",
+            serde_json::to_string(&(gradient, raw, parts.iter().map(|(r, c)| (r.bounds(), c)).collect::<Vec<_>>(), a, m, [x, y]))
+                .unwrap_or_default()
+        );
+        let to_local = invert(m);
+        let raster = move || {
+            let mut bytes = vec![0; w as usize * h as usize * 4];
+            for (k, pixel) in bytes.chunks_exact_mut(4).enumerate() {
+                let (px, py) = (x + (k % w as usize) as f64, y + (k / w as usize) as f64);
+                let [lx, ly] = apply(to_local, px + 0.5, py + 0.5);
+                // (a pixel centred on an edge belongs to the rect when the edge is its left or top one on
+                // the screen, however the frame is turned: the centre is tested a hair right of and below itself)
+                let [tx, ty] = apply(to_local, px + 0.5 + 1e-6, py + 0.5 + 1e-7);
+                let inside = |r: &Rect| tx >= r.x && tx < r.x + r.w && ty >= r.y && ty < r.y + r.h;
+                let Some((_, mesh)) = meshes.iter().rev().find(|(rect, _)| inside(rect)) else { continue };
+                let Some(mesh) = mesh else { continue };
+                let value = mesh.at_turned([lx, ly], px as i64, py as i64);
+                for c in 0..4 {
+                    pixel[c] = gpu8(value[c] as f64 / 255.);
+                }
+            }
+            bytes
+        };
+        let (.., id) = self.cached_layer(key, x as i32, y as i32, w, h, Box::new(raster));
+        self.image_layer(ctx, Rect::new(x, y, w as f64, h as f64), id, clip);
+    }
     fn rotated_fill(
         &mut self,
         ctx: &mut BuildContext,
@@ -2035,6 +2115,19 @@ impl DrawPreparer {
                 0.
             };
             let mut fill = Rect::new(r.x + inset, r.y + inset, r.w - 2. * inset, r.h - 2. * inset);
+            if !p.snapped && gradient.is_object() && fill.w > 0. && fill.h > 0. {
+                // (the border takes the gradient too, as on an unturned frame)
+                let outer = Rect::new(
+                    fill.x - border_size,
+                    fill.y - border_size,
+                    fill.w + 2. * border_size,
+                    fill.h + 2. * border_size,
+                );
+                let raw = [p.raw.x, p.raw.y, p.raw.w, p.raw.h];
+                let parts = [(outer, Some(color(&border["color"], [0.; 3]))), (fill, ring.is_none().then_some(colour))];
+                self.turned_gradient_fill(ctx, gradient, raw, m, clip, a, &parts);
+                return Ok(());
+            }
             if !p.snapped {
                 let fb = transformed_bounds(m, fill, 2.);
                 if ring.is_none() {
@@ -2182,6 +2275,11 @@ impl DrawPreparer {
         }
         if !p.snapped {
             let bounds = transformed_bounds(m, r, 2.);
+            if gradient.is_object() && !radii.iter().any(|v| *v > 0.) && r.w > 0. && r.h > 0. {
+                let raw = [p.raw.x, p.raw.y, p.raw.w, p.raw.h];
+                self.turned_gradient_fill(ctx, gradient, raw, m, clip, a, &[(r, Some(colour))]);
+                return Ok(());
+            }
             self.rotated_fill(
                 ctx,
                 r,

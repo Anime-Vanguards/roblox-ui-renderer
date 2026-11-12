@@ -60,6 +60,10 @@
 			"digest": "4fc66fd5cdd19e7e53294d0c3ecee8787c03de46d37da301c8393f202f28861d",
 			"status": "ok"
 		},
+		"fast/edit/gradient-probe-turned": {
+			"digest": "1f753a9a7fdea286438d57504503e8df72ca4f1a95da859ca4a89216043c47c9",
+			"status": "ok"
+		},
 		"fast/edit/gradient-probe-types": {
 			"digest": "0260be634969b12a016572719f009c9c05dd768fd4273579802e135cb3a4de43",
 			"status": "ok"
@@ -836,6 +840,10 @@
 			"digest": "d851dd9d814cf8a77548ab2bca9455f79f894f707d2d0dba1f6e683f707c23b0",
 			"status": "ok"
 		},
+		"fixtures/edit/gradient-probe-turned": {
+			"digest": "70917ab0bf40e2215f6904dc415d99b5643c562eaa188062e4746b4f100182db",
+			"status": "ok"
+		},
 		"fixtures/edit/gradient-probe-types": {
 			"digest": "b7498846addfba02adbbd7518a6759fd054245aee9922d199392c04636dd53e6",
 			"status": "ok"
@@ -1598,6 +1606,10 @@
 		},
 		"fixtures/play/gradient-probe-table": {
 			"digest": "5b5ba03ef33c29281c408ab7cefd2ac84630bfe48a29b3e1847ff67121501679",
+			"status": "ok"
+		},
+		"fixtures/play/gradient-probe-turned": {
+			"digest": "4bf1ef9305382fd5df1c81269398b436c13198f72ec8443b6d2363f3d0678707",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-types": {
@@ -2545,7 +2557,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T06:44:41.751Z",
+	"recorded": "2026-11-12T07:18:11.897Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
