@@ -11,10 +11,12 @@
 
 import net from "node:net";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { withoutCookie } from "./assets.mjs";
+import { PNG } from "pngjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.RUR_STUDIO_MCP_PORT || 0);
@@ -90,11 +92,11 @@ async function studioId(request, query) {
 }
 
 // Runs Luau in Studio (Edit datamodel). Large results: the chunk returns a string, paged in base64.
-export async function runLuau(code, { studio = DEFAULT_STUDIO } = {}) {
+export async function runLuau(code, { studio = DEFAULT_STUDIO, datamodel = "Edit" } = {}) {
 	return session(async request => {
 		const target = await studioId(request, studio);
 		const call = async luau => {
-			const result = await request("tools/call", { name: "execute_luau", arguments: { studio_id: target.id, datamodel_type: "Edit", code: luau } });
+			const result = await request("tools/call", { name: "execute_luau", arguments: { studio_id: target.id, datamodel_type: datamodel, code: luau } });
 			const text = resultText(result);
 			if (result.isError) throw new Error(text);
 			return text;
@@ -125,7 +127,8 @@ return #_G.__RUR_RESULT`;
 			parts.push(await call(`return string.sub(_G.__RUR_RESULT, ${start}, ${start + 89999})`));
 		}
 		await call("_G.__RUR_RESULT = nil return 0");
-		return { text: Buffer.from(parts.join(""), "base64").toString("utf8"), studio: target };
+		const bytes = Buffer.from(parts.join(""), "base64");
+		return { text: bytes.toString("utf8"), bytes, studio: target };
 	});
 }
 
@@ -201,6 +204,107 @@ export function captureViewport(studioName, width, height, outFile, scales) {
 	if (!scales) return outFile;
 	const matched = /scale=([\d.]+)/.exec(result.stdout || "");
 	return matched ? Number(matched[1]) : undefined;
+}
+
+// Studios started by tools/studio/launch.mjs: [{ pid, exe, version, place, scale, desktop, startedAt }], one file per
+// machine; entries whose process has ended are dropped when read
+export const STUDIO_DESKTOP = "rur-studio";
+const LAUNCHED_FILE = path.join(os.tmpdir(), "rur", "studios.json");
+const alive = pid => {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return error.code === "EPERM";
+	}
+};
+export function launchedStudios() {
+	try {
+		return JSON.parse(fs.readFileSync(LAUNCHED_FILE, "utf8")).filter(studio => alive(studio.pid));
+	} catch {
+		return [];
+	}
+}
+export function writeLaunchedStudios(studios) {
+	fs.mkdirSync(path.dirname(LAUNCHED_FILE), { recursive: true });
+	fs.writeFileSync(LAUNCHED_FILE, JSON.stringify(studios, null, 1));
+}
+// How a Studio named by `query` (part of its window title, i.e. its place file) is captured: "engine" when the
+// launcher started it on its own desktop, else "window" (PrintWindow). RUR_STUDIO_CAPTURE overrides.
+export function studioCaptureMethod(query) {
+	if (process.env.RUR_STUDIO_CAPTURE) return process.env.RUR_STUDIO_CAPTURE;
+	const hidden = launchedStudios().some(studio => studio.desktop && query && path.basename(studio.place).includes(query));
+	return hidden ? "engine" : "window";
+}
+
+// Lossless capture through the engine, for a Studio started on a desktop of its own (tools/studio/launch.mjs):
+// Windows does not compose windows there, so PrintWindow has nothing to read, but Studio renders and
+// CaptureService:CaptureScreenshot returns the viewport at its physical size, read back through an EditableImage.
+// The screenshot leaves CoreGui out, so what is captured is mounted under StarterGui (shown in edit mode).
+// Returns { png, dpi } for the top-left width x height physical pixels.
+const ENGINE_CAPTURE_LUAU = (width, height) => `
+local CaptureService = game:GetService("CaptureService")
+local AssetService = game:GetService("AssetService")
+local Id = nil
+CaptureService:CaptureScreenshot(function(ContentId)
+	Id = ContentId
+end)
+local Started = os.clock()
+while not Id do
+	if os.clock() - Started > 20 then
+		error("CaptureScreenshot did not answer in 20 s")
+	end
+	task.wait()
+end
+local Image = AssetService:CreateEditableImageAsync(Content.fromUri(Id))
+local Size = Image.Size
+local W, H = math.min(${width}, Size.X), math.min(${height}, Size.Y)
+local Pixels = Image:ReadPixelsBuffer(Vector2.zero, Vector2.new(W, H))
+Image:Destroy()
+-- Runs of equal RGB: [count u16][r][g][b]
+local Out = buffer.create(W * H * 5)
+local Write = 0
+local Count = W * H
+local Index = 0
+while Index < Count do
+	local At = Index * 4
+	local R, G, B = buffer.readu8(Pixels, At), buffer.readu8(Pixels, At + 1), buffer.readu8(Pixels, At + 2)
+	local Run = 1
+	while Index + Run < Count and Run < 65535 do
+		local Next = (Index + Run) * 4
+		if buffer.readu8(Pixels, Next) ~= R or buffer.readu8(Pixels, Next + 1) ~= G or buffer.readu8(Pixels, Next + 2) ~= B then
+			break
+		end
+		Run += 1
+	end
+	buffer.writeu16(Out, Write, Run)
+	buffer.writeu8(Out, Write + 2, R)
+	buffer.writeu8(Out, Write + 3, G)
+	buffer.writeu8(Out, Write + 4, B)
+	Write += 5
+	Index += Run
+end
+local Viewport = workspace.CurrentCamera.ViewportSize
+return string.format("%d %d %d %d %.6f|", W, H, Size.X, Size.Y, Viewport.X) .. buffer.readstring(Out, 0, Write)
+`;
+
+export async function captureEngine(width, height, { studio = DEFAULT_STUDIO, datamodel = "Edit" } = {}) {
+	const { bytes } = await runLuau(ENGINE_CAPTURE_LUAU(width, height), { studio, datamodel });
+	const bar = bytes.indexOf(0x7c);
+	const [w, h, fullWidth, , viewportWidth] = bytes.subarray(0, bar).toString("latin1").split(" ").map(Number);
+	const png = new PNG({ width: w, height: h });
+	let out = 0;
+	for (let at = bar + 1; at + 5 <= bytes.length; at += 5) {
+		const run = bytes.readUInt16LE(at);
+		for (let k = 0; k < run; k++, out += 4) {
+			png.data[out] = bytes[at + 2];
+			png.data[out + 1] = bytes[at + 3];
+			png.data[out + 2] = bytes[at + 4];
+			png.data[out + 3] = 255;
+		}
+	}
+	if (out !== w * h * 4) throw new Error(`engine capture decoded ${out / 4} of ${w * h} pixels`);
+	return { png, dpi: Math.round((fullWidth / viewportWidth) * 100) / 100 };
 }
 
 // A Luau string literal of value's text: its UTF-8 as it is, with ", \ and the control characters escaped as Luau reads

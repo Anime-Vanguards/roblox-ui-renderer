@@ -9,7 +9,7 @@ import path from "node:path";
 import { PNG } from "pngjs";
 import { fileURLToPath } from "node:url";
 
-import { runLuau, captureViewport, luauString, focusStudio, restoreFocus, ensureWholeViewport, DEFAULT_STUDIO } from "./studio.mjs";
+import { runLuau, captureViewport, captureEngine, studioCaptureMethod, luauString, focusStudio, restoreFocus, ensureWholeViewport, DEFAULT_STUDIO } from "./studio.mjs";
 import { withStudioLock } from "./lock.mjs";
 import { OUT_DIR, sharedStatePath, textSubpixel } from "./paths.mjs";
 import { findEngine } from "./engine.mjs";
@@ -992,7 +992,11 @@ export async function compare(args) {
 	const probes = compareProbes(roots);
 	// Studio's display scale: --dpi, or detected from its viewport window (the monitor it is on)
 	let dpi = args.dpi ? Number(args.dpi) : undefined;
-	const mountLuau = MOUNT_LUAU({ pathParts, width, height, background, time, modelB64, fixtureSource, probes });
+	// A Studio the launcher started on a desktop of its own is captured through the engine (cli/studio.mjs
+	// captureEngine), whose screenshot leaves CoreGui out: the mount goes under StarterGui there, which edit mode draws
+	const captureMethod = studioCaptureMethod(studio);
+	const inContainer = luau => captureMethod === "engine" ? luau.replace('local CoreGui = game:GetService("CoreGui")', 'local CoreGui = game:GetService("StarterGui")') : luau;
+	const mountLuau = inContainer(MOUNT_LUAU({ pathParts, width, height, background, time, modelB64, fixtureSource, probes }));
 	const captureKey = sha1(JSON.stringify({ studio, dpi: dpi || "auto", mount: sha1(mountLuau) }));
 	const reuse = args.recapture ? { reason: "--recapture" } : reusableCapture(outDir, captureKey);
 	if (!reuse.record && args["reuse-only"]) throw new CaptureNeeded(reuse.reason);
@@ -1058,10 +1062,17 @@ export async function compare(args) {
 			const result = JSON.parse(mounted.text);
 			result.textFlag = textFlag;
 			try {
-				result.dpi = captureViewport(mounted.studio.name, result.viewport[0], result.viewport[1], capturePath, dpi ? [dpi] : DISPLAY_SCALES);
+				if (captureMethod === "engine") {
+					const shot = await captureEngine(Math.ceil(result.viewport[0] * 4), Math.ceil(result.viewport[1] * 4), { studio });
+					fs.writeFileSync(capturePath, PNG.sync.write(shot.png));
+					result.dpi = shot.dpi;
+					result.captureMethod = "engine";
+				} else {
+					result.dpi = captureViewport(mounted.studio.name, result.viewport[0], result.viewport[1], capturePath, dpi ? [dpi] : DISPLAY_SCALES);
+				}
 			} finally {
 				restoreFocus(previousFocus);
-				await runLuau(UNMOUNT_LUAU, { studio });
+				await runLuau(inContainer(UNMOUNT_LUAU), { studio });
 				if (mouseIcon === "true") await runLuau(mouseIconLuau(true), { studio });
 			}
 			return result;

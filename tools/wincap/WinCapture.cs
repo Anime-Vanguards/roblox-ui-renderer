@@ -11,6 +11,65 @@ using System.Text;
 // so Studio viewport renders can be compared pixel-for-pixel without the MCP's downscaled JPEG.
 public static class WinCapture
 {
+	// The desktop tools/studio/launch.mjs starts Studio on (out of the user's sight and focus)
+	public const string STUDIO_DESKTOP = "rur-studio";
+	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr OpenDesktopW(string name, uint flags, bool inherit, uint access);
+	[DllImport("user32.dll")] static extern bool SetThreadDesktop(IntPtr desktop);
+	[DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
+	[DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hWnd);
+	[DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int command);
+	[DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+	// Runs `work` on the named desktop, in a thread of its own (a thread with windows cannot change desktops);
+	// null when the desktop does not exist
+	static string OnDesktop(string desktop, Func<string> work)
+	{
+		IntPtr handle = OpenDesktopW(desktop, 0, false, 0x01FF);
+		if (handle == IntPtr.Zero) return null;
+		string result = null;
+		Exception error = null;
+		var thread = new System.Threading.Thread(() =>
+		{
+			try { if (SetThreadDesktop(handle)) result = work(); }
+			catch (Exception e) { error = e; }
+		});
+		thread.Start();
+		thread.Join();
+		CloseDesktop(handle);
+		if (error != null) throw error;
+		return result;
+	}
+
+	// Grows the Studio window whose title contains titleMatch by dw x dh physical pixels without activating it,
+	// on the user's desktop or on Studio's own: "size=WxH", or null when there is none
+	public static string Grow(string titleMatch, int dw, int dh)
+	{
+		Func<string> grow = () =>
+		{
+			MakeDpiAware();
+			IntPtr found = IntPtr.Zero;
+			EnumWindows((hWnd, _) =>
+			{
+				var title = new StringBuilder(512);
+				GetWindowText(hWnd, title, 512);
+				string text = title.ToString();
+				if (IsWindowVisible(hWnd) && text.IndexOf(titleMatch, StringComparison.OrdinalIgnoreCase) >= 0 && text.EndsWith("Roblox Studio")) found = hWnd;
+				return found == IntPtr.Zero;
+			}, IntPtr.Zero);
+			if (found == IntPtr.Zero) return null;
+			RECT rect;
+			GetWindowRect(found, out rect);
+			if (IsZoomed(found))
+			{
+				ShowWindow(found, 4); // SW_SHOWNOACTIVATE
+				System.Threading.Thread.Sleep(200);
+			}
+			SetWindowPos(found, IntPtr.Zero, rect.Left, rect.Top, rect.Right - rect.Left + dw, rect.Bottom - rect.Top + dh, 0x0014); // SWP_NOZORDER | SWP_NOACTIVATE
+			return String.Format("size={0}x{1}", rect.Right - rect.Left + dw, rect.Bottom - rect.Top + dh);
+		};
+		return grow() ?? OnDesktop(STUDIO_DESKTOP, grow);
+	}
+
 	[StructLayout(LayoutKind.Sequential)]
 	public struct RECT { public int Left, Top, Right, Bottom; }
 

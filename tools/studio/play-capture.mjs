@@ -24,7 +24,7 @@ import zlib from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { withStudioLock } from "../../cli/lock.mjs";
-import { captureViewport, guardStudioFocus, listStudios } from "../../cli/studio.mjs";
+import { captureViewport, guardStudioFocus, listStudios, studioCaptureMethod } from "../../cli/studio.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const args = {};
@@ -133,6 +133,12 @@ async function capture() {
 	const studios = await listStudios();
 	const studio = studios.find(entry => entry.id === args.studio) || studios.find(entry => typeof entry.name === "string" && entry.name.includes(args.studio));
 	if (!studio) throw new Error(`no Studio instance matches "${args.studio}"`);
+	// A Studio on a desktop of its own (tools/studio/launch.mjs) is captured through the engine, but a play client
+	// refuses to read its screenshot back (CreateEditableImageAsync: "cannot currently create editable image from
+	// temporary texture id") and play mode has no edit datamodel to do it from
+	if (studioCaptureMethod(args.studio) === "engine") {
+		throw new Error("play-capture needs a Studio on the user's desktop (tools/studio/launch.mjs --user-desktop): a play session of a Studio on its own desktop cannot be captured losslessly");
+	}
 	return withStudioLock(`play-capture ${name}`, async () => {
 		const stopGuard = guardStudioFocus(studio.name, 300000);
 		callTool("start_stop_play", { studio_id: studio.id, is_start: true });
@@ -196,7 +202,7 @@ return "mounted"`, studio.id);
 			callTool("start_stop_play", { studio_id: studio.id, is_start: false });
 			await sleep(1500);
 			const guard = await stopGuard();
-			if (/STOLEN/.test(guard)) console.error(`play-capture: Studio took the foreground during the play session and was put back:
+			if (/FOREGROUND TAKEN|ON SCREEN/.test(guard)) console.error(`play-capture: Studio raised a window during the play session (parked, foreground handed back):
 ${guard.trim()}`);
 		}
 	});
@@ -204,7 +210,7 @@ ${guard.trim()}`);
 
 const scale = args.reuse ? JSON.parse(fs.readFileSync(path.join(out, "studio-capture.json"), "utf8")).scale : await capture();
 const rendered = path.join(out, "rur");
-const render = spawnSync(process.execPath, [path.join(ROOT, "cli", "rur.mjs"), "render", "--fixture", fixture, "--all-layers", "--mode", "play", "--viewport", `${width}x${height}`, "--dpi", String(scale),
+const render = spawnSync(process.execPath, [path.join(ROOT, "cli", "rur.mjs"), "render", "--fixture", fixture, "--all-layers", "--mode", "play", "--viewport", `${width}x${height}`, "--scale", String(scale),
 	"--time", String(seconds), "--background", background.join(","), "--out", rendered], { encoding: "utf8" });
 if (render.status !== 0) throw new Error(`rur render failed: ${render.stderr || render.stdout}`);
 const studio = readPng(path.join(out, "studio-viewport.png")), chrome = readPng(path.join(out, "studio-chrome.png")), ours = readPng(path.join(rendered, "render.png"));

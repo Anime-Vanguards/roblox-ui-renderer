@@ -30,28 +30,38 @@ comparison, the unstable ones with their reason, and the total of what counts.
 
 ## Starting Studio
 
-Start the Studio a comparison uses with the launcher, so it never takes the keyboard focus from whoever is using
-the machine:
+Start the Studio a comparison uses with the launcher. It runs on a Windows desktop of its own, so none of its
+windows (splash, main window, dialogs) is ever on a monitor or takes the keyboard focus:
 
 ```powershell
-node tools/studio/launch.mjs --place <file.rbxl>      # prints the process id
-node tools/studio/launch.mjs --close <pid>             # when the batch is done
+node tools/studio/launch.mjs --place <file.rbxl>      # prints the pid; --studio <file name> selects it
+node tools/studio/launch.mjs --list                   # the Studios it started that still run
+node tools/studio/launch.mjs --close <pid>            # when the task is done
 ```
 
-It starts Studio without activating it (`SW_SHOWNOACTIVATE`), moves its main window above the primary monitor
-with a 4 px strip on screen, at the bottom of the z-order (it keeps that monitor's display scale; a window
-entirely off screen is not composed by Windows, and 5 of 16 captures there showed the previous mount), and for
-`--guard-seconds` (45) puts back any Studio window that takes the foreground (a login or recovery dialog). It
-also moves Studio's drawn cursor out of the way: until the mouse has been over the viewport, Studio draws it at
-the viewport's centre, inside the compared area (`--park <pid>` does that again). Options: `--version` (the
-installed build, default 0.747.0.7471481) or `--exe`, `--scale 1` (draw at display scale 1 on any monitor; a
-running Studio moved to a monitor of another scale reports a wrong viewport size), `--on-screen`.
+A running Studio of the same build, place and scale is reused instead of starting another (`--new` starts one
+anyway): keep one per task, reuse it across capture batches and close it at the end. Options: `--version` (an
+installed build, default 0.747.0.7471481) or `--exe`, `--scale 1` (display scale 1; otherwise the primary
+monitor's).
 
-Nothing in rur brings Studio to the front: captures render the same unfocused, and play-capture guards the
-foreground while its play session runs. `--focus` / `RUR_FOCUS` are ignored. Measured on Windows 11
-(2026-11-12): through a launch, eight captures, a play-capture and the close, no Studio window was ever the
-foreground. A desktop of its own (CreateDesktop) would keep Studio out of focus entirely, but Studio does not
-draw its viewport there.
+Windows composes only the desktop the user sees, so PrintWindow has nothing to read from such a Studio. `rur compare`
+captures it through the engine instead: `CaptureService:CaptureScreenshot`, read back losslessly through an
+EditableImage. The screenshot leaves CoreGui out, so for this Studio the compare mounts under StarterGui (which edit
+mode draws) instead of CoreGui. Measured 2026-11-12 on Studio 0.747.0.7471481: 24 of 24 captures at 1.5x and 10 at 1x
+gave the same pixels and the same device scale as captures of an on-screen Studio (rects, corners, strokes,
+gradients, text, images, rotation, Path2D, CanvasGroup); a frame takes 0.2 to 0.3 s. `RUR_STUDIO_CAPTURE=engine` or
+`window` overrides the choice.
+
+Limits: play-capture cannot capture a play session there (a play client refuses to read its screenshot back, and
+play mode has no edit datamodel); use `--user-desktop` for it, or the sim backend. A Studio there renders uncapped:
+idle it held 3.5 GB private memory and 0.65 of a core.
+
+`--user-desktop` starts Studio on the user's desktop for PrintWindow captures: minimized, every window parked above
+the primary monitor with a 4 px strip on screen as it appears (a window entirely off the monitors is not composed
+and 5 of 16 captures came out stale) and the foreground handed back. Its splash still shows on a monitor for about
+10 s: while Studio loads, its UI thread applies no move from outside, and no start option (`SW_SHOWMINNOACTIVE`,
+`STARTF_USEPOSITION`, `-qwindowgeometry`) places the splash. Nothing in rur brings Studio to the front;
+`--focus` / `RUR_FOCUS` are ignored.
 
 ## The Studio MCP bridge
 
