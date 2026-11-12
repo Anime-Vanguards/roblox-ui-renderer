@@ -122,9 +122,11 @@ Limitations:
   synthetic italic and image and group edge cases have small known differences.
 - Stories that depend on game services or Studio-only content, yield while mounting or contain source errors
   run as far as they can; the sweep reports these separately from rendering errors.
-- UIShadow `Inset` and `Mode = Text` draw as a plain outer shadow of the shape: Studio drew them so until
-  0.746 and draws an inner shadow and a glow of the text since 0.747 (notes/images.md "UIShadow at Studio
-  0.747"). `ShowBehindParent` is ignored.
+- UIShadow `Mode = Text` with a BlurRadius is close to Studio 0.747 but not exact: Studio draws the glow
+  from a coarse distance-field texture of each glyph, the renderer from the glyph's outline at full
+  resolution, so a glow differs by up to 10 to 50 of 255 levels on a few pixels beside glyph corners (most
+  with small radii) and where the radius passes 0.4 of the text size (notes/images.md "UIShadow Inset,
+  ShowBehindParent and Mode = Text"). `Inset`, `ShowBehindParent` and a text shadow without blur are exact.
 
 ## Contributing, security and license
 
