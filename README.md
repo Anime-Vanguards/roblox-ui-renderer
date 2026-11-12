@@ -119,8 +119,8 @@ Limitations:
 - A plain render captures the state after `--time`; interactive states need `--actions` or the desktop
   app's input.
 - Bit-exact Studio parity is not complete: the edges of colour emoji and one pixel of a thin path corner have
-  small known differences. A rotated image, Frame or CanvasGroup can differ in a pixel whose centre lies on
-  one of its edges, a Pixelated image under a UICorner in the pixels whose centres lie on a texel boundary,
+  small known differences. A rotated image can differ by a few levels in a pixel whose centre lies within
+  a hundredth of a pixel of its edge, a textured image under a UICorner by a few levels on its arcs at 1.5x,
   and a UIGradient on a rotated element in its colour steps. Roblox draws text in one of two ways, chosen by a
   server flag; the renderer has both and defaults to the one production serves (whole-pixel text).
   `--text-subpixel on` selects the other, quarter-pixel text: see [docs/text.md](docs/text.md), "Text modes".

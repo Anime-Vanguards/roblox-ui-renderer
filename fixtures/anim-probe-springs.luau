@@ -1,7 +1,7 @@
 -- Continuous spring and clock-driven animation with no module but this file, so it mounts in any place:
 -- damped springs in closed form (critically damped, under-damped, over-damped; a Color3 and a UDim2) stepped by
 -- Heartbeat's dt and retargeted every 0.8 s, a looping eased value, a spring retargeted every second, a
--- RenderStepped rotation from os.clock(), a Heartbeat-dt progress bar and a task.wait() counter.
+-- RenderStepped rotation from the sum of its dt, a Heartbeat-dt progress bar and a task.wait() counter.
 -- fixtures/anim-springs.luau runs the same lanes through a project's own spring libraries and needs that
 -- project mounted; this one is the scene compared with Studio. Every loop and handler stops itself within a
 -- frame once Target leaves the DataModel, so a Studio compare leaves nothing running.
@@ -156,7 +156,8 @@ return function(Target)
 		Fill.Size = UDim2.fromScale(Progress, 1)
 	end))
 
-	-- RenderStepped: rotation from os.clock()
+	-- RenderStepped: rotation from the frames' own clock (the sum of RenderStepped's dt, which a compare replays
+	-- from Studio's recorded frames; os.clock() is read at a different instant on each side)
 	local Spinner = New("Frame", {
 		Name = "ClockSpinner",
 		Size = UDim2.fromOffset(60, 12),
@@ -165,10 +166,11 @@ return function(Target)
 		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 		BorderSizePixel = 0,
 	}, Root)
-	local Started = os.clock()
-	table.insert(Connections, RunService.RenderStepped:Connect(function()
+	local Elapsed = 0
+	table.insert(Connections, RunService.RenderStepped:Connect(function(Dt)
 		if Mounted() then
-			Spinner.Rotation = (os.clock() - Started) * 180
+			Elapsed += Dt
+			Spinner.Rotation = Elapsed * 180
 		end
 	end))
 
