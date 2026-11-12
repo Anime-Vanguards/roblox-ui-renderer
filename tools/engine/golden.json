@@ -1081,7 +1081,19 @@
 			"status": "ok"
 		},
 		"fast/edit/viewport-models": {
-			"digest": "94e646598e1579a3bacd20c83be5e3f827716215db8b225e26ae3544f5f09b72",
+			"digest": "f613e278739729b275a751d72cffcd00f8fe270abd254a85a3615203ad039724",
+			"status": "ok"
+		},
+		"fast/edit/viewport-probe-fade": {
+			"digest": "db09ee4a7966f10437756cd45d4dd54d9024b7caf3d76d556056e1f1832945d2",
+			"status": "ok"
+		},
+		"fast/edit/viewport-probe-layer": {
+			"digest": "fac2f7592affdb27568dbf3e07395f11f8ff369771ea8cd0910e939b809cbb80",
+			"status": "ok"
+		},
+		"fast/edit/viewport-probe-materials": {
+			"digest": "9e8e001e1bd2cb83b2dac82c44bfebb7adfa2e78b3792012c74cb77da50159b2",
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
@@ -2177,7 +2189,19 @@
 			"status": "ok"
 		},
 		"fixtures/edit/viewport-models": {
-			"digest": "fb464fcba68d05db30ced03a704bb21cbf815d03c1ab12ba9bece4dfd9a2e5e3",
+			"digest": "cc24b126d0adfaa695eff01b03ebf5dfb7021423714e1c6d57a5f02b85e160cd",
+			"status": "ok"
+		},
+		"fixtures/edit/viewport-probe-fade": {
+			"digest": "2194cfedad30aa8ae9d8cded94b0e5c533f84bf689b5979ac332f2748b97257a",
+			"status": "ok"
+		},
+		"fixtures/edit/viewport-probe-layer": {
+			"digest": "5811f7ed212cb9ffbcc9cc7e1b4d5a607a7e38c5db03691b4cd8b832ab21793c",
+			"status": "ok"
+		},
+		"fixtures/edit/viewport-probe-materials": {
+			"digest": "97909133bc08f217ac718cd3d37aa47f80e1aea35e38001541a2feb97328100e",
 			"status": "ok"
 		},
 		"fixtures/play/anim-mount": {
@@ -3009,7 +3033,19 @@
 			"status": "ok"
 		},
 		"fixtures/play/viewport-models": {
-			"digest": "f46b175efa5dab23222de4fe4c4b5fb92d147138f199b2cc394eb2bdac624fdd",
+			"digest": "4d2d63627f060fa2417b98316251b917d879bf9fc046360e2463421f088e046b",
+			"status": "ok"
+		},
+		"fixtures/play/viewport-probe-fade": {
+			"digest": "71144271e44c9bc2ad3f11ae0fcd03f82b663c2cc446ea9f7b674317cc40ae43",
+			"status": "ok"
+		},
+		"fixtures/play/viewport-probe-layer": {
+			"digest": "38f6018011721b090ae12cd88ba4ea4c4230771b55bd339ad1e17ee8e6ba564e",
+			"status": "ok"
+		},
+		"fixtures/play/viewport-probe-materials": {
+			"digest": "a3d26c8a900b942a07008674203eb2484c3e8bdbc9023211c05c31c65a0ab5b3",
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
@@ -3253,7 +3289,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T22:39:11.797Z",
+	"recorded": "2026-11-12T23:07:18.990Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
