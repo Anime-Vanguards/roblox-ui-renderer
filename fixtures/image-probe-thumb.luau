@@ -1,7 +1,9 @@
--- Thumbnail probe: which texture Studio draws for an rbxthumb:// headshot. a bracket list's and a row list's avatar
--- headshots (rbxthumb AvatarHeadShot w=60 / w=150) differ from our thumbnails.roblox.com PNGs all over the face.
--- Here the same thumbnails are drawn Pixelated and large (every texel a visible block, to count the texture's
--- size and compare texels), and at the stories' sizes with the default filter.
+-- Thumbnail-sized textures drawn as the stories draw avatar headshots: Pixelated and large (every texel a
+-- visible block, to count the texture's size and compare texels), and at the stories' sizes with the default
+-- filter. The textures are Studio's own, 60 x 60 and 128 x 128: a live rbxthumb:// headshot is not compared,
+-- because the thumbnail service re-renders avatars and hands out renditions of different ages by size (Studio
+-- drew a 150 x 150 headshot 6.5 levels brighter than the 150 x 150 file the service returned on the same day:
+-- notes/images.md, "image-probe-thumb"), so its pixels are no measure of the renderer.
 -- compare: --viewport 1200x900 --time 2 --background 30,30,30
 -- analysis: python tools/analysis/image_thumb.py image-probe-thumb
 return function(Target)
@@ -19,12 +21,12 @@ return function(Target)
 		return Label
 	end
 
-	local Head60 = "rbxthumb://type=AvatarHeadShot&id=156&w=60&h=60"
-	local Head150 = "rbxthumb://type=AvatarHeadShot&id=1&w=150&h=150"
-	Image("Pix60", Head60, 10, 10, 420, Enum.ResamplerMode.Pixelated)
-	Image("Pix150", Head150, 440, 10, 450, Enum.ResamplerMode.Pixelated)
-	-- The stories' sizes, default filter: the bracket list's Fit 32 x 32 of the w=60 thumbnail, the rows' 31 x 31 of w=150
-	Image("Story60", Head60, 920, 20, 32, nil, Enum.ScaleType.Fit)
-	Image("Story150", Head150, 980, 20, 31)
-	Image("Big60", Head60, 920, 80, 240)
+	local Small = "rbxasset://textures/ui/Settings/Help/BButtonDark.png" -- 60 x 60
+	local Large = "rbxasset://textures/explosion.png" -- 128 x 128
+	Image("Pix60", Small, 10, 10, 420, Enum.ResamplerMode.Pixelated)
+	Image("Pix128", Large, 440, 10, 448, Enum.ResamplerMode.Pixelated)
+	-- The stories' sizes, default filter: a bracket list's Fit 32 x 32 of its 60 px headshot, a row's 31 x 31
+	Image("Story60", Small, 920, 20, 32, nil, Enum.ScaleType.Fit)
+	Image("Story128", Large, 980, 20, 31)
+	Image("Big60", Small, 920, 80, 240)
 end
