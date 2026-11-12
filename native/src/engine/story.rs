@@ -118,6 +118,17 @@ pub fn mount_project(lua: &Lua, engine: &Rc<Engine>, spec: &ProjectSpec, started
         engine.state.borrow_mut().project.client_gui_mount = Some(function);
     }
 
+    // The place's material generation (MaterialService.Use2022Materials, which scripts cannot read): the
+    // root's rur.json `use2022Materials`. Without it the DataModel has none, as a place saved without it,
+    // where Studio 0.747 draws the pre-2022 materials (ViewportFrames read it: export/viewport.rs).
+    if let Some(Json::Bool(on)) = project::project_setting(&spec.roots, "use2022Materials") {
+        let game = engine.world().game;
+        if let (Ok(service), Some(name)) = (services::get_service(engine, game, "MaterialService"), engine.reflection.name_id("Use2022MaterialsXml")) {
+            let mut state = engine.state.borrow_mut();
+            super::instance::raw_set_silent(&mut state, &engine.reflection, service, name, Value::Bool(on));
+        }
+    }
+
     let core = mounting.finish(engine, &core)?;
     Ok(Project { host, hierarchy: core.hierarchy, mount_time: core.mount_time, started: core.started, plugin_widgets })
 }

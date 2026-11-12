@@ -245,6 +245,19 @@ mod tests {
     }
 }
 
+/// Whether a ViewportFrame's fill is drawn as part of its image: Studio draws the frame's world into a target
+/// cleared to its background and draws that target as the frame's image, so ImageColor3, ImageTransparency,
+/// a UIGradient, a UICorner and Rotation apply to the fill and the picture as one layer, the picture replacing
+/// the fill where it covers it; the border is drawn apart, untinted and unfaded (Studio 0.747,
+/// fixtures/viewport-probe-fade.luau and viewport-probe-layer.luau). The client lays the picture over the
+/// snapshot's `background` (cli/viewports.mjs); without a picture the fill is drawn as a Frame's.
+pub(crate) fn viewport_layer(node: &Value, assets: &crate::assets::AssetStore) -> bool {
+    node["viewport"]["background"].is_object()
+        && node["image"]["uri"]
+            .as_str()
+            .is_some_and(|uri| uri.starts_with("rur-viewport://") && assets.image(uri).is_some())
+}
+
 pub(crate) struct BuildContext {
     pub origin: [f64; 2],
     pub width: u32,
@@ -1578,11 +1591,14 @@ impl DrawPreparer {
             if !in_group {
                 self.group_shadows(ctx, node, scene, assets)?;
             }
-            match &moved {
-                Some(moved) => {
-                    self.background(ctx, moved, physical_rect(moved, self.scale), radii, in_group)?
+            // A ViewportFrame's picture holds its fill (viewport_layer); its border is drawn over it ("over")
+            if !viewport_layer(node, assets) {
+                match &moved {
+                    Some(moved) => {
+                        self.background_part(ctx, moved, physical_rect(moved, self.scale), radii, in_group, None)?
+                    }
+                    None => self.background_part(ctx, node, physical, radii, in_group, None)?,
                 }
-                None => self.background(ctx, node, physical, radii, in_group)?,
             }
         }
         if parts == "all" || parts == "image" {
@@ -1654,6 +1670,16 @@ impl DrawPreparer {
             self.stats.images_ms += image_started.elapsed().as_secs_f64() * 1000.;
         }
         if parts == "all" || parts == "over" {
+            // A ViewportFrame's border lies over its picture: an Inset border is not covered by it (Studio
+            // 0.747, fixtures/viewport-probe-layer.luau)
+            if viewport_layer(node, assets) {
+                match &moved {
+                    Some(moved) => {
+                        self.background_part(ctx, moved, physical_rect(moved, self.scale), radii, in_group, Some(1.))?
+                    }
+                    None => self.background_part(ctx, node, physical, radii, in_group, Some(1.))?,
+                }
+            }
             if node["text"].is_object() {
                 let text_started = Instant::now();
                 let _text_scope = crate::microprofile::scope("Text");
@@ -2100,20 +2126,25 @@ impl DrawPreparer {
         }
         self.emit(ctx, start, DrawBatch::default());
     }
-    fn background(
+    /// `ring`: the border alone (a ViewportFrame whose picture holds its fill, viewport_layer)
+    fn background_part(
         &mut self,
         ctx: &mut BuildContext,
         node: &Value,
         p: PhysicalRect,
         radii: [f64; 4],
         in_group: bool,
+        ring: Option<f64>,
     ) -> Result<(), DrawError> {
         let start = Instant::now();
         let _scope = crate::microprofile::scope("Background");
         if node["bg"].is_object() {
             self.stats.backgrounds += 1;
         }
-        let result = self.background_inner(ctx, node, p, radii, in_group, None);
+        if ring.is_some() && (in_group || number(&node["border"]["size"], 0.) <= 0.) {
+            return Ok(());
+        }
+        let result = self.background_inner(ctx, node, p, radii, in_group, ring);
         self.stats.background_ms += start.elapsed().as_secs_f64() * 1000.;
         result
     }

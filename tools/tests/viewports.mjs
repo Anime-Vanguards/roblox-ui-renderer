@@ -29,7 +29,9 @@ try {
 	const pixels = PNG.sync.read(fs.readFileSync(direct.file));
 	assert.deepEqual(PNG.sync.read(fs.readFileSync(world.file)).data, pixels.data, "WorldModel and direct model geometry match");
 	assert(pixels.data.filter((value, index) => index % 4 === 3 && value > 0).length > 1000, "model is actually visible");
-	assert.equal(pixels.data[3], 0, "background is transparent");
+	// the worker draws the world over the frame's fill (BackgroundColor3 30, 36, 50), as Studio's target holds it
+	assert.deepEqual([...pixels.data.subarray(0, 4)], [30, 36, 50, 255], "the frame's fill where nothing covers it");
+	assert.equal(pixels.width, 240, "the frame's logical size");
 	const preserved = path.join(directory, "saved.png");
 	fs.linkSync(direct.file, preserved);
 	const saved = fs.readFileSync(preserved);
@@ -62,7 +64,7 @@ try {
 	} finally {
 		next.close();
 	}
-	console.log("Viewports: direct/WorldModel parity, camera updates, transparency, bounded storage, saved-image isolation, cleanup and persisted images passed.");
+	console.log("Viewports: direct/WorldModel parity, camera updates, the fill, bounded storage, saved-image isolation, cleanup and persisted images passed.");
 } finally {
 	worker.close();
 	if (previousState === undefined) delete process.env.RUR_STATE_DIR;

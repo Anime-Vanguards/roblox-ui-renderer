@@ -1082,6 +1082,8 @@ fn has_part(node: &Value, in_group: bool, over: bool) -> bool {
             || node["caret"].is_object()
             || (!in_group && !array(&node["strokes"]).is_empty())
             || (!in_group && array(&node["shadows"]).iter().any(|shadow| shadow["inset"] == true))
+            // a ViewportFrame's border, over its picture (scene_draw.rs viewport_layer)
+            || (!in_group && node["viewport"]["background"].is_object() && number(&node["border"]["size"], 0.0) > 0.0)
     } else {
         (!in_group && !array(&node["shadows"]).is_empty())
             || (node["bg"].is_object()

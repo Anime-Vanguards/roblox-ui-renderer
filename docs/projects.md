@@ -52,6 +52,7 @@ The engine reads these per root, as `{ "<key>": { "<root folder name>": value } 
 |---|---|
 | `placeIds` | `game.PlaceId` for stories mounted from that root (`--place-id` overrides it) |
 | `streamingTargetRadius` | makes the place streaming-enabled with that radius |
+| `use2022Materials` | `true` when the place uses the 2022 materials (MaterialService.Use2022Materials, which scripts cannot read); without it the place has the pre-2022 materials, as a place saved without the property does in Studio. ViewportFrames draw their parts with the place's materials |
 | `clientGui` | the dot-separated path of a ModuleScript whose `Mount()` builds the client's own PlayerGui, run once when an edit-mode story first reaches the PlayerGui |
 
 And this one for the whole project:

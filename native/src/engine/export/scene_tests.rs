@@ -904,3 +904,48 @@ fn path2d_legacy_rotation_clipping_has_no_clip() {
     run(Options { clips_descendants_supports_rotation: false, ..options(600.0, 500.0, 1.0) }, PATH2D, &[("Modern", false)]);
 }
 
+
+fn viewport_snapshots(roots: Option<&std::path::Path>) -> Vec<Json> {
+    let out = std::env::temp_dir().join(format!("rur-viewport-snapshot-{}.json", std::process::id()));
+    let fixture = crate::engine::default_repo().join("fixtures/viewport-models.luau");
+    let mut args: Vec<String> = ["--fixture", &fixture.to_string_lossy(), "--viewport", "820x360", "--scale", "1.5", "--time", "0", "--dump-scene", &out.to_string_lossy()]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    if let Some(root) = roots {
+        args.extend(["--roots".to_string(), root.to_string_lossy().into_owned()]);
+    }
+    let parsed = crate::engine::cli::parse(&args).expect("args");
+    assert_eq!(crate::engine::cli::run(parsed).expect("render"), 0);
+    let scene: Json = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    let _ = std::fs::remove_file(&out);
+    scene["nodes"].as_array().unwrap().iter().filter_map(|node| node.get("viewport").cloned()).collect()
+}
+
+/// A ViewportFrame's snapshot asks for its picture at the frame's logical size whatever the device scale
+/// (Studio stretches a picture of that size over the frame), carries the frame's fill the picture is laid
+/// over, and the DataModel's MaterialService: without rur.json `use2022Materials` the place has the
+/// pre-2022 materials, as a place saved without the property does in Studio 0.747.
+#[test]
+fn viewport_snapshot_is_logical_size_over_its_fill_with_the_places_materials() {
+    let project = std::env::temp_dir().join(format!("rur-viewport-materials-{}", std::process::id()));
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("rur.json"), "{}").unwrap();
+    let snapshots = viewport_snapshots(Some(&project.join("src")));
+    assert_eq!(snapshots.len(), 3);
+    for snapshot in &snapshots {
+        assert_eq!((snapshot["width"].as_u64(), snapshot["height"].as_u64()), (Some(240), Some(280)), "the frame's logical size at 1.5x");
+        let colour: Vec<f64> = snapshot["background"]["color"].as_array().unwrap().iter().map(|v| (v.as_f64().unwrap() * 255.0).round()).collect();
+        assert_eq!(colour, [30.0, 36.0, 50.0]);
+        assert_eq!(snapshot["background"]["transparency"].as_f64(), Some(0.0));
+        let instances = snapshot["instances"].as_array().unwrap();
+        assert_eq!(instances[0]["class"], "ViewportFrame", "the frame is the snapshot's first instance");
+        let service = instances.iter().find(|i| i["class"] == "MaterialService").expect("the place's MaterialService");
+        assert_eq!((service["parent"].as_u64(), &service["properties"]["Use2022MaterialsXml"]), (Some(0), &serde_json::json!({ "Bool": false })));
+    }
+    std::fs::write(project.join("rur.json"), r#"{ "use2022Materials": { "src": true } }"#).unwrap();
+    let snapshots = viewport_snapshots(Some(&project.join("src")));
+    let _ = std::fs::remove_dir_all(&project);
+    let service = snapshots[0]["instances"].as_array().unwrap().iter().find(|i| i["class"] == "MaterialService").unwrap().clone();
+    assert_eq!(service["properties"]["Use2022MaterialsXml"], serde_json::json!({ "Bool": true }), "rur.json use2022Materials");
+}

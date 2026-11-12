@@ -30,6 +30,7 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/places.mjs"]],
 		[process.execPath, ["tools/tests/compare_unstable.mjs"]],
 		[process.execPath, ["tools/tests/compare_reports.mjs"]],
+		[process.execPath, ["tools/tests/viewport_layer.mjs"]],
 		[process.execPath, ["tools/tests/examples.mjs"]],
 	];
 	// The checks are independent (each writes its own out/ directory): they run concurrently and each

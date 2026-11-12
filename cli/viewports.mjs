@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { createHash } from "node:crypto";
+import { PNG } from "pngjs";
 import { ROOT, stateDir } from "./paths.mjs";
 
 function executable() {
@@ -13,6 +14,50 @@ function executable() {
 	const sibling = path.resolve(ROOT, "../roblox-object-renderer/target/release", process.platform === "win32" ? "ror.exe" : "ror");
 	if (fs.existsSync(sibling)) return sibling;
 	throw new Error("ViewportFrames need a 3D viewport worker: set RUR_VIEWPORT_WORKER to an executable with a viewport-worker command (docs/viewports.md), or build the roblox-object-renderer checkout beside this one.");
+}
+
+// Studio draws a ViewportFrame's world into a target cleared to the frame's background and draws that target
+// as the frame's image: the background (at BackgroundTransparency) and the picture are one layer, the picture
+// replacing the background where it covers it, and ImageColor3, ImageTransparency, a UIGradient, a UICorner and
+// Rotation apply to that layer; the border and a UIStroke are drawn apart, untouched (Studio 0.747,
+// fixtures/viewport-probe-fade.luau: 12 cells within half a level of this model). The worker's picture is
+// drawn over the frame's fill (the snapshot's `background`, the node's `bg`), so the renderer draws the fill
+// as part of the frame's image (native render/scene_draw.rs `viewport_layer`). The worker clears its target to
+// the fill and replies `background: true`: Studio's target averages its samples' colours as they are, so a
+// part's edge holds the fill's colour at full strength whatever its opacity (a dark fringe even at
+// BackgroundTransparency 1, viewport-probe-fade's half and fully transparent cells) and is clipped after the
+// mean. A worker that returns a transparent picture has it laid over the fill here: a texel the world covers
+// in part (coverage c, the picture's alpha) takes W c + B (1 - c) at alpha c + b (1 - c).
+// Bytes as rur's: colour floor(c * 256), alpha floor((1 - t) * 256); straight alpha out.
+const LAYER = "layer3";
+
+function byte(value) {
+	return Math.max(0, Math.min(255, Math.floor(value * 256)));
+}
+
+export function viewportBackground(viewport) {
+	const background = viewport?.background;
+	if (!background) return null;
+	return { colour: (background.color ?? [1, 1, 1]).map(byte), alpha: byte(1 - Number(background.transparency ?? 0)) };
+}
+
+// The picture in `file` over `background`, written in place (beside it, then renamed)
+export function layViewportBackground(file, background) {
+	if (!background) return;
+	const png = PNG.sync.read(fs.readFileSync(file));
+	const data = png.data;
+	const b = background.alpha / 255;
+	for (let i = 0; i < data.length; i += 4) {
+		const a = data[i + 3] / 255;
+		if (a === 1) continue;
+		for (let c = 0; c < 3; c++) {
+			data[i + c] = Math.round(data[i + c] * a + background.colour[c] * (1 - a));
+		}
+		data[i + 3] = Math.round((a + b * (1 - a)) * 255);
+	}
+	const partial = `${file}.${process.pid}.layer.tmp`;
+	fs.writeFileSync(partial, PNG.sync.write(png));
+	fs.renameSync(partial, file);
 }
 
 // One-shot renders (the render pipeline's resolver asks with `persist`) keep each snapshot's image under
@@ -111,7 +156,7 @@ export class ViewportWorker {
 		if (persist) {
 			this.stamp ??= workerStamp();
 			const directory = path.join(stateDir(), "viewports-persisted");
-			persisted = path.join(directory, `${createHash("sha256").update(`${key}\0${this.stamp}`).digest("hex")}.png`);
+			persisted = path.join(directory, `${createHash("sha256").update(`${key}\0${this.stamp}\0${LAYER}`).digest("hex")}.png`);
 			if (fs.existsSync(persisted)) {
 				const now = new Date();
 				try { fs.utimesSync(persisted, now, now); } catch { /* another process is replacing it */ }
@@ -127,6 +172,8 @@ export class ViewportWorker {
 		let result = { file };
 		if (this.snapshots.get(slot) !== key || !fs.existsSync(file)) {
 			result = await this.request({ viewport, out: file });
+			// A worker that drew the picture over the snapshot's background says so; for one that did not
+			if (!result.background) layViewportBackground(file, viewportBackground(viewport));
 			this.snapshots.set(slot, key);
 		}
 		if (!persisted) return result;
