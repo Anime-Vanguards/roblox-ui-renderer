@@ -3,9 +3,10 @@
 //
 // - CreateProcess with STARTUPINFO.wShowWindow = SW_SHOWNOACTIVATE: the splash and the main window open without
 //   becoming the foreground window.
-// - The main window is moved fully off the visible desktop (above the primary monitor, so it keeps that monitor's
-//   display scale) at the bottom of the z-order, without activation. Studio keeps rendering there and PrintWindow
-//   captures it at the right scale. (A desktop of its own, CreateDesktop, keeps windows out of focus entirely, but
+// - The main window is moved above the primary monitor (so it keeps that monitor's display scale) with only its
+//   bottom VISIBLE_STRIP pixels on screen, at the bottom of the z-order, without activation. A window entirely off
+//   the monitors still renders, but Windows stops composing it, and PrintWindow then returned the frame before
+//   the last mount in 5 of 16 captures; with a 4 px strip on screen, 0 of 16. (A desktop of its own, CreateDesktop, keeps windows out of focus entirely, but
 //   Studio's viewport is not drawn there: every capture came out empty.)
 // - Studio draws its own cursor at the viewport's centre until the mouse has been over the viewport; a posted
 //   WM_MOUSEMOVE (no real input, the cursor does not move) puts it in the viewport's bottom-right corner.
@@ -101,13 +102,14 @@ public static class StudioLaunch
 		return found;
 	}
 
-	// Moves the window fully above the virtual screen, in line with the primary monitor (whose display scale it
-	// keeps), at the bottom of the z-order, without activating it. Returns its new rectangle.
+	public const int VISIBLE_STRIP = 4;
+
+	// Moves the window above the primary monitor (whose display scale it keeps; the primary's top-left is 0,0) with
+	// VISIBLE_STRIP pixels on screen, at the bottom of the z-order, without activating it. Returns its rectangle.
 	public static string Hide(IntPtr h, int width, int height)
 	{
 		if (IsZoomed(h) || IsIconic(h)) ShowWindow(h, SW_SHOWNOACTIVATE);
-		int virtualTop = GetSystemMetrics(77); // SM_YVIRTUALSCREEN
-		int y = virtualTop - height - 200;
+		int y = VISIBLE_STRIP - height;
 		SetWindowPos(h, HWND_BOTTOM, 0, y, width, height, SWP_NOACTIVATE);
 		RECT r;
 		GetWindowRect(h, out r);

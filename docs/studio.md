@@ -38,8 +38,9 @@ node tools/studio/launch.mjs --place <file.rbxl>      # prints the process id
 node tools/studio/launch.mjs --close <pid>             # when the batch is done
 ```
 
-It starts Studio without activating it (`SW_SHOWNOACTIVATE`), moves its main window off the visible desktop, above
-the primary monitor, where it keeps that monitor's display scale and still renders and captures, and for
+It starts Studio without activating it (`SW_SHOWNOACTIVATE`), moves its main window above the primary monitor
+with a 4 px strip on screen, at the bottom of the z-order (it keeps that monitor's display scale; a window
+entirely off screen is not composed by Windows, and 5 of 16 captures there showed the previous mount), and for
 `--guard-seconds` (45) puts back any Studio window that takes the foreground (a login or recovery dialog). It
 also moves Studio's drawn cursor out of the way: until the mouse has been over the viewport, Studio draws it at
 the viewport's centre, inside the compared area (`--park <pid>` does that again). Options: `--version` (the

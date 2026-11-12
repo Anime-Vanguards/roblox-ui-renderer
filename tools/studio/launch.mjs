@@ -7,8 +7,8 @@
 //   node tools/studio/launch.mjs --close <pid>      stop that Studio (no save prompt)
 //   node tools/studio/launch.mjs --park <pid>       move Studio's drawn cursor to the viewport's corner again
 //
-// The window opens without activation, is moved off the visible desktop (above the primary monitor, at its display
-// scale, where it still renders and captures) and a guard puts back any window of it that takes the foreground
+// The window opens without activation, is moved above the primary monitor with only a 4 px strip on screen (at the
+// monitor's display scale; a window entirely off screen is not composed and captures come out stale) and a guard puts back any window of it that takes the foreground
 // for --guard-seconds. --scale 1 starts it at display scale 1 whatever the monitor (Qt's per-process scale
 // variables; moving a running Studio between monitors of different scales breaks its viewport size). --on-screen
 // leaves the window where Studio puts it (still opened without activation and guarded).
