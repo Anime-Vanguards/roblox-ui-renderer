@@ -1968,37 +1968,58 @@ fn erf(x: f64) -> f64 {
             * (-x * x).exp();
     if x < 0.0 { -y } else { y }
 }
-/// Texels a text size in a glow field (glyphs.rs glow_field_ppem: the master is the glyph at TextSize 56)
-const GLOW_FIELD_TEXELS: f64 = 56.0;
 /// The largest half-width of a glow's window in the field's 0..1: 0.45 (22.5 texels, the 0.405 of a text size
 /// that round 1 read as the field's reach). Measured on fixtures/shadow-probe-field-l2 to -l4 (an "L" at 16 px a
 /// texel, w from 0.12 to 2.24): the window's ends fitted at 0.05 and 0.95 for every w past 0.45.
 const GLOW_WINDOW_CAP: f64 = 0.45;
-/// The glow's strength by its window's half-width w (W / 50 texels), measured on the same probes (a
-/// least-squares amplitude per w with the window capped, 0.3 to 0.4 levels rms); between the measured w it is
-/// interpolated, past the last it follows smoothstep(0.45 / w), which the last two match. Not derived: the
+/// The glow's strength by w = 2 x BlurRadius / 50 texels (device px), measured on the same probes and on
+/// shadow-probe-text4 (two glyph sizes and both device scales agree to 0.005 at a shared w); between the measured w it is
+/// interpolated, past the last it falls as smoothstep(0.45 / w), which the last ones approach. Not derived: the
 /// texture's clamping does not explain it (notes/images.md).
 fn glow_strength(w: f64) -> f64 {
-    const MEASURED: [(f64, f64); 12] = [
-        (0.124, 1.0),
+    // (the median of Studio / the renderer on each cell's bright pixels, times the strength it drew with, on
+    // shadow-probe-text4 at 1.5x and 1x, two text sizes; the ends from shadow-probe-field-l2 to -l4)
+    const MEASURED: [(f64, f64); 28] = [
+        (0.124, 1.0000),
+        (0.224, 0.9992),
         (0.249, 0.9883),
-        (0.299, 0.9693),
-        (0.398, 0.9066),
-        (0.423, 0.8834),
-        (0.448, 0.8615),
-        (0.498, 0.8151),
-        (0.597, 0.7172),
-        (0.796, 0.5434),
-        (0.996, 0.4093),
-        (1.493, 0.2188),
+        (0.299, 0.9768),
+        (0.336, 0.9543),
+        (0.373, 0.9288),
+        (0.411, 0.8948),
+        (0.448, 0.8657),
+        (0.485, 0.8269),
+        (0.523, 0.7938),
+        (0.560, 0.7518),
+        (0.597, 0.7194),
+        (0.616, 0.7036),
+        (0.672, 0.6488),
+        (0.728, 0.6010),
+        (0.747, 0.5855),
+        (0.784, 0.5557),
+        (0.896, 0.4718),
+        (1.008, 0.4034),
+        (1.045, 0.3852),
+        (1.120, 0.3445),
+        (1.195, 0.3121),
+        (1.344, 0.2583),
+        (1.493, 0.2187),
+        (1.568, 0.1991),
+        (1.792, 0.1550),
         (2.240, 0.1051),
+        (3.360, 0.0465),
     ];
     if w <= MEASURED[0].0 {
         return 1.0;
     }
-    if w >= MEASURED[MEASURED.len() - 1].0 {
-        let t = (GLOW_WINDOW_CAP / w).clamp(0.0, 1.0);
-        return t * t * (3.0 - 2.0 * t);
+    let (last_w, last) = MEASURED[MEASURED.len() - 1];
+    if w >= last_w {
+        // smoothstep(0.45 / w), carried on from the last measured point
+        let tail = |w: f64| {
+            let t = (GLOW_WINDOW_CAP / w).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        return last * tail(w) / tail(last_w);
     }
     let i = MEASURED.iter().position(|(x, _)| *x > w).unwrap_or(MEASURED.len() - 1);
     let ((x0, y0), (x1, y1)) = (MEASURED[i - 1], MEASURED[i]);
@@ -2030,7 +2051,6 @@ fn field_glow(
     }
     let runs = arr(&text["runs"]);
     let mut fields = Vec::new();
-    let mut size = 0.0f64;
     for p in placed.iter().filter(|p| p.shown) {
         let font = &fonts[p.font as usize];
         let master = crate::glyphs::glow_field_ppem(font);
@@ -2044,9 +2064,8 @@ fn field_glow(
         if !bitmap.layers.is_empty() {
             return Ok(None);
         }
-        let device_size = font_size(font, p.ppem) * p.scale;
-        size = size.max(device_size);
-        let k = device_size / GLOW_FIELD_TEXELS;
+        // Device px a texel: the text size / 56
+        let k = font_size(font, p.ppem) * p.scale / 56.0;
         fields.push(Field { x0: p.x + bitmap.left as f64 * k, y0: p.baseline - bitmap.top as f64 * k, k, bitmap });
     }
     if fields.is_empty() {
@@ -2849,8 +2868,9 @@ mod tests {
         assert!(text_shadow_gain(0.5) > 0.995);
         // The field glow's strength by its window (shadow-probe-field-l2 to -l4)
         assert_eq!(glow_strength(0.05), 1.0);
-        assert!((glow_strength(0.498) - 0.8151).abs() < 1e-9);
-        assert!((glow_strength(3.0) - { let t: f64 = 0.15; t * t * (3.0 - 2.0 * t) }).abs() < 1e-9);
+        assert!((glow_strength(0.448) - 0.8657).abs() < 1e-9);
+        let tail = |t: f64| t * t * (3.0 - 2.0 * t);
+        assert!((glow_strength(4.5) - 0.0465 * tail(0.1) / tail(0.45 / 3.36)).abs() < 1e-9);
         let mut last = 1.0;
         for step in 1..400 {
             let strength = glow_strength(step as f64 * 0.01);

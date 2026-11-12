@@ -328,10 +328,8 @@ pub fn unhinted_style(style: Option<&str>) -> String {
 /// The style token of a glyph's glow field: the 8-bit distance field Studio draws a text shadow's glow from
 /// (render/text.rs text_shadow), rasterized at the field's master size (glow_field_ppem), 56 texels a text size
 pub const FIELD: &str = "f";
-/// The texels a glow field reaches past the glyph's ink: its bytes saturate 25.5 texels from the edge
+/// The texels a glow field reaches past the glyph's ink (its bytes saturate 25 texels from the edge)
 pub const FIELD_PAD: i32 = 26;
-/// The oversampling of the raster a glow field is measured on
-pub const FIELD_OVERSAMPLE: u32 = 8;
 /// `style` with the field token
 pub fn field_style(style: Option<&str>) -> String {
     match style.filter(|style| !style.is_empty()) {
@@ -346,109 +344,107 @@ pub fn glow_field_ppem(font: &Value) -> f64 {
     let upem = font.get("unitsPerEm").and_then(Value::as_f64).unwrap_or(1.0);
     57.0 * upem / crate::render::text::size_units(font)
 }
-/// A glow field's bytes from the glyph's coverage at FIELD_OVERSAMPLE x its ppem: the signed Euclidean distance
-/// (inside positive) between the centres of the raster's inside and outside pixels, the mean of the four fine
-/// pixels around each texel's centre, as floor(128 + 5 d) with d in texels. The texels lie on whole texels from
-/// the glyph's origin, FIELD_PAD of them past its ink.
-pub fn glow_field(fine: &GlyphBitmap) -> GlyphBitmap {
-    let n = FIELD_OVERSAMPLE as i32;
-    if fine.width == 0 || fine.rows == 0 {
+/// The neighbours a field's seeds are looked for at, (row, column) steps in this order (a tie keeps the first)
+const FIELD_NEIGHBOURS: [(i32, i32); 8] = [(0, 1), (1, 0), (1, 1), (1, -1), (0, -1), (-1, 0), (-1, -1), (-1, 1)];
+/// A glow field's bytes from the glyph's unhinted coverage at the master size, Studio 0.747's texture: the texels
+/// are the coverage's pixels (the glyph's origin on a texel corner) with FIELD_PAD more on every side. A pixel is
+/// inside when its coverage is at least 0.5. Each pixel next to one of the other kind (8 neighbours) is seeded
+/// with the nearest point where the coverage, linearly interpolated towards that neighbour, crosses 0.5; the
+/// seeds spread by two 8SSEDT sweeps (each pixel keeps the nearest point a neighbour holds); the byte is
+/// floor(128 + 5.1 d), d the distance to the pixel's point, positive inside. Read back from Studio's glows
+/// (fixtures/shadow-probe-field-l, -o, -a): 882 of 882, 955 of 955 and 1163 of 1169 texels.
+pub fn glow_field(coverage: &GlyphBitmap) -> GlyphBitmap {
+    if coverage.width == 0 || coverage.rows == 0 {
         return GlyphBitmap { width: 0, rows: 0, left: 0, top: 0, coverage: Box::new([]), layers: Vec::new() };
     }
-    let (w8, h8) = (fine.width as i32, fine.rows as i32);
-    let left = fine.left.div_euclid(n) - FIELD_PAD;
-    let right = (fine.left + w8 + n - 1).div_euclid(n) + FIELD_PAD;
-    let top = (fine.top + n - 1).div_euclid(n) + FIELD_PAD;
-    let bottom = (fine.top - h8).div_euclid(n) - FIELD_PAD;
-    let (tw, th) = ((right - left) as usize, (top - bottom) as usize);
-    let (cw, ch) = (tw * n as usize, th * n as usize);
-    let (ox, oy) = ((fine.left - left * n) as usize, (top * n - fine.top) as usize);
-    let mut inside = vec![false; cw * ch];
-    for row in 0..h8 as usize {
-        for column in 0..w8 as usize {
-            if fine.coverage[row * w8 as usize + column] >= 128 {
-                inside[(oy + row) * cw + ox + column] = true;
-            }
+    let pad = FIELD_PAD as usize;
+    let (bw, bh) = (coverage.width as usize, coverage.rows as usize);
+    let (w, h) = (bw + 2 * pad, bh + 2 * pad);
+    let mut a = vec![0.0f64; w * h];
+    for row in 0..bh {
+        for column in 0..bw {
+            a[(row + pad) * w + column + pad] = coverage.coverage[row * bw + column] as f64 / 255.0;
         }
     }
-    let to_outside = squared_distances(&inside, cw, ch, false);
-    let to_inside = squared_distances(&inside, cw, ch, true);
-    let fine_d = |x: usize, y: usize| -> f64 {
-        let k = y * cw + x;
-        if inside[k] { to_outside[k].sqrt() } else { -to_inside[k].sqrt() }
-    };
-    let half = (n / 2) as usize;
-    let mut coverage = vec![0u8; tw * th];
-    for j in 0..th {
-        for i in 0..tw {
-            let (x, y) = (i * n as usize + half, j * n as usize + half);
-            let d = (fine_d(x - 1, y - 1) + fine_d(x, y - 1) + fine_d(x - 1, y) + fine_d(x, y)) / 4.0 / n as f64;
-            coverage[j * tw + i] = (128.0 + 5.0 * d).floor().clamp(0.0, 255.0) as u8;
-        }
-    }
-    GlyphBitmap { width: tw as u32, rows: th as u32, left, top, coverage: coverage.into(), layers: Vec::new() }
-}
-/// Squared Euclidean distance from each pixel to the nearest pixel whose `inside` is `target` (the exact
-/// transform of Felzenszwalb and Huttenlocher; such pixels themselves are 0)
-fn squared_distances(inside: &[bool], w: usize, h: usize, target: bool) -> Vec<f64> {
-    const FAR: f64 = 1e20;
-    let mut grid: Vec<f64> = inside.iter().map(|v| if *v == target { 0.0 } else { FAR }).collect();
-    let longest = w.max(h);
-    let (mut f, mut d, mut v, mut z) = (vec![0.0; longest], vec![0.0; longest], vec![0usize; longest], vec![0.0; longest + 1]);
-    for x in 0..w {
-        for y in 0..h {
-            f[y] = grid[y * w + x];
-        }
-        edt_line(&f[..h], &mut d[..h], &mut v, &mut z);
-        for y in 0..h {
-            grid[y * w + x] = d[y];
-        }
-    }
-    for y in 0..h {
-        f[..w].copy_from_slice(&grid[y * w..(y + 1) * w]);
-        edt_line(&f[..w], &mut d[..w], &mut v, &mut z);
-        grid[y * w..(y + 1) * w].copy_from_slice(&d[..w]);
-    }
-    grid
-}
-/// One line of the transform: d[q] = min over r of (q - r)^2 + f[r] (the lower envelope of parabolas)
-fn edt_line(f: &[f64], d: &mut [f64], v: &mut [usize], z: &mut [f64]) {
-    let n = f.len();
-    if n == 0 {
-        return;
-    }
-    let mut k = 0usize;
-    v[0] = 0;
-    z[0] = f64::NEG_INFINITY;
-    z[1] = f64::INFINITY;
-    for q in 1..n {
-        let qf = q as f64;
-        loop {
-            let r = v[k] as f64;
-            let s = ((f[q] + qf * qf) - (f[v[k]] + r * r)) / (2.0 * qf - 2.0 * r);
-            if s <= z[k] {
-                if k == 0 {
-                    v[0] = q;
-                    z[1] = f64::INFINITY;
-                    break;
+    let inside: Vec<bool> = a.iter().map(|v| *v >= 0.5).collect();
+    let mut point = vec![(f64::NAN, f64::NAN); w * h];
+    let mut distance = vec![f64::INFINITY; w * h];
+    for i in 0..h {
+        for j in 0..w {
+            let k = i * w + j;
+            for (di, dj) in FIELD_NEIGHBOURS {
+                let (ii, jj) = (i as i32 + di, j as i32 + dj);
+                if ii < 0 || jj < 0 || ii >= h as i32 || jj >= w as i32 {
+                    continue;
                 }
-                k -= 1;
-                continue;
+                let q = ii as usize * w + jj as usize;
+                if inside[k] == inside[q] {
+                    continue;
+                }
+                let t = (0.5 - a[k]) / (a[q] - a[k]);
+                let (x, y) = (j as f64 + dj as f64 * t, i as f64 + di as f64 * t);
+                let d = (x - j as f64).hypot(y - i as f64);
+                if d < distance[k] {
+                    distance[k] = d;
+                    point[k] = (x, y);
+                }
             }
-            k += 1;
-            v[k] = q;
-            z[k] = s;
-            z[k + 1] = f64::INFINITY;
-            break;
         }
     }
-    k = 0;
-    for q in 0..n {
-        while z[k + 1] < q as f64 {
-            k += 1;
+    let mut relax = |i: usize, j: usize, ni: i64, nj: i64, point: &mut Vec<(f64, f64)>, distance: &mut Vec<f64>| {
+        if ni < 0 || nj < 0 || ni >= h as i64 || nj >= w as i64 {
+            return;
         }
-        let r = v[k] as f64;
-        d[q] = (q as f64 - r) * (q as f64 - r) + f[v[k]];
+        let (x, y) = point[ni as usize * w + nj as usize];
+        if x.is_nan() {
+            return;
+        }
+        let d = (x - j as f64).hypot(y - i as f64);
+        let k = i * w + j;
+        if d < distance[k] {
+            distance[k] = d;
+            point[k] = (x, y);
+        }
+    };
+    for i in 0..h {
+        let ii = i as i64;
+        for j in 0..w {
+            let jj = j as i64;
+            relax(i, j, ii, jj - 1, &mut point, &mut distance);
+            relax(i, j, ii - 1, jj, &mut point, &mut distance);
+            relax(i, j, ii - 1, jj - 1, &mut point, &mut distance);
+            relax(i, j, ii - 1, jj + 1, &mut point, &mut distance);
+        }
+        for j in (0..w).rev() {
+            relax(i, j, ii, j as i64 + 1, &mut point, &mut distance);
+        }
+    }
+    for i in (0..h).rev() {
+        let ii = i as i64;
+        for j in (0..w).rev() {
+            let jj = j as i64;
+            relax(i, j, ii, jj + 1, &mut point, &mut distance);
+            relax(i, j, ii + 1, jj, &mut point, &mut distance);
+            relax(i, j, ii + 1, jj + 1, &mut point, &mut distance);
+            relax(i, j, ii + 1, jj - 1, &mut point, &mut distance);
+        }
+        for j in 0..w {
+            relax(i, j, ii, j as i64 - 1, &mut point, &mut distance);
+        }
+    }
+    let bytes: Vec<u8> = (0..w * h)
+        .map(|k| {
+            let d = if inside[k] { distance[k] } else { -distance[k] };
+            (128.0 + 5.1 * d).floor().clamp(0.0, 255.0) as u8
+        })
+        .collect();
+    GlyphBitmap {
+        width: w as u32,
+        rows: h as u32,
+        left: coverage.left - FIELD_PAD,
+        top: coverage.top + FIELD_PAD,
+        coverage: bytes.into(),
+        layers: Vec::new(),
     }
 }
 /// Whether a node draws a text shadow's glow (render/text.rs text_shadow)
@@ -793,10 +789,10 @@ impl Rasterizer {
         }
         let (join, bold, italic, quarter) = parse_style(style);
         if style.is_some_and(|style| style.split('+').any(|token| token == FIELD)) {
-            // A glow field: the unhinted glyph at FIELD_OVERSAMPLE x the ppem (its synthetic bold scaled alike)
-            let fine_bold = (bold > 0).then(|| format!("b{}", bold * FIELD_OVERSAMPLE as i64));
-            let fine = self.rasterize(file, ppem * FIELD_OVERSAMPLE as f64, glyph, 0.0, Some(&unhinted_style(fine_bold.as_deref())))?;
-            let bitmap = Arc::new(glow_field(&fine));
+            // A glow field: from the unhinted glyph at the field's own ppem (and synthetic bold)
+            let plain_bold = (bold > 0).then(|| format!("b{bold}"));
+            let coverage = self.rasterize(file, ppem, glyph, 0.0, Some(&unhinted_style(plain_bold.as_deref())))?;
+            let bitmap = Arc::new(glow_field(&coverage));
             self.bytes += bitmap.coverage.len();
             self.fonts.get_mut(file).unwrap().bitmaps.insert(key, bitmap.clone());
             return Ok(bitmap);
@@ -1232,20 +1228,26 @@ mod tests {
     /// hard text shadow and a frame shadow want nothing more
     #[test]
     fn a_glow_field_lies_on_whole_texels_from_the_origin() {
-        // A 2 x 2 texel square of ink at texels x 1..3, y 1..3 above the baseline, at 8 x 8 fine pixels a texel
-        let fine = GlyphBitmap { width: 16, rows: 16, left: 8, top: 24, coverage: vec![255u8; 256].into(), layers: Vec::new() };
-        let field = glow_field(&fine);
+        // A 2 x 2 pixel square of full coverage at x 1..3, y 1..3 above the baseline
+        let square = GlyphBitmap { width: 2, rows: 2, left: 1, top: 3, coverage: vec![255u8; 4].into(), layers: Vec::new() };
+        let field = glow_field(&square);
         assert_eq!((field.left, field.top), (1 - FIELD_PAD, 3 + FIELD_PAD));
         assert_eq!((field.width, field.rows), (2 + 2 * FIELD_PAD as u32, 2 + 2 * FIELD_PAD as u32));
         let at = |x: i32, y: i32| field.coverage[((field.top - 1 - y) * field.width as i32 + x - field.left) as usize];
-        // The square's four texels are alike and inside; the texel beside it is outside, the corner far out 0
-        let centre = at(1, 1);
-        assert!(centre > 128, "{centre}");
-        assert_eq!((at(2, 1), at(1, 2), at(2, 2)), (centre, centre, centre));
-        assert!(at(0, 1) < 128);
+        // The edge lies halfway between the last inside and the first outside pixel: 0.5 texel from each,
+        // floor(128 +/- 5.1 x 0.5); 4.5 texels out, floor(128 - 5.1 x 4.5)
+        assert_eq!(at(1, 1), 130);
+        assert_eq!((at(2, 1), at(1, 2), at(2, 2)), (130, 130, 130));
+        assert_eq!(at(0, 1), 125);
+        assert_eq!(at(-4, 1), 105);
         assert_eq!(at(field.left, field.top - 1), 0);
-        // Five bytes a texel along a side, from the edge
-        assert_eq!(at(-4, 1) as i32 - at(-5, 1) as i32, 5);
+        // Half coverage counts as inside, and a seed lies where the coverage crosses 0.5 towards a neighbour
+        let ramp = GlyphBitmap { width: 3, rows: 5, left: 0, top: 5, coverage: [255u8, 153, 51].repeat(5).into(), layers: Vec::new() };
+        let field = glow_field(&ramp);
+        let row = |x: i32| field.coverage[(FIELD_PAD as usize + 2) * field.width as usize + (x - field.left) as usize];
+        // (the middle row of a 5-row ramp) between 0.6 and 0.2 the crossing is 0.25 texel from the 0.6 pixel
+        assert_eq!(row(1), (128.0 + 5.1 * 0.25f64).floor() as u8);
+        assert_eq!(row(2), (128.0 - 5.1 * 0.75f64).floor() as u8);
     }
 
     #[test]
