@@ -1968,6 +1968,162 @@ fn erf(x: f64) -> f64 {
             * (-x * x).exp();
     if x < 0.0 { -y } else { y }
 }
+/// Texels a text size in a glow field (glyphs.rs glow_field_ppem: the master is the glyph at TextSize 56)
+const GLOW_FIELD_TEXELS: f64 = 56.0;
+/// The largest half-width of a glow's window in the field's 0..1: 0.45 (22.5 texels, the 0.405 of a text size
+/// that round 1 read as the field's reach). Measured on fixtures/shadow-probe-field-l2 to -l4 (an "L" at 16 px a
+/// texel, w from 0.12 to 2.24): the window's ends fitted at 0.05 and 0.95 for every w past 0.45.
+const GLOW_WINDOW_CAP: f64 = 0.45;
+/// The glow's strength by its window's half-width w (W / 50 texels), measured on the same probes (a
+/// least-squares amplitude per w with the window capped, 0.3 to 0.4 levels rms); between the measured w it is
+/// interpolated, past the last it follows smoothstep(0.45 / w), which the last two match. Not derived: the
+/// texture's clamping does not explain it (notes/images.md).
+fn glow_strength(w: f64) -> f64 {
+    const MEASURED: [(f64, f64); 12] = [
+        (0.124, 1.0),
+        (0.249, 0.9883),
+        (0.299, 0.9693),
+        (0.398, 0.9066),
+        (0.423, 0.8834),
+        (0.448, 0.8615),
+        (0.498, 0.8151),
+        (0.597, 0.7172),
+        (0.796, 0.5434),
+        (0.996, 0.4093),
+        (1.493, 0.2188),
+        (2.240, 0.1051),
+    ];
+    if w <= MEASURED[0].0 {
+        return 1.0;
+    }
+    if w >= MEASURED[MEASURED.len() - 1].0 {
+        let t = (GLOW_WINDOW_CAP / w).clamp(0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
+    }
+    let i = MEASURED.iter().position(|(x, _)| *x > w).unwrap_or(MEASURED.len() - 1);
+    let ((x0, y0), (x1, y1)) = (MEASURED[i - 1], MEASURED[i]);
+    y0 + (y1 - y0) * (w - x0) / (x1 - x0)
+}
+/// A text shadow's glow from each glyph's distance field (glyphs.rs glow_field), Studio 0.747: the field's
+/// texture drawn as a quad at the glyph's pen, the text size / 56 device px a texel, sampled bilinearly
+/// (8-bit weights). The texture's value f (0..1) stands for (f - 0.5) x 50 texels from the edge, inside
+/// positive (the field is stored at 5 bytes a texel, so a glow is 2 % narrower than its W); alpha is
+/// glow_strength(2 x BlurRadius / 50 texels) x the smoothstep of f over 0.5 -/+ min(w, GLOW_WINDOW_CAP), w = W / (50
+/// texels in device px).
+/// Glyphs over each other blend. None when a glyph has no field in the atlas or is a colour
+/// glyph (the coverage glow of text_shadow draws those).
+fn field_glow(
+    placed: &[Placement],
+    text: &Value,
+    fonts: &Value,
+    assets: &AssetStore,
+    rgb: [f64; 3],
+    opacity: f64,
+    width: f64,
+    scale: f64,
+) -> Result<Option<Vec<TextQuad>>, TextError> {
+    struct Field {
+        bitmap: GlyphBitmap,
+        x0: f64,
+        y0: f64,
+        k: f64,
+    }
+    let runs = arr(&text["runs"]);
+    let mut fields = Vec::new();
+    let mut size = 0.0f64;
+    for p in placed.iter().filter(|p| p.shown) {
+        let font = &fonts[p.font as usize];
+        let master = crate::glyphs::glow_field_ppem(font);
+        let run = p.run.and_then(|index| runs.get(index)).filter(|run| run.is_object());
+        let bold = crate::glyphs::text_bold_strength(text, run, font, master);
+        let style = crate::glyphs::field_style(crate::glyphs::text_glyph_style(None, bold, None).as_deref());
+        let Ok(bitmap) = glyph_bitmap_of(&[GlyphKey::new(p.font, master, p.glyph, 0.0, Some(&style))], assets) else {
+            return Ok(None);
+        };
+        let Some(bitmap) = bitmap else { continue };
+        if !bitmap.layers.is_empty() {
+            return Ok(None);
+        }
+        let device_size = font_size(font, p.ppem) * p.scale;
+        size = size.max(device_size);
+        let k = device_size / GLOW_FIELD_TEXELS;
+        fields.push(Field { x0: p.x + bitmap.left as f64 * k, y0: p.baseline - bitmap.top as f64 * k, k, bitmap });
+    }
+    if fields.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let bounds = fields.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, f| {
+        [
+            b[0].min(f.x0),
+            b[1].min(f.y0),
+            b[2].max(f.x0 + f.bitmap.w as f64 * f.k),
+            b[3].max(f.y0 + f.bitmap.h as f64 * f.k),
+        ]
+    });
+    let (lx, ly) = (bounds[0].floor(), bounds[1].floor());
+    let (lw, lh) = ((bounds[2].ceil() - lx) as usize, (bounds[3].ceil() - ly) as usize);
+    if lw == 0 || lh == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    if lw.checked_mul(lh).filter(|p| *p <= 64 * 1024 * 1024).is_none() {
+        return Err(TextError("text shadow exceeds allocation limit".into()));
+    }
+    let mut layer = vec![0.0f64; lw * lh * 4];
+    for f in &fields {
+        // The window of field values the glow ramps over, in the texture's units (0..1 for -25..25 texels):
+        // w = W / (50 texels) either side of the edge (0.5), at most GLOW_WINDOW_CAP; past that the glow keeps
+        // its shape and weakens (glow_strength)
+        let window = width / (f.k * 50.0);
+        let half = window.min(GLOW_WINDOW_CAP);
+        let low = 0.5 - half;
+        // (the strength goes by 2 x BlurRadius device px, which is W only at 1.5x: at 1x the window is W =
+        // 3 x BlurRadius wide and the strength that of 2 x BlurRadius, shadow-probe-field-l2 to -l4 at 1x)
+        let strength = glow_strength(width * scale / 1.5 / (f.k * 50.0));
+        let (w, h) = (f.bitmap.w as usize, f.bitmap.h as usize);
+        let texel = |i: usize, j: usize| f.bitmap.coverage[j.min(h - 1) * w + i.min(w - 1)] as f64;
+        let (x1, y1) = (f.x0 + w as f64 * f.k, f.y0 + h as f64 * f.k);
+        // The quad's pixels: centres inside it
+        let (first_x, last_x) = ((f.x0 - 0.5).ceil() as i64, (x1 - 0.5).ceil() as i64);
+        let (first_y, last_y) = ((f.y0 - 0.5).ceil() as i64, (y1 - 0.5).ceil() as i64);
+        for py in first_y..last_y {
+            for px in first_x..last_x {
+                let u = ((px as f64 + 0.5 - f.x0) / f.k - 0.5).clamp(0.0, (w - 1) as f64);
+                let v = ((py as f64 + 0.5 - f.y0) / f.k - 0.5).clamp(0.0, (h - 1) as f64);
+                let (i, j) = (u.floor() as usize, v.floor() as usize);
+                // (a GPU's filter weights have 8 bits)
+                let (su, sv) = (((u - i as f64) * 256.0 + 0.5).floor() / 256.0, ((v - j as f64) * 256.0 + 0.5).floor() / 256.0);
+                let top = texel(i, j) + (texel(i + 1, j) - texel(i, j)) * su;
+                let bottom = texel(i, j + 1) + (texel(i + 1, j + 1) - texel(i, j + 1)) * su;
+                let t = ((top + (bottom - top) * sv) / 255.0 - low) / (2.0 * half);
+                let t = t.clamp(0.0, 1.0);
+                let a = strength * t * t * (3.0 - 2.0 * t);
+                if a <= 0.0 {
+                    continue;
+                }
+                let (x, y) = (px - lx as i64, py - ly as i64);
+                if x < 0 || y < 0 || x >= lw as i64 || y >= lh as i64 {
+                    continue;
+                }
+                let k = (y as usize * lw + x as usize) * 4;
+                for c in 0..3 {
+                    layer[k + c] = rgb[c] * a + layer[k + c] * (1.0 - a);
+                }
+                layer[k + 3] = a + layer[k + 3] * (1.0 - a);
+            }
+        }
+    }
+    let mut rgba = vec![0u8; lw * lh * 4];
+    for k in (0..rgba.len()).step_by(4) {
+        let a = snap(layer[k + 3] * opacity * 255.0).clamp(0.0, 255.0);
+        if a > 0.0 {
+            for c in 0..3 {
+                rgba[k + c] = premul(snap(layer[k + c] / layer[k + 3]).min(255.0), a);
+            }
+            rgba[k + 3] = a as u8;
+        }
+    }
+    Ok(Some(vec![image(lx, ly, lw as f64, lh as f64, lw, lh, rgba, 1.0)]))
+}
 /// Signed distances (px, outside positive) to the edge of a coverage bitmap (0..255, `w` x `h`), over
 /// the bitmap padded by `pad` px on every side. An edge pixel's coverage places the edge within it.
 fn coverage_distances(coverage: &[f64], w: usize, h: usize, pad: usize) -> Vec<f64> {
@@ -2123,6 +2279,9 @@ pub fn text_shadow(
     // The glow's glyphs: the unhinted outlines at the text's pens (an atlas built before they were
     // wanted: the text's own bitmaps)
     let (placed, _) = placements(&plain["text"], fonts, node["matrix"].is_array());
+    if let Some(quads) = field_glow(&placed, &plain["text"], fonts, assets, rgb, opacity, width, scale)? {
+        return Ok(quads);
+    }
     let mut glyphs = Vec::new();
     for p in placed.iter().filter(|p| p.shown) {
         let bitmap = match glyph_bitmap_of(&unhinted_keys(p), assets) {
@@ -2688,6 +2847,16 @@ mod tests {
         assert_eq!(text_shadow_profile(16.0, 16.0), 0.0);
         assert!((text_shadow_profile(-8.0, 16.0) - 0.84375).abs() < 1e-12);
         assert!(text_shadow_gain(0.5) > 0.995);
+        // The field glow's strength by its window (shadow-probe-field-l2 to -l4)
+        assert_eq!(glow_strength(0.05), 1.0);
+        assert!((glow_strength(0.498) - 0.8151).abs() < 1e-9);
+        assert!((glow_strength(3.0) - { let t: f64 = 0.15; t * t * (3.0 - 2.0 * t) }).abs() < 1e-9);
+        let mut last = 1.0;
+        for step in 1..400 {
+            let strength = glow_strength(step as f64 * 0.01);
+            assert!(strength <= last + 1e-12, "{step}");
+            last = strength;
+        }
         for (over, gain) in [(0.8, 0.94), (1.06, 0.84), (1.32, 0.72), (1.59, 0.61), (1.88, 0.50), (2.63, 0.32)] {
             assert!((text_shadow_gain(over) - gain).abs() < 0.03, "{over}: {}", text_shadow_gain(over));
         }

@@ -420,6 +420,30 @@
 			"digest": "f9eb8b34871240a5793edd71a5daa1da5cae2bfaa8512f420e0de0ccf923d4c6",
 			"status": "ok"
 		},
+		"fast/edit/shadow-probe-field-a": {
+			"digest": "293dfbde8d3bb509d945556c11cabfabbc70cb0f4b7d5eaa362c212d04fe5d7b",
+			"status": "ok"
+		},
+		"fast/edit/shadow-probe-field-l": {
+			"digest": "fc7ab33be6eabd2d9532c506e8e1f3ba04f03c677d3d5ecbe4dd9d7e2c1058a8",
+			"status": "ok"
+		},
+		"fast/edit/shadow-probe-field-l2": {
+			"digest": "8557f0c94aad22799e680dd1e431e0e0119e508e4b5d0589d6f14a7c35a9eb0c",
+			"status": "ok"
+		},
+		"fast/edit/shadow-probe-field-l3": {
+			"digest": "56769da771c9ca1c6c45cf8e318c9ac579ad26e7ad689784ee936784b64c20dc",
+			"status": "ok"
+		},
+		"fast/edit/shadow-probe-field-l4": {
+			"digest": "4226442640e88202f647cc280d4b9d3b55415dd5eec7fbdb27b234e3f58b6571",
+			"status": "ok"
+		},
+		"fast/edit/shadow-probe-field-o": {
+			"digest": "5bb7fa7f789c8bd395345c26a79fe3012bd2cf6c1c2d75098351bdecc3547866",
+			"status": "ok"
+		},
 		"fast/edit/shadow-probe-g": {
 			"digest": "3e3919fd285821af9cbcbf33b9072fae033e5359b897c83b8ae114b3e51c88cb",
 			"status": "ok"
@@ -1460,6 +1484,30 @@
 			"digest": "d243619f731a083d70e9d3cc375412d60bbc69654bcbdfecf46bde1577ffac9b",
 			"status": "ok"
 		},
+		"fixtures/edit/shadow-probe-field-a": {
+			"digest": "474825d2c0576dcf7d1dd9c0774a1559ce4d8e403fb029705e3ce193f1f57c7c",
+			"status": "ok"
+		},
+		"fixtures/edit/shadow-probe-field-l": {
+			"digest": "023b4b925ca7e681bf4cfcd45c42f864f735c3350958dc2a4545a4fe1ac13fa8",
+			"status": "ok"
+		},
+		"fixtures/edit/shadow-probe-field-l2": {
+			"digest": "484be24b6682ef477c37a88f0e5a0a26b4cf039030e8f6c52818dd7babd4dac6",
+			"status": "ok"
+		},
+		"fixtures/edit/shadow-probe-field-l3": {
+			"digest": "948b297b2c1456725d378464e19817108a3858acaa37efd74b056f3514d1f504",
+			"status": "ok"
+		},
+		"fixtures/edit/shadow-probe-field-l4": {
+			"digest": "317419b00cd193085c55a0407ca57421c441c1a40d02d017de6a0e96bcfe80fb",
+			"status": "ok"
+		},
+		"fixtures/edit/shadow-probe-field-o": {
+			"digest": "33a8671c12dc26813836f7047b8c6e63fd97adc7eb1bf08d8d8c52210653bda4",
+			"status": "ok"
+		},
 		"fixtures/edit/shadow-probe-g": {
 			"digest": "291d8ca27180e85b82e95a490fcf3d7f1a7664324deec266d5fac7831349352a",
 			"status": "ok"
@@ -2452,6 +2500,30 @@
 			"digest": "d5685b2a064092ec30f197f686aff19593b731647a501ac3c53ec639def7f766",
 			"status": "ok"
 		},
+		"fixtures/play/shadow-probe-field-a": {
+			"digest": "1e7289f4f045f78649a37693e3992213b74782af52ef67897abb2988a3325aca",
+			"status": "ok"
+		},
+		"fixtures/play/shadow-probe-field-l": {
+			"digest": "9ad2b973894cb7f37c5cffb3447aaa7a7089ffad3a43e5e40d050cd4d50611f2",
+			"status": "ok"
+		},
+		"fixtures/play/shadow-probe-field-l2": {
+			"digest": "f43c997b8853360f103a3691bed79e7fda26067bc81df01f1fcee6bb083f7f0e",
+			"status": "ok"
+		},
+		"fixtures/play/shadow-probe-field-l3": {
+			"digest": "cf84ad3c9946d2d775027c8b01ddd523a798d1812bb5391b2a8d45e815d846d6",
+			"status": "ok"
+		},
+		"fixtures/play/shadow-probe-field-l4": {
+			"digest": "4ac345205890feef90e1612ada2b799d4ff501dc59d9989838367e2a6e971f0e",
+			"status": "ok"
+		},
+		"fixtures/play/shadow-probe-field-o": {
+			"digest": "b3bdab81411b30980908a1c78a2d2e174602b690ce040af0cff8b4c1906bed3b",
+			"status": "ok"
+		},
 		"fixtures/play/shadow-probe-g": {
 			"digest": "33e48258e8411e8a49b26d3fcf986eae970a7d95a93d49cd4c23516c4dc51fbc",
 			"status": "ok"
@@ -3101,7 +3173,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T20:54:45.880Z",
+	"recorded": "2026-11-12T21:42:26.010Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

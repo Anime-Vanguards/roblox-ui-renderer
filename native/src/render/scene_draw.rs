@@ -2646,7 +2646,9 @@ impl DrawPreparer {
         for shadow in shadows {
             let rgb = color(&shadow["color"], [0.; 3]).map(|c| stop_byte(c) as f64);
             let opacity = (1. - number(&shadow["transparency"], 0.)).clamp(0., 1.);
-            let width = 2. * number(&shadow["blur"], 0.).max(0.);
+            // The glow's half-width W in device px: 3 x BlurRadius / the device scale, whatever a UIScale does
+            // (2 x BlurRadius at 1.5x, 3 x at 1x: shadow-probe-text2 / -text3 at both scales, notes/images.md)
+            let width = 3. * number(&shadow["blur"], 0.).max(0.) / self.scale;
             let quads = match super::text::text_shadow(node, scene.fonts(), assets, self.scale, rgb, opacity, width) {
                 Ok(quads) => quads,
                 Err(_) if assets.pending_count() > 0 => Vec::new(),
