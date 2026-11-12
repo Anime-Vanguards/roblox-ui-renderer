@@ -1805,14 +1805,18 @@ mod device_tests {
     #[test]
     fn the_device_and_inset_reach_the_scripts() {
         let desktop = probe(&[]).unwrap();
-        assert!(desktop.contains("touch=false mouse=true keyboard=true gamepad=false last=Focus inset=0 story=0 gui=0,300"), "{desktop}");
+        // (the label draws the device's and the story's values; the session's are printed: fixtures/device-probe.luau)
+        assert!(desktop.contains("touch=false mouse=true keyboard=true inset=0 story=0 gui=0"), "{desktop}");
+        assert!(desktop.contains("gamepad=false last=Focus gui height=300"), "{desktop}");
         let phone = probe(&["--device", "touch", "--topbar-inset", "58"]).unwrap();
-        assert!(phone.contains("touch=true mouse=false keyboard=false gamepad=false last=Touch inset=58 story=-58 gui=0,242"), "{phone}");
+        assert!(phone.contains("touch=true mouse=false keyboard=false inset=58 story=-58 gui=0"), "{phone}");
+        assert!(phone.contains("gamepad=false last=Touch gui height=242"), "{phone}");
         let pad = probe(&["--device", "gamepad"]).unwrap();
         assert!(pad.contains("gamepad=true last=Gamepad1"), "{pad}");
         // (a phone is the engine's touch device with a phone's work-clock prices: ree --device phone)
         let handset = probe(&["--device", "phone"]).unwrap();
-        assert!(handset.contains("touch=true mouse=false keyboard=false gamepad=false last=Touch"), "{handset}");
+        assert!(handset.contains("touch=true mouse=false keyboard=false inset="), "{handset}");
+        assert!(handset.contains("gamepad=false last=Touch"), "{handset}");
         assert!(probe(&["--device", "console"]).unwrap_err().contains("--device"));
     }
 
