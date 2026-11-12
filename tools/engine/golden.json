@@ -5,19 +5,19 @@
 			"status": "ok"
 		},
 		"fast/edit/anim-probe-springs": {
-			"digest": "e1cd690a1a81dbed9d814257a48aa99e6e33f2455e5148c466f6507ef9fe08d6",
+			"digest": "560084abfa6bb11e1df1b8711da910138407053acacc0b663cab899ede56d23e",
 			"status": "ok"
 		},
 		"fast/edit/anim-tweens": {
-			"digest": "a883d1c1d7d26d99742d010dc2077c329ca24f1d9c07b8a2e98b59361b2474bb",
+			"digest": "4b32f1711bfd3430af0a9e819c63bb2735418e0404346a379f3cd0c0089f3e22",
 			"status": "ok"
 		},
 		"fast/edit/canvasgroup": {
-			"digest": "a4beea685a5c3ab80488761208d7a8960c5cd3566cc5d1527d69ff31d370138a",
+			"digest": "49a5fd66f280d4262ca0dc6bc75dad186f59e8667cddabb35a275c74777dd4e4",
 			"status": "ok"
 		},
 		"fast/edit/canvasgroup-rotated-gradient": {
-			"digest": "40332fca4b24aca5670b82c878aa05107b4fab682b106ebf523bffd4c932407d",
+			"digest": "4da9cc8645f5423b85bba73afbea3dc6d3b76c3dcaf638f2da7701a809a1aa8a",
 			"status": "ok"
 		},
 		"fast/edit/corners": {
@@ -25,7 +25,7 @@
 			"status": "ok"
 		},
 		"fast/edit/device-probe": {
-			"digest": "97a64511e02e331a77f3d561850b6277f2ace09c574f436db57ab7c1b79b1517",
+			"digest": "8904f0389ab51590c8ef200dc1f500d3fbe2c3c36d209ce502a0a8600fc39a10",
 			"status": "ok"
 		},
 		"fast/edit/gradient-edges": {
@@ -81,7 +81,7 @@
 			"status": "ok"
 		},
 		"fast/edit/group-misc": {
-			"digest": "e88d76d32876202ccef003a334c5618a2b30408f91a65689731c9d32540a66c3",
+			"digest": "026894dbddfdb3b63a14c500e85954000b669ef4f3b999ea9a48946177d59327",
 			"status": "ok"
 		},
 		"fast/edit/group-probe-bigarea": {
@@ -177,31 +177,31 @@
 			"status": "ok"
 		},
 		"fast/edit/input-device-flow": {
-			"digest": "97c6dd3fcb573b2a59e584f594cb2b9149a91db3bdbe1de5699e57a19f885752",
+			"digest": "cc095765eee5a1f64d7c49ed489f0bb94035978705fec0a1b02f06be9d46a88b",
 			"status": "ok"
 		},
 		"fast/edit/interaction-autobuttoncolor": {
-			"digest": "a6e9b4b70d5552ac774d51a9be105e2a30204163dc4ff0c53a5506f69429dce8",
+			"digest": "9ed7536e5dd1b6f4d020b6c3d24a0adf50221b8efc60d9a4c2b91019c7530fd8",
 			"status": "ok"
 		},
 		"fast/edit/interaction-scroll": {
-			"digest": "c95ffc2dac1197537a610a9cbd5058ab66ff0e9672afd131a842e2af50f804f9",
+			"digest": "26bd0929abca083d44a0379ed4ffb0a961aa0cf28745de14c6c9e865b1d79f22",
 			"status": "ok"
 		},
 		"fast/edit/interaction-textbox": {
-			"digest": "9373a18372bfad206806a78a2589f98b88848aef7ca836d464f77ce3c0c678ae",
+			"digest": "04717e3a077f5f23e71d0a18d3dd08338883a2600b2d56d32904640b203d1fa0",
 			"status": "ok"
 		},
 		"fast/edit/interaction-textbox+actions": {
-			"digest": "06e0734382dc2156bd3a8f3e2be64263b6974b05611d96e9c4df9dcd024a8d7c",
+			"digest": "2e97a68feb46ef5b756b51c0860c10ef1b101e1372c6ff7c74d814c2dcd18f9f",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize": {
-			"digest": "65ce2bea20712a09b3c2e0255d51edec1dae7e35abf5d69dc70c28c72e9d8cec",
+			"digest": "8de257ecafc43cdf477c5462fd8cef26512bd176663151ead03f9f4ad7fe31fd",
 			"status": "ok"
 		},
 		"fast/edit/layout-dynamic": {
-			"digest": "1c9cbe0a92bf8d14f5da1694c969757a5394734f52348baee83d59ce99a75d4a",
+			"digest": "b162e649b66a42b8652d94b2bfb17ce6303a45e17446ad06462de7394525a355",
 			"status": "ok"
 		},
 		"fast/edit/layout-flex": {
@@ -217,39 +217,75 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-richscaled-quads": {
+			"digest": "577453ea27937250001d781f906e336fe91f648d570d3584c14b8de10eaf4cb0",
+			"status": "ok"
+		},
+		"fast/edit/layout-richscaled-quads@quarter": {
 			"digest": "65e49c9126f7a02381d157754c264cfab98c0a203bc57b9b193842ee4a79a0e0",
 			"status": "ok"
 		},
 		"fast/edit/layout-text-narrow": {
+			"digest": "31c340840cb3036e9f9a9ffb6eb6c1391ce66891bc32c124862300804f29d4f5",
+			"status": "ok"
+		},
+		"fast/edit/layout-text-narrow@quarter": {
 			"digest": "d4725fcf78655c61d442df14f7fa8a74d649357f592eaf1e530aa1e6b3dba7e4",
 			"status": "ok"
 		},
 		"fast/edit/layout-text-overflow": {
+			"digest": "c40e9c9610c98d2a0e63a9d00369bbe6e4183f334dd6ebc72b714129341028cc",
+			"status": "ok"
+		},
+		"fast/edit/layout-text-overflow@quarter": {
 			"digest": "558cf2867342c32065e9be4149cba80689f63280bc39f0d264c1e5f4645a461f",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen": {
-			"digest": "38d2a93bff62dcc1b47b2ff3f86aeb290f31dc9f870579e37c682ce415c774f7",
+			"digest": "1cc673311ce62ab72fcfec652459cd2ac22a53df0f23f606be4791ca8cd35f7a",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen2": {
+			"digest": "c0e7af0575aeea626a0375db5fa7641e59fa8ba3d0a5d0402183bb05c0f0d000",
+			"status": "ok"
+		},
+		"fast/edit/layout-textpen2@quarter": {
 			"digest": "67322b009a476295ec46eac409338f087f7a3b902dc362183914dcbd99490f90",
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen3": {
+			"digest": "8ecd3e3a35e4a72f607e994ae4fdf6d0b65a4a0170c80d7c89bd5da1609bbe81",
+			"status": "ok"
+		},
+		"fast/edit/layout-textpen3@quarter": {
 			"digest": "295e2d2a89bafe2a597e30582a2bb99b943d47c2d056590d7fc28d85d3319ea5",
 			"status": "ok"
 		},
+		"fast/edit/layout-textpen@quarter": {
+			"digest": "38d2a93bff62dcc1b47b2ff3f86aeb290f31dc9f870579e37c682ce415c774f7",
+			"status": "ok"
+		},
 		"fast/edit/layout-truncate": {
-			"digest": "ef56dbc3a77cbe8d23e65fa8c1699ece1de79e1b8fa28e13819e82b3ebd92b87",
+			"digest": "e07db5e5156f5f3adb5205ba3edc8c6ac2a44051852c63a43e9cb227951ec47b",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate2": {
+			"digest": "8e34754eee4fe94fd8dc8b7307fe6507e82ccb46c2d6bd74a65317e68be7cec1",
+			"status": "ok"
+		},
+		"fast/edit/layout-truncate2@quarter": {
 			"digest": "f4042fad44b585272797a26dffd6237152debc22012f0c96c5a4c4ce7cea1692",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate3": {
+			"digest": "51a1a2f1ee22ff3ad9b5947d51de0ae7c6d2bda7f1d78b97edbbf961a9763346",
+			"status": "ok"
+		},
+		"fast/edit/layout-truncate3@quarter": {
 			"digest": "47b9620daed01a97f5ca9680937483e6e9b40f640963e0b4ded6589393e54e99",
+			"status": "ok"
+		},
+		"fast/edit/layout-truncate@quarter": {
+			"digest": "ef56dbc3a77cbe8d23e65fa8c1699ece1de79e1b8fa28e13819e82b3ebd92b87",
 			"status": "ok"
 		},
 		"fast/edit/live-rotated-cull": {
@@ -257,11 +293,11 @@
 			"status": "ok"
 		},
 		"fast/edit/live-scroll": {
-			"digest": "802de236e2ab2b76ce611d78a668a07e3da049d04fd6634858e2f6948760923b",
+			"digest": "48ed639075eaf9cb2d0ff5de115c3fff64ce9a89580aaffc3a257115b1a8964b",
 			"status": "ok"
 		},
 		"fast/edit/live-stress": {
-			"digest": "e111a912f5b0f17422576b9efd5738026593f5c6b48d9015c901b42feff4bd4b",
+			"digest": "066e321c8958571883973f486bbc882946b2109a057cdfe9251bb3b5c2a942b1",
 			"status": "ok"
 		},
 		"fast/edit/path2d-curves": {
@@ -277,7 +313,7 @@
 			"status": "ok"
 		},
 		"fast/edit/path2d-order": {
-			"digest": "85d4113bc8ad5eea506d84c9b9e46361141549326bcb2cf3466ec433b987debf",
+			"digest": "d4dd9a7bf49638173eb57bafca985687b00e085dbcd257419d81cf84c3d7402b",
 			"status": "ok"
 		},
 		"fast/edit/path2d-probe-snap": {
@@ -301,7 +337,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-errors": {
-			"digest": "6b4d10164a81d6c50e89f3db7ab7254f89ba1c0da3d067218de7fb36d9879209",
+			"digest": "793d4da96d5f8b263cba51858cea412144699af1776d88e187ad49d11d5464cc",
 			"status": "ok"
 		},
 		"fast/edit/probe-ids": {
@@ -309,7 +345,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-input": {
-			"digest": "530451f62261b1e8ba3caf433f693e5c6112b72e49a2c8ebfa3970977ee8c373",
+			"digest": "fc4719f34beccdbff4c2b17ab11c45a0d6f1efce5cfdab711901c60628b3b3ca",
 			"status": "ok"
 		},
 		"fast/edit/probe-scheduler": {
@@ -317,7 +353,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
-			"digest": "3e6dd02fd5cb2044b7d5715224cfb790151b40e18b4b16bd5df3582acb88f8fb",
+			"digest": "2f962c3868880f8716aaab894878a6ad145669998c16a2afeca15bde5a4b3d07",
 			"status": "ok"
 		},
 		"fast/edit/rects": {
@@ -325,7 +361,7 @@
 			"status": "ok"
 		},
 		"fast/edit/rotation": {
-			"digest": "7240123766593bc760e5d216473dc91ed038dcff2cf427a82c1c4c9093703f04",
+			"digest": "ead366b3d8f8b47f02de07d0d90658f8e4080df4cbd2754de186f68624be1368",
 			"status": "ok"
 		},
 		"fast/edit/rotation-clip-offscreen": {
@@ -365,7 +401,7 @@
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-behind": {
-			"digest": "3f58e7be0864d7d457bfef4a474fcaa1f3c4b8471960bb8743a60af7e9d524bd",
+			"digest": "5b507f3efb0c6b184c028bfba80fc430de2cbf0c34cbc6019c3a3228e798ee85",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-c-clear": {
@@ -377,7 +413,7 @@
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-e": {
-			"digest": "86a648a0b2f3a743221758b15d28d197ae885928a14469c0f835bf7ac56a5666",
+			"digest": "67f748403c4f721b507f4b457e375b14bd8737c9fbae256ea0470311687800af",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-f": {
@@ -401,7 +437,7 @@
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-inset2": {
-			"digest": "c994b22aada7724bb5d1b599b7f789265cdade2e624d2c8bcc0064fef37a10fd",
+			"digest": "9d31943dd12ae47b1e0252bab1a95b502caf8cc0c170ec757211e3287729b08c",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-k": {
@@ -433,19 +469,19 @@
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-text": {
-			"digest": "860f607d8420acaef0d055b162d8fc90861dc7b30786e5a1a04670c6ea24c9b4",
+			"digest": "20af111e5df6783b8244dd54cbaecc2f96e83ef10f2e69be049beab42491d037",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-text2": {
-			"digest": "d43994baed7dd0f03fae67e8c489cc1c5f7d5613a1bdc47214840ec84630a918",
+			"digest": "fd527eb621727b435063f4181904943af299cadc751227ceb5183d925cbf6e7a",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-text3": {
-			"digest": "90951aa103f0a51dfda6740a1e09936efb233d69159b5ee24c7b0e79da6f6bfc",
+			"digest": "fdf61b739a01efc89e05b2eeba78807ef78eca7219dafd42060c2606c646f6bf",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-text4": {
-			"digest": "1890360249272f3a7749a93956a74f52041d2be7aaaf6a99b923231b9522346e",
+			"digest": "22da36c7607898655ab3e87c7300b6a5fda14b062235ee4275f85716a2614c0e",
 			"status": "ok"
 		},
 		"fast/edit/shadows": {
@@ -465,19 +501,19 @@
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull": {
-			"digest": "0afd20d1b6e87a1b7443fb97f2a4e9f48fb1be1468fc3a3ef87abb5b2b9833ba",
+			"digest": "f8bedc202ca9c9aa69d8d5689514acdb46b3ad03f248f0b63bbc8625a020515b",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull3": {
-			"digest": "85c6583dc506214ef5483ddb5d6760adac56cca891f4b528c145f4bd20d32b79",
+			"digest": "22cdf3f53db6778fe7a7ec34f77d1451ea6b3a9b5a1f5e2165d01043f611f21b",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull4": {
-			"digest": "fd640cb752ef0529fb7b3af8281897ffec9f4ca412de790166cc1a68dae5da6e",
+			"digest": "807f3f05e760cbf5693c8c145205b6c5248b7540a125c8012fa5e52b1ac3ff65",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-cull5": {
-			"digest": "93aacae78d224390270bac104e7d1318c65a40074bf18ff3500f652657ffbf2b",
+			"digest": "f2fc59e30e9eba6a6019c37c73ae80e993d46bfaf5067ec2b8898e3591090956",
 			"status": "ok"
 		},
 		"fast/edit/stories-autosize-surface": {
@@ -497,7 +533,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stories-scroll-noclip": {
-			"digest": "22e78d042faeb93767bd57bf982581f3d5d1bde82da25a3859095580aaf19fe8",
+			"digest": "968ef4b8b5a5f6f218acd93716b8ea8b2c104786e197ae8c4eb5504cbca1b5e3",
 			"status": "ok"
 		},
 		"fast/edit/stroke-button": {
@@ -525,7 +561,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-misc": {
-			"digest": "9f6af0dc8da7f3a389a8bda479441bb7e37ea68eff02f2e8f2304e37eb97ee68",
+			"digest": "b76d73f12bacd3b8335aaec5460101d21a030b420f5d9ecd86e0bf64533765c8",
 			"status": "ok"
 		},
 		"fast/edit/stroke-modes": {
@@ -561,11 +597,11 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-probe-scaledui": {
-			"digest": "16754a935e3d8a1c3a142eaa235636e57283f0663c9fcdd45829ec3929a1f3fa",
+			"digest": "1b4449f0d1134ff208488fcfd36470400fb0e66e30c961f3cd8fb9f3138d6bc7",
 			"status": "ok"
 		},
 		"fast/edit/stroke-probe-scaledui2": {
-			"digest": "7cc8d1c836e8b135ed9266ae15b41ad92c064a6965cb6fda6a12c963b257a39e",
+			"digest": "e3a262ab2588da43279411bdea88d8c20d9b43ae6e884fd95fe852052208aa58",
 			"status": "ok"
 		},
 		"fast/edit/stroke-radius": {
@@ -581,26 +617,50 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-a": {
+			"digest": "2cf5bae4e775214734afb0a492496e48752a92f4b4bc4d82a7d3047a012d683c",
+			"status": "ok"
+		},
+		"fast/edit/stroke-text-a@quarter": {
 			"digest": "e09102abcb8aff2257106063624ee3d0f4fde86ec281dcf764e22b0a0e57f20d",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-b": {
+			"digest": "0e811c5d6fbfaa7f890af7c274b1bd86b722b303cfa7a6fbcc61c2e7a4f2c305",
+			"status": "ok"
+		},
+		"fast/edit/stroke-text-b@quarter": {
 			"digest": "bcb60b49f51948b5e8584549743819934de7b5520fd5e4647569097d4a640522",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-c": {
+			"digest": "c32fca03ca7b5e1423291a056902de65cf192f4fccbca7356c2bab466a7dee98",
+			"status": "ok"
+		},
+		"fast/edit/stroke-text-c@quarter": {
 			"digest": "7f1ca09415506195b93ce34d0cec5e00e0bfd88e3d9181d6053624af941d1ecc",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-d": {
+			"digest": "c866967594c5addb24131fa53d271aca85d432b0aff680ba93d66990a39bc80d",
+			"status": "ok"
+		},
+		"fast/edit/stroke-text-d@quarter": {
 			"digest": "bf44f16440ab52a89258cf158b290dd540deff98a5a2d14d3362f39166826eaa",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-e": {
+			"digest": "bd4e04b5ba4e0bb8b3527a2dab1094d89248f785b310d983fcfe1e689b5f8e3c",
+			"status": "ok"
+		},
+		"fast/edit/stroke-text-e@quarter": {
 			"digest": "53f16357304fad0ec1b148f0033353cc9fb71601d34a325221c00cc746a47a2b",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-uiscale": {
+			"digest": "9796cbcd9a8e898422d87d3593d82fc7915ba6147a36acea75b0d0797b59c085",
+			"status": "ok"
+		},
+		"fast/edit/stroke-text-uiscale@quarter": {
 			"digest": "72d763fdc12168918f622c80c56cf7a71f9d64b49b8abebe26c9d566833ed2c7",
 			"status": "ok"
 		},
@@ -613,166 +673,354 @@
 			"status": "ok"
 		},
 		"fast/edit/text-baseline": {
+			"digest": "e6690c26ea0c5df32dcaa61e78600ff453b3fe66d8f25c472a45ef87b95644fd",
+			"status": "ok"
+		},
+		"fast/edit/text-baseline@quarter": {
 			"digest": "a5e0bb9f9af0bc23dc20a86aed1d5fb8738161752399ba424bc62c66cdfdf1a2",
 			"status": "ok"
 		},
 		"fast/edit/text-fontfaces": {
+			"digest": "56243272a739457817c9a31304300948480c6ba66640489ba9dab09eb6a68a3a",
+			"status": "ok"
+		},
+		"fast/edit/text-fontfaces@quarter": {
 			"digest": "22328d24f4b02fd3f2e29d28ef2779cdb1558a68bbdb68d35d69286fe40e00e0",
 			"status": "ok"
 		},
 		"fast/edit/text-fonts": {
+			"digest": "03bca36067d4b37150dda4d0917b8dae616d2dd0837969aa88ab78872a5a93c3",
+			"status": "ok"
+		},
+		"fast/edit/text-fonts@quarter": {
 			"digest": "6c5e3699db83cecd2fa2d914560cea14e575952bc88991d6f40f23de5b6d4722",
 			"status": "ok"
 		},
 		"fast/edit/text-glow": {
+			"digest": "dd0fea1c59b248d4f79f9b8d4ab712107e3f4083779a9bd06a25a01663598660",
+			"status": "ok"
+		},
+		"fast/edit/text-glow@quarter": {
 			"digest": "b69e0b1cdc159e1909e96524cb9410d52d03d3c0fb91bfa04aaccd6863e6681d",
 			"status": "ok"
 		},
 		"fast/edit/text-gradient": {
-			"digest": "bec8761784f5a910f40903ea074761768dd9df68ae051b12545040ed4c4e4500",
+			"digest": "aae48a08efd1522ae6b2fa74cfb3e9d0ba50246e0af5b1d55aaa79a40162101e",
 			"status": "ok"
 		},
 		"fast/edit/text-gradient-degenerate": {
+			"digest": "b0e5af466c5a493bfe949aac2027cb0b28e3b12e750c17a9b3973d164b0600eb",
+			"status": "ok"
+		},
+		"fast/edit/text-gradient-degenerate@quarter": {
 			"digest": "7a7aa7f41fc6372b3cb9c91343cef3f5259031df82ec8155a688f80fffae6aff",
 			"status": "ok"
 		},
+		"fast/edit/text-gradient@quarter": {
+			"digest": "bec8761784f5a910f40903ea074761768dd9df68ae051b12545040ed4c4e4500",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-blend": {
+			"digest": "0d9ebc0d0230f9e8819d6e53ef7b2c6fa37ed790bbc81ddef76c588caff89002",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-blend@quarter": {
 			"digest": "31640c39554e30e9579acea35fb4f8aa93cc6b4aca65849d1b74a174c232885a",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-case": {
+			"digest": "ec3e07f295c139b1aaf51e3923a1985c64a8f1012ed95f28301096bc258d5bd0",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-case@quarter": {
 			"digest": "dce03643d5607394b1371abe4d4b1d7d377a22f143ef43648b25b798b416f320",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor": {
-			"digest": "d839b7ad80a9dff248afa2da06b6da06fda7be0ad45716d922bb7ee92d7e462c",
+			"digest": "25e6c4e18605d5bfe160f590dfa71fcedfdadbb61fe856c7dfee6cbe92d14804",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor2": {
+			"digest": "464ae4b764318878188d2d516b689e6173dc8b31a607bb91cfc0af9986ac1326",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-decor2@quarter": {
 			"digest": "8f2c7420ff312c066e4104276e8da91e92a93c9c885c83c109f853538e993551",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-decor@quarter": {
+			"digest": "d839b7ad80a9dff248afa2da06b6da06fda7be0ad45716d922bb7ee92d7e462c",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-emoji": {
-			"digest": "ae7558c73bde2e9c4194e71b27bf1f3e8cd9b5136f43b7442ffd7fc1d9fb5608",
+			"digest": "b46feddc91195cba28314b6ff40af51ca4b763cd7400d29ff2ba0ca94b8dbd86",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-emoji-line": {
+			"digest": "da3efd33183189d5bb0feab708bcf9bd885b14a396def406f75b9c7f3fa2dc82",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-emoji-line@quarter": {
 			"digest": "07b7af5f2bd58fdb33766e369c3b35cc2fd7c873db3bee7aa7e009b85a112248",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-emoji@quarter": {
+			"digest": "ae7558c73bde2e9c4194e71b27bf1f3e8cd9b5136f43b7442ffd7fc1d9fb5608",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-fallback-block": {
+			"digest": "4dbdcf67388cbd3c305f354b9c8e60f3d046acf6a32356195a1694820c13d9c9",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-fallback-block@quarter": {
+			"digest": "9ffa66307ff49706a395040be666fa424ee3b4aae3e61a204616598068a26645",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-fracsize": {
-			"digest": "9d4beb1e4b86be9d464cb3a6a0b30444a7dfe2373c3277736f8e9ce86e2724ef",
+			"digest": "d3eedece6496666350ce8384999a201734d69434e04e66d15923108ac1c7a7bc",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-fracsize2": {
+			"digest": "0bad62f04d259164b4bf72123541dd92fd77f721e7df15e76a34cbfb0657e270",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-fracsize2@quarter": {
 			"digest": "39cc7661105835c11d5c4a44ea91234a300c261236122d86fac110fd9c101abe",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-fracsize@quarter": {
+			"digest": "9d4beb1e4b86be9d464cb3a6a0b30444a7dfe2373c3277736f8e9ce86e2724ef",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-gradient": {
-			"digest": "d0a7df8be456615f341eb82a9745e107c1266ff019da00c07f6ce8b0a349b2d5",
+			"digest": "e74f5179c67f23affdff6a9e62ecbf45a1f5a5d5da67cc988cd8cf97c4c54987",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradient2": {
+			"digest": "7927fafb809ca5a3191d25d9455d89c490bd718407aa7e83a8a16aa9e353b79a",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-gradient2@quarter": {
 			"digest": "3dab88c5347f268e87269bd170f426132b870748b8344d7d7cb914445bff5d03",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-gradient@quarter": {
+			"digest": "d0a7df8be456615f341eb82a9745e107c1266ff019da00c07f6ce8b0a349b2d5",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-gradstroke": {
+			"digest": "7bbc6bdc49f5eb86a41e9de3cf01cf855a8dda23c9d32df9587a714d2f2203da",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-gradstroke@quarter": {
 			"digest": "217eae10c59e2b9b1320b197bd255dfab2c8a33912fe986be1482a491f601678",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-graphemes": {
+			"digest": "155f4903ce888db14475f1c3952f69c07bc3f680330f096e9ea06b076b4a1135",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-graphemes@quarter": {
 			"digest": "a40d8f4a58da03f73673637cd2cf84b1b02a0736144723bd83060253ca6e08b0",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-grouptext": {
+			"digest": "9116767b3f0775000f850138e795d95d3b40f3c04bbd09b012ebe4395209309e",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-grouptext@quarter": {
 			"digest": "492ef6597132c5aa7d4b905df7f11c4894a3eebcfda902382b355578b0e1f1b8",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-groupturned": {
+			"digest": "cd26ccd0e29dd7fef6daa65296e8a618634feb79a8ee7cd2e6c8a8975ff72512",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-groupturned@quarter": {
+			"digest": "f2a5010444c5dfe8f13331c8305455d314e76097b54ced458677d97d3d81c31a",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-overlap": {
+			"digest": "a89ab2c81ec23a10ad7cb7f9b432b297a42ac2b45db9663b3ab93dd155f039ed",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-overlap@quarter": {
 			"digest": "85ad834b89dfc36be7db329b074f54d7227b9c6dd2a18dca10a6abbbdbde100f",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-place": {
+			"digest": "c6b6209055e3f4464208b65bc49429a35b99af92f321da478f7b83c09118e479",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-place@quarter": {
 			"digest": "564fdbf5b6cffe912790e084c977a3814ff7ea6bf951da5bf95146f2d61cc027",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-quadties": {
+			"digest": "f06be3e6b0facc23bcfce9ce4f62c33db2d01a08c9336d43e745dbb1a9b41174",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-quadties@quarter": {
 			"digest": "d7df35cbfaafdc7ca441d81088881b0dbe4023218b616667ae80427ca93e4bd1",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rich": {
+			"digest": "d6406886b6a6e5ccf2589075711556616def5007e2c31b23fd7bfc3ef92403b2",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-rich@quarter": {
 			"digest": "2494fe5785c06286543f8c0eae5d2724571a2a77e925f4389623c4731ce7d2fc",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richcap": {
+			"digest": "a5b4da18a848c017a03ddf21455c821a8e7985130eeee47ab5bc711e79ce0ba1",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-richcap@quarter": {
 			"digest": "281bf6f3e15829b907b425478332f6a28d555bdd04e0b1fe7568a290c79ca573",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richscaled": {
-			"digest": "841bcab89d8bb9ae0ebe2960cfd336d0fb97a03c87e3858bd9b172a1adcd6662",
+			"digest": "6f5e9b287fd9614be854ae02968f298048993bc917bcd1c424bf12035579718e",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richscaled1": {
+			"digest": "35ec737eb76b7705ced56aa73d1b1496aeeea4f7db710d4894d9d330bb7d22e4",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-richscaled1@quarter": {
 			"digest": "0f4f13bb953ed53401211c350cfbca5f5c6dbd4210053714698b42315c1d2e4c",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-richscaled@quarter": {
+			"digest": "841bcab89d8bb9ae0ebe2960cfd336d0fb97a03c87e3858bd9b172a1adcd6662",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-richtrunc": {
+			"digest": "353572ba8a85fcc401b826d7f511d395cde0fd6893788663a7f2c27fcdf14719",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-richtrunc@quarter": {
 			"digest": "a5fa85837af11d351f228f1cbe4d6a7df094a61715f49d370edf1bd8920c4983",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rotate": {
-			"digest": "49e15606493beb438d746781d5bcbbf2de99a974a1f142903bc47c032218741d",
+			"digest": "fec34a946d562a9cb4ba8bf31c961fbcfbaf6790322ffd03abfaa545c0f26c65",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rotate-quarter": {
+			"digest": "25b9ebb59b7d5a448cb1294292f9714475c58687e7492c8a8a1b6355763b68d6",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-rotate-quarter@quarter": {
 			"digest": "070fa19780663dcc0c30d8a0d9e82cbf324ebbe28bd7dbbd5de7bb3dfa8dac95",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-rotate@quarter": {
+			"digest": "49e15606493beb438d746781d5bcbbf2de99a974a1f142903bc47c032218741d",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-rotation-size": {
+			"digest": "7498677db3173bd792d96042eac9dd18854f6bfc4c3fe10164faf1ba40eb512c",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-rotation-size@quarter": {
 			"digest": "4bbe3919ee56a23299e961a81d4604f702cf798346fe59ebb57a5420da4b30cd",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-selfclip": {
+			"digest": "9dfdcf6cb55c714e68b2445eddd5945c3773ae25f104a149673ca462b6b99444",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-selfclip@quarter": {
 			"digest": "f19a61720e06144af4f9d4367b4985dd71928c4cd5e2196d99906deacb4da8fe",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-strokequad": {
+			"digest": "5eb4c74cdcf522c57c06bac97acd3afa47bc820fa1bf4c1954da1aa95e5cb2cc",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-strokequad@quarter": {
 			"digest": "61e17557f57b59aa1a6a3063903b43fb697f8a31f07eb3f833a199550a52d81d",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-subpixel": {
-			"digest": "08e5c887b572fa3eb10e4f0a1a32755f52a9e14a1035f2590bd36daa6e57c01c",
+			"digest": "45a5d983942824e9e14b3d468c871dbe226b379e8d4c3c8d84818419a8fa504e",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-subpixel-size": {
+			"digest": "ce7411e7d143aefafc2d0897c0c720d0978cc77d6f34c26b05391570bc281b18",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-subpixel-size@quarter": {
 			"digest": "bce1f1ca6f8f66590b3278fcdebdbb1d6d065e79c5f58abb0d3412dc77af1520",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-subpixel@quarter": {
+			"digest": "08e5c887b572fa3eb10e4f0a1a32755f52a9e14a1035f2590bd36daa6e57c01c",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-synth": {
+			"digest": "540a2dff96a0fa175d00438a2628d289b8f3a39f979ea176d29b31cd3ba3529f",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-synth@quarter": {
 			"digest": "d0038986a3065c6982814da24d7570aa1435ee5bd50be49e7c4a9669e8b78085",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-synthscaled": {
+			"digest": "2b7ded3836759b6a74ead5ffeeaa30ea5d4f6affedb6766f16bc9c23ff6a7be5",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-synthscaled@quarter": {
+			"digest": "6aab4392b23890a2867270b7a46c502a962047431719dbbdb50e98c82bc206d0",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-tie": {
-			"digest": "ef0bb6ae5e8b8f2ab89c2ba8ffcb1b3778a5cb60c0e5e38b2cef403856a63e8f",
+			"digest": "85ef6b4c968515976da21bfb75c403a149416630eb6439805f8a6955df2af8e1",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-tie-size": {
+			"digest": "92cafe53eb32a527d157d36d7c99f16b5eb89969701a52fe82e2226a0173f3fb",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-tie-size@quarter": {
 			"digest": "c691bcac96178ccc916102ed111a22fc0ae91c40479728720ff2c1c82eb3e3eb",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-tie@quarter": {
+			"digest": "ef0bb6ae5e8b8f2ab89c2ba8ffcb1b3778a5cb60c0e5e38b2cef403856a63e8f",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-uiscale": {
+			"digest": "edd25af4c90b3a4b03d7d3b2166fa5881b2aa65141837f59369827df7fe8b5fc",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-uiscale@quarter": {
 			"digest": "8702c2312115f6eb8ab53d8e231bf856ff2f4dfc8446bebcb039329eeb6fb5cf",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-view": {
+			"digest": "81f61fd207b5218c13c84071e6b47ba4ac464f51b54b8d6fd82317d24fbfdb52",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-view@quarter": {
 			"digest": "bcab1d47a59a29babd3d497e0dccc6755b9e4af1c7e2d8d36ccf849b0a27d162",
 			"status": "ok"
 		},
 		"fast/edit/text-raster": {
+			"digest": "d47ab71205a145c48cfe00531bdbdf6b7efaac1ffd15f015d9137f1fd279f93f",
+			"status": "ok"
+		},
+		"fast/edit/text-raster@quarter": {
 			"digest": "4807eaa7d42f311429008e77ec32be8183208e5bc89eeb50091bfbd309d2003e",
 			"status": "ok"
 		},
 		"fast/edit/text-stroke": {
+			"digest": "a63c24aa55d57118830127a8fbd50373a12f523b876c012928b07d88f7c599b8",
+			"status": "ok"
+		},
+		"fast/edit/text-stroke@quarter": {
 			"digest": "5f7ed2c6a265dbc4f59fc2349052019e3b92fec5055c1982c54e0a68e62b9e5e",
 			"status": "ok"
 		},
@@ -781,15 +1029,15 @@
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
-			"digest": "1c7d5a795be799cba669de0518b44964dd8d57ecda1eea77e7ea7685ea54ebc3",
+			"digest": "cbbb18a44c1e945068d222aac77d2af33588cf22c3f00f90356736ba67176b96",
 			"status": "live"
 		},
 		"fast/live/interaction-textbox/120hz-click": {
-			"digest": "841ce98761397583e3d047ef4e195dd22951e2a924716c5bd4416c874fc88265",
+			"digest": "2379190e3cb8ab1f8adbbd49cf3b7c07b43e03d674673617f34f38de464b40c3",
 			"status": "live"
 		},
 		"fast/live/live-scroll/60hz-default": {
-			"digest": "3edf119bf587bdf4763b0468dda1777a36810fcd6f43baec9d6ef472521e3a80",
+			"digest": "69504b01f19e69dcd1a615ec31ab7f76f56105744590ba3fafe3941b5eb9a4ba",
 			"status": "live"
 		},
 		"fixtures/edit/anim-mount": {
@@ -797,19 +1045,19 @@
 			"status": "ok"
 		},
 		"fixtures/edit/anim-probe-springs": {
-			"digest": "6d69a144c70cc2c54afb11ed3bf96da8bb65473351a25f758c6ef294bd5eed1f",
+			"digest": "7ae9df4b13ef123f8fa16e82d74629bfb26b56c7d8f155746f8e0f07ac188a3a",
 			"status": "ok"
 		},
 		"fixtures/edit/anim-tweens": {
-			"digest": "08c9ca247923a5e7d701d5f31e6bc5ce9bfa19bb449cd10b3b8ca74960f258fa",
+			"digest": "beeb8781342b21bb98608a1fa662e63a21c2a678148078b4e75ccb5ad2878d3e",
 			"status": "ok"
 		},
 		"fixtures/edit/canvasgroup": {
-			"digest": "c5751669a39045b495bd032345b3f38ae77a81b991111d7aab0224b4364068e4",
+			"digest": "0a3b9f7df660a55be1b276ae696d10541804b81766aeb7578ae4c7ce9e10477c",
 			"status": "ok"
 		},
 		"fixtures/edit/canvasgroup-rotated-gradient": {
-			"digest": "a42048f069046fef5dd3055088c4be8acb5ba87bfdf6ff968ee3c401cd3cd75f",
+			"digest": "fa4ade2e12a324d308820ff073f325f046d473b66729f65034b25faa51ad896e",
 			"status": "ok"
 		},
 		"fixtures/edit/corners": {
@@ -817,7 +1065,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/device-probe": {
-			"digest": "59f58a2b5864970ca6963a80ea92b36ffd3a695e37366f73927edbf3d40d5718",
+			"digest": "63b14339fa22bdd076e5f2c1fe2cb2e4aa901f3e5b1daad940d0fc0940bdb2be",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-edges": {
@@ -873,7 +1121,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/group-misc": {
-			"digest": "fc8964575404bf69370f757dd084f0a85ad021e2aa66d2e348863e67415c1f31",
+			"digest": "a3413de55a9293f2d4a9e5ca08f3334732304372be5a957e7963b61eccf16ddd",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-bigarea": {
@@ -969,31 +1217,31 @@
 			"status": "ok"
 		},
 		"fixtures/edit/input-device-flow": {
-			"digest": "a46ba05c8f440b3a445a6b463d72ab4f94a33a4f4a597142698df53852f11da0",
+			"digest": "d78b1529d46372bbf60aecc062a1b6b52cf562ec38d8881da1e47b6f3c6d1bba",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-autobuttoncolor": {
-			"digest": "ee8c3bd20ede424f06e033dd2087c6acd3ba74f908add09eff13a95a7c82fb93",
+			"digest": "837e0d1e004afa70f35f710c8f6307c2e8476a55522020d4c88c76644f985eae",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-scroll": {
-			"digest": "836c83f0e6a957a4148401bde2c3852d1c53aaf83290eb6de5c85dc2b8f0c614",
+			"digest": "102130bf9d9a88f7010cb03ae48798d4fe07af95e0b2e2c8206168e8668d5eb6",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-textbox": {
-			"digest": "93d9f700025585cb66bc5729b83bb6185d0727ea08a16c999f0b7c10d43eadc9",
+			"digest": "c86cc8f9b731a378754715628e5794f95453500d5c2352c52b2cf3c5635c4e7b",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-textbox+actions": {
-			"digest": "a21ce4674655f58562ca24f7efaf78eeeba6c4af927349cb7eb7e14d3b98aaea",
+			"digest": "205fe3e50d58fadfd5f24ccde4e403c6b5f055f543f807eb8c59b63d58af2ff7",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize": {
-			"digest": "4f522af5beca43a4d93764dafd879f374fc7c851874c870b5aa741b9745dd1bf",
+			"digest": "c6dac60801d116cff325de900bef623171afaf825df1f8324c92e44c107d2284",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-dynamic": {
-			"digest": "afe743e2341f6603c3e28043f81d69851c58b963f5d9380bc5432f345cc58993",
+			"digest": "19fd9eba4f06e4d1fd14f0ca34379a66d67fb609c322e8609e17bba5c2253090",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-flex": {
@@ -1009,39 +1257,75 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-richscaled-quads": {
+			"digest": "d347a8b4852c3b61cdd2e4ee5ed61bd995ec28bc3675d01608a9feaaad3893d6",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-richscaled-quads@quarter": {
 			"digest": "063f5e3168d74752e03ac5e832615b6fe21589b14c479d504b8f6d84ec41b9c4",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-narrow": {
+			"digest": "4938f77bc4153a635a6407cfe698c1310968c4fa447a07ca0bfcf11361f05eb1",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-text-narrow@quarter": {
 			"digest": "067c03e35a7fa82ea33ec869046d78008293dc2d69cc562a96d66e2c06d0f7ae",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-overflow": {
+			"digest": "f336fc2729a384b1731a83dacd3b442e042f94ff95043f07a2590069634cdba3",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-text-overflow@quarter": {
 			"digest": "96fe5f5bc74d87ba73fbf7d776206d9c3220e1737fa9f34799ae5b64cb9465eb",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen": {
-			"digest": "5697126ff954933fac44099e8658059d3b58b53a015cbcab64c5f6f66f007626",
+			"digest": "e55e934e204c02264816f7dee65d5cf59df2443f4e6b4fc96bedb6f450981bbb",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen2": {
+			"digest": "55c4291ab1d83748e74f89926083245b37a713498fc3f595f474dec6149b9579",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-textpen2@quarter": {
 			"digest": "f08e15108e7003ed4b9e0a0edbd7b74c7c034565f78644bb875cdaca62435261",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen3": {
+			"digest": "96bc74280671ba41cadd0ce2a1a6968df80dccf315f1313fe5ee58348d899bc7",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-textpen3@quarter": {
 			"digest": "832cd265c8ac82b92822bd94c9d988d3b47e74a922aa42641d6294982ec61bfa",
 			"status": "ok"
 		},
+		"fixtures/edit/layout-textpen@quarter": {
+			"digest": "5697126ff954933fac44099e8658059d3b58b53a015cbcab64c5f6f66f007626",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-truncate": {
-			"digest": "1567ac5f77805a0bd8d9153944dda624b1b1d5fc360663cb24fdc1d8d4ef92ac",
+			"digest": "9ca6601053277fb51d9a9520dedc1118fbbc1657d34821e6c80eb0ab7b983dc4",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate2": {
+			"digest": "2eaf7ae1b09319e04cff78e813f79c650d4372adbd395142296adec2b9681e56",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-truncate2@quarter": {
 			"digest": "fbd2eb2e3e3af89d2f005b9d0ae2136de9eff8047c53fb7df53b75ae3464a873",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate3": {
+			"digest": "7d8dcdf78b0d4d0a978849fbe180021440cd2316487554c96724cab1076d3343",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-truncate3@quarter": {
 			"digest": "0cdb0f7bf021948b76461968b8adf9a4a8776f7e7657ce8b243cb53eaa098581",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-truncate@quarter": {
+			"digest": "1567ac5f77805a0bd8d9153944dda624b1b1d5fc360663cb24fdc1d8d4ef92ac",
 			"status": "ok"
 		},
 		"fixtures/edit/live-rotated-cull": {
@@ -1049,11 +1333,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/live-scroll": {
-			"digest": "7270f1048e29c78e1fa4abee9ba7d1931667c8cba83c880df8d0a9095808fb05",
+			"digest": "b25907675b3859e981be6190609195d655a3df85013f5e31d6c77543f92d301d",
 			"status": "ok"
 		},
 		"fixtures/edit/live-stress": {
-			"digest": "34dfb736c7863687485ec07b48a2451a2484ecfd57c03d3619e411bbe33031fb",
+			"digest": "7f11309816a5e567a1fd869a9b6c1a4b1c95ed17a06521056b421889214811f3",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-curves": {
@@ -1069,7 +1353,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-order": {
-			"digest": "489e922e07b77e67023c5b55dfcae3c957cec0244e79ee5aa3d2abfc758fad7c",
+			"digest": "8e2c4469ca6d13c09e4cc147b069c8b96cc44fe65c3ac77de1262b45057d76d3",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-probe-snap": {
@@ -1093,7 +1377,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-errors": {
-			"digest": "bc6f1bbb7f2ca6159ac8c06acfa429657614c27782e430057f1415b450aabd93",
+			"digest": "c52c547efd3f31dec76e31c22b2a14d8acf51cddcd5befbd8672cfc395f996ce",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-ids": {
@@ -1101,7 +1385,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-input": {
-			"digest": "4fae0fe5a988e6cd6ad62fddf0bbc14c640dadf4c8e1bdc5c037f730dbf330b9",
+			"digest": "3e0277a57885e0e8443b22b47d61e967f27bccd36c8c8066f5fe23c02a0f927a",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-scheduler": {
@@ -1109,7 +1393,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
-			"digest": "1986a1120a64d7ce6c0bfb4fe35461df981a9d18dca64eb90054de91a3dc078e",
+			"digest": "68f7978e167e91221a57a4760cda6efc5e758c26f2dfefc5a23adc2c344681ed",
 			"status": "ok"
 		},
 		"fixtures/edit/rects": {
@@ -1117,7 +1401,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/rotation": {
-			"digest": "507bf8e149c8b0aabfc687c120e8fdcc882ccf0016b9cf3dafd4d55a419bbfaf",
+			"digest": "8f3b71ac11a88eefa6fc4cc92e08e63f4f885fc28182d89fc9a5b390e4a70106",
 			"status": "ok"
 		},
 		"fixtures/edit/rotation-clip-offscreen": {
@@ -1157,7 +1441,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-behind": {
-			"digest": "6ff36ba8686ff197074e46434f79a76201491d64dc3bf83db84f286c6e6d8c59",
+			"digest": "72115506a9e9ac076063d7892edbbe07e7cdc68edebab5c3e21d36039eaf5e0c",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-c-clear": {
@@ -1169,7 +1453,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-e": {
-			"digest": "349d0cece7f25abf628e11fcc8866915e4aef799747d96f4ccc8e471901ab188",
+			"digest": "6bdcd741470e33110f7a5e2505d92474503a26c35f55defc7bd3bb74b571c343",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-f": {
@@ -1193,7 +1477,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-inset2": {
-			"digest": "1a8c985c3b2fb1356f0bd9ea1c17db44184774cebdc1c4bc9917175583c2032c",
+			"digest": "323ca152bfad8893a1e22497736e88dba4fe60b43a45397d9bc070247210b161",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-k": {
@@ -1225,19 +1509,19 @@
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text": {
-			"digest": "b18a582941c86cce9044db5b8e354abe909a59e0e59d73ce92eeb444b9ce9250",
+			"digest": "408905e1a66f93193235c951b53590a42fcb8b4e4a2cc1bfafbc503fbb76073e",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text2": {
-			"digest": "87ef5cee2069eafa1dc3e838e878cd608b0272228fd175e7e37bd03a86bbd459",
+			"digest": "1b6f429b81de1ec476a0cfd9e93ffe0c3d034a845693a019a035c5456f221aa1",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text3": {
-			"digest": "c156d8f3607bcacc3385d148e153b6de16aa3c96908decf385a3a50623ad9b83",
+			"digest": "88ae9e223daeadc3eb02ab9f0eee218c2a6a773d40f3c19f872e778eb6eb7bad",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text4": {
-			"digest": "51e1f9c7a2623963900dcc0ce5bec370b4fb8c6ef6ad47146edf579f773258e6",
+			"digest": "536d5288743f599a6519d6e8423cc09167ea24c306723e7a176dfe714bcb3ac1",
 			"status": "ok"
 		},
 		"fixtures/edit/shadows": {
@@ -1257,19 +1541,19 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull": {
-			"digest": "bad38d92ac01fb1b3eb3f89f9383227b5dc906351c928abeee30c93083ab68af",
+			"digest": "8fef17bd351ce2f43679ce9b06ae8811ae8f71b789e420bfa1ecfe7374e72884",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull3": {
-			"digest": "7f6a1e8e5cca4e84421e722454ca3e91a744ac7de41454b83cc3cdf6d836eec9",
+			"digest": "51a6c48f7d5783e2b6c2f245dc04e08049ccc1a4c6ea2ce77fbcf2ecf5cd43b3",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull4": {
-			"digest": "36fa962ea9cd261074f4282b69ecd7d6c79a30b57647d67fb6d6e58a9ba2411b",
+			"digest": "fc6907aaead85c894a601415c315f0000171b976a4f70c4407435f674332c864",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull5": {
-			"digest": "f1c357268a2cd1c3a4ca604cde018a981079c55a327a3ff8cee500ee9fe6386a",
+			"digest": "dc615e4925346dcc5c95c5c72a43c38ea1f0a04718c1f428d6f979a3021bb2a7",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-surface": {
@@ -1289,7 +1573,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stories-scroll-noclip": {
-			"digest": "bd2a967b20bb18ebb1009008d605e99450b45c3b3f3f4cc9b65d6b97f3a944fb",
+			"digest": "2ef60c0c6394e82199c8d836be0a1a9607fa87c6d44082a2c0cc6ff902b4a15a",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-button": {
@@ -1317,7 +1601,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-misc": {
-			"digest": "bfb1a641e98e76e9d032d050464ffe6dd44e6539b03c02257d2abc99948c8ff3",
+			"digest": "b8fccdd31072874334ea772633b44b7e77efdd41ffaad1498cb6604214a1587e",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-modes": {
@@ -1353,11 +1637,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-scaledui": {
-			"digest": "5b314b6d67fbbb9cc82071bbb631462d312582d84c591bcd5ff41bb45fee3541",
+			"digest": "d9531af213b5dee1be908dc3777ba95af5eec50b7d7c041516eb9135e65e8b8d",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-scaledui2": {
-			"digest": "b41e78c84bf95d4697a957cabf214c1caf38953460566ef00a2281393468eaf8",
+			"digest": "808b02ec1b98c8dfdce01f2c6d229e1779f2f54d8b056166116f3a48a1457653",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-radius": {
@@ -1373,26 +1657,50 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-a": {
+			"digest": "43b69a3402468c18c88effbaad500445a1fc163bab98d361be9f733e407fd684",
+			"status": "ok"
+		},
+		"fixtures/edit/stroke-text-a@quarter": {
 			"digest": "cdc825ec73c7060b0c89c66d3f8c8b33a6f769978b89d0ec0956d993d571bad8",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-b": {
+			"digest": "c7a9376962ab65e4a9591d78018a719cdf0e0ddef7d0f0c71ac75d234955a1f7",
+			"status": "ok"
+		},
+		"fixtures/edit/stroke-text-b@quarter": {
 			"digest": "895e394f0b53efdb6b252299d230239375e6e09aa90315a10f85553bbce21315",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-c": {
+			"digest": "02a0f8ca51ebb266d7d14263d198592e73552577e53e992387873bb9b4fdbd12",
+			"status": "ok"
+		},
+		"fixtures/edit/stroke-text-c@quarter": {
 			"digest": "65ac34a5a4d570a53e2af5f6d8a80c089be4ad2aa01afe77b2dc3952dcec0a71",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-d": {
+			"digest": "08532dd01504ab38d12116431c92d01bf2862850b71a1a80f958f7c945611b8d",
+			"status": "ok"
+		},
+		"fixtures/edit/stroke-text-d@quarter": {
 			"digest": "97383d1404b5e70179b3b57935ff5d364e0bff10f669b93f8ff0923f936624a5",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-e": {
+			"digest": "0356956a563ccdbe8b3313ce7c39a1dd8f06973b7b6fbf27e12975ee484900de",
+			"status": "ok"
+		},
+		"fixtures/edit/stroke-text-e@quarter": {
 			"digest": "63dc27f6ae21de491c2fdb40a1ca862e68664668e08badf1a3fdd2d7c25810c7",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-uiscale": {
+			"digest": "4f0a5068eda36f95c04cf0aa4b168d1e8d6c735e0650600aa72c3c071acb10fc",
+			"status": "ok"
+		},
+		"fixtures/edit/stroke-text-uiscale@quarter": {
 			"digest": "57d0eb2891beae174dab3f61afad28f8786c870cf3470245fb4fd85be85cb2f3",
 			"status": "ok"
 		},
@@ -1405,166 +1713,354 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-baseline": {
+			"digest": "b3dbac8afff4db3c035dd391fc31068221a6df6c1581f07732e8f3099134e4b7",
+			"status": "ok"
+		},
+		"fixtures/edit/text-baseline@quarter": {
 			"digest": "8f9c9048e4dac159c4e8e0425793faa815c2df3b5665f1cf9b3f9571e0b51a08",
 			"status": "ok"
 		},
 		"fixtures/edit/text-fontfaces": {
+			"digest": "a46ed5a1f63450c86c680a4c869eca5b55170a0de3a1594c7c9a8d12a9bb790a",
+			"status": "ok"
+		},
+		"fixtures/edit/text-fontfaces@quarter": {
 			"digest": "050ddd22203c81e3d667a04e89bc438be67f0ac00191747eb68ed993a6959f93",
 			"status": "ok"
 		},
 		"fixtures/edit/text-fonts": {
+			"digest": "68c3d4905e39eacd06be2dd7f17aa3f5e9e869febc8aa30f3ec81649e4dddf72",
+			"status": "ok"
+		},
+		"fixtures/edit/text-fonts@quarter": {
 			"digest": "41f3c6e949cfbf34053d0613d7935add8d1b338de3991940b663ac5304243e9e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-glow": {
+			"digest": "493a115a21e2bf5a9cc8246d893aef0b9412e883fbde6307a01fbd0e93aff8ad",
+			"status": "ok"
+		},
+		"fixtures/edit/text-glow@quarter": {
 			"digest": "5a39ba2504f953426fe6c299790fac4264445102974cc98dbbee8dc2e2cfeb20",
 			"status": "ok"
 		},
 		"fixtures/edit/text-gradient": {
-			"digest": "5868cba50615acc2b23ecf3d55c71f0aeac6b5985e7f85eb2b8a9299dc66ac87",
+			"digest": "9c13dd6abb9c80caf67bf4bafd1d14039878b3d4616454ac79424dadad98fd6b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-gradient-degenerate": {
+			"digest": "4bf651a099bf82e5a326b0f6023cfaabc1923927d9f55bc9886ccc9b04167536",
+			"status": "ok"
+		},
+		"fixtures/edit/text-gradient-degenerate@quarter": {
 			"digest": "10db89f9a799e3a07b2c37ccf8a12747ac1f1e71a6ab820cc74ec446854ea849",
 			"status": "ok"
 		},
+		"fixtures/edit/text-gradient@quarter": {
+			"digest": "5868cba50615acc2b23ecf3d55c71f0aeac6b5985e7f85eb2b8a9299dc66ac87",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-blend": {
+			"digest": "3c95e249cc173117fe0b4af53aaacb0c128c72e99a107b046ced42b57a80ab55",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-blend@quarter": {
 			"digest": "ad702ec8a6169d3a8994385216a9b4754a492fe643420770929ca6d5642c3d3d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-case": {
+			"digest": "7944ed9fc4a7534857beb975dae7e47356c660d208ec03833aded78a7834d466",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-case@quarter": {
 			"digest": "f4c0999a1c673ed86116c1ae246347a0c66e605276caf5e9289e406da064c901",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor": {
-			"digest": "6a722b3151b2de6c5f251e35c7c7f1c42ea54039d35bf01a2e163961e31d584d",
+			"digest": "a46696d013103d5535ed349b3a8417b9e7c4a58a2712cb3d0f3a472423608ae7",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor2": {
+			"digest": "3e1633ae7172f565c138a5bcce1d61db1320c751572739413a82c6669234b988",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-decor2@quarter": {
 			"digest": "9767fa59cb8f8eb0e0bfa36ed9eef41cc73bb3ba756e678a26c34ddbcafdeb86",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-decor@quarter": {
+			"digest": "6a722b3151b2de6c5f251e35c7c7f1c42ea54039d35bf01a2e163961e31d584d",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-emoji": {
-			"digest": "1e6e63d089149b8b46fbbc3f80a03ac6a5b3115d0b6a358ec986918e60c2411b",
+			"digest": "5f7bb3a91d7aa730c9dd123186a06317859fc02fa8744d61822df9b09c6f2fad",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-emoji-line": {
+			"digest": "6b4b9f30f873231e8ab50eafb33042e52949b840e4b270945f9f40c277e44994",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-emoji-line@quarter": {
 			"digest": "992f3e58c94d4bbfa7d204ed554c7fcfa83451d367328f2ba17b883ebe5eeef3",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-emoji@quarter": {
+			"digest": "1e6e63d089149b8b46fbbc3f80a03ac6a5b3115d0b6a358ec986918e60c2411b",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-fallback-block": {
+			"digest": "2054ce764e8b8ecee828a6dd2dcac80afa28864e45478bf51aee9fd607703853",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-fallback-block@quarter": {
+			"digest": "0d0c7feeb02f2119dfef2dfecbaf5db3410fc70e47293ad642d7c16ba387ed22",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-fracsize": {
-			"digest": "52d1bb15a9cbfb97e12eb823ca21decf5d905ebfb10c31e0c540f1cfcda5ab61",
+			"digest": "e84ccef948c748960f368744f4a18e8100add290afb900e062fd1c6006eaf0dc",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize2": {
+			"digest": "f3514e58b0e04091f97948dff87e393255ce122036ec2baf3f0cd4619b387119",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-fracsize2@quarter": {
 			"digest": "23a34c3144c613b05cc9a8d3e91c982f2de310cadee4aea3627324b8a274f92c",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-fracsize@quarter": {
+			"digest": "52d1bb15a9cbfb97e12eb823ca21decf5d905ebfb10c31e0c540f1cfcda5ab61",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-gradient": {
-			"digest": "57ebd9802e813bcbd231ef268a85bac2788d92709cc0afc3467d39d4312ade91",
+			"digest": "45bed490aad26a1dbaaacefa1812fccbdd1315885237a4a343530bc6b2aeeba3",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradient2": {
+			"digest": "983e9e9cb59545238933aac71adf1ac7c31eaa8b2c8b2fadc55c491fbc2a2db9",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-gradient2@quarter": {
 			"digest": "6dcdeb5defdc3e2ed0573de8f55f48ced3309dfa335cd215317f379df033ac20",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-gradient@quarter": {
+			"digest": "57ebd9802e813bcbd231ef268a85bac2788d92709cc0afc3467d39d4312ade91",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-gradstroke": {
+			"digest": "6859b63c192a298716ed209f28112e449ee3c88b0605a6c6d95198cee0884041",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-gradstroke@quarter": {
 			"digest": "822e9f405352ac109e734a01a532d74a400701fa0fe815fec29231ac481478fd",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-graphemes": {
+			"digest": "db129fabecc84c0ef1ed5281cd375782389a60db4acfdf8293fd3312bff772c1",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-graphemes@quarter": {
 			"digest": "2d43087b6541777a4f3168d33bae83bb17897ce9056f4bacf54c5aea0cd31d6a",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-grouptext": {
+			"digest": "3c979bf929abbb29c6c6bf5fba9a80e6b0452781ebcc2463bf74dc953f8cb959",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-grouptext@quarter": {
 			"digest": "1c6c55dfdedfbfee91e0e9efba7026202d7457044d74a8d79584aa9131c0ac5a",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-groupturned": {
+			"digest": "4b9063fc08da6eb39a8cac922590c81a7ce894c923458caf32cc609c9d2410ce",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-groupturned@quarter": {
+			"digest": "89a205f646beb5a3042deeacafc296de54e8cab1a91e20cd6406341f79783a53",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-overlap": {
+			"digest": "1d12422c07f8690543783cda321d776b364f42fbed67a08b4a9cfef1b679a7da",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-overlap@quarter": {
 			"digest": "9d50a0543600e4504105584219c8b3ee359a28ed95a2c7820525a69430228f94",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-place": {
+			"digest": "14daf14a3cf478005604384b8c5a2b23cacab44cf841a3458d7311e39e684bb2",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-place@quarter": {
 			"digest": "4617c093b413e9f9f3759c7dd2178ab4e9240cdf3939e8743f8b616beedb5fe1",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-quadties": {
+			"digest": "17262a33e95325e36e252dce5e00f824763ef1ead9bdc8e54d312b478c522dfa",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-quadties@quarter": {
 			"digest": "165fe1f31c1b4dbdd05f7c59636764ad80f15a4b85204c7642e8b5e826af2e52",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rich": {
+			"digest": "c48c348fb0278959842e6306dc25fb9fbe786ad3824237245cb8b153d39a4a8c",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-rich@quarter": {
 			"digest": "e0f99d06b5d6bb99cc5b6cccb872f22a891ec5b773e0ebdf075a53e4e2f71a3b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richcap": {
+			"digest": "ebfdc713ed9df86194dd7ad75073f842240fb02d4fd9c8936c62675d30fa8c3b",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-richcap@quarter": {
 			"digest": "8c4bcd77a9fcd1ee0d0e5f0fedc01715399a8445d0396a318614e251a9944bf4",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled": {
-			"digest": "eef277491f67dbd48a0576eab95d47d970e965629ace30a11775d2af06de4f0c",
+			"digest": "2bd38f894ac6ceecd6a1c72176f8cbb61981af29d0fdb8bc528f96d7a85c246c",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled1": {
+			"digest": "043a4e54ffc6578e0f319d1dfbb32df2059417d02a7337bdf273e64389c34e9b",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-richscaled1@quarter": {
 			"digest": "d45f91b3f9dd45c5a7d1df049579e2727b7adf78cf7dbc97cd3c7ad666ffa2cf",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-richscaled@quarter": {
+			"digest": "eef277491f67dbd48a0576eab95d47d970e965629ace30a11775d2af06de4f0c",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-richtrunc": {
+			"digest": "b3170f2f270bb0d9cf7a6201adb88c2ebe1e80bc69052fbd0955f65a2656dadd",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-richtrunc@quarter": {
 			"digest": "ceb1716c36bd75c5e1de458ca750609a328e74629ee6aee49c32b2821ee2c081",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate": {
-			"digest": "6dbb318f8ce19ec4ef8d960a416af71e3d46edd9ab33b864208460caeaa2669f",
+			"digest": "640647b0436aabcdf52c928fb9218465352ca9ce83aeed7ae1afaea60f267342",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate-quarter": {
+			"digest": "0189a28b3afaf4db4780a4fb031edc19fa740a18473e85fe9f17e78e65fd435a",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-rotate-quarter@quarter": {
 			"digest": "dc7ecdb6d422604ca3289ac3c15f8017e0c56fdfa074da7577f0814dd8e4f0e8",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-rotate@quarter": {
+			"digest": "6dbb318f8ce19ec4ef8d960a416af71e3d46edd9ab33b864208460caeaa2669f",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-rotation-size": {
+			"digest": "2af5953165833c2004ff6f4bd3c0fca33002c126c9ebf686beacf62553cb9905",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-rotation-size@quarter": {
 			"digest": "0522d9be66af716cf8f57859760c5a6de692693636b57c75a552efd3c5915093",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-selfclip": {
+			"digest": "670fd75d42217db54bd2cf395a6b8263c21a62e249ae6458c5445d0ab4d21581",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-selfclip@quarter": {
 			"digest": "0dbc36eab493a1753a09a02b4b6b3bdb345f1eff362eb1ee2f443f2aa204ae33",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-strokequad": {
+			"digest": "d9f202c9ccc73493127a94b7f26162139403041265e8d8fd14cf25de3dfadbb9",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-strokequad@quarter": {
 			"digest": "6ee54aab34a926468294abacc1a1d41e325097ddc841b587da9aa9fed0185cc6",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-subpixel": {
-			"digest": "a0f675d68da20d2fa690a98f793e9bd208d7f4861d9121a203461e4b7cc31535",
+			"digest": "aa2c0e93e059bf22a67d49c60fa761ea34d084a45bba5d1d6113979a67dcf97f",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-subpixel-size": {
+			"digest": "59257aa4ae2a39f51415f06b643c4db20605cfdf77cc9bee4d3f185a4f6f7fa8",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-subpixel-size@quarter": {
 			"digest": "864b885a5f5de462ef5459e1388d8262301069ca0370b2484ed2cd99a5764f49",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-subpixel@quarter": {
+			"digest": "a0f675d68da20d2fa690a98f793e9bd208d7f4861d9121a203461e4b7cc31535",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-synth": {
+			"digest": "613a03f26399fa895d740ad3f3bb29b674146aa3fb70a5bec97cfb766fb3b166",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-synth@quarter": {
 			"digest": "e9c37b395a21592a2e45ca065a11fe227f82bbdfc8110473c371f0e2aeab40e5",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-synthscaled": {
+			"digest": "27ea624e0a51b6cbd59ab5980158ccaed5467c2ff4b9f3c119af20d7842fb633",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-synthscaled@quarter": {
+			"digest": "aea168b27f884c3aaf47615d0591867dc9a1ed5f59a000575ab995bb61122332",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-tie": {
-			"digest": "33abd6f0141a720763caa79bfadbdbb4766f354483f86296fd2091356f92058b",
+			"digest": "31ecd126fe32cecd56a2449d0ab62ae1e87625cddda47fdbe1b17f5666f0910e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-tie-size": {
+			"digest": "a300c6167efdcee84f71d4f2bbc24fd10081bb7939875bea104c2abec4ef66f2",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-tie-size@quarter": {
 			"digest": "84e58cdb4cc7b42404bf3d6d185273e596275734cca795c20fc852af3c51877f",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-tie@quarter": {
+			"digest": "33abd6f0141a720763caa79bfadbdbb4766f354483f86296fd2091356f92058b",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-uiscale": {
+			"digest": "e8e27ea9fa07ad86de9474dc234a55677abe3ec1fe370cf2f2be29ba406240b9",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-uiscale@quarter": {
 			"digest": "94963e2569f110dfc6ba41ba574fa91269ca964b9b48c1363c0600bfab0e726d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-view": {
+			"digest": "aaa6a417ecafa5260103dc9629d68a3949c2d2900668945dc7fdafc57c7fabbe",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-view@quarter": {
 			"digest": "9ffa7ac94bc803f9ee1443a18a4be0f0b0a3c68bb5ee17ba9be9d1e51c57b97e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-raster": {
+			"digest": "458dd29edc559349136fb588d493a7543763dfea5e90f4246fcacf5c3d387dae",
+			"status": "ok"
+		},
+		"fixtures/edit/text-raster@quarter": {
 			"digest": "ac1ce6af0af96554f450e3fbf2062b6cb5c3503b519e5ff1993778dea4945680",
 			"status": "ok"
 		},
 		"fixtures/edit/text-stroke": {
+			"digest": "13228b6478760013d19bc65588ce328741ea0cfabf143b727d9fa04814994254",
+			"status": "ok"
+		},
+		"fixtures/edit/text-stroke@quarter": {
 			"digest": "f043104406b795bb0e84aab430023c4b83234743a5eb038b5b93984a5ed6552a",
 			"status": "ok"
 		},
@@ -1577,19 +2073,19 @@
 			"status": "ok"
 		},
 		"fixtures/play/anim-probe-springs": {
-			"digest": "68e7c61a6859575e3d4fbcc14427d4625a8c33bc0605ed8e2122ef7e0feae5d7",
+			"digest": "15cbfbb37d1dffd8ba6b00cf8c8c5cba4044777088ff8307c6e983c6d2bd3501",
 			"status": "ok"
 		},
 		"fixtures/play/anim-tweens": {
-			"digest": "f853aaeafbbabcaa0cf8ffdd3285634d61c25265853cab3e9d60945ba7007137",
+			"digest": "83fa95ae4a226ff7ab6ea38cb8d8640e90641de945fe4fdc21892b5b0779df6a",
 			"status": "ok"
 		},
 		"fixtures/play/canvasgroup": {
-			"digest": "355005bbf39cd4abc466c2002428c50544e00b23328d2b57ea14635a6c874d16",
+			"digest": "22c3b2950f3279c7b1a85980ee0ce025d45f18e12171dd6a6e655afbb44df539",
 			"status": "ok"
 		},
 		"fixtures/play/canvasgroup-rotated-gradient": {
-			"digest": "bfb76fc2768c461f778cc2e84cfdee4765eade629386a32cfad26d23ffa6af81",
+			"digest": "0ba198bf1f539d006e7ec88b521c7a53f9c58e5f8acd80f28679ecb4311f1b14",
 			"status": "ok"
 		},
 		"fixtures/play/corners": {
@@ -1597,7 +2093,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/device-probe": {
-			"digest": "e2f37205015bb6c44b6f5d283d56cd1faa8d945a023eb6d0736a0e2ca8f9a2c8",
+			"digest": "e9b44be169763e696ba691c51a784aa1c3ad3be640d67ed1c7da5dd3e7fb536c",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-edges": {
@@ -1653,7 +2149,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/group-misc": {
-			"digest": "ac37a1b635b0f2ebf3625bd351325f4490d295e2b4210003d416b671218848f8",
+			"digest": "5ded6e3fa97ea43caf04be29bd9eaa312322c5a55d8a7543498d312a181fd716",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-bigarea": {
@@ -1749,31 +2245,31 @@
 			"status": "ok"
 		},
 		"fixtures/play/input-device-flow": {
-			"digest": "0a4b363048d4c67fe12e9bdec53ba99025a30505d6b1835e26fb85a316e5ea93",
+			"digest": "b4e8d0adbc5f94f6c6e82d821b7a973baead0b26c11cfe6e3a89cf492617935b",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-autobuttoncolor": {
-			"digest": "bf08ec92d873cb4bdb44a7cb35f714aaeed312d5972494a3d42ca6d0effa0e80",
+			"digest": "51004bcbde6349cd708e2d1dda05716985deb2005de76549a5385d8f7ce428a3",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-scroll": {
-			"digest": "85ced40ad7368f7cdaaa772babf4aefbf845e9657b86f3c08e9e0db26b95a5cc",
+			"digest": "8de6c703c9f6543eb116dde5b6b60a568c30aa69a2afaed81be2fbd204f0b53c",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-textbox": {
-			"digest": "9d803a3f4df8b64448479f8c2eea9ad5c32332758dd670253eb27b5b53cda1fc",
+			"digest": "bce535e4f9bc8d1a52269e2f9149790b0c539315617975bd9b2d0aa61360d99a",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-textbox+actions": {
-			"digest": "238b146a335d45455c0326df1ad6fd20371d454768b161cf3bcbfe23fa1301c2",
+			"digest": "836a52ed00d23aa530bbf27e37a103864dc1734dab57d2fb5147d7a470640cb8",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize": {
-			"digest": "23ad86628c325e5c62263654bacaee807177d26f733e147951b5ca0769192d79",
+			"digest": "dafd7ed12710f99a43ded1b8889e60a3675a75074465c09cd44c4778c23ba15d",
 			"status": "ok"
 		},
 		"fixtures/play/layout-dynamic": {
-			"digest": "b80381cfe4ef8c720b14956a5f0d0950410bf8e766c107f472495351e50b18db",
+			"digest": "0dc8f5ab015a0c21202cd50b24254155a68ef587f5ae155dbad8723ef71cffda",
 			"status": "ok"
 		},
 		"fixtures/play/layout-flex": {
@@ -1789,39 +2285,39 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-richscaled-quads": {
-			"digest": "ba9c7845e8fa4424e99a83d53bab530f19a9556e0531e91fdfba3bcee754aac7",
+			"digest": "c0a826e98736ea553fd559fa022e1c7afe15aa40eb5f0ce8835d8e3b9b5b4960",
 			"status": "ok"
 		},
 		"fixtures/play/layout-text-narrow": {
-			"digest": "7b3e3afc83c8a645236eaf272b832eaf4215310b3abc26a7a4f02e767acc8947",
+			"digest": "0ff7b23d9d0c0b74e7f9f215a76e05f830bf1bac61b4189c6e1f9995b6cc4e64",
 			"status": "ok"
 		},
 		"fixtures/play/layout-text-overflow": {
-			"digest": "05c5321c82fbc5f06f12ad07a74728705cc0d954cd8480acc5d5b0b7a3c0e46e",
+			"digest": "fa385fc8df901cd1bb8f69c7138a439d755b9301358fb26d496034a009e543da",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen": {
-			"digest": "eefc11ceeb0afc849124399aa374723002cfa87b9e90c0ed03f3889fb0e501b4",
+			"digest": "f747b7a8a4a89b487b9fe23bc2b457afd10e23a26576d41be36acbff0e459242",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen2": {
-			"digest": "aa824bed41e04166485de678c952059ea9a8cbbd81f194df57ebedb7f74d7f08",
+			"digest": "6841884d2ba918b99540ec7d68eedcf22d09ee5be0116d201aa4bb5cee0ed678",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen3": {
-			"digest": "04170a67e3e7fd2630f0b974e4860014468cfa4dfed81abb85c0a052a2feb347",
+			"digest": "261b392aeafcd1eb52275e04c038933b3f9806fac71dd9677e3f6e6f1d22fb1d",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate": {
-			"digest": "facd32ca41c3df1a5866c01a434250a398a79c39becaae9f18fdb4e6e09c4ba1",
+			"digest": "c4e49eed4764193403c0908178edba3606849e972723aa30d982afb8602d477d",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate2": {
-			"digest": "f89aaa850dc77e495256af6926575ade3b5e363e4768336182979bad155af5a7",
+			"digest": "aefcad7a64e42e222f1d01328613f0f551985da69a6cf3126bacbff731f62428",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate3": {
-			"digest": "16a7fac2ba9f9cb6eba819730a0cc20efe54d1f9d06c468b1f5b04bdfbf03239",
+			"digest": "7f94db4cf147a0d4a19608c747b647e05dbe481d3a03d86893d1b2f84a926528",
 			"status": "ok"
 		},
 		"fixtures/play/live-rotated-cull": {
@@ -1829,11 +2325,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/live-scroll": {
-			"digest": "0bac8e579bbf82111d2b53f97d42a1abc9ce92d3563a74a62ed51e26c952b274",
+			"digest": "10ae86ba3655580f41e3bf74c1f8798e5a17944aaaaaa2fe8ea4bf1d2e70dec6",
 			"status": "ok"
 		},
 		"fixtures/play/live-stress": {
-			"digest": "4ee51a334f26afff2c72284a16578730c94420283361cb6d5336d30dd497d1ff",
+			"digest": "d037cbc1b0cc64fb6b617cb19745aad47470ed0f1228e948ab1cddab93f491d7",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-curves": {
@@ -1849,7 +2345,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/path2d-order": {
-			"digest": "3e9a03e41fe70cc279ec88cd2f733bfa624bbafa9aa5ddaa202c313b8c679db7",
+			"digest": "3511e323d97b148d6d69d70cfd4417d955ffccc8e3571095d55f822a3add34c8",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-probe-snap": {
@@ -1873,7 +2369,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-errors": {
-			"digest": "1c215923f73eed32ea08d960993e444bdb6e0c9e4131fea72f8d66ab4408c9cd",
+			"digest": "a103a95afc0ee0b6c723628314999a5f6f5728807dc34c55d59617e65208e7fd",
 			"status": "ok"
 		},
 		"fixtures/play/probe-ids": {
@@ -1881,7 +2377,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-input": {
-			"digest": "1a9a744d2f034e344d68a7d39081de1e9f71cf1b11b897cf919440e97c3e2b13",
+			"digest": "0eb61d151743afe63bb409061ee2e86dc8db1fb4d39c1a4b9d47027e32a763df",
 			"status": "ok"
 		},
 		"fixtures/play/probe-scheduler": {
@@ -1889,7 +2385,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "574fd355d679076d5d887b5c5b5c02e19f659ed7471ce894c4094f3f30e0d421",
+			"digest": "d415040de96b64acd7ab9e20ff5f8144184d08607cda369d899bacf194b598e6",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
@@ -1897,7 +2393,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/rotation": {
-			"digest": "2a192fd0489a89e1931e556258b996d4c2faf6ac7135e10b7193d95de9a1af4a",
+			"digest": "7a84cfbe37adb52e453c9a3d97a87c544a67370cf64060565aae0158eed1b91f",
 			"status": "ok"
 		},
 		"fixtures/play/rotation-clip-offscreen": {
@@ -1937,7 +2433,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-behind": {
-			"digest": "0d98c92f94e2d9cfd1a80ad54e87f5ef6a3aa025c6ba572b7e464e87af4489e1",
+			"digest": "bbd4b8eefee1b00ea9e3c6aa917626a94a4c25027384535fb265655a81f9972e",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-c-clear": {
@@ -1949,7 +2445,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-e": {
-			"digest": "1f716eef9bef5cc004bd8effa5afc5e64189e209112b60ebfaffe46f79b85b99",
+			"digest": "92fc9930d0f8b12b053033d7f7757bc0649bdc29c754ad0580998064faee88db",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-f": {
@@ -1973,7 +2469,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-inset2": {
-			"digest": "c282cbd468b076390779f5e827294dcc64d5032fc8813dbd6892db3b68240595",
+			"digest": "6a6b04eb8c804296f1ff03d4d2b1c899254b12b10adf9862d35c7519795bdf65",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-k": {
@@ -2005,19 +2501,19 @@
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text": {
-			"digest": "a8f5e5a31fb2b0620d289379ced914aaaf253da465aba1af59db31b7d4f4f218",
+			"digest": "e494e50c2c22c9d306f503e937d294ff246a242fe02420d0aa8e36aa7d9d570b",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text2": {
-			"digest": "460efe0becdac9b749dc1bb75d20fcd9ed13de39042e5991dac0c35bfc072a98",
+			"digest": "32eb730ddeaf499db61fc7eeedd021bbfe88f12bed989298110373f416c50fdb",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text3": {
-			"digest": "44b5195bfc334008babe32fb283e924d551ae48999d09dbb20714300d3badae7",
+			"digest": "4a2436e6d52e7135bf6895b06c3c323b0b2268f2477bf5ad965e54a00dabc325",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text4": {
-			"digest": "44ef3f42d4ec2a8980b1cd4886891a4f2505c6b573fa1c6ba62b9f432b921710",
+			"digest": "fdb9b3a5b81d3fd3f94e869facedfd5d638949dafee7204a6369367f95a249f8",
 			"status": "ok"
 		},
 		"fixtures/play/shadows": {
@@ -2037,19 +2533,19 @@
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull": {
-			"digest": "52bbe2c7db5764ea976ae2dadc5fc371bab4fd64823609ec61ace68cdd018bdd",
+			"digest": "998007b80f1d693fab01d289009d798b6b33230f22c215e1dfa5ef7160897a90",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull3": {
-			"digest": "59e6a80c9cdc49651a9c309e657a6f8c20b20dcaf8baa517771e3a644a958925",
+			"digest": "52e6102f983290d333232b099a6711a88b8fd7bc9573cab7d153a23886a0483e",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull4": {
-			"digest": "e71e4db62bb20e26a3ecd54010e20161b32066c07b42e6a0dc167e3339ef675e",
+			"digest": "ed0a418de88f15ad4b9f295d9b522ad044bbb42e9a182ab165b5d6a313a47736",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull5": {
-			"digest": "5e9c980507fa82e3d40f62eb4bf4cb40d075a120e0df76ab0b1dc26ac9592823",
+			"digest": "ee4f7a039e9c2de0b7b05c633ad301aae9ec13da8e80ba53059e83b123a8d959",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-surface": {
@@ -2069,7 +2565,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/stories-scroll-noclip": {
-			"digest": "1b747cdcf1bfdbc05673e3f9e70fcece4637a49f8722a1267a890957adc2eebd",
+			"digest": "55fa11bcbab4dc0b7dcd53fed345fcc7e522b31a8533c6d8e894d4f882db130f",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-button": {
@@ -2097,7 +2593,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/stroke-misc": {
-			"digest": "9deef27382c3ad2f35640fa699597d4181d76e510b5092e550dc9da3f777e904",
+			"digest": "c581298b31ddb490571fb0a4265355b96ee027554847b7dd1401b405fbf2f9fa",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-modes": {
@@ -2133,11 +2629,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-scaledui": {
-			"digest": "6a8b63651b3421d7b31d5f35c73ad945cc44c8c48e839db9aa8e290f46109f8b",
+			"digest": "11a1eabf642e4ac05c10b27f0fa6a0e55fd45f2db6c0c9f99632e6d8b0f7411e",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-scaledui2": {
-			"digest": "f56be3cdf3c0c3ff3ee9a4ed8c7c768e05d274e812a93175875948fd437e2ad6",
+			"digest": "9a230ef22432b8f345fd8f1c608e2f2835fb35812cbccbbbb75d2fbc9bed6ae0",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-radius": {
@@ -2153,27 +2649,27 @@
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-a": {
-			"digest": "c27ed890d01e0480974e38c849e99e663e617a280001f2ca2e99b258679b9192",
+			"digest": "29672070db21e0a03836dcd92db63921a0f389654c9fbb36e6fbb6c7a0a2abc1",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-b": {
-			"digest": "c5e2c8d1ab4f40d446f3940fcdb209ecc9672592b0c22c319e76d21a7f9b1e1c",
+			"digest": "87de8f647fe755498b318e0f8a38c6f8ed42fab0285f6278a055175f244a07c1",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-c": {
-			"digest": "1683f2d41b813eb8502f23f483b1cd80d410fd9aed1abe75c995cd786539732d",
+			"digest": "2d08ea7e67dc7bd46a76c81e7cca0b5e10847e5224de338b1df89665a7768dc0",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-d": {
-			"digest": "ef71790b9d5a82c3466800e56eae2ab53cf5e25f3173769a0aa1aaa1456084e7",
+			"digest": "83820e821fedd96f57028cd95ac345593c74a173f0ec93a0e29adfd9eebcf144",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-e": {
-			"digest": "6e1f70ce8e4e8a5e484aa1b24fc8351291c9ac2f4ec9e631285dd8f305a0e37c",
+			"digest": "3ff02a92fd0b014f377637c46d4fc737e7197f8db854cca11b8500e2a0068adb",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-uiscale": {
-			"digest": "9c444722d8f7340359c1bba4904fa5d79443284a866e9db503aded8c5a9cee4b",
+			"digest": "85371f07e3e8617c04a723dda8a54f94d2af2d83e91cd1102963a56a9873e378",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-zindex": {
@@ -2185,167 +2681,179 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-baseline": {
-			"digest": "b3c08b1961045aed4d577ed7908ccfed41c42b01e8b3d08080e8f1f8d34b34de",
+			"digest": "863454f5200cc8d7e1a65fb374562b91b3d6b2e88d96b84a70352efed56a75fc",
 			"status": "ok"
 		},
 		"fixtures/play/text-fontfaces": {
-			"digest": "5f52c9247c6a829b9eab70a7dbeed33c6c701b6d2f94cab642f74e396265f6b1",
+			"digest": "f3cfce102252442fa5f986ad3820c30b97803c419469d6a4848ddc691c5e765b",
 			"status": "ok"
 		},
 		"fixtures/play/text-fonts": {
-			"digest": "40401fe547324da1519f828df7f475d076e336ac346a5a3025db8bb2af3ef3a1",
+			"digest": "21b5728d46b562baebe1d768adfb753783b61abb237b58e41328546a3d78e283",
 			"status": "ok"
 		},
 		"fixtures/play/text-glow": {
-			"digest": "406b9cc0fb2307a5f5e4915c9ed20c185710ebe6eef14357f87b8e20d922bec0",
+			"digest": "eebf1499a57cecd9c05fc7813a4bfed9b7b57acdd041e48c8a4411d9784ed1a6",
 			"status": "ok"
 		},
 		"fixtures/play/text-gradient": {
-			"digest": "07c8f0b42b3e3c3c03b34c1b4b11e3553290b33c02a4c5b8687df261a13396a7",
+			"digest": "7d9813a1df88403ac00bc9f7241eefdf33e055aceae158da0b684caccdd63945",
 			"status": "ok"
 		},
 		"fixtures/play/text-gradient-degenerate": {
-			"digest": "426e5a04103ee9ab0fefd2b69b89182d00df129a57901a83a7160904dcf0ecc0",
+			"digest": "9177038e3efe7140e2335787f89ef3c66f275d413a259d81e8a625a6189a6b21",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-blend": {
-			"digest": "663da8fedf83ac9af387b918395722ea9bcf9a056c4ec543dfca04b907870099",
+			"digest": "3c8443f410180c6e0d3a5a1481af3fe3e549dce7255a73d03530088b9049e630",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-case": {
-			"digest": "0c12c756ae120715dade4db8756de208077fe320ad004c91d65380c0fe69335e",
+			"digest": "253008d8ce2105d82a96c3853d3af28bd73cdfc663c8a2ae46db7a5b5405883c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor": {
-			"digest": "a88a18329586359b6c7d662d62bb1f36a01ebf75a043836c4d0d0a1d73f3d779",
+			"digest": "b179fd9ed85c1cbae75a421422e5cee4e476ecf5b68ce804e40e412a652c4e4f",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor2": {
-			"digest": "e9a1fd1b38908dc645a309b76bfcceeb562c4ffb7c023dc8eb4c9930f482d02a",
+			"digest": "0043d4e90fa200da645d65e3ca6f462cf9acc1a1855792c126de219e6089a629",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-emoji": {
-			"digest": "df29754e65c11e5f8e699aa3b28f8dadf7aeb654957e8ffc6c74bc3f3073f86b",
+			"digest": "322f58f3cfbbd15be26d0bac1bddf58084ae8e5fd450c55837b57f3e4c3f58ed",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-emoji-line": {
-			"digest": "6e4bbd63f5305173265e2d27ff5e6ce73d3219fbde92dd6a09a1a036752a12bd",
+			"digest": "483505e577dc2ce9c68ab48d8bde1b9684933119a66abb760ae26033dfe64209",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-fallback-block": {
+			"digest": "f509103b0128d93309bd9f48e8e4245c2c42ff38c6e3566dca72002eb2426e8b",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize": {
-			"digest": "51802ff2adff574ef14a85035ce66dabb1755647ee758794c6ece908b2e720be",
+			"digest": "3eaa519efc187033dcf3e01fdb8673b949a7d0c1fb8bb2411ef01209fd8a2b68",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize2": {
-			"digest": "977587e9eec25ad1971e6603ad34e1e2dcb1f78b515a2c94e748b5b4f8a6c8bd",
+			"digest": "634047ed397aa8a574488db8864c29db6c54cdd7c1aaff3b35b6a9e532cb24fa",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradient": {
-			"digest": "6513ea47c34e238d3446cfb30f3d5bd8a425ab150911ffd85de97039562a2342",
+			"digest": "2a9f99e66f68af14e2e888409e88af9d3553e75a7def3980a6968b6804a6cdb5",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradient2": {
-			"digest": "ea3da26cfd255a4d766e34902d693c1a91332072e741fe53dfad5a6b482503d9",
+			"digest": "1389ad001da67a6439708898b73b6dd7100dbbe51f7a64fd9d259016c6e229e6",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradstroke": {
-			"digest": "366e0a629ec6decc66c62e82ac6fdbd924931b33a515ac55e39fb9629237427a",
+			"digest": "5f05674f1f10f8860a506da9d148e67ee6198c68db8b3c31f6acf6dff3ee83fb",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-graphemes": {
-			"digest": "d3818ae4d8346b80c92fd46104c87c536b67cc0a3a70663d5e4026a118faf153",
+			"digest": "bed292bdbfec45712a159247a6ab6b982dad403ffe418070e06cc8babf880840",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-grouptext": {
-			"digest": "fbcc80db0b530ebee9fc24abf92b42844bea3a09c663d5439d7f80dfa73e5d21",
+			"digest": "16d9d43efc7a4a0835e5a94649e95dd45f54363f6cc95f7197796c72d056bcf9",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-groupturned": {
+			"digest": "fbcf83a1552e5b9d28fb0706fba4d335d7cd503ed67d6e989615bdf263d79e76",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-overlap": {
-			"digest": "418f702f2cc006806b1ffca17421b2e47d6d0cf9638a4e6d2fb67281c68ee55e",
+			"digest": "426357ebd274302ee2d5f6284756de86f3405853ecd09826d946772e8f549ec5",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-place": {
-			"digest": "934eb5fa0a330238145c63f9f8025e4368b3f0a66864fb6ba4561b9b2d947a61",
+			"digest": "8a5ad2f24951df5ac8a72e11a01a0b4c7908aeb1d8f399e5cd144711ff6cbf03",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-quadties": {
-			"digest": "bcad3498a877febbac3dc132f677447e7993b357f6b90d9b9e6c69bdbcf21e07",
+			"digest": "53e653c6d727ac9ea6d870089b651d899785f923a48fb426aedae66ac346db91",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rich": {
-			"digest": "eff2cba7047fb50c2fa08c617886f2a1017b586f7bb26441f6b011d5508556ac",
+			"digest": "638e7f23dcf490cc3b2624a85d64bb7e961d263baadaef5dd241fd65143eafd2",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richcap": {
-			"digest": "ac1f3e9f9dd0dd1e159977938a4d59adebb16b1959818dbb3d93d4c04cf2db24",
+			"digest": "13a687d0497642525ab8513cf281fa5ffc33cba6ce53432ec4baf4eb33272726",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richscaled": {
-			"digest": "e7ec78b607ac92bc3dc7045c765a5c4acd611cf92d4c10d48d3136a04e635bd8",
+			"digest": "654f2f7daa3ed867d241ff99d9280f9575fd1b5ced6af841a22aac22ac82aac3",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richscaled1": {
-			"digest": "6a5a7d7dabd7a43f3c90c14f56db26cb8adc9358ad87ad682b813320ad82ff53",
+			"digest": "54f64eb3e2494996afeae440a0c5abe1314a757cbca306cdfd9185c78fa7b229",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richtrunc": {
-			"digest": "7e6ef5a0477f0029fa7dc4b8b49fbc78eedf6c2272d1c32fd23a66a4a3368b7d",
+			"digest": "039a0e99b8b3d165ac75a89f16ad6276849a21db58324236aa4030faa595adef",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotate": {
-			"digest": "087dada80b8bea915d574fb6c0511e7631579807433390ea58803ed8e35b81cc",
+			"digest": "f377b0b44cccecd0659975b3d42b9c8ccf851dd77c561d7215d59ac1b8a82863",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotate-quarter": {
-			"digest": "5c7b8c9135f47b64814769274a5c5c729ac73285e84c94223bf8c2c9f75e483f",
+			"digest": "fe3f807aad1e7905be77616200fa7f8954cffdf8b9fa6251fcf3312374c9f490",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotation-size": {
-			"digest": "270833cd4cf5995343144e8038b0f0e0f5c2043aaddc6b1da89f0f19436e793a",
+			"digest": "d6617e81cf243e176e3b5ffabcd0bf8ea0015e5d2af59fe2ad095e5593635d5d",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-selfclip": {
-			"digest": "334b7c59554f7429c96700122b8da5bb2bc8fb188ad46c936646390dec2e0c68",
+			"digest": "07f0a1470553dcc4c87f4f446ed6b631003c183fde9b51a52cd7148604c2d430",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-strokequad": {
-			"digest": "a54e8bce686f0753d6af37843b60a8de8a000e78578ab9b5ca4ae02e532391cb",
+			"digest": "ee9c43247e18966e0a3d4520c0e11acd290be5d7d4b67b2a1f9a91717f3a7ed5",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-subpixel": {
-			"digest": "96672b1eb4361e7a5c8f9fe3afd73f39f76b76d0aea34d4af1707dc6a4a45cba",
+			"digest": "d6d930697d710ccc3f0d86eaa04fcbed88cac59d6cf96fa520e3583c4fc66d3b",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-subpixel-size": {
-			"digest": "155622b9c35dc2db76ab5a92f449d26bf9d1c2230bc0e3e8e32a1ce16b72bdc3",
+			"digest": "603c5ae3ba44d050c925f7407ad1db227ea5ac367a9c0ddaa0f1d8bd75cc082c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-synth": {
-			"digest": "a1b07ccf776f46860a8df08f8e1487c495323d1fceedd1752163cafd82f44af7",
+			"digest": "bb701ffe4643dbf579624dfad93fb3cebbf67dd193ce949af69747e4549943bc",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-synthscaled": {
+			"digest": "77273b978eff11c7ff0197684f33907b4317d0d06f5183f053eb7827c0003637",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-tie": {
-			"digest": "2a5ffb15ae321f3d15e897b3976fb43de154a32d123c65d35c7810c41d84310e",
+			"digest": "c58b65d831e7612b33db5b38ddc16d48bcdecdca5fe29b9740bc1a8006467ebf",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-tie-size": {
-			"digest": "3d91e33e8d41781284fee644c61dd6be5efee89bed6c6d81e56e1d971c762063",
+			"digest": "a49ce5a3326232ccbd17bf05c02ae2662dc78ab22431ea045093dc92698e9054",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-uiscale": {
-			"digest": "518827100e644a7545622e597edaa549d56a578c718f2af103f226c16f8c163e",
+			"digest": "5c8ff389e7e9d44fcc3dc4775f2f1f87725bfae38ee2e78967295e4b2a3f7ca8",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-view": {
-			"digest": "a187746a1572bc242f56581c0569d1a0423b72d9323858a8f5190d65e13d9431",
+			"digest": "3f30b02b5a418688918ae1b56e629cad391083c9acc2d51408be882a7df5e8f0",
 			"status": "ok"
 		},
 		"fixtures/play/text-raster": {
-			"digest": "e1cfcedbe2bfec0e4bfdff2bf3cff9939824ec245ccd4e4477cfe50dda133a8c",
+			"digest": "11a8c2df5ba62cbed8940e1bf63aa43696a58fdbcb01743bd52089fde8836967",
 			"status": "ok"
 		},
 		"fixtures/play/text-stroke": {
-			"digest": "dd453c714c51a75333db80f6772b6809444ed1f9e497a43f90f0cdb241b303d4",
+			"digest": "cc22e2ac6f95d4640bfa6450d7da5ab6ebf32ea319c1c78d00591557eafe0c90",
 			"status": "ok"
 		},
 		"fixtures/play/viewport-models": {
@@ -2353,99 +2861,99 @@
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
-			"digest": "a287d1e9d1d476a019bb4621839b55ceabcdff9c2a9bbd68c72685fc7f7c83a8",
+			"digest": "f735540f0ebfae06dcd9ede4acd544dc4d734f92d256833f0f68954c634f81a6",
 			"status": "live"
 		},
 		"live/input/144hz-input-probe": {
-			"digest": "612e76c618e27c1a20504db52746eda4cfa424d5cf4cf8db723861d9198d2d47",
+			"digest": "527a769f5a2c28897c8420c5ac05bf4d31e5ad2dd4dfdde98842a2164d7bc1a9",
 			"status": "live"
 		},
 		"live/input/60hz-input-probe": {
-			"digest": "0e9e1612c632c18525a800f6d6caf3b198388551b05824adaf11d8f15085301b",
+			"digest": "e593b97e79c6b956e05c5355906dc53a8bbb74639f8b9e2e1df3cb20af08b9fb",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-click": {
-			"digest": "75bcf8add7775252a67058a8b02de02116880142210201faef173f56415f7796",
+			"digest": "2d56e06510c4a818db15f842dbb3837e488459b129c8d2d94e9e3c21c060a799",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-default": {
-			"digest": "e2a193eb20e1bee5919eee2a1b8d9c5459894b3622a6266075a36691f0eda25f",
+			"digest": "8005b886ff50831949b98268a10931a81a8e82fd1e997cfa55b6c3b32b455f02",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/144hz-click": {
-			"digest": "d73d886a58f90efcb6fc945037034d72b0fbc62867327e40dfa15ae8c07dbc62",
+			"digest": "b0473d15d9bee5781f50f62528b764a8b890143e0d13c7fcf6ef8c914f31da8c",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/144hz-default": {
-			"digest": "615c8cf80b3334862fb73bf3467c2012e20df92a89fa6928d91065c8e73f6b94",
+			"digest": "6d63eee7407b10be41c1727b2a46c40b0a422ca9c7c8b23a0d24e192ac87f60d",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-click": {
-			"digest": "5da9cdeb4e75c423b22ea055bbe562951c76c738e970fb05cd4653f63f453d17",
+			"digest": "fef1b05e655cbef2a28081ff792e977078f1ec9b8758f22b2fd102c28486022a",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-default": {
-			"digest": "e2855fd3206950379825e92cb8b2858ab3454a88b296df1f14af84e857e3724e",
+			"digest": "57f5fb64e513d647ffd6f64e76a52f629ec83f5d435e74a566664c9bcf37477e",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-no-input": {
-			"digest": "d18d18ae2b541ef2c5eb470d86572537c55c2d241786868659d9ce71acf1d8e7",
+			"digest": "8a020371103202eee25e21d30760d226b890484b215583612407d164eb74cbd8",
 			"status": "live"
 		},
 		"live/interaction-scroll/120hz-click": {
-			"digest": "cd009ea4a9a85db06088fe54bc96b1c22370a6cd647935d49ebb9a3edd8c81ed",
+			"digest": "1ea72749a949b23fef40e1bf8cfa183a45383405609ce8fb467d1a06e63ab4bb",
 			"status": "live"
 		},
 		"live/interaction-scroll/120hz-default": {
-			"digest": "b25edb6ffa2bc8ba65d1edd74ea2649b6a4186f5076b478d585a2e0115df6ee3",
+			"digest": "4c2ea14881cd7ffae5f571539af8ff66c82c706c55b9852c260cd83dca07d66c",
 			"status": "live"
 		},
 		"live/interaction-scroll/144hz-click": {
-			"digest": "fe1863f53ec1d078cbecb64647add3ce90db9fa135cb1cf4610669272e1b6ac3",
+			"digest": "57ffe484d488ab148311e04018fa3652be4c272821da2d7a6fdd0f3f67e02ce0",
 			"status": "live"
 		},
 		"live/interaction-scroll/144hz-default": {
-			"digest": "fc3ddf8cbc5655544dac7ae15ec992a76ecfaa2d8669b5fdf116cfb67a52f6af",
+			"digest": "3f98e7e70d7a3e4f5cc2079d459c0786418bb424dd4998ebe9915ad9514c7281",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-click": {
-			"digest": "077d7703ebaf6a85b98b323af02cace24fb434a5ed9897021d3a9bc75934b6e9",
+			"digest": "1596a39a799c907949257d842710669d743db476bbcfa4725bbfb9e85dc8a027",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-default": {
-			"digest": "08e8617bebc9ab81b6949555c42c44b2844fd24ad399863388adabffc4ad3a44",
+			"digest": "d75e3d5a1f7f469a9acc9c3e336e392dc02eabe4f1b28ca11cc9df64ee36a0e5",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-no-input": {
-			"digest": "c5e91610483a5636a9123ccb6037d21b5e2a9b2cd35524d69b3623b9259dda98",
+			"digest": "84959058dad4bb9df50b2608387c491407d94262e5460df798f12dcc156119d9",
 			"status": "live"
 		},
 		"live/interaction-textbox/120hz-click": {
-			"digest": "a271a435c2a198c6fa6f39c358aeec073959b4312d8b04ec34482f91dcfb29c7",
+			"digest": "317c14f64cd4e7f8a3773fed45b85f55dbd624f2f9d6ed7a5c9cc7dd1a9246a6",
 			"status": "live"
 		},
 		"live/interaction-textbox/120hz-default": {
-			"digest": "3085d170bda4c35fedaff1eef7bd450cc9c58761e81006149d2c970351e1cfd0",
+			"digest": "7c6edb8fd968a1578f06864e8edc172e399a212c160e4e3a1f785c1ed90e0de1",
 			"status": "live"
 		},
 		"live/interaction-textbox/144hz-click": {
-			"digest": "7a92a3e8571d19dfd6991ce1320a039daf7f89e10a0c2b396b6608cba3960cb7",
+			"digest": "42406d3d02e8ecf88c9c0e1f0514534630aaa8ab66b855c32628c4073081c23b",
 			"status": "live"
 		},
 		"live/interaction-textbox/144hz-default": {
-			"digest": "159b7534fcba62fd8aa13a385f2b6a47e4f2d92c8a4701c656aa50dc089c0680",
+			"digest": "22f88c86088533c093ac0c3b950927ca6a9aee7b88e5aad6b16a006908b2d54c",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-click": {
-			"digest": "a26c3098a5bb899246f4ca01a701e33573d0e7550d2f13b5c613c56e04ab294e",
+			"digest": "0108d83206c2b41051c2092a6e83312a17c440989a9280b1d718f6bedd0f095a",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-default": {
-			"digest": "b2531f06f820645252f52274573306432d751044761b1056356d17d4218d8d95",
+			"digest": "8f958ead354b6a0a80995aa8360db14982046ee2a9483f43c9affadfe4e1e606",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-no-input": {
-			"digest": "0514151147a8595816c83d79fbb9df3f33e52a365e16fc12c906715775a64591",
+			"digest": "1a58d3940a3e6d1f582f141e9b3c3307798a59074072d2f748c97c030ddb51b4",
 			"status": "live"
 		},
 		"live/live-rotated-cull/120hz-click": {
@@ -2485,115 +2993,115 @@
 			"status": "live"
 		},
 		"live/live-scroll/120hz-click": {
-			"digest": "d6d5142ba49b2d68b35aaab9f146f9a5576321704f8adcc4a08ab36772f77f77",
+			"digest": "c188856ac2babd3004e82834a0a8883622879482aa8b0a9dbd9becfcaf601944",
 			"status": "live"
 		},
 		"live/live-scroll/120hz-default": {
-			"digest": "edbf36e3f8c1b74ee8580d7aaaa67feeb59d490a008684ccdf162f63c5d6d021",
+			"digest": "7bc9be2e41329a97a5d91bd3fd7e8d10cdea25b299610aeb99feadf5008e58aa",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-click": {
-			"digest": "135c8521651cd7a0c022379ffb1edaef960c45142a3b075b8ad589f4431f1361",
+			"digest": "62120e82a82e9206b9e5d227aa22128e114612d686dc974454e95dd4004a6c49",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-default": {
-			"digest": "72192f7d47f9cf8d4119cdcad6b94cccfa2b27624e0b57dc9cb3eb716df8cc43",
+			"digest": "35de7d1ebde0044d9d48b9dd4a5b1c10fe9300265d1e09e4ac404eb6e7fd7a0c",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-presentation": {
-			"digest": "08be92aff2053fb8719bcbf3462227fe74fd64330e7675fb780f30ecb61e0c85",
+			"digest": "2bab2b18733d5546f73cf728d15aab45d1cac7a0ca53b81411eda01f8e5be319",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-click": {
-			"digest": "d91daa24dc46531c557a15ce5a1d3502af5483eb1c969bc17152ae47dd35790b",
+			"digest": "8092380d816451682bcd53ab0d1d22171185ac8dd7a1d2eab479868a82c9ed58",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-default": {
-			"digest": "43584a282d3cabc51aa0a44c738888326d20c8a0ea1307961eff90ace7a5142f",
+			"digest": "5e5240d3907caa7450e120a6a2ae70133d451e90906071028f70b1d3f6c9c383",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-no-input": {
-			"digest": "4552ac356866e955420b78c360fb21caf43a7164e60a929a4b5e710330449d6e",
+			"digest": "a53ddf781c942f0f3c00900f22d42fd62766e8198daaffe66d180eb2d0201b3d",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-presentation": {
-			"digest": "3179609479052450510cdc3cfa5f19c4e542434ae7777ab6b808e2ad324789fd",
+			"digest": "f3e0da6cb5a25bab9223ae420c7fabdf3a4b6b66b664ce79f0e3d44f7145f3a1",
 			"status": "live"
 		},
 		"live/live-stress/120hz-click": {
-			"digest": "20be0391a38e43d7360108ac417aef01efeff0c861b7a0a28f0bcdbdfe134daa",
+			"digest": "f63c8fe4808dd7145c229c53ca4bfed0e695f347bc3c5d0d73c9d4da0693f303",
 			"status": "live"
 		},
 		"live/live-stress/120hz-default": {
-			"digest": "297f4d918b175333d2e84e0264ed5577b34d40429838cb021c59fd8e958b9327",
+			"digest": "759a18b8fa9ab897000c41df123679322825442afd3044bde06522540277040f",
 			"status": "live"
 		},
 		"live/live-stress/144hz-click": {
-			"digest": "2f42390cd65b19af389310f5b2b4a5de09d273946817a6e4000979a78ea701b9",
+			"digest": "2c038e9ec197fd6a727e39327e165006872a6e7d47a387607a2c67779f20e9c6",
 			"status": "live"
 		},
 		"live/live-stress/144hz-default": {
-			"digest": "ebd9625140cd31615b3709580cac79ca938927105c270c96c3995bec9e0894ca",
+			"digest": "0eb918b256ef03991d052524d724759f217bd1e8e505975696a393d7c08a63ab",
 			"status": "live"
 		},
 		"live/live-stress/144hz-presentation": {
-			"digest": "c68674e2b84719d40037bfe6cb49d0f663e61ca5182262f7fa72c8f1ffb53590",
+			"digest": "86f543c233e4176dab70c214d7957fb4f933600fc1fd620d1b45b049d5511938",
 			"status": "live"
 		},
 		"live/live-stress/60hz-click": {
-			"digest": "386750c7fc5e6b89bd3890c0f23d0d50b6b3c2b2d8840ce14f49b02218beb857",
+			"digest": "30db8992625d5476056e9b9da8e6cef87c307a27b88eaf761b97ee31fa4ccea9",
 			"status": "live"
 		},
 		"live/live-stress/60hz-default": {
-			"digest": "6536e60228d5a4cac1ed923358c69bb575543c61f0f2d2384d1c93e3278e917a",
+			"digest": "b43d0a5c90614dd91866e4d0c6ac2984c3b82325fef30eb22c3d02fe5e3f5f9b",
 			"status": "live"
 		},
 		"live/live-stress/60hz-no-input": {
-			"digest": "9f8a463c3858c851d6a39f18b329f40b2692c4c27116268040c19e539b1c7331",
+			"digest": "bb677502dec415e908581196e5bad5dc389ddc3d09a9aab7e4f418c2e996d01d",
 			"status": "live"
 		},
 		"live/live-stress/60hz-presentation": {
-			"digest": "e6f6970a8064a83e96209b7240eab8834c9474205432b21fc4b376a3113b4b86",
+			"digest": "357a833dbf816ad5c645738a850c6146a12c7b612da1511cb9c1865107174f79",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-click": {
-			"digest": "86bdc1ae6fc92a7ebe17bdddd6924366d43039bd36011c9d1cc2cc16d0cc974c",
+			"digest": "54544dd028b89881033984b933eb74bb39e4c8b21a1b61d24197a54ee0cff83d",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-default": {
-			"digest": "50ea5b15e1d3511712de93c0013a5f5500e2bd8b23def4a893adb9a7b8891371",
+			"digest": "fd18887ea4fba8eaf082e2e964b6736e7347e343ae4eecdef0dc6cf36fad9fc1",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-click": {
-			"digest": "b4b898a701374a2be848c4fa99ed21ff581fd58a4b463ff8d91593fb732c7ba0",
+			"digest": "1fe6a76c3f488e6a299a0fc7618589a8883b8e0befac271fea6561e502a5fac8",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-default": {
-			"digest": "9412f7359c747372539d00662bff15f65beed80f8f622a2d75247813c735861e",
+			"digest": "758b488d3459ec020dc7575cf747c638cb85c698bc4dfb1fe2de6364e5a49128",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-presentation": {
-			"digest": "fe4501c1319b2a6f098ddc476e9bf454324182632f1a0f215142adb94329711c",
+			"digest": "89cbf20b2838b6542a19bd32e979c96586a4acfd0f0e0112d47193213d5ab798",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-click": {
-			"digest": "22fd6b28683638791083f0f1c38796b56745c9ca6369058d53fc0b7c39dc869f",
+			"digest": "12f64d3d63dcd0b6f34ba376a488cc1e73434fc6b4d3a6f5598d520457419e0e",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-default": {
-			"digest": "cec87694832eaeb5692a6cdd13a7f6008490ca2496a520a5654a44d3bbec6d57",
+			"digest": "de223217e88f2c78134b86b3d24dbc0ea9ffa1a00834f8ed16ebc09b96f8e1aa",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-no-input": {
-			"digest": "e88d97714a9a10002a52f8c0907443b949f5d0999f1e409ab8a1c30f9c2cc62e",
+			"digest": "d5a7b56bd9075bf88754caf18bfc626e7e1dbdd3aad718a92e6b7ac403df9968",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-presentation": {
-			"digest": "8c98f723f6013de23325158eda63fd5abf50823f281c31af68197720afce56d7",
+			"digest": "1a356c799150d3091acd6622872e4e7e0de03cb987162084e13e254b3c63c452",
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T20:11:58.486Z",
+	"recorded": "2026-11-12T20:24:03.539Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
