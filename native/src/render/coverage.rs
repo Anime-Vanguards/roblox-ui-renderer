@@ -1,5 +1,5 @@
 //! Measured UICorner, UIStroke and UIShadow coverage rules, evaluated in device space.
-use super::geometry::{Rect, Transform, apply};
+use super::geometry::{Rect, Transform, apply, invert};
 
 pub fn corner_coverage(w: u32, h: u32, radii: [f64; 4], ox: i32, oy: i32) -> Vec<f64> {
     corner_coverage_raw(w, h, radii, ox, oy, w as f64, h as f64)
@@ -298,8 +298,18 @@ pub fn border_stroke_alpha_modes(
     let round = joins != "Miter" && joins != "Bevel";
     let bevel = joins == "Bevel";
     let radii = radii.map(|r| r.max(0.0).min(limit));
-    // (measured on unrotated frames; a rotated frame keeps the ramp)
-    let mixed = !rotated && radii.iter().any(|r| *r != radii[0]);
+    // A quarter turn keeps the axes, and Studio draws its stroke as an unturned one's (the margins of sharp
+    // corners, fixtures/stroke-probe-mixed-turned.luau at 90 and 180 degrees); only its ties fall as on the
+    // screen (`turned` below)
+    let axis_aligned = (to_local[1] == 0.0 && to_local[2] == 0.0) || (to_local[0] == 0.0 && to_local[3] == 0.0);
+    let rotated = rotated && !axis_aligned;
+    // (turned frames too: fixtures/stroke-probe-mixed-turned.luau)
+    let mixed = radii.iter().any(|r| *r != radii[0]);
+    // On a turned frame the mixed rules' ties fall as on the screen: a pixel centre on the hole's left or top
+    // edge there is in the hole, and the left corners are the ones left of the centre on the screen
+    let to_screen = invert(to_local);
+    // (quarter turns included: they are not `rotated`, whose strokes are drawn as turned quads)
+    let turned = to_local[0] != 1.0 || to_local[1] != 0.0 || to_local[2] != 0.0 || to_local[3] != 1.0;
     let quadrants = radii.map(|r| {
         let sharp = r == 0.0;
         let mut mode = Mode::Smooth;
@@ -317,7 +327,7 @@ pub fn border_stroke_alpha_modes(
         } else if sharp && d == 0.0 {
             mode = Mode::Hard;
             margin = 0.0;
-        } else if sharp && d <= 2.0 * scale && !rotated {
+        } else if sharp && d <= 2.0 * scale && (!rotated || mixed) {
             // (up to 2 logical px: at 1.5x an edge 3 px out has no margin and one 3.375 px out has it, at 1x
             // one 1.5 px out has none and one 2.5 px out has it: fixtures/stroke-sweep.luau at both scales)
             margin = 0.0;
@@ -411,10 +421,13 @@ pub fn border_stroke_alpha_modes(
             let current = i;
             i += 1;
             let i = current;
+            // On a turned frame a pixel centre on an edge falls as on the screen (the top-left rule there): the
+            // centre is taken a hair right of and below itself (fixtures/stroke-probe-mixed-turned.luau)
+            let nudge = if turned { [1e-6, 1e-7] } else { [0.0; 2] };
             let [x, y] = apply(
                 to_local,
-                gx as f64 + i as f64 + 0.5,
-                gy as f64 + j as f64 + 0.5,
+                gx as f64 + i as f64 + 0.5 + nudge[0],
+                gy as f64 + j as f64 + 0.5 + nudge[1],
             );
             let v = (y - y0).min(y1 - y);
             if v > interior && (x - x0).min(x1 - x) > interior {
@@ -432,9 +445,10 @@ pub fn border_stroke_alpha_modes(
             // The outer bounds are single-precision sums: at 1x a Thickness of 1.4 puts the left bound on a
             // pixel centre (460 - 1.4 - 0.1 rounds to 458.5), which is drawn, and the right bound on one too
             // (500 + 1.4 + 0.1 rounds to 501.5), which is not (fixtures/stroke-fringe.luau at 1x, column 8)
+            // (a turned frame's ties fall by the nudge above, which single precision would swamp)
             let (df, mf) = (d as f32, m as f32);
-            let low = |edge: f64| ((edge as f32 - df) - mf) as f64;
-            let high = |edge: f64| ((edge as f32 + df) + mf) as f64;
+            let low = |edge: f64| if turned { edge - d - m } else { ((edge as f32 - df) - mf) as f64 };
+            let high = |edge: f64| if turned { edge + d + m } else { ((edge as f32 + df) + mf) as f64 };
             if x < low(x0) || x >= high(x1) || y < low(y0) || y >= high(y1) {
                 continue;
             }
@@ -466,11 +480,12 @@ pub fn border_stroke_alpha_modes(
                 {
                     continue;
                 }
+                let screen_left = if turned { to_screen[0] * (x - cx) + to_screen[2] * (y - cy) < 0.0 } else { left };
                 // In the last half pixel of a left corner's square, a pixel centred half a pixel or more
                 // past the straight inner edges is empty (the arc's ramp would leave it 1 to 5 %); nearer
                 // the edge it holds the ramp (0.25 px past: 26 %)
                 if mixed
-                    && left
+                    && screen_left
                     && (qx <= 0.5 || qy <= 0.5)
                     && x >= x0 + inset + 0.5
                     && y >= y0 + inset + 0.5
@@ -857,29 +872,29 @@ mod tests {
         ];
         let strokes = [
             2436972246u32,
-            3002565937,
-            1734602426,
+            2606528217,
+            450504576,
             3430542588,
             3047246943,
             1339572075,
             1819584623,
             53136845,
             1574060111,
-            2514612688,
-            117468618,
-            1074766995,
+            3385404916,
+            2035116723,
+            3934129946,
             2878728380,
-            2562567434,
-            1685356165,
+            191019786,
+            3194569309,
             3606728384,
             4211294253,
-            2982063452,
-            3302788288,
-            1214368773,
+            3420604382,
+            187267678,
+            1804581695,
             1153362503,
             2377840651,
-            2905977538,
-            162110940,
+            694274846,
+            3842631073,
         ];
         let hash = |values: Vec<f64>| {
             values.iter().fold(2166136261u32, |h, v| {
@@ -1004,6 +1019,34 @@ mod tests {
         let center = stroke([12.0, 12.0, 0.0, 0.0], 9.0, "Center");
         assert!((at(&center, 11, 4) - 0.5167).abs() < 0.001);
     }
+    #[test]
+    fn a_quarter_turned_mixed_stroke_breaks_ties_as_on_the_screen() {
+        // fixtures/stroke-probe-mixed-turned.luau, a 60 x 40 frame turned 180 degrees with corners 8, 0, 3, 12
+        // and a Center stroke of 2 at 1.5x (Studio 0.747): on the screen's left side the pixel centred on the
+        // hole's edge is empty and the one centred on the outer edge half covered; on the bottom (the frame's
+        // sharp top-right corner) the pixel centred on the hole's edge is full and the one on the outer edge empty
+        let a = border_stroke_alpha(
+            Rect::new(60.0, 165.0, 90.0, 60.0),
+            [12.0, 0.0, 4.5, 18.0],
+            3.0,
+            "Center",
+            "Round",
+            [56, 160],
+            [100, 70],
+            [-1.0, 0.0, 0.0, -1.0, 210.0, 390.0],
+            true,
+            1.5,
+        );
+        let at = |x: usize, y: usize| a[(y - 160) * 100 + x - 56];
+        assert_eq!(at(61, 200), 0.0);
+        assert_eq!(at(60, 200), 1.0);
+        assert!((at(58, 200) - 0.5).abs() < 1e-5);
+        assert_eq!(at(57, 200), 0.0);
+        assert_eq!(at(90, 223), 1.0);
+        assert_eq!(at(90, 225), 1.0);
+        assert_eq!(at(90, 226), 0.0);
+    }
+
     #[test]
     fn a_sharp_stroke_gets_its_margin_past_two_logical_px() {
         // fixtures/stroke-sweep.luau at 1x: a sharp Outer stroke of Thickness 1.5 has its half pixel on the

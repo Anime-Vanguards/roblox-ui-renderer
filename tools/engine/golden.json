@@ -548,6 +548,10 @@
 			"digest": "9496d85054f0e3b3a26f4227669066dba3ec76274965b5825a8cf1266f43924d",
 			"status": "ok"
 		},
+		"fast/edit/stroke-probe-mixed-turned": {
+			"digest": "c94559a04da2346c2245a1d0988e54e106fad26d237378792a47380a660a9cc0",
+			"status": "ok"
+		},
 		"fast/edit/stroke-probe-scaledui": {
 			"digest": "16754a935e3d8a1c3a142eaa235636e57283f0663c9fcdd45829ec3929a1f3fa",
 			"status": "ok"
@@ -1328,6 +1332,10 @@
 			"digest": "dcd0705ffe0fc39b8097c660d0516a6e6db0bc6fc107f72c8ceec21e507591ca",
 			"status": "ok"
 		},
+		"fixtures/edit/stroke-probe-mixed-turned": {
+			"digest": "419a313deb30e81fc4a04046ed5db3b17f4159e63c0fea7866aff673f4571329",
+			"status": "ok"
+		},
 		"fixtures/edit/stroke-probe-scaledui": {
 			"digest": "5b314b6d67fbbb9cc82071bbb631462d312582d84c591bcd5ff41bb45fee3541",
 			"status": "ok"
@@ -2096,6 +2104,10 @@
 			"digest": "0b38dc25050ec9132ee05211a142e8ba251e80eb7ad98d24b373ba58624ec5e3",
 			"status": "ok"
 		},
+		"fixtures/play/stroke-probe-mixed-turned": {
+			"digest": "51be450265a09b74430c78cdc492c069956948735c3d3f92325c5ebbcb0ba840",
+			"status": "ok"
+		},
 		"fixtures/play/stroke-probe-scaledui": {
 			"digest": "6a8b63651b3421d7b31d5f35c73ad945cc44c8c48e839db9aa8e290f46109f8b",
 			"status": "ok"
@@ -2557,7 +2569,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T07:18:11.897Z",
+	"recorded": "2026-11-12T19:59:54.848Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
