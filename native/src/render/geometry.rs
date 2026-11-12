@@ -231,6 +231,38 @@ pub fn invert(m: Transform) -> Transform {
 pub fn apply(m: Transform, x: f64, y: f64) -> [f64; 2] {
     [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]
 }
+/// A turned quad as the rasterizer holds it: each corner of the local rect `b` (x0, y0, x1, y1), carried to the
+/// screen by `m` (which already subtracts `origin`), lands on the 1/256 px grid, and what is interpolated over
+/// the quad runs over its two triangles, (top left, top right, bottom left) and (bottom left, top right,
+/// bottom right). Returns the two triangles' maps from the screen back to local space and the line through the
+/// shared diagonal as (a, b, c) with a x + b y + c >= 0 on the first triangle's side, x and y measured from
+/// `anchor`. Measured on a 16 x 16 Pixelated texture over 150 px turned 20 degrees (fixtures/image-rotation
+/// MotorPix): four pixel centres lie 0.0005 px from a texel boundary, and the snapped corners move exactly those
+/// four to the other texel; rounding down instead moves eight others.
+pub fn snapped_quad_maps(m: Transform, b: [f64; 4], origin: [f64; 2], anchor: [f64; 2]) -> ([Transform; 2], [f64; 3]) {
+    let corner = |x: f64, y: f64| {
+        let p = apply(m, x, y);
+        [
+            ((p[0] + origin[0]) * 256.).round() / 256. - origin[0],
+            ((p[1] + origin[1]) * 256.).round() / 256. - origin[1],
+        ]
+    };
+    let (tl, tr, bl, br) = (corner(b[0], b[1]), corner(b[2], b[1]), corner(b[0], b[3]), corner(b[2], b[3]));
+    let (w, h) = (b[2] - b[0], b[3] - b[1]);
+    // The map taking the local rect's sides to the two given screen vectors, the local point `at` to `to`
+    let map = |across: [f64; 2], down: [f64; 2], at: [f64; 2], to: [f64; 2]| -> Transform {
+        let (m0, m1, m2, m3) = (across[0] / w, across[1] / w, down[0] / h, down[1] / h);
+        [m0, m1, m2, m3, to[0] - m0 * at[0] - m2 * at[1], to[1] - m1 * at[0] - m3 * at[1]]
+    };
+    let first = map([tr[0] - tl[0], tr[1] - tl[1]], [bl[0] - tl[0], bl[1] - tl[1]], [b[0], b[1]], tl);
+    let second = map([br[0] - bl[0], br[1] - bl[1]], [br[0] - tr[0], br[1] - tr[1]], [b[2], b[3]], br);
+    let (mut la, mut lb) = (bl[1] - tr[1], -(bl[0] - tr[0]));
+    if la * (tl[0] - tr[0]) + lb * (tl[1] - tr[1]) < 0. {
+        (la, lb) = (-la, -lb);
+    }
+    let lc = -(la * (tr[0] - anchor[0]) + lb * (tr[1] - anchor[1]));
+    ([invert(first), invert(second)], [la, lb, lc])
+}
 pub fn node_transform(node: &Value, origin: [f64; 2], scale: f64) -> Transform {
     let base = [1., 0., 0., 1., -origin[0], -origin[1]];
     if !node["matrix"].is_array() {
@@ -378,6 +410,30 @@ mod tests {
         assert_eq!(group_texture_dims(0., 333., 2100., 75., 1.5), (2049, 74));
         assert_eq!(group_texture_dims(0., 0., 4200., 75., 1.5), (2049, 38));
         assert_eq!(group_texture_dims(320., 0., 132., 40., 1.5), (134, 41));
+    }
+    #[test]
+    fn turned_quads_sit_on_the_subpixel_grid() {
+        // fixtures/image-rotation MotorPix at device scale 1.5: 150 px turned 20 degrees, 16 texels a side.
+        // The centre of pixel (1078, 55) lies 0.0005 px right of the boundary of texels 6 and 7 on the exact
+        // quad and Studio draws texel 6: the corners on the 1/256 px grid put it there
+        let m = [0.939693, 0.34202, -0.34202, 0.939693, 105.26977155, -357.0145575];
+        let b = [990., 45., 1140., 195.];
+        let texel = |inv: Transform, x: f64, y: f64| ((apply(inv, x, y)[0] - 990.) / 150. * 16.).floor();
+        assert_eq!(texel(invert(m), 1078.5, 55.5), 7.);
+        let (maps, diagonal) = snapped_quad_maps(m, b, [0., 0.], [0., 0.]);
+        assert!(diagonal[0] * 1078.5 + diagonal[1] * 55.5 + diagonal[2] >= 0.);
+        assert_eq!(texel(maps[0], 1078.5, 55.5), 6.);
+        // (1129, 133) lies in the second triangle and moves from row 7 to row 6
+        let row = |inv: Transform, x: f64, y: f64| ((apply(inv, x, y)[1] - 45.) / 150. * 16.).floor();
+        assert!(diagonal[0] * 1129.5 + diagonal[1] * 133.5 + diagonal[2] < 0.);
+        assert_eq!(row(invert(m), 1129.5, 133.5), 7.);
+        assert_eq!(row(maps[1], 1129.5, 133.5), 6.);
+        // Both maps take the ends of the shared diagonal to the same local points
+        for (local, map) in [([1140., 45.], maps[0]), ([1140., 45.], maps[1]), ([990., 195.], maps[0]), ([990., 195.], maps[1])] {
+            let screen = apply(m, local[0], local[1]);
+            let p = apply(map, screen[0], screen[1]);
+            assert!((p[0] - local[0]).abs() < 0.01 && (p[1] - local[1]).abs() < 0.01);
+        }
     }
     #[test]
     fn device_ties() {

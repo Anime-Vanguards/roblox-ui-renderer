@@ -13,6 +13,22 @@ pub struct MipLevel {
     pub data: Arc<[u8]>,
 }
 
+/// A texture's levels as Studio samples it: an EditableImage's content has no mip chain (asset_levels)
+pub fn asset_levels(asset: &crate::assets::TextureAsset) -> Vec<MipLevel> {
+    let mut levels = texture_levels(asset.width as usize, asset.height as usize, asset.rgba.clone());
+    if editable_image(&asset.id.0) {
+        levels.truncate(1);
+    }
+    levels
+}
+/// Whether an image URI names an EditableImage's pixels (the engine writes them to
+/// <state dir>/editable-images/<process>-<n>.png). Studio 0.747 draws such content from its one level:
+/// minified, turned or not, it aliases where an asset's texture blends its mips (64 x 64 texels over 48 px:
+/// 2,482 px over 2 levels with a mip chain, 0 without; fixtures/image-probe-editable.luau)
+pub fn editable_image(uri: &str) -> bool {
+    uri.rsplit_once('/')
+        .is_some_and(|(dir, file)| dir.ends_with("/editable-images") && file.ends_with(".png"))
+}
 pub fn texture_levels(width: usize, height: usize, data: Arc<[u8]>) -> Vec<MipLevel> {
     if width == 0
         || height == 0
@@ -266,8 +282,27 @@ pub fn mip_levels(count: usize, lod: f64) -> (usize, u16) {
 pub fn pixelated_level(count: usize, lod: f64) -> usize {
     ((lod.max(0.0) + 0.5).floor() as usize).min(count.saturating_sub(1))
 }
+/// The GPU's length of a texture coordinate's change (a, b) over a pixel: the longer side plus 11/32 of the
+/// shorter (footprint_length)
 pub fn derivative_length(a: f64, b: f64) -> f64 {
-    a.abs().max(b.abs()) + 0.375 * a.abs().min(b.abs())
+    a.abs().max(b.abs()) + 0.34375 * a.abs().min(b.abs())
+}
+/// 11/16, the weight of the two diagonals in footprint_length
+pub const FOOTPRINT_DIAGONAL: f64 = 0.6875;
+/// Texels a pixel spans along the longer axis of its footprint, whose log2 is the mip level: `x` and `y` are
+/// the texture coordinates' changes (in texels) over one pixel across and down. The GPU takes the longest of
+/// four directions: across, down, and the two diagonals x + y and x - y at 11/16 (for 1 / sqrt 2), each by
+/// derivative_length. Measured on Studio 0.747 with a 16 x 16 texture of one opaque row over clear ones, whose
+/// first half texel reads the level directly (fixtures/image-probe-rotlod.luau: 151 readings at 14 angles and
+/// 14 shapes from square to 1:19, within 0.016 of a level, the eighth bit of the level's fraction being
+/// 0.004). The first model, the longer of across and down at 3/8, agreed on square images to 0.02 and read
+/// 0.42 of a level low on a thin image turned 45 degrees. An unturned image is unchanged: across and down are
+/// its two axes and no diagonal is longer.
+pub fn footprint_length(x: [f64; 2], y: [f64; 2]) -> f64 {
+    derivative_length(x[0], x[1])
+        .max(derivative_length(y[0], y[1]))
+        .max(FOOTPRINT_DIAGONAL * derivative_length(x[0] + y[0], x[1] + y[1]))
+        .max(FOOTPRINT_DIAGONAL * derivative_length(x[0] - y[0], x[1] - y[1]))
 }
 pub fn truncate_sample(value: f64) -> f64 {
     (value * (4096.0 / 255.0)).floor() / 4096.0
@@ -534,6 +569,54 @@ pub fn sample_at(
             }) as f32
         }
     })
+}
+
+#[cfg(test)]
+mod footprint_tests {
+    use super::*;
+    /// The level of an image of su x sv texels a pixel along its own axes, turned by `degrees`
+    fn level(su: f64, sv: f64, degrees: f64) -> f64 {
+        let (c, s) = (degrees.to_radians().cos(), degrees.to_radians().sin());
+        footprint_length([su * c, -sv * s], [su * s, sv * c]).log2()
+    }
+    #[test]
+    fn mip_levels_of_turned_images_follow_studio() {
+        // fixtures/image-probe-rotlod.luau, Studio 0.747: (texels a px across, down, degrees, level read)
+        for (su, sv, degrees, read) in [
+            (1.3333, 1.3333, 20., 0.492),
+            (1.3333, 1.3333, 45., 0.367),
+            (0.0711, 1.3333, 5., 0.406),
+            (0.0711, 1.3333, 30., 0.329),
+            (0.0711, 1.3333, 45., 0.367),
+            (0.6667, 1.3333, 30., 0.392),
+            (0.3333, 1.3333, 25., 0.329),
+            (1.3333, 0.6667, 60., 0.392),
+        ] {
+            let rule = level(su, sv, degrees);
+            assert!((rule - read).abs() < 0.02, "{su} x {sv} at {degrees}: {rule} for {read}");
+        }
+        // The longer of across and down alone reads a thin image at 45 degrees 0.4 of a level low
+        let (c, s) = (45f64.to_radians().cos(), 45f64.to_radians().sin());
+        let old = derivative_length(0.0711 * c, 1.3333 * s).max(derivative_length(0.0711 * s, 1.3333 * c)).log2();
+        assert!(old < -0.03);
+        // An unturned image keeps the texels a pixel along its longer axis
+        assert_eq!(footprint_length([2.5, 0.], [0., 1.25]), 2.5);
+        assert_eq!(footprint_length([1.5, 0.], [0., 1.5]), 1.5);
+    }
+    #[test]
+    fn editable_images_have_one_level() {
+        assert!(editable_image("file://C:/state/editable-images/52596-4.png"));
+        assert!(!editable_image("rbxasset://textures/ui/Motor.png"));
+        assert!(!editable_image("file://C:/art/editable-images.png"));
+        let asset = |uri: &str| crate::assets::TextureAsset {
+            id: crate::assets::AssetId(uri.into()),
+            width: 4,
+            height: 4,
+            rgba: vec![255u8; 64].into(),
+        };
+        assert_eq!(asset_levels(&asset("file://C:/state/editable-images/1-0.png")).len(), 1);
+        assert_eq!(asset_levels(&asset("rbxasset://textures/ui/Motor.png")).len(), 3);
+    }
 }
 
 #[cfg(test)]

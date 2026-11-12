@@ -263,12 +263,7 @@ impl ImageCache {
         }
         self.stats.mip_misses += 1;
         let started = Instant::now();
-        let levels: Arc<[MipLevel]> = texture_levels(
-            source.width as usize,
-            source.height as usize,
-            source.rgba.clone(),
-        )
-        .into();
+        let levels: Arc<[MipLevel]> = super::sampling::asset_levels(source).into();
         let bytes = levels.iter().map(|l| l.data.len()).sum::<usize>();
         const BUDGET: usize = 128 * 1024 * 1024;
         if bytes <= BUDGET {
@@ -1014,8 +1009,8 @@ fn rotated_coverage(
 ) -> f64 {
     let Some(radii) = radius else {
         let (qx, qy) = (px.abs() - hw, py.abs() - hh);
-        let d = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0);
-        return (1.0 - d).clamp(0.0, 1.0);
+        // Past a corner the nearer edge's ramp alone: a mitred corner, as a turned frame's
+        return (1.0 - qx.max(qy)).clamp(0.0, 1.0);
     };
     let grow = 0.09;
     if px < -hw - grow || px >= hw + grow || py < -hh - grow || py >= hh + grow {
@@ -1045,20 +1040,14 @@ fn rotated_coverage(
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Measured fringe sampling of rotated images (notes/images.md rounds 6 and 11; fixtures/image-probe-rotstrip.luau,
-/// a rotated title texture, fixtures/image-probe-rotchain.luau): Studio's anti-aliasing strip around each edge is two
-/// triangles whose outer vertices sit 1 px past the corners (mitred) and carry the corners' UVs, the UV affine per
-/// triangle. At distance d outside an edge of length L and t from its start corner the sample lies t + d along it
-/// up to t = L - d (L + 1), then (t - d + 2) L / (L + 2). Across the edge it lies on the edge line, or `insets` px
-/// inside on edges that are the texture's border (rotated_fringe_insets). Rotations -13 / 25 / 160 / -65 at 1.2 / 2 /
-/// 3 px per texel: 0.7 px inside is sharp at 1.2 px/texel (0.675 or 0.725 put 10-30 px off; a texel-unit inset fails
-/// at 2 and 3 px/texel); ImageRect crop edges inside the texture sample on the edge line (0.1 px in or out doubles
-/// the misses). Edges [top, right, bottom, left] run clockwise. The rotated title 88 -> 6 px > 2, rotchain
-/// A / B / C 90 / 104 / 83 -> 3 / 0 / 0.
-pub const ROTATED_FRINGE_INSET: f64 = 0.7;
-
-pub fn rotated_fringe_sample(lx: f64, ly: f64, b: [f64; 4], insets: [f64; 4]) -> [f64; 2] {
-    let (cx, cy) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
+/// Measured fringe sampling of rotated images (notes/images.md rounds 6, 11 and "Rotated images at Studio 0.747";
+/// fixtures/image-probe-rotstrip.luau, image-probe-rotlod.luau, image-probe-rotchain.luau): Studio's
+/// anti-aliasing strip around each edge is two triangles whose outer vertices sit 1 px past the corners (mitred)
+/// and carry the corners' UVs, the UV affine per triangle. At distance d outside an edge of length L and t from
+/// its start corner the sample lies t + d along it up to t = L - d (L + 1), then (t - d + 2) L / (L + 2). Across
+/// the edge it lies on the edge line, whether the edge is the texture's border or an ImageRect crop's. Edges
+/// [top, right, bottom, left] run clockwise.
+pub fn rotated_fringe_sample(lx: f64, ly: f64, b: [f64; 4]) -> [f64; 2] {
     let (w, h) = (b[2] - b[0], b[3] - b[1]);
     let (dt, dr, db, dl) = (b[1] - ly, lx - b[2], ly - b[3], b[0] - lx);
     let d = dt.max(dr).max(db).max(dl);
@@ -1071,35 +1060,43 @@ pub fn rotated_fringe_sample(lx: f64, ly: f64, b: [f64; 4], insets: [f64; 4]) ->
         }
     };
     if d == dt {
-        [b[0] + along(lx - b[0], w) * w, (b[1] + insets[0]).min(cy)]
+        [b[0] + along(lx - b[0], w) * w, b[1]]
     } else if d == dr {
-        [(b[2] - insets[1]).max(cx), b[1] + along(ly - b[1], h) * h]
+        [b[2], b[1] + along(ly - b[1], h) * h]
     } else if d == db {
-        [b[2] - along(b[2] - lx, w) * w, (b[3] - insets[2]).max(cy)]
+        [b[2] - along(b[2] - lx, w) * w, b[3]]
     } else {
-        [(b[0] + insets[3]).min(cx), b[3] - along(b[3] - ly, h) * h]
+        [b[0], b[3] - along(b[3] - ly, h) * h]
     }
 }
 
-/// rotated_fringe_sample's insets for the edges [top, right, bottom, left] of the quads' bounds b:
-/// ROTATED_FRINGE_INSET where every quad along that edge ends on the texture's border (UV 0 or 1, clamped), else 0
-/// (wrapped quads never take it).
-pub fn rotated_fringe_insets(quads: &[ImageQuad], b: [f64; 4]) -> [f64; 4] {
-    let border = |v: f64| v <= 0.0 || v >= 1.0;
-    let edge = |on: &dyn Fn(&ImageQuad) -> bool, uv: &dyn Fn(&ImageQuad) -> f64| {
-        let mut along = quads.iter().filter(|q| on(q)).peekable();
-        if along.peek().is_some() && along.all(|q| !q.wrap && border(uv(q))) {
-            ROTATED_FRINGE_INSET
-        } else {
-            0.0
-        }
+/// The mip level of a fringe pixel (rotated_fringe_sample), from its strip triangle's own texture coordinates:
+/// they do not change across the edge, and along it they run as the triangle lays them (t + d, or t - d
+/// squeezed by L / (L + 2)), so a pixel spans the edge's `density` (texels a local px along [x, y]) along one
+/// diagonal of the frame, whatever the image's density across the edge. `inv` maps screen to local. A thin
+/// image minified across only (16 texels over 9 px, 0.07 texel a px along) keeps level 0 in its long fringes
+/// where its inside reads level 0.83; a square one at 1.2 px a texel reads level 0.1 there and 0 inside, which
+/// the first model took for a sample 0.7 px inside the edge.
+pub fn rotated_fringe_lod(lx: f64, ly: f64, b: [f64; 4], density: [f64; 2], inv: [f64; 6]) -> f64 {
+    let (w, h) = (b[2] - b[0], b[3] - b[1]);
+    let (dt, dr, db, dl) = (b[1] - ly, lx - b[2], ly - b[3], b[0] - lx);
+    let d = dt.max(dr).max(db).max(dl);
+    let (gx, gy) = if d == dt || d == db {
+        let t = if d == dt { lx - b[0] } else { b[2] - lx };
+        let first = t < w - d * (w + 1.0);
+        let s = density[0] * if first { 1.0 } else { w / (w + 2.0) };
+        (s, if (d == dt) == first { -s } else { s })
+    } else {
+        let t = if d == dr { ly - b[1] } else { b[3] - ly };
+        let first = t < h - d * (h + 1.0);
+        let s = density[1] * if first { 1.0 } else { h / (h + 2.0) };
+        (s, if (d == dr) == first { s } else { -s })
     };
-    [
-        edge(&|q| q.y0 == b[1], &|q| q.v0),
-        edge(&|q| q.x1 == b[2], &|q| q.u1),
-        edge(&|q| q.y1 == b[3], &|q| q.v1),
-        edge(&|q| q.x0 == b[0], &|q| q.u0),
-    ]
+    super::sampling::footprint_length(
+        [gx * inv[0] + gy * inv[1], 0.0],
+        [gx * inv[2] + gy * inv[3], 0.0],
+    )
+    .log2()
 }
 
 fn rotated_image(
@@ -1155,22 +1152,36 @@ fn rotated_image(
         || (transform[0].abs() < 1e-6 && transform[3].abs() < 1e-6);
     let rounded = radius.iter().any(|r| *r > 0.0);
     let (hw, hh) = ((bounds[2] - bounds[0]) / 2.0, (bounds[3] - bounds[1]) / 2.0);
-    let lods: Vec<f64> = quads
+    // Texels a local px along each axis, and the mip level inside the quad
+    let densities: Vec<[f64; 2]> = quads
         .iter()
         .map(|q| {
-            let su = texture.width as f64 * (q.u1 - q.u0) / (q.x1 - q.x0);
-            let sv = texture.height as f64 * (q.v1 - q.v0) / (q.y1 - q.y0);
-            derivative_length(inv[0] * su, inv[1] * sv)
-                .max(derivative_length(inv[2] * su, inv[3] * sv))
+            [
+                texture.width as f64 * (q.u1 - q.u0).abs() / (q.x1 - q.x0),
+                texture.height as f64 * (q.v1 - q.v0).abs() / (q.y1 - q.y0),
+            ]
+        })
+        .collect();
+    let lods: Vec<f64> = densities
+        .iter()
+        .map(|[su, sv]| {
+            super::sampling::footprint_length([inv[0] * su, inv[1] * sv], [inv[2] * su, inv[3] * sv])
                 .log2()
         })
         .collect();
-    let insets = rotated_fringe_insets(&quads, bounds);
+    // The quad's corners sit on the rasterizer's 1/256 px grid, so each of its two triangles has its own map
+    // (geometry.rs snapped_quad_maps)
+    let (maps, diagonal) = if quarter {
+        ([inv, inv], [0., 0., 1.])
+    } else {
+        super::geometry::snapped_quad_maps(transform, bounds, [0., 0.], [0., 0.])
+    };
     let mut out = vec![0.0; w * h * 4];
     for j in 0..h {
         for i in 0..w {
             let (x, y) = (bx + i as f64 + 0.5, by + j as f64 + 0.5);
-            let [lx, ly] = apply(inv, x, y);
+            let first = diagonal[0] * x + diagonal[1] * y + diagonal[2] >= 0.;
+            let [lx, ly] = apply(maps[if first { 0 } else { 1 }], x, y);
             let (qx, qy) = (
                 lx.clamp(bounds[0], bounds[2]),
                 ly.clamp(bounds[1], bounds[3]),
@@ -1201,8 +1212,9 @@ fn rotated_image(
             // A fringe pixel outside the quad samples where Studio's anti-aliasing strip puts it
             // (rotated_fringe_sample)
             let (mut sx, mut sy, mut index, mut q) = (lx, ly, index, q);
-            if !quarter && (lx < bounds[0] || lx > bounds[2] || ly < bounds[1] || ly > bounds[3]) {
-                [sx, sy] = rotated_fringe_sample(lx, ly, bounds, insets);
+            let fringe = !quarter && (lx < bounds[0] || lx > bounds[2] || ly < bounds[1] || ly > bounds[3]);
+            if fringe {
+                [sx, sy] = rotated_fringe_sample(lx, ly, bounds);
                 if let Some((k, found)) = quads
                     .iter()
                     .enumerate()
@@ -1214,7 +1226,12 @@ fn rotated_image(
             }
             let u = q.u0 + (sx - q.x0) / (q.x1 - q.x0) * (q.u1 - q.u0);
             let v = q.v0 + (sy - q.y0) / (q.y1 - q.y0) * (q.v1 - q.v0);
-            let sample = sample_at(levels, u, v, lods[index], q.wrap, pixelated);
+            let lod = if fringe {
+                rotated_fringe_lod(lx, ly, bounds, densities[index], inv)
+            } else {
+                lods[index]
+            };
+            let sample = sample_at(levels, u, v, lod, q.wrap, pixelated);
             out[(j * w + i) * 4..(j * w + i + 1) * 4].copy_from_slice(&shade(
                 sample,
                 tint,

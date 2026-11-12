@@ -1,9 +1,9 @@
 //! Canonical IMAGE / IMAGE_ROTATED packets sample retained source mip textures on the GPU.
 use super::{
     geometry::*,
-    images::{ROTATED_FRINGE_INSET, dims, image_quads, quad_corner_mask, rotated_fringe_insets},
+    images::{dims, image_quads, quad_corner_mask},
     packet::*,
-    sampling::{derivative_length, mip_levels, pixelated_level, texture_levels},
+    sampling::{asset_levels, mip_levels, pixelated_level},
     scene_draw::{BuildContext, DrawPreparer},
 };
 use crate::assets::{AssetId, TextureAsset};
@@ -170,11 +170,7 @@ impl DrawPreparer {
                 return Some((entry.id, entry.levels));
             }
         }
-        let levels = texture_levels(
-            asset.width as usize,
-            asset.height as usize,
-            asset.rgba.clone(),
-        );
+        let levels = asset_levels(asset);
         if levels.is_empty() {
             return None;
         }
@@ -440,8 +436,13 @@ impl DrawPreparer {
         let flags = (image["resample"] == "Pixelated") as u8
             | ((quarter as u8) << 1)
             | ((rounded as u8) << 2);
+        let (maps, diagonal) = if quarter {
+            ([inv, inv], [0., 0., 1.])
+        } else {
+            snapped_quad_maps(m, bounds, ctx.origin, [raster[0], raster[1]])
+        };
         let start = self.begin(ctx, raster, clip, 7);
-        for v in local_texels(inv, [raster[0], raster[1]], [0., 0.]) {
+        for v in local_texels(maps[0], [raster[0], raster[1]], [0., 0.]) {
             self.push(v)
         }
         self.push(bounds);
@@ -451,16 +452,21 @@ impl DrawPreparer {
         self.push([tint[0], tint[1], tint[2], fade]);
         self.push(radii.map(|r| r.max(0.)));
         let gradient = node.get("gradient").filter(|v| v.is_object());
-        // Fringe sampling (images.rs rotated_fringe_sample): the edges that take the inset, as bits
-        let insets = rotated_fringe_insets(&quads, bounds);
-        let mask = (0..4).fold(0u8, |bits, i| bits | (((insets[i] > 0.) as u8) << i));
-        self.push([gradient.is_some() as u8 as f64, 0., mask as f64, ROTATED_FRINGE_INSET]);
-        debug_assert_eq!(self.packet.texels.len() - start, 11);
+        self.push([gradient.is_some() as u8 as f64, 0., 0., 0.]);
+        // The second triangle's map and the diagonal between the two (geometry.rs snapped_quad_maps); a
+        // quarter turn keeps the one exact map
+        for v in local_texels(maps[1], [raster[0], raster[1]], [0., 0.]) {
+            self.push(v)
+        }
+        self.push([diagonal[0], diagonal[1], diagonal[2], 0.]);
+        debug_assert_eq!(self.packet.texels.len() - start, 14);
         for q in quads {
             let su = asset.width as f64 * (q.u1 - q.u0) / (q.x1 - q.x0);
             let sv = asset.height as f64 * (q.v1 - q.v0) / (q.y1 - q.y0);
-            let rho = derivative_length(inv[0] * su, inv[1] * sv)
-                .max(derivative_length(inv[2] * su, inv[3] * sv));
+            let rho = super::sampling::footprint_length(
+                [inv[0] * su, inv[1] * sv],
+                [inv[2] * su, inv[3] * sv],
+            );
             self.push([q.x0, q.y0, q.x1, q.y1]);
             self.push([q.u0, q.v0, q.u1, q.v1]);
             self.push([rho.log2(), q.wrap as u8 as f64, q.unrounded as u8 as f64, 0.]);
@@ -818,6 +824,15 @@ mod tests {
                 .iter()
                 .map(|v| v.map(f32::to_bits))
                 .collect();
+            // RUR_RECORD_GOLDEN_FIELDS=<file> lists the records as they are now (case, then its texels' bits)
+            // instead of comparing: for re-recording them after the record's layout or its mip level changed
+            if let Some(out) = std::env::var_os("RUR_RECORD_GOLDEN_FIELDS") {
+                use std::io::Write;
+                let mut file =
+                    std::fs::OpenOptions::new().create(true).append(true).open(out).expect("the list");
+                writeln!(file, "{i} {}", serde_json::to_string(&actual).unwrap()).unwrap();
+                continue;
+            }
             assert_eq!(actual, expected, "record case {i}");
             for (level, expected) in draw.packet.textures[0]
                 .levels

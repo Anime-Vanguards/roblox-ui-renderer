@@ -876,7 +876,9 @@ vec4 kindImage(ivec2 P, vec2 X) {
 
 // IMAGE_ROTATED: inverse, (e, f, ox, oy) to local space, bounds (x0, y0, x1, y1), screen rect,
 // (slot, quads, flags: 1 pixelated, 2 quarter turn, 4 rounded, levels), tint + fade, radii, gradient
-// (flag, offset) + fringe (inset edge mask, inset), then from texel 11 per quad (x0, y0, x1, y1), (u0, v0, u1, v1), (lod, wrap, unrounded, 0)
+// (flag, offset), the second triangle's inverse and (e, f, ox, oy), the diagonal (a, b, c: the first triangle
+// where a (x - ox) + b (y - oy) + c >= 0; geometry.rs snapped_quad_maps), then from texel 14 per quad
+// (x0, y0, x1, y1), (u0, v0, u1, v1), (lod, wrap, unrounded, 0)
 // (unrounded: a 9-slice part without texels on an axis, which UICorner leaves square: images.rs ImageQuad::unrounded)
 // Wrap / clamp an index into [0, n) (GLSL's % is undefined for negative operands)
 int wrapIndex(int i, int n) {
@@ -939,7 +941,8 @@ vec4 sampleAt(int slot, int levels, vec2 uv, float lod, bool wrap, bool pixelate
 
 float rotatedCoverage(vec2 p, vec2 halfSize, bool rounded, vec4 radii, vec4 m) {
 	if (!rounded) {
-		return clamp(1.0 - sdBox(p, halfSize), 0.0, 1.0);
+		// A mitred corner, as a turned frame's (turnedQuad)
+		return turnedQuad(p, halfSize);
 	}
 	if (p.x < -halfSize.x || p.x >= halfSize.x || p.y < -halfSize.y || p.y >= halfSize.y) {
 		return 0.0;
@@ -967,32 +970,61 @@ float fringeAlong(float t, float L, float d) {
 	return t < L - d * (L + 1.0) ? (t + d) / L : (t - d + 2.0) / (L + 2.0);
 }
 
-vec2 fringeSample(vec2 l, vec4 b, int mask, float inset) {
-	vec2 c = (b.xy + b.zw) * 0.5;
+vec2 fringeSample(vec2 l, vec4 b) {
 	float W = b.z - b.x, H = b.w - b.y;
 	float dt = b.y - l.y, dr = l.x - b.z, db = l.y - b.w, dl = b.x - l.x;
 	float d = max(max(dt, dr), max(db, dl));
 	if (d == dt) {
-		return vec2(b.x + fringeAlong(l.x - b.x, W, d) * W, min(b.y + ((mask & 1) != 0 ? inset : 0.0), c.y));
+		return vec2(b.x + fringeAlong(l.x - b.x, W, d) * W, b.y);
 	}
 	if (d == dr) {
-		return vec2(max(b.z - ((mask & 2) != 0 ? inset : 0.0), c.x), b.y + fringeAlong(l.y - b.y, H, d) * H);
+		return vec2(b.z, b.y + fringeAlong(l.y - b.y, H, d) * H);
 	}
 	if (d == db) {
-		return vec2(b.z - fringeAlong(b.z - l.x, W, d) * W, max(b.w - ((mask & 4) != 0 ? inset : 0.0), c.y));
+		return vec2(b.z - fringeAlong(b.z - l.x, W, d) * W, b.w);
 	}
-	return vec2(min(b.x + ((mask & 8) != 0 ? inset : 0.0), c.x), b.w - fringeAlong(b.w - l.y, H, d) * H);
+	return vec2(b.x, b.w - fringeAlong(b.w - l.y, H, d) * H);
+}
+
+// The mip level of a fringe pixel (images.rs rotated_fringe_lod): the strip triangle's texture coordinate does
+// not change across the edge and runs along it as fringeAlong lays it, so a pixel spans the edge's texels
+// (density: texels a local px along x and y) along one diagonal of the frame; the longest of across, down and
+// the two screen diagonals at 11/16 (sampling.rs footprint_length)
+float fringeLod(vec2 l, vec4 b, vec2 density, vec4 m) {
+	float W = b.z - b.x, H = b.w - b.y;
+	float dt = b.y - l.y, dr = l.x - b.z, db = l.y - b.w, dl = b.x - l.x;
+	float d = max(max(dt, dr), max(db, dl));
+	vec2 g;
+	if (d == dt || d == db) {
+		float t = d == dt ? l.x - b.x : b.z - l.x;
+		bool first = t < W - d * (W + 1.0);
+		float s = density.x * (first ? 1.0 : W / (W + 2.0));
+		g = vec2(s, (d == dt) == first ? -s : s);
+	} else {
+		float t = d == dr ? l.y - b.y : b.w - l.y;
+		bool first = t < H - d * (H + 1.0);
+		float s = density.y * (first ? 1.0 : H / (H + 2.0));
+		g = vec2(s, (d == dr) == first ? s : -s);
+	}
+	float across = g.x * m.x + g.y * m.y, down = g.x * m.z + g.y * m.w;
+	return log2(max(max(abs(across), abs(down)), 0.6875 * max(abs(across + down), abs(across - down))));
 }
 
 vec4 kindImageRotated(ivec2 P, vec2 X) {
 	vec4 m = rec(3), tr = rec(4), bounds = rec(5), screen = rec(6), info = rec(7);
+	// The quad's corners sit on the rasterizer's 1/256 px grid, so each of its two triangles has its own map
+	vec4 diagonal = rec(13);
+	if (diagonal.x * (X.x - tr.z) + diagonal.y * (X.y - tr.w) + diagonal.z < 0.0) {
+		m = rec(11);
+		tr = rec(12);
+	}
 	vec2 l = toLocal(m, tr, X);
 	vec2 cl = clamp(l, bounds.xy, bounds.zw);
 	int slot = int(info.x), count = int(info.y), flags = int(info.z), levels = int(info.w);
 	bool pixelated = (flags & 1) != 0, quarter = (flags & 2) != 0, rounded = (flags & 4) != 0;
 	int found = -1;
 	for (int i = 0; i < count; i++) {
-		vec4 qb = rec(11 + i * 3);
+		vec4 qb = rec(14 + i * 3);
 		if (cl.x >= qb.x && cl.x <= qb.z && cl.y >= qb.y && cl.y <= qb.w) {
 			found = i;
 			break;
@@ -1001,7 +1033,7 @@ vec4 kindImageRotated(ivec2 P, vec2 X) {
 	if (found < 0) {
 		DISCARD
 	}
-	vec4 qb = rec(11 + found * 3), uv = rec(12 + found * 3), qs = rec(13 + found * 3);
+	vec4 qb = rec(14 + found * 3), uv = rec(15 + found * 3), qs = rec(16 + found * 3);
 	float coverage;
 	if (rounded) {
 		vec2 halfSize = (qb.zw - qb.xy) * 0.5;
@@ -1016,24 +1048,29 @@ vec4 kindImageRotated(ivec2 P, vec2 X) {
 		DISCARD
 	}
 	// A fringe pixel outside the quad samples where Studio's anti-aliasing strip puts it (images.rs
-	// rotated_fringe_sample): along the edge shifted by the strip's triangles, across it on the edge line or, on edges that are
-	// the texture's border (rec(10).z bits: 1 top, 2 right, 4 bottom, 8 left), rec(10).w px inside
+	// rotated_fringe_sample): along the edge shifted by the strip's triangles, across it on the edge line, at
+	// the strip's own mip level
 	vec2 sp = l;
-	if (!quarter && (l.x < bounds.x || l.x > bounds.z || l.y < bounds.y || l.y > bounds.w)) {
-		sp = fringeSample(l, bounds, int(rec(10).z), rec(10).w);
+	bool fringe = !quarter && (l.x < bounds.x || l.x > bounds.z || l.y < bounds.y || l.y > bounds.w);
+	if (fringe) {
+		sp = fringeSample(l, bounds);
 		for (int i = 0; i < count; i++) {
-			vec4 qi = rec(11 + i * 3);
+			vec4 qi = rec(14 + i * 3);
 			if (sp.x >= qi.x && sp.x <= qi.z && sp.y >= qi.y && sp.y <= qi.w) {
 				qb = qi;
-				uv = rec(12 + i * 3);
-				qs = rec(13 + i * 3);
+				uv = rec(15 + i * 3);
+				qs = rec(16 + i * 3);
 				break;
 			}
 		}
 	}
 	vec2 t = (sp - qb.xy) / (qb.zw - qb.xy);
 	vec2 uvp = uv.xy + t * (uv.zw - uv.xy);
-	vec4 value = sampleAt(slot, levels, uvp, qs.x, qs.y > 0.5, pixelated);
+	float lod = qs.x;
+	if (fringe) {
+		lod = fringeLod(l, bounds, vec2(imageSize(slot, 0)) * abs(uv.zw - uv.xy) / (qb.zw - qb.xy), m);
+	}
+	vec4 value = sampleAt(slot, levels, uvp, lod, qs.y > 0.5, pixelated);
 	return shadeImage(value, l, coverage, 8, 10);
 }
 

@@ -31,7 +31,11 @@ Fixtures: `image-probe-ties`, `snap-probe-ties1x`.
   rounds its even axis down.
 - 9-slice (`ScaleType.Slice`), Tile, Fit and Crop follow Studio's quad layout; `ImageRectOffset` /
   `ImageRectSize` crop the texture.
-- A rotated image's anti-aliased fringe samples 0.7 px inside the edge at the measured texel densities.
+- A rotated image's corners sit on the rasterizer's 1/256 px grid and its texture coordinates run over the
+  quad's two triangles. Its mip level follows the texels a pixel spans across, down and along both diagonals;
+  the anti-aliased fringe samples on the edge line at the level of its own strip.
+- A node whose rotations cancel is drawn on snapped edges, fill and image alike.
+- An `EditableImage` has no mip levels: a minified one aliases, as in Studio.
 - Thumbnails (`rbxthumb://`) use the thumbnail service's WebP rendition, as Studio does.
 
 Fixtures: `image-probe-*` (the ones with Studio's own `rbxasset://` textures).
