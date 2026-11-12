@@ -42,7 +42,13 @@ return function(Target)
 		Size = UDim2.fromOffset(776, 200),
 		BackgroundTransparency = 1,
 	}, Root)
-	local Styles = Enum.EasingStyle:GetEnumItems()
+	-- The styles a tween takes: Studio 0.747 lists Spring and Bezier too, and TweenInfo.new raises for them
+	local Styles = {}
+	for _, Style in Enum.EasingStyle:GetEnumItems() do
+		if pcall(TweenInfo.new, 1, Style) then
+			table.insert(Styles, Style)
+		end
+	end
 	table.sort(Styles, function(A, B)
 		return A.Value < B.Value
 	end)
