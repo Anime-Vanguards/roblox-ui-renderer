@@ -15,6 +15,19 @@ Output in `out/compare/<name>/`: `studio.png`, `rur/` (a normal render), `diff.p
 is at most 2 of 255), `layout` (every GuiObject's rect matched by path) and `propMismatches` (visual
 properties that differ).
 
+`pixels.over2` is the number of pixels more than 2 levels apart and `pixels.counted` how many of them count.
+A fixture that Studio does not draw the same way twice says so in its header comment, for all of it or for
+rects in logical px, and those pixels are compared and reported (`pixels.unstable`: the reason and their
+number) but not counted:
+
+```lua
+-- compare-unstable: Studio draws strokes of equal ZIndex in an order that changes from mount to mount
+-- compare-unstable 0,408,1200,90: the last row's strokes have one ZIndex
+```
+
+`node tools/analysis/compare_total.mjs [name ...]` adds up the reports in `out/compare/`: a line per
+comparison, the unstable ones with their reason, and the total of what counts.
+
 ## The Studio MCP bridge
 
 rur talks to Studio through an MCP server on a local TCP port: newline-delimited JSON-RPC 2.0, an

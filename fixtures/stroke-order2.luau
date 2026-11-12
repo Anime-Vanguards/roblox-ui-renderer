@@ -10,6 +10,7 @@
 --   R6 red, green, blue, subtree insert
 --   R7 red, green, blue, incremental
 --   R8 like R1 with the red stroke reparented away and back at t = 0.05 s
+-- compare-unstable: Studio draws strokes of equal ZIndex in an order that changes from mount to mount (notes/strokes.md)
 -- compare: --viewport 1200x900 --time 0.3 --background 20,20,26
 return function(Target)
 	local Red, Green, Blue = Color3.fromRGB(230, 40, 40), Color3.fromRGB(40, 200, 90), Color3.fromRGB(40, 90, 230)

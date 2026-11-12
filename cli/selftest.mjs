@@ -28,6 +28,7 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/placeholders.mjs"]],
 		[process.execPath, ["tools/tests/web-bundle-directories.mjs"]],
 		[process.execPath, ["tools/tests/places.mjs"]],
+		[process.execPath, ["tools/tests/compare_unstable.mjs"]],
 		[process.execPath, ["tools/tests/examples.mjs"]],
 	];
 	// The checks are independent (each writes its own out/ directory): they run concurrently and each

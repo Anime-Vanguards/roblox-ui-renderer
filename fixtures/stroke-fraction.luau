@@ -2,6 +2,7 @@
 -- 1x, Outer 1.3846 px with a vertical UIGradient and UICorner 8.39, Inner 2.52 px black). Columns:
 -- x fractions 0, .25, .5, .5035, .75; rows: plain Outer, + UICorner, + UIGradient, + both, the story's
 -- Outer + Inner pair.
+-- compare-unstable 0,408,1200,90: the last row's Outer and Inner strokes have one ZIndex, which Studio draws in an order that changes from mount to mount (notes/strokes.md)
 -- compare: --viewport 1200x520 --time 0.2 --background 0,0,0
 return function(Target)
 	local Fractions = { 0, 0.25, 0.5, 0.5035, 0.75 }

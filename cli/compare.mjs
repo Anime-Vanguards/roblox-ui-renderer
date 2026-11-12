@@ -474,11 +474,40 @@ function crop(png, x, y, w, h) {
 	return out;
 }
 
-// Pixel comparison: per-pixel max channel difference.
-export function comparePngs(a, b, diffFile) {
+// A fixture whose picture Studio does not draw the same way twice says so in its header comment:
+//   -- compare-unstable: <reason>                 the whole fixture
+//   -- compare-unstable x,y,w,h[ x,y,w,h]: <reason>   those rects (logical px)
+// Its pixels (or those rects) are compared and reported but not counted: no renderer can match a picture
+// Studio itself changes between two captures. Returns null, or { reason, regions } (regions null: all of it).
+export function unstableOf(source) {
+	for (const line of String(source || "").split(/\r?\n/)) {
+		if (!line.startsWith("--")) break;
+		const match = /^--\s*compare-unstable((?:\s+-?[\d.]+,-?[\d.]+,[\d.]+,[\d.]+)*)\s*:\s*(.+?)\s*$/.exec(line);
+		if (!match) continue;
+		const regions = match[1].trim() ? match[1].trim().split(/\s+/).map(rect => rect.split(",").map(Number)) : null;
+		return { reason: match[2], regions };
+	}
+	return null;
+}
+
+// One line for a comparison's pixels: what counts, and what does not with the reason
+export function pixelLine(pixels) {
+	const px = count => `${count.toLocaleString("en-US")} px`;
+	if (!pixels.unstable) return `${px(pixels.over2)} over 2 levels`;
+	const where = pixels.unstable.regions ? `${pixels.unstable.regions.length} marked rect${pixels.unstable.regions.length === 1 ? "" : "s"}` : "the whole fixture";
+	return `${px(pixels.counted)} over 2 levels counted; not counted: ${px(pixels.unstable.over2)} in ${where} (${pixels.unstable.reason})`;
+}
+
+// Pixel comparison: per-pixel max channel difference. `unstable` (unstableOf) with `dpi` leaves the unstable
+// pixels out of `counted`.
+export function comparePngs(a, b, diffFile, unstable = null, dpi = 1) {
 	const w = Math.min(a.width, b.width), h = Math.min(a.height, b.height);
 	const diff = new PNG({ width: w, height: h });
-	let over2 = 0, over8 = 0, over32 = 0, total = 0, sumAbs = 0, sumSq = 0;
+	let over2 = 0, over8 = 0, over32 = 0, total = 0, sumAbs = 0, sumSq = 0, counted = 0;
+	const regions = unstable && unstable.regions
+		? unstable.regions.map(([x, y, rw, rh]) => [Math.floor(x * dpi), Math.floor(y * dpi), Math.ceil((x + rw) * dpi), Math.ceil((y + rh) * dpi)])
+		: null;
+	const steady = (x, y) => !unstable || (regions !== null && !regions.some(r => x >= r[0] && x < r[2] && y >= r[1] && y < r[3]));
 	for (let y = 0; y < h; y++) {
 		for (let x = 0; x < w; x++) {
 			const ia = (y * a.width + x) * 4, ib = (y * b.width + x) * 4, id = (y * w + x) * 4;
@@ -490,7 +519,10 @@ export function comparePngs(a, b, diffFile) {
 				sumSq += d * d;
 			}
 			total++;
-			if (max > 2) over2++;
+			if (max > 2) {
+				over2++;
+				if (steady(x, y)) counted++;
+			}
 			if (max > 8) over8++;
 			if (max > 32) over32++;
 			const gray = Math.round((a.data[ia] + a.data[ia + 1] + a.data[ia + 2]) / 3 * 0.35);
@@ -505,6 +537,10 @@ export function comparePngs(a, b, diffFile) {
 	return {
 		width: w,
 		height: h,
+		// Pixels more than 2 levels apart, and how many of them count (all, unless the fixture is unstable)
+		over2,
+		counted,
+		...(unstable ? { unstable: { reason: unstable.reason, regions: unstable.regions, over2: over2 - counted } } : {}),
 		exactPercent: 100 * (1 - over2 / total),
 		within8Percent: 100 * (1 - over8 / total),
 		within32Percent: 100 * (1 - over32 / total),
@@ -1003,7 +1039,9 @@ export async function compare(args) {
 	const player = studioResult.localPlayer || null;
 	const summary = await withStudioPlayer(player, () => withStudioOrder(orderFile, () => withRecordedClock(clockFile, () => render(renderArgs))));
 	const ours = readPng(summary.png);
-	const pixels = comparePngs(ours, studioPng, path.join(outDir, "diff.png"));
+	const unstable = unstableOf(fixtureSource);
+	const pixels = comparePngs(ours, studioPng, path.join(outDir, "diff.png"), unstable, dpi);
+	process.stderr.write(`rur compare: ${name}: ${pixelLine(pixels)}\n`);
 	sideBySide(ours, studioPng, path.join(outDir, "side-by-side.png"));
 
 	const scene = readScene(path.join(outDir, "rur", "scene.json"));
@@ -1017,7 +1055,7 @@ export async function compare(args) {
 		const idealScene = readScene(path.join(outDir, "rur-ideal", "scene.json"));
 		const idealLayout = compareLayout(studioResult.nodes, idealScene, dpi, [studioResult.target[0], studioResult.target[1]]);
 		ideal = {
-			pixels: comparePngs(readPng(idealSummary.png), studioPng, null),
+			pixels: comparePngs(readPng(idealSummary.png), studioPng, null, unstable, dpi),
 			layout: { matched: idealLayout.matched, exact: idealLayout.exact, within1: idealLayout.within1, propMismatches: idealLayout.propMismatches },
 		};
 	}

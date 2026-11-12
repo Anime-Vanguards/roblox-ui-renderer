@@ -1,6 +1,7 @@
 -- UIStroke draw order among strokes of equal ZIndex (round 4): two Center strokes with the same footprint (the one
 -- drawn last covers the other) parented red-then-blue and blue-then-red, a three-stroke stack, and the stories'
 -- Inner gradient + Outer black pair on a rounded frame, in both child orders.
+-- compare-unstable: Studio draws strokes of equal ZIndex in an order that changes from mount to mount (notes/strokes.md)
 -- compare: --viewport 900x400 --time 0.2 --background 20,20,26
 return function(Target)
 	local function Frame(X, Y, Radius)
