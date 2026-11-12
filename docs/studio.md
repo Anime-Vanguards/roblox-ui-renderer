@@ -76,6 +76,14 @@ Any bridge that serves these over TCP works; the maintainers run their own. Sett
 
 ## What a compare does
 
+A report (`report.json`) is the result of the run that wrote it or nothing: a compare removes the old one first,
+so a run that stops (a reuse refused, a Studio error) leaves no numbers behind. It names the engine that drew the
+rur side (`engine`: the binary's sha256, when it was built, the checkout's commit) and the capture (`capture`:
+when, whether it was reused, Studio's `FFlagLegacyTextSubpixelRendering`). A capture in the other text state than
+rur's text mode is refused with the switch to use (`--text-subpixel on|off`). Tools that add reports up read them
+through `readReport` (cli/compare.mjs), which refuses a report another engine drew. For each capture Studio's mouse
+icon is hidden, so the system cursor over Studio's window does not end up in the image.
+
 - Everything it mounts lives under `CoreGui` and is removed afterwards; nothing is saved and no script is
   edited.
 - Studio's frame clock and the order it iterates siblings are recorded and replayed offline, so animation

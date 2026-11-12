@@ -1,11 +1,11 @@
-// Adds up `rur compare` reports: pixels more than 2 levels apart per comparison and in total. Pixels a fixture
+// Adds up `rur compare` reports (only those the current engine drew): pixels more than 2 levels apart per comparison and in total. Pixels a fixture
 // marks unstable (a `-- compare-unstable` header line, cli/compare.mjs unstableOf) are listed with the reason
 // and left out of the total.
 //   node tools/analysis/compare_total.mjs [name ...] [--dir out/compare]
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { pixelLine } from "../../cli/compare.mjs";
+import { pixelLine, readReport } from "../../cli/compare.mjs";
 
 // The lines and the total for reports ({ name, pixels } each; pixels as comparePngs returns them)
 export function totals(reports) {
@@ -28,13 +28,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 	const names = argv.length ? argv : fs.readdirSync(dir).filter(name => fs.existsSync(path.join(dir, name, "report.json"))).sort();
 	const reports = [];
 	for (const name of names) {
-		const file = path.join(dir, name, "report.json");
-		if (!fs.existsSync(file)) {
-			console.error(`${name}: no report (${file})`);
+		// Only reports the current engine drew (cli/compare.mjs readReport): a stale one is an error, not a number
+		let pixels;
+		try {
+			pixels = readReport(path.join(dir, name)).pixels;
+		} catch (error) {
+			console.error(`${name}: ${error.message}`);
 			process.exitCode = 1;
 			continue;
 		}
-		const pixels = JSON.parse(fs.readFileSync(file, "utf8")).pixels;
 		if (pixels.over2 === undefined) {
 			console.error(`${name}: its report was written before pixels were counted; run rur compare again`);
 			process.exitCode = 1;

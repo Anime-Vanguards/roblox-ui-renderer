@@ -11,7 +11,9 @@ import { fileURLToPath } from "node:url";
 
 import { runLuau, captureViewport, luauString, focusStudio, restoreFocus, ensureWholeViewport, DEFAULT_STUDIO } from "./studio.mjs";
 import { withStudioLock } from "./lock.mjs";
-import { OUT_DIR, sharedStatePath } from "./paths.mjs";
+import { OUT_DIR, sharedStatePath, textSubpixel } from "./paths.mjs";
+import { findEngine } from "./engine.mjs";
+import { execFileSync } from "node:child_process";
 import { render } from "./rur.mjs";
 import { CLOCK_LUAU, writeClock, clockSummary, withRecordedClock } from "./clock.mjs";
 
@@ -901,6 +903,68 @@ export class CaptureNeeded extends Error {
 	}
 }
 
+// The engine a report was drawn with: its binary (path, sha256, when it was built) and the checkout's commit
+// (with whether native/ or cli/ had uncommitted edits). Hashing is cached per binary size and time.
+const identities = new Map();
+export function engineIdentity(executable = findEngine()) {
+	if (!executable || !fs.existsSync(executable)) return null;
+	const stat = fs.statSync(executable);
+	const stamp = `${executable}|${stat.size}|${stat.mtimeMs}`;
+	if (!identities.has(stamp)) {
+		let commit = null, dirty = null;
+		try {
+			const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+			commit = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+			dirty = execFileSync("git", ["-C", root, "status", "--porcelain", "--", "native", "cli"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() !== "";
+		} catch {
+			// not a git checkout: the binary's hash still identifies it
+		}
+		identities.set(stamp, { executable, sha256: createHash("sha256").update(fs.readFileSync(executable)).digest("hex"), built: stat.mtime.toISOString(), commit, dirty });
+	}
+	return identities.get(stamp);
+}
+
+// A report as a result of the current engine, or an error: a report.json the current engine did not draw
+// (an earlier run's, left in a folder whose reuse then failed, or drawn by an engine since rebuilt) is not a
+// number to read. Tools that add reports up read them through this.
+export function readReport(dir, executable = findEngine()) {
+	const file = path.join(dir, "report.json");
+	if (!fs.existsSync(file)) throw new Error(`${dir}: no report (the compare did not finish)`);
+	const report = JSON.parse(fs.readFileSync(file, "utf8"));
+	const current = engineIdentity(executable);
+	if (!report.engine || !report.engine.sha256) throw new Error(`${dir}: the report does not say which engine drew it (made before reports recorded it): compare again`);
+	if (current && report.engine.sha256 !== current.sha256) {
+		throw new Error(`${dir}: the report was drawn by another engine (${report.engine.built}, ${String(report.engine.commit).slice(0, 12)}) than the current one (${current.built}, ${String(current.commit).slice(0, 12)}): compare again`);
+	}
+	return report;
+}
+
+// Studio's text drawing, FFlagLegacyTextSubpixelRendering ("true", "false", or "unknown" when Studio does not
+// tell): asked at every capture and kept with it
+const TEXT_FLAG_LUAU = `local ok, value = pcall(function() return game:GetFastFlag("LegacyTextSubpixelRendering") end)
+if ok and type(value) == "boolean" then return tostring(value) end
+return "unknown"`;
+
+// Studio draws its mouse icon in the viewport wherever the system cursor last was over Studio's window, which
+// is wherever the user's mouse happens to be when Studio sits behind other windows (a white dot in the
+// capture: 360 px of five text fixtures on 2026-11-13). Hidden for the capture and put back after; kept out of
+// the mount so saved captures stay reusable.
+const MOUSE_ICON_OFF_LUAU = `local Input = game:GetService("UserInputService")
+local Before = Input.MouseIconEnabled
+Input.MouseIconEnabled = false
+return tostring(Before)`;
+const mouseIconLuau = enabled => `game:GetService("UserInputService").MouseIconEnabled = ${enabled ? "true" : "false"}
+return "ok"`;
+
+// A capture in the other text state than rur's text mode differs in every glyph: refused, with the switch
+export function checkTextState(flag, subpixel = textSubpixel()) {
+	if (flag !== "true" && flag !== "false") return;
+	const studioOn = flag === "true";
+	if (studioOn === subpixel) return;
+	throw new Error(`Studio draws text with FFlagLegacyTextSubpixelRendering ${flag} but rur is in its ${subpixel ? "quarter" : "whole"}-pixel text mode: `
+		+ `pass --text-subpixel ${studioOn ? "on" : "off"} (docs/text.md, "Text modes")`);
+}
+
 export async function compare(args) {
 	const [width, height] = String(args.viewport || "1200x900").split("x").map(Number);
 	const background = args.background ? String(args.background).split(",").map(Number) : [46, 46, 46];
@@ -911,6 +975,8 @@ export async function compare(args) {
 	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$/, "");
 	const outDir = path.resolve(args.out || path.join(OUT_DIR, "compare", name));
 	fs.mkdirSync(outDir, { recursive: true });
+	// The report is this run's result or nothing: an earlier one must not outlive a run that stops
+	fs.rmSync(path.join(outDir, "report.json"), { force: true });
 
 	let modelB64 = "";
 	let pathParts = [];
@@ -937,6 +1003,8 @@ export async function compare(args) {
 		// The earlier capture, as it was measured
 		const dump = JSON.parse(fs.readFileSync(dumpFile, "utf8"));
 		studioResult = { ...reuse.record.studio, target: dump.target, nodes: dump.nodes };
+		// A capture records Studio's text state since 2026-11-13 (older ones say nothing: "unknown")
+		checkTextState(studioResult.textFlag || "unknown");
 		dpi = dpi || studioResult.dpi || 1.5;
 		calibration = reuse.record.calibration || undefined;
 		colourKeyed = reuse.record.colourKeyed;
@@ -976,19 +1044,25 @@ export async function compare(args) {
 				previousFocus = focusStudio(target.studio.name);
 				if (previousFocus) await new Promise(resolve => setTimeout(resolve, 400));
 			}
-			let mounted;
+			let mounted, textFlag = "unknown", mouseIcon = null;
 			try {
+				textFlag = String((await runLuau(TEXT_FLAG_LUAU, { studio })).text).trim();
+				checkTextState(textFlag);
+				mouseIcon = String((await runLuau(MOUSE_ICON_OFF_LUAU, { studio })).text).trim();
 				mounted = await runLuau(mountLuau, { studio });
 			} catch (error) {
+				if (mouseIcon === "true") await runLuau(mouseIconLuau(true), { studio }).catch(() => {});
 				restoreFocus(previousFocus);
 				throw error;
 			}
 			const result = JSON.parse(mounted.text);
+			result.textFlag = textFlag;
 			try {
 				result.dpi = captureViewport(mounted.studio.name, result.viewport[0], result.viewport[1], capturePath, dpi ? [dpi] : DISPLAY_SCALES);
 			} finally {
 				restoreFocus(previousFocus);
 				await runLuau(UNMOUNT_LUAU, { studio });
+				if (mouseIcon === "true") await runLuau(mouseIconLuau(true), { studio });
 			}
 			return result;
 		});
@@ -1074,6 +1148,10 @@ export async function compare(args) {
 		files: { studio: studioFile, ours: summary.png, diff: path.join(outDir, "diff.png"), sideBySide: path.join(outDir, "side-by-side.png") },
 	};
 	report.studio.reused = reuse.record ? reuse.record.capturedAt : false;
+	// What drew the rur side and in which state Studio drew its side: a report is only read with the engine that
+	// wrote it (readReport), and a capture in the other text state is refused before it gets here
+	report.engine = { ...engineIdentity(), textSubpixel: textSubpixel() };
+	report.capture = { capturedAt: reuse.record ? reuse.record.capturedAt : new Date().toISOString(), reused: Boolean(reuse.record), studioTextFlag: studioResult.textFlag || "unknown" };
 	if (!reuse.record) {
 		// What this capture depends on, for the next compare (reusableCapture)
 		const issues = [];
