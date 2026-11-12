@@ -581,6 +581,12 @@ fn text_engine_matches_frozen_corpus() {
     // notes/text.md which rules moved how many cases, and keep the corpus it replaces. A case that names
     // a face the corpus does not hold (a missing font file) still fails.
     let update_measured = std::env::var("RUR_TEXT_CORPUS_UPDATE").ok();
+    // With RUR_TEXT_CORPUS_UPDATE and RUR_TEXT_CORPUS_UPDATE_PEN=1: the differing "pen" cases of right-aligned
+    // rich lines too (a Studio-verified change of where such a line starts; other pens still fail).
+    let update_pen = update_measured.is_some() && std::env::var_os("RUR_TEXT_CORPUS_UPDATE_PEN").is_some();
+    let right_rich_pen = |case: &Map<String, Value>| -> bool {
+        case.get("p").and_then(Value::as_object).is_some_and(|params| boolean(params, "rich") && string(params, "a") == "Right")
+    };
     let rich_scaled = |case: &Map<String, Value>| -> bool {
         case.get("p").and_then(Value::as_object).is_some_and(|params| boolean(params, "rich") && boolean(params, "scaled"))
     };
@@ -609,6 +615,7 @@ fn text_engine_matches_frozen_corpus() {
         } else if (update_q.is_some() && kind == "text" && same(&without_q(expected), &without_q(&actual)))
             || (update_rich_scaled.is_some() && kind == "text" && rich_scaled(case) && !actual.to_string().contains("unknown face"))
             || (update_measured.is_some() && (kind == "layout" || kind == "text") && !actual.to_string().contains("unknown face"))
+            || (update_pen && kind == "pen" && right_rich_pen(case))
         {
             updated.push((index, actual.clone()));
         } else if failures.len() < 40 {

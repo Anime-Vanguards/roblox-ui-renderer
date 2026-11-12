@@ -71,10 +71,13 @@ fn grapheme_at(indices: &[(u32, u32)], position: u32) -> u32 {
 
 impl TextEngine {
     /// Trailing glyphs of a truncated line that are the layout's ellipsis (TextEngine::ellipsis, appended by
-    /// truncation; plain text only: rich truncation appends none).
+    /// truncation).
     fn ellipsis_glyphs(&self, layout: &TextLayout, line: &Line) -> usize {
         if !line.truncated {
             return 0;
+        }
+        if layout.runs.is_some() {
+            return line.glyphs.iter().rev().take_while(|glyph| glyph.is_ellipsis()).count();
         }
         let Some(face) = layout.face else { return 0 };
         let Some(ellipsis) = self.ellipsis_cache.get(&(face, layout.size.to_bits())) else { return 0 };

@@ -374,7 +374,8 @@ pub fn atlas_entries(scene: &Value) -> Vec<AtlasEntry> {
         let runs = as_array(text.get("runs"));
         let glow = text_glow(node);
         for line in as_array(text.get("lines")) {
-            for row in as_array(line.get("glyphs")) {
+            let copies = as_array(line.get("copies"));
+            for (row_index, row) in as_array(line.get("glyphs")).iter().enumerate() {
                 let Some(row) = row.as_array() else {
                     continue;
                 };
@@ -414,6 +415,20 @@ pub fn atlas_entries(scene: &Value) -> Vec<AtlasEntry> {
                         font_index,
                         style: Some(unhinted_style(text_glyph_style(None, bold, quarter).as_deref())),
                     });
+                }
+                // The legacy TextStroke copies of a tied pen that round another way (export.rs `tie_step`)
+                for copy in copies.iter().filter(|copy| copy.get(0).and_then(Value::as_u64) == Some(row_index as u64)) {
+                    for side in 1..=2 {
+                        let quarter = text_quarter(text, copy.get(side), false);
+                        want(AtlasEntry {
+                            font_file: file.to_string(),
+                            ppem,
+                            glyph,
+                            stroke_px: 0.0,
+                            font_index,
+                            style: text_glyph_style(None, bold, quarter),
+                        });
+                    }
                 }
                 let tag = run.and_then(|run| run.get("stroke")).filter(|tag| truthy(Some(tag)));
                 let chosen: Vec<&Value> = match tag {

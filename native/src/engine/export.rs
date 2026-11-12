@@ -722,7 +722,13 @@ fn color_json(color: &Option<[f64; 3]>) -> Option<Json> {
 }
 
 /// ExportRuns: RichText runs for the renderer (glyph entries index them).
-fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::text::Run]) -> Json {
+/// The runs of a rich text. With `ellipsis` (a line is cut by TextTruncate) two variants of every run
+/// follow them, which draw the ellipsis after that run's glyphs (`text_lines`): Studio 0.747 draws it with
+/// the label's own face at the run's size, emboldened and slanted for a bold or italic run where that face
+/// is not, in the run's colour and stroke and outside its decorations; and, when no glyph is kept before
+/// it, the same in the label's colour (fixtures/text-probe-richtrunc.luau: 0 px over tolerance with the
+/// label's glyph synthesized, 37 or more per label with the run's own face at any quarter pixel).
+fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::text::Run], lines: &[Line], ellipsis: bool) -> Json {
     let (family, weight, style) = font_parts(ctx, id);
     let mut result = Vec::new();
     for run in runs {
@@ -761,6 +767,10 @@ fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::
         }
         let run_family = run_style.family.clone().unwrap_or_else(|| family.clone());
         if let Some(face) = text.fonts.get_face(&run_family, run_weight, &font_style) {
+            let run_number = result.len() as u32 + 1;
+            if lines.iter().any(|line| line.glyphs.iter().any(|glyph| glyph.run == run_number && glyph.face != face && !is_space(glyph.code) && !glyph.is_ellipsis())) {
+                entry.insert("metrics".into(), face_metrics(text, face));
+            }
             let face = text.face(face);
             entry.insert(
                 "face".into(),
@@ -769,7 +779,50 @@ fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::
         }
         result.push(Json::Object(entry));
     }
+    if ellipsis {
+        let label_face = text.fonts.get_face(&family, weight, style).map(|face| {
+            let face = text.face(face);
+            json!({ "bold": face.weight >= 700.0, "italic": face.style == "italic", "weight": number(face.weight) })
+        });
+        let count = result.len();
+        for label_colour in [false, true] {
+            for index in 0..count {
+                let mut entry = result[index].as_object().cloned().unwrap_or_default();
+                entry.insert("underline".into(), Json::Bool(false));
+                entry.insert("strike".into(), Json::Bool(false));
+                entry.remove("mark");
+                match &label_face {
+                    Some(face) => entry.insert("face".into(), face.clone()),
+                    None => entry.remove("face"),
+                };
+                if label_colour {
+                    entry.remove("color");
+                    entry.remove("transparency");
+                }
+                result.push(Json::Object(entry));
+            }
+        }
+    }
     Json::Array(result)
+}
+
+/// The vertical metrics of a face, as a font row has them (`Registry::font_index`): a line's baseline is
+/// the ascender's share of its height in the face of the label (of the run, in rich text), not in the face
+/// a glyph falls back to. Measured (fixtures/text-probe-emoji-line.luau, Studio 0.747 at 1.5x): a line of
+/// emoji alone, or starting with one, sits where the label's letters would, a pixel off the emoji face's
+/// own baseline in two of three faces.
+fn face_metrics(text: &TextEngine, face: super::text::fonts::FaceId) -> Json {
+    let font = &text.face(face).font;
+    let mut row = json!({
+        "unitsPerEm": number(font.units_per_em),
+        "ascender": number(font.ascender),
+        "descender": number(font.descender),
+        "lineGap": number(font.line_gap),
+    });
+    if font.line_gap != 0.0 {
+        row["sizeUnits"] = number(super::text::layout::height_units(font));
+    }
+    row
 }
 
 /// FontInternal.Parts of a text object's FontFace.
@@ -788,24 +841,46 @@ pub(crate) struct LineCache {
     lines: Vec<CachedLine>,
 }
 
-/// A line's glyph entries, its rich run segments, and each entry's exact pen from the line's start (with
-/// whether it is drawn at quarter pixels): a pen exactly halfway between two quarter pixels rounds by
-/// where the label is (`tie_quarter`), and rotated text keeps the exact pens.
-type CachedLine = (Json, Option<Json>, Vec<(f64, bool)>);
+/// A line's glyph entries, its rich run segments, and each entry's exact pen from the line's start with
+/// its glyph's pixel size and the steps of a pixel it stops at (4 or 1): a pen exactly halfway between two
+/// steps rounds by where the label is and by the glyph's size (`tie_step`), and rotated text keeps the
+/// exact pens. Last, where every glyph of the line (spaces too) starts in its stretch, exact
+/// (MaxVisibleGraphemes ends the decorations there).
+type CachedLine = (Json, Option<Json>, Vec<(f64, f64, f64)>, Vec<f64>);
 
-/// The quarter pixel of a pen exactly halfway between two, as Studio 0.747 rounds it: the pen is added to
+/// The step (a quarter pixel, or a whole one for glyphs over 32 GUI pixels) of a pen exactly halfway
+/// between two, as Studio 0.747 rounds it: the pen is added to
 /// the line's start in logical pixels in single precision and scaled back, so the tie falls up or down by
 /// that sum's rounding error. The line's start is its alignment anchor (`line_pen`: the content box's left
 /// edge, right edge or centre snapped to a device pixel) over the scale, less the whole device pixels from
-/// the line's start to the anchor times the scale's reciprocal. Measured at 1.5x: 258 of 258 tied pens of
-/// fixtures/text-probe-tie.luau, layout-textpen2.luau and layout-text-overflow.luau (rounding every tie up
-/// misses 26 of them).
-fn tie_quarter(pen: f64, line_px: f64, anchor: f64, pixel_scale: f64) -> f64 {
+/// the line's start to the anchor times the scale's reciprocal. The scale back is not the device scale
+/// itself but the reciprocal of the glyph's logical size over its pixel size, the logical size being the
+/// pixel size times the scale's reciprocal: at 1.5x that is 1.5 for every size under 48 px but 25 px, where
+/// it is one step lower (1.4999999), so a 25 px glyph's ties fall down far more often. Measured at 1.5x:
+/// 397 of 397 tied pens of fixtures/text-probe-tie.luau, layout-textpen2.luau, layout-text-overflow.luau,
+/// text-probe-quadties.luau and text-probe-richscaled.luau (the device scale itself misses 17, all of them
+/// 25 px glyphs; rounding every tie up misses 54), and the one half-pixel pen of a 71 px glyph there.
+///
+/// A copy of the glyph drawn `offset` device pixels aside (the legacy TextStroke's four copies, one pixel
+/// left and right) has the offset added to the line's start before the pen, so its tie can fall the other
+/// way: the result is then the pen of the copy's bitmap before the offset. Measured: 30 of 30 copies of
+/// the tied pens of fixtures/text-probe-graphemes.luau LegacyN5 ("x" at 66.375 px of a centred 45 px line:
+/// the fill at 66.5, the right copies at 66.5 + 1, the left copies at 66.25 - 1) and of the 14 legacy
+/// stroke labels of fixtures/text-probe-grouptext.luau (the offset added after the pen gives 26).
+fn tie_step(pen: f64, line_px: f64, anchor: f64, pixel_scale: f64, size: f64, steps: f64, offset: f64) -> f64 {
     let scale = pixel_scale as f32;
     let inverse = (1.0 / pixel_scale) as f32;
     let origin = anchor as f32 / scale - (anchor - line_px) as f32 * inverse;
-    let device = f64::from((origin + pen as f32 * inverse) * scale);
-    (device * 4.0 + 0.5).floor() / 4.0 - line_px
+    let size = size as f32;
+    let back = 1.0 / (size * inverse / size);
+    let device = f64::from(((origin + offset as f32 * inverse) + pen as f32 * inverse) * back);
+    (device * steps + 0.5).floor() / steps - line_px - offset
+}
+
+/// Whether a pen is exactly halfway between two steps of a pixel (26.6 pens: an odd number of eighths for
+/// quarters, of halves for whole pixels).
+fn tied(pen: f64, steps: f64) -> bool {
+    (pen * steps * 2.0).rem_euclid(2.0) == 1.0
 }
 
 /// ExportText's lines and content box (the parts that move with the label).
@@ -837,6 +912,7 @@ fn text_lines(
 
     let size = result.size;
     let rich = result.runs.is_some();
+    let legacy_stroke = ctx.get_opt(id, ctx.n.text_stroke_transparency).and_then(Value::as_number).unwrap_or(1.0) < 1.0;
     let alignment = XAlign::from_name(x_align);
     let mut cache = cache;
     let caching = cache.is_some();
@@ -862,22 +938,58 @@ fn text_lines(
             content_x + (content_w - line_width) / 2.0
         };
         let line_top = top + line.top;
-        let (mut glyphs, runs, pens) = match cached.and_then(|lines| lines.get(index)) {
-            Some((glyphs, runs, pens)) => (glyphs.clone(), runs.clone(), pens.clone()),
+        let (mut glyphs, runs, pens, starts) = match cached.and_then(|lines| lines.get(index)) {
+            Some((glyphs, runs, pens, starts)) => (glyphs.clone(), runs.clone(), pens.clone(), starts.clone()),
             None => {
                 // Glyph entries: font index, glyph id, x (px from the pen), ppem (per glyph) and, for
                 // rich text, the 0-based index into `runs`
                 let mut glyphs = Vec::with_capacity(line.glyphs.len());
                 let mut pens = Vec::with_capacity(line.glyphs.len());
+                let mut starts = Vec::with_capacity(line.glyphs.len());
+                // Rich text: the horizontal extent of each run's stretch on the line, spaces included, for its
+                // decorations. Measured (fixtures/text-probe-decor.luau, -decor2, -rich, -richtrunc: 320 of
+                // 321 underlines, strikes and marks, the other the wrapped line below): it starts at the
+                // stretch's whole pixel and is as wide as the stretch's exact pens, rounded half up, not the
+                // sum of its glyphs' whole-pixel advances ("s" 42.56 px wide from 74 ends at 117, not 116).
+                // The whitespace a wrapped line ends with is outside it (Wrap30: 9 px shorter).
+                let mut segments: Vec<[f64; 3]> = Vec::new();
+                let counted = if line.paragraph_end {
+                    line.glyphs.len()
+                } else {
+                    line.glyphs.iter().rposition(|glyph| !is_space(glyph.code)).map_or(0, |last| last + 1)
+                };
                 let mut run_index: u32 = 0;
+                // A rich truncation's ellipsis is drawn by a variant of its run (`export_runs`): the first
+                // set after the layout's runs, the second when no glyph is kept before it
+                let run_count = result.runs.as_ref().map_or(0, |runs| runs.len()) as u32;
+                let mut kept = false;
                 // A stretch of one run on the line starts at a whole pixel (its first glyph's rounded x) and
                 // its glyphs follow by their exact pens; a truncation's ellipsis (a pen of its own, below the
                 // text's: `TextEngine::ellipsis`) goes on from the exact pen after the text it follows
                 let (mut segment_x, mut segment_pen, mut segment_run, mut last_pen) = (0.0, 0.0, u32::MAX, f64::INFINITY);
                 let mut last_end = 0.0;
-                for glyph in &line.glyphs {
+                for (glyph_index, glyph) in line.glyphs.iter().enumerate() {
                     if glyph.run != 0 {
                         run_index = glyph.run - 1;
+                    }
+                    let ellipsis = rich && glyph.is_ellipsis();
+                    if !ellipsis && rich && glyph_index < counted {
+                        // (before the ellipsis variant below: a truncation's ellipsis is outside every run's
+                        // extent, decorations end before it)
+                        let run = f64::from(run_index);
+                        let stretch = glyph.run != segment_run;
+                        let start = if stretch { glyph.x } else { segment_x + glyph.pen - segment_pen };
+                        let end = if stretch { glyph.x + glyph.end - glyph.pen } else { segment_x + glyph.end - segment_pen };
+                        let end = (end + 0.5).floor();
+                        match segments.last_mut() {
+                            Some(current) if current[0] == run => current[2] = end,
+                            _ => segments.push([run, (start + 0.5).floor(), end]),
+                        }
+                    }
+                    if ellipsis {
+                        run_index = glyph.run.max(1) - 1 + if kept { run_count } else { 2 * run_count };
+                    } else {
+                        kept = true;
                     }
                     if glyph.run != segment_run {
                         (segment_x, segment_pen, segment_run) = (glyph.x, glyph.pen, glyph.run);
@@ -886,6 +998,7 @@ fn text_lines(
                     }
                     last_pen = glyph.pen;
                     last_end = segment_x + glyph.end - segment_pen;
+                    starts.push(segment_x + glyph.pen - segment_pen);
                     if is_space(glyph.code) {
                         continue;
                     }
@@ -899,7 +1012,7 @@ fn text_lines(
                     // (glyphs over 32 GUI pixels, 48 px at 1.5x and 32 at 1x: at its whole pixel)
                     let steps = if glyph_size > 32.0 * pixel_scale { 1.0 } else { 4.0 };
                     let exact = segment_x + glyph.pen - segment_pen + glyph.offset;
-                    pens.push((exact, steps == 4.0));
+                    pens.push((exact, glyph_size, steps));
                     entry.push(number((exact * steps + 0.5).floor() / steps));
                     entry.push(number(round(face_ppem, 5)));
                     if rich {
@@ -907,49 +1020,46 @@ fn text_lines(
                     }
                     glyphs.push(Json::Array(entry));
                 }
-                // Rich text: the horizontal extent of each run segment on the line, spaces included
-                let runs = rich.then(|| {
-                    let mut segments: Vec<[f64; 3]> = Vec::new();
-                    let mut segment_run: f64 = 0.0;
-                    for glyph in &line.glyphs {
-                        if glyph.run != 0 {
-                            segment_run = (glyph.run - 1) as f64;
-                        }
-                        match segments.last_mut() {
-                            Some(current) if current[0] == segment_run => current[2] = glyph.x + glyph.advance,
-                            _ => segments.push([segment_run, glyph.x, glyph.x + glyph.advance]),
-                        }
-                    }
-                    Json::Array(segments.iter().map(|s| numbers(s)).collect())
-                });
+                let runs = rich.then(|| Json::Array(segments.iter().map(|s| numbers(s)).collect()));
                 let glyphs = Json::Array(glyphs);
                 if caching {
-                    built.push((glyphs.clone(), runs.clone(), pens.clone()));
+                    built.push((glyphs.clone(), runs.clone(), pens.clone(), starts.clone()));
                 }
-                (glyphs, runs, pens)
+                (glyphs, runs, pens, starts)
             }
         };
         // px: the whole device pixel Studio starts the pen at; ux: the unsnapped pen (only when not whole)
         let pen = line_pen(alignment, content_x, content_w, line_width, rich, false, pixel_scale);
         let exact_pen = round(line_pen(alignment, content_x, content_w, line_width, rich, true, pixel_scale), 3);
+        // `copies`: [entry index, pen of the left copies' bitmap, pen of the right copies'] of the glyphs whose
+        // legacy TextStroke copies round another way than the glyph (`tie_step`)
+        let mut copies: Vec<Json> = Vec::new();
         if rotated {
             // Rotated text: Studio 0.747 draws every glyph's unshifted bitmap at its exact pen and resamples it
             // (fixtures/text-probe-rotate-quarter.luau)
             if let Some(list) = glyphs.as_array_mut() {
-                for (entry, &(exact, _)) in list.iter_mut().zip(&pens) {
+                for (entry, &(exact, ..)) in list.iter_mut().zip(&pens) {
                     entry[2] = number(exact);
                 }
             }
-        } else if pixel_scale != 1.0 && pens.iter().any(|&(exact, quarters)| quarters && (exact * 8.0).rem_euclid(2.0) == 1.0) {
+        } else if pixel_scale != 1.0 && pens.iter().any(|&(exact, _, steps)| tied(exact, steps)) {
             let anchor = super::text::layout::snap_pixel(match alignment {
                 XAlign::Left => content_x,
                 XAlign::Right => content_x + content_w,
                 XAlign::Center => content_x + content_w / 2.0,
             });
             if let Some(list) = glyphs.as_array_mut() {
-                for (entry, &(exact, quarters)) in list.iter_mut().zip(&pens) {
-                    if quarters && (exact * 8.0).rem_euclid(2.0) == 1.0 {
-                        entry[2] = number(tie_quarter(exact, pen, anchor, pixel_scale));
+                for (index, (entry, &(exact, size, steps))) in list.iter_mut().zip(&pens).enumerate() {
+                    if tied(exact, steps) {
+                        let own = tie_step(exact, pen, anchor, pixel_scale, size, steps, 0.0);
+                        entry[2] = number(own);
+                        if legacy_stroke {
+                            let left = tie_step(exact, pen, anchor, pixel_scale, size, steps, -1.0);
+                            let right = tie_step(exact, pen, anchor, pixel_scale, size, steps, 1.0);
+                            if left != own || right != own {
+                                copies.push(json!([index, number(left), number(right)]));
+                            }
+                        }
                     }
                 }
             }
@@ -964,10 +1074,13 @@ fn text_lines(
         entry.insert("height".into(), number(line.height));
         entry.insert("width".into(), number(line_width));
         let (glyphs, runs) = match reveal.as_ref().and_then(|lines| lines[index]) {
-            Some(cut) => reveal_line(line, cut, glyphs, runs, &mut entry),
+            Some(cut) => reveal_line(line, cut, glyphs, runs, result.runs.as_ref().map_or(0, |runs| runs.len()) as u64, &starts, &mut entry),
             None => (glyphs, runs),
         };
         entry.insert("glyphs".into(), glyphs);
+        if !copies.is_empty() {
+            entry.insert("copies".into(), Json::Array(copies));
+        }
         if let Some(runs) = runs {
             entry.insert("runs".into(), runs);
         }
@@ -1003,7 +1116,7 @@ fn text_reveal(ctx: &Ctx, text: &TextEngine, id: InstanceId, result: &TextLayout
 /// A line MaxVisibleGraphemes cuts: `shown` = its leading glyph entries drawn, `ellipsis` = its trailing
 /// entries drawn after them (the truncation ellipsis, moved to follow the visible prefix); rich run
 /// segments end at the cut. The entries stay (and keep the line's baseline): the layout is unchanged.
-fn reveal_line(line: &Line, cut: LineReveal, glyphs: Json, runs: Option<Json>, entry: &mut Map<String, Json>) -> (Json, Option<Json>) {
+fn reveal_line(line: &Line, cut: LineReveal, glyphs: Json, runs: Option<Json>, run_count: u64, starts: &[f64], entry: &mut Map<String, Json>) -> (Json, Option<Json>) {
     let count = line.glyphs.len();
     let entries = |range: std::ops::Range<usize>| line.glyphs[range].iter().filter(|glyph| !is_space(glyph.code)).count();
     let shown = entries(0..cut.visible);
@@ -1014,21 +1127,39 @@ fn reveal_line(line: &Line, cut: LineReveal, glyphs: Json, runs: Option<Json>, e
             let start = line.glyphs[count - cut.ellipsis].x;
             let moved = line.glyphs[count - cut.ellipsis..].iter().filter(|glyph| !is_space(glyph.code));
             let first = list.len() - tail;
+            // Measured (fixtures/text-probe-graphemes.luau, "Relax. T…" at 8 graphemes): the ellipsis starts
+            // at the pen of the first hidden glyph as that glyph would be drawn (95.25, not its whole
+            // pixel 95); hidden whitespace has no drawn pen and gives its whole pixel
+            let hidden = line.glyphs.get(cut.visible).filter(|glyph| !is_space(glyph.code));
+            let at = match hidden {
+                Some(_) if shown < first => list[shown][2].as_f64().unwrap_or(cut.cut),
+                _ => cut.cut,
+            };
             for (glyph, item) in moved.zip(list[first..].iter_mut()) {
-                item[2] = number(round(cut.cut + glyph.x - start + glyph.x_offset, 3));
+                item[2] = number(round(at + glyph.x - start + glyph.x_offset, 3));
+                // Nothing drawn before a rich ellipsis: its run's variant in the label's colour
+                // (`export_runs`; measured: MaxVisibleGraphemes 0 of a red run draws a white ellipsis)
+                if let (0, Some(run)) = (shown, item.get(4).and_then(Json::as_u64)) {
+                    if run >= run_count && run < 2 * run_count {
+                        item[4] = Json::from(run + run_count);
+                    }
+                }
             }
         }
         entry.insert("ellipsis".into(), Json::from(tail));
     }
     entry.insert("shown".into(), Json::from(shown));
+    // Decorations end where the first hidden glyph starts in its stretch, rounded half up like their own
+    // ends (measured, fixtures/text-probe-graphemes.luau RichDecorN9: a mark cut at 163.4 px ends at 163)
+    let edge = starts.get(cut.visible).map_or(cut.cut, |start| (start + 0.5).floor());
     let runs = runs.map(|runs| {
         let segments = runs.as_array().map(Vec::as_slice).unwrap_or(&[]);
         Json::Array(
             segments
                 .iter()
-                .filter(|segment| segment[1].as_f64().is_some_and(|x0| x0 < cut.cut))
+                .filter(|segment| segment[1].as_f64().is_some_and(|x0| x0 < edge))
                 .map(|segment| {
-                    let x1 = segment[2].as_f64().unwrap_or(0.0).min(cut.cut);
+                    let x1 = segment[2].as_f64().unwrap_or(0.0).min(edge);
                     json!([segment[0].clone(), segment[1].clone(), number(x1)])
                 })
                 .collect(),
@@ -1074,6 +1205,13 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
             json!({ "color": ctx.color(ctx.get_opt(id, ctx.n.text_stroke_color3)), "transparency": number(stroke_transparency) }),
         );
     }
+    // The metrics of the label's own face: they place the baseline of its lines whichever face a glyph
+    // falls back to (`face_metrics`)
+    // (only on a text with such glyphs: the others place their lines by their own glyphs' face)
+    let fallback = |face: FaceId| result.lines.iter().any(|line| line.glyphs.iter().any(|glyph| glyph.face != face && !is_space(glyph.code)));
+    if let Some(face) = result.face.filter(|face| result.runs.is_none() && fallback(*face)) {
+        export.insert("face".into(), face_metrics(text, face));
+    }
     // The FontFace's requested weight (100-900) and style ("normal" / "italic")
     export.insert("weight".into(), number(info.weight));
     export.insert("style".into(), Json::String(info.style.clone()));
@@ -1090,7 +1228,8 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     }
     if let Some(runs) = &result.runs {
         export.insert("rich".into(), Json::Bool(true));
-        export.insert("runs".into(), export_runs(ctx, text, id, runs));
+        let ellipsis = result.lines.iter().any(|line| line.glyphs.last().is_some_and(|glyph| glyph.is_ellipsis()));
+        export.insert("runs".into(), export_runs(ctx, text, id, runs, &result.lines, ellipsis));
     }
     Some(export)
 }
@@ -2303,14 +2442,52 @@ mod tests {
     /// a right-aligned one whose box ends at 660 px.
     #[test]
     fn tied_quarter_pens_round_by_the_line_start() {
-        assert_eq!(tie_quarter(54.625, 30.0, 30.0, 1.5), 54.75);
-        assert_eq!(tie_quarter(54.625, 551.0, 660.0, 1.5), 54.5);
-        assert_eq!(tie_quarter(54.625, 538.0, 645.0, 1.5), 54.75);
-        assert_eq!(tie_quarter(55.875, 772.0, 807.0, 1.5), 56.0);
-        assert_eq!(tie_quarter(55.875, 1637.0, 1672.0, 1.5), 55.75);
+        assert_eq!(tie_step(54.625, 30.0, 30.0, 1.5, 30.0, 4.0, 0.0), 54.75);
+        assert_eq!(tie_step(54.625, 551.0, 660.0, 1.5, 30.0, 4.0, 0.0), 54.5);
+        assert_eq!(tie_step(54.625, 538.0, 645.0, 1.5, 30.0, 4.0, 0.0), 54.75);
+        assert_eq!(tie_step(55.875, 772.0, 807.0, 1.5, 30.0, 4.0, 0.0), 56.0);
+        assert_eq!(tie_step(55.875, 1637.0, 1672.0, 1.5, 30.0, 4.0, 0.0), 55.75);
         // whole scales are exact: every tie rounds up
-        assert_eq!(tie_quarter(54.625, 551.0, 660.0, 1.0), 54.75);
-        assert_eq!(tie_quarter(54.625, 551.0, 660.0, 2.0), 54.75);
+        assert_eq!(tie_step(54.625, 551.0, 660.0, 1.0, 30.0, 4.0, 0.0), 54.75);
+        assert_eq!(tie_step(54.625, 551.0, 660.0, 2.0, 30.0, 4.0, 0.0), 54.75);
+    }
+
+    /// The sum is scaled back by the reciprocal of the glyph's logical size over its pixel size, which at
+    /// 1.5x is 1.5 for every size drawn at quarter pixels but 25 px (fixtures/text-probe-quadties.luau and
+    /// text-probe-richscaled.luau: centred rich TextScaled lines of 25 px glyphs under a UIScale). The same
+    /// line and pen round up at 26 px and down at 25 px; near the screen's left edge a 25 px tie still goes
+    /// either way by where the line starts.
+    #[test]
+    fn tied_quarter_pens_of_25_px_glyphs_fall_by_their_size() {
+        assert_eq!(tie_step(35.875, 1571.0, 1625.0, 1.5, 26.0, 4.0, 0.0), 36.0);
+        assert_eq!(tie_step(35.875, 1571.0, 1625.0, 1.5, 25.0, 4.0, 0.0), 35.75);
+        assert_eq!(tie_step(13.125, 676.0, 751.0, 1.5, 25.0, 4.0, 0.0), 13.0);
+        assert_eq!(tie_step(98.875, 454.0, 510.0, 1.5, 25.0, 4.0, 0.0), 98.75);
+        assert_eq!(tie_step(98.875, 1348.0, 1404.0, 1.5, 25.0, 4.0, 0.0), 99.0);
+        assert_eq!(tie_step(15.125, 9.0, 75.0, 1.5, 25.0, 4.0, 0.0), 15.0);
+        assert_eq!(tie_step(15.125, 6.0, 72.0, 1.5, 25.0, 4.0, 0.0), 15.25);
+    }
+
+    /// Glyphs over 32 GUI pixels stop at whole pixels, and a pen at a half pixel falls by the same sum
+    /// (text-probe-richscaled's 71 px "Mystery": its "s" at 86.5 px is drawn at 86).
+    #[test]
+    fn legacy_stroke_copies_of_a_tied_pen_round_with_their_offset() {
+        // "x" at 66.375 px of a centred 45 px line: the fill and the right copies at 66.5, the left at 66.25
+        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, 0.0), 66.5);
+        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, 1.0), 66.5);
+        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, -1.0), 66.25);
+        // 25 px lines at three places: (fill, left, right)
+        let at = |line: f64, anchor: f64| [0.0, -1.0, 1.0].map(|offset| tie_step(60.125, line, anchor, 1.5, 25.0, 4.0, offset));
+        assert_eq!(at(150.0, 222.0), [60.25, 60.0, 60.0]);
+        assert_eq!(at(62.0, 134.0), [60.25, 60.0, 60.25]);
+        assert_eq!(at(588.0, 660.0), [60.0, 60.25, 60.0]);
+    }
+
+    #[test]
+    fn tied_whole_pixel_pens_round_by_the_line_start() {
+        assert_eq!(tie_step(86.5, 39.0, 157.0, 1.5, 71.0, 1.0, 0.0), 86.0);
+        assert_eq!(tie_step(86.5, 30.0, 30.0, 1.5, 71.0, 1.0, 0.0), 87.0);
+        assert!(tied(86.5, 1.0) && !tied(86.25, 1.0) && tied(86.125, 4.0) && !tied(86.25, 4.0));
     }
 
     /// The integer path gives exactly `tonumber(string.format("%.9g", f))` (the formatting path).

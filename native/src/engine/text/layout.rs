@@ -32,12 +32,21 @@ pub struct Glyph {
     pub code: u32,
     pub size: f64,
     pub run: u32,
-    /// The exact pen before the glyph in px (26.6 steps), from the start of the text (`round_pen`).
+    /// The exact pen before the glyph in px (26.6 steps), from the start of the text (`round_pen`). A
+    /// truncation's ellipsis is a pen of its own, below zero (`TextEngine::ellipsis`).
     pub pen: f64,
     /// The exact pen after the glyph in px.
     pub end: f64,
     /// The GPOS x offset in px, exact in 26.6 (`x_offset` is it in whole pixels).
     pub offset: f64,
+}
+
+impl Glyph {
+    /// Whether the glyph is part of a truncation's ellipsis (`TextEngine::ellipsis`: the only pens below
+    /// zero).
+    pub fn is_ellipsis(&self) -> bool {
+        self.pen < 0.0
+    }
 }
 
 /// One laid-out line (`TextLayout.Line`). `first` / `last` are the 1-based glyph range in the
@@ -213,13 +222,17 @@ pub fn snap_pixel(value: f64) -> f64 {
 /// floor(width / 2). Rich text halves its width in logical px and floors it back in device px, so a
 /// line whose width / DPI is inexact comes out just under and centres one pixel further right: its
 /// half width is floor((width - 1) / 2). Measured: fixtures/layout-textpen2.luau 128/128 rich lines at
-/// 1.5x (widths not a multiple of 3 px) and at 1x (never: every width is exact). `exact`: the anchor
+/// 1.5x (widths not a multiple of 3 px) and at 1x (never: every width is exact). A right-aligned rich
+/// line of such a width starts one pixel further right the same way: round(x + w) - (width - 1)
+/// (fixtures/text-probe-tie-size.luau: 16 of 16 such lines, and the truncated lines of
+/// fixtures/text-probe-richtrunc.luau: 50, 77, 139, 175 and 232 px wide but not 120 or 255). `exact`: the anchor
 /// left unsnapped, as rotated text places its quads before resampling them (text-probe-rotation-size:
 /// 0 differing pixels).
 pub fn line_pen(alignment: XAlign, content_x: f64, content_w: f64, line_width: f64, rich: bool, exact: bool, pixel_scale: f64) -> f64 {
     let snap = |value: f64| if exact { value } else { snap_pixel(value) };
     match alignment {
         XAlign::Left => snap(content_x),
+        XAlign::Right if rich && !divides_exactly(line_width, pixel_scale) => snap(content_x + content_w) - (line_width - 1.0),
         XAlign::Right => snap(content_x + content_w) - line_width,
         XAlign::Center => {
             let mut half = idiv(line_width, 2.0);
@@ -667,10 +680,11 @@ fn trimmed_count(glyphs: &[Glyph]) -> usize {
     count
 }
 
-/// Longest character prefix of glyphs[..limit] that fits `available` beside the ellipsis. Measured
-/// (AtEnd): a prefix only survives when adding its next character would make it wider than the
-/// ellipsis ("aaaa" in a narrow box shows "..." then "aa...", never "a...").
-fn character_prefix(glyphs: &[Glyph], limit: usize, available: f64, ellipsis_width: f64) -> usize {
+/// Longest character prefix of glyphs[..limit] that fits `box_width` beside the ellipsis
+/// (`ellipsis_width(count)`: the one after `count` glyphs). Measured (AtEnd): a prefix only survives when
+/// adding its next character would make it wider than the ellipsis ("aaaa" in a narrow box shows "..."
+/// then "aa...", never "a...").
+fn character_prefix(glyphs: &[Glyph], limit: usize, box_width: f64, ellipsis_width: &dyn Fn(usize) -> f64) -> usize {
     let limit = limit.min(glyphs.len());
     let mut widths = Vec::with_capacity(limit);
     let mut width = 0.0;
@@ -679,8 +693,9 @@ fn character_prefix(glyphs: &[Glyph], limit: usize, available: f64, ellipsis_wid
         widths.push(width);
     }
     for count in (1..=limit).rev() {
+        let ellipsis = ellipsis_width(count);
         let next = if count < limit { widths[count] } else { f64::INFINITY };
-        if widths[count - 1] <= available + 1e-6 && next > ellipsis_width + 1e-6 {
+        if widths[count - 1] <= box_width - ellipsis + 1e-6 && next > ellipsis + 1e-6 {
             return count;
         }
     }
@@ -720,10 +735,10 @@ fn split_word_fill(glyphs: &[Glyph], forced: usize, box_width: f64, ellipsis: &[
     }
 }
 
-/// Measured (layout-probe-autoedge): an unwrapped rich line wider than its box keeps its longest
-/// character prefix that fits, with either TextTruncate mode, and no ellipsis counts in TextBounds:
+/// Measured (layout-probe-autoedge): TextBounds of an unwrapped rich line wider than its box span its
+/// longest character prefix that fits, with either TextTruncate mode, and no ellipsis counts in them:
 /// "Max Players" (119 px) reads 109 ("Max Player") in 117 px and 46 ("Max ", its space counted) in
-/// 58.5 px.
+/// 58.5 px. What is drawn is another line (`truncate_rich_drawn`).
 fn truncate_rich(line: &Line, box_width: f64) -> Line {
     let mut count = 0;
     let mut width = 0.0;
@@ -737,6 +752,47 @@ fn truncate_rich(line: &Line, box_width: f64) -> Line {
     concat(&line.glyphs[..count], None, false)
 }
 
+/// The line Studio draws for an unwrapped rich line wider than its box (fixtures/text-probe-richtrunc.luau,
+/// Studio 0.747 at 1.5x: 28 box widths by two modes, three alignments and one or two runs, 12 box widths
+/// between whole and half pixels, five styled texts). The box counts up to its next whole pixel ("Rel…",
+/// 50 px, is drawn from 49.2 px on where plain text needs 50). AtEnd then cuts like plain text. SplitWord
+/// keeps the longest character prefix that fits beside the ellipsis, whitespace like any character, and
+/// draws nothing when not even the ellipsis fits. The ellipsis is the label face's, at the size and in the
+/// run of the last kept glyph (of the line's first glyph when none is kept), but as wide as the ellipsis
+/// of that glyph's own face: after a bold run "goin…" would fit 227 px by the label's ellipsis (21 px) and
+/// Studio draws "goi…". `ellipsis_at(count)` is the one after `count` kept glyphs. A bold or italic run's
+/// ellipsis is the label face's glyph emboldened or slanted, and with no glyph kept it has the label's
+/// colour (export.rs `export_runs`).
+fn truncate_rich_drawn(line: &Line, box_width: f64, mode: Truncate, ellipsis_at: &dyn Fn(usize) -> Arc<(Vec<Glyph>, f64)>) -> Line {
+    let glyphs = &line.glyphs;
+    let box_width = (box_width - 1e-6).ceil();
+    let width_at = |count: usize| ellipsis_at(count).1;
+    if box_width - width_at(0) < -1e-6 {
+        return concat(&[], None, false);
+    }
+    let keep = if mode == Truncate::SplitWord {
+        let mut width = 0.0;
+        let mut keep = 0;
+        for (index, glyph) in glyphs.iter().enumerate() {
+            width += glyph.advance;
+            if width + width_at(index + 1) > box_width + 1e-6 {
+                break;
+            }
+            keep = index + 1;
+        }
+        keep
+    } else {
+        at_end_keep(glyphs, box_width, &width_at)
+    };
+    let ellipsis = ellipsis_at(keep);
+    let (size, run) = match glyphs.get(keep.max(1) - 1) {
+        Some(glyph) => (glyph.size, glyph.run),
+        None => (0.0, 0),
+    };
+    let tail: Vec<Glyph> = ellipsis.0.iter().map(|glyph| Glyph { run, size, ..*glyph }).collect();
+    concat(&glyphs[..keep], Some(&tail), mode != Truncate::SplitWord)
+}
+
 /// Measured (unwrapped, line wider than the box): AtEnd keeps the longest prefix of whole words
 /// (characters of the first word when none fits) beside the ellipsis and always appends it;
 /// SplitWord keeps the longest character prefix that fits beside the ellipsis plus the whitespace
@@ -744,14 +800,19 @@ fn truncate_rich(line: &Line, box_width: f64) -> Line {
 /// width.
 fn truncate_unwrapped(line: &Line, box_width: f64, ellipsis: &[Glyph], ellipsis_width: f64, mode: Truncate) -> Line {
     let glyphs = &line.glyphs;
-    let available = box_width - ellipsis_width;
     if mode == Truncate::SplitWord {
         return split_word_fill(glyphs, 0, box_width, ellipsis, ellipsis_width);
     }
-    if available < -1e-6 {
+    if box_width - ellipsis_width < -1e-6 {
         return concat(&[], None, false);
     }
+    let keep = at_end_keep(glyphs, box_width, &|_| ellipsis_width);
+    concat(&glyphs[..keep], Some(ellipsis), true)
+}
 
+/// How many glyphs AtEnd keeps of an unwrapped line wider than `box_width`; `ellipsis_width(count)` is the
+/// width of the ellipsis after `count` kept glyphs (one width for plain text).
+fn at_end_keep(glyphs: &[Glyph], box_width: f64, ellipsis_width: &dyn Fn(usize) -> f64) -> usize {
     // 1-based counts like the Luau.
     let mut width = 0.0;
     let mut word_end = 0;
@@ -762,6 +823,7 @@ fn truncate_unwrapped(line: &Line, box_width: f64, ellipsis: &[Glyph], ellipsis_
         if is_space(glyph.code) {
             continue;
         }
+        let available = box_width - ellipsis_width(index);
         let next = glyphs.get(index0 + 1);
         if next.is_none_or(|next| is_space(next.code)) {
             if first_word_end == 0 {
@@ -782,7 +844,7 @@ fn truncate_unwrapped(line: &Line, box_width: f64, ellipsis: &[Glyph], ellipsis_
     // ("s" 8); "W some words" stays "W…" until "W som…" ("som" 35 > "W " 20).
     let mut keep = word_end;
     if keep > 0 {
-        let cut = character_prefix(glyphs, glyphs.len(), available, ellipsis_width);
+        let cut = character_prefix(glyphs, glyphs.len(), box_width, ellipsis_width);
         if cut > keep {
             let mut boundary = cut;
             while boundary > 0 && !is_space(glyphs[boundary - 1].code) {
@@ -804,9 +866,9 @@ fn truncate_unwrapped(line: &Line, box_width: f64, ellipsis: &[Glyph], ellipsis_
         }
     }
     if keep == 0 {
-        keep = character_prefix(glyphs, first_word_end.max(1), available, ellipsis_width);
+        keep = character_prefix(glyphs, first_word_end.max(1), box_width, ellipsis_width);
     }
-    concat(&glyphs[..keep], Some(ellipsis), true)
+    keep
 }
 
 /// Measured (wrapped, lines cut by the box height; only the last visible line changes): the ellipsis
@@ -840,7 +902,7 @@ fn truncate_wrapped(line: &Line, source: Option<&[Glyph]>, max_width: f64, ellip
     if !line.split || max_width < ellipsis_width - 1e-6 {
         return None;
     }
-    let keep = character_prefix(&line.glyphs, count, max_width - ellipsis_width, ellipsis_width);
+    let keep = character_prefix(&line.glyphs, count, max_width, &|_| ellipsis_width);
     Some(concat(&line.glyphs[..keep], Some(ellipsis), true))
 }
 
@@ -1109,11 +1171,50 @@ impl TextEngine {
             replacement.truncated = true;
             replacement
         };
+        // TextBounds widths of the truncated lines that are drawn as another line than the one measured
+        // (rich lines: `truncate_rich_drawn`; a SplitWord line broken inside a word, below)
+        let mut drawn_bounds: Vec<Option<f64>> = Vec::new();
         if let (Some(ellipsis), Some(box_width)) = (&ellipsis, box_width) {
             for index in 0..lines.len() {
                 if lines[index].width > box_width + 1e-6 {
                     let replacement = if rich {
-                        truncate_rich(&lines[index], box_width)
+                        let bounds = truncate_rich(&lines[index], box_width);
+                        drawn_bounds.resize(lines.len(), None);
+                        drawn_bounds[index] = Some(bounds.glyphs.iter().map(|glyph| glyph.advance).sum());
+                        // One ellipsis per face and size on the line: the label face's glyphs, as wide as
+                        // the ellipsis of the glyph's own face (`truncate_rich_drawn`)
+                        let mut styles: Vec<(FaceId, u64, Arc<(Vec<Glyph>, f64)>)> = Vec::new();
+                        if let Some(face) = face {
+                            for glyph in &lines[index].glyphs {
+                                let glyph_size = if glyph.size != 0.0 { glyph.size } else { size };
+                                if styles.iter().any(|style| style.0 == glyph.face && style.1 == glyph_size.to_bits()) {
+                                    continue;
+                                }
+                                let drawn = self.ellipsis(face, glyph_size);
+                                let own = self.ellipsis(glyph.face, glyph_size);
+                                let entry = if own.1 > 0.0 && own.1 != drawn.1 && !drawn.0.is_empty() {
+                                    let mut glyphs = drawn.0.clone();
+                                    let last = glyphs.len() - 1;
+                                    glyphs[last].advance += own.1 - drawn.1;
+                                    Arc::new((glyphs, own.1))
+                                } else {
+                                    drawn
+                                };
+                                styles.push((glyph.face, glyph_size.to_bits(), entry));
+                            }
+                        }
+                        let line = &lines[index];
+                        let ellipsis_at = |count: usize| -> Arc<(Vec<Glyph>, f64)> {
+                            match line.glyphs.get(count.max(1) - 1) {
+                                Some(glyph) => {
+                                    let glyph_size = if glyph.size != 0.0 { glyph.size } else { size };
+                                    let found = styles.iter().find(|style| style.0 == glyph.face && style.1 == glyph_size.to_bits());
+                                    found.map_or_else(|| ellipsis.clone(), |style| style.2.clone())
+                                }
+                                None => ellipsis.clone(),
+                            }
+                        };
+                        truncate_rich_drawn(line, box_width, truncate, &ellipsis_at)
                     } else {
                         truncate_unwrapped(&lines[index], box_width, &ellipsis.0, ellipsis.1, truncate)
                     };
@@ -1126,6 +1227,16 @@ impl TextEngine {
                 let index = fit - 1;
                 let source = sources[index].map(|paragraph| &paragraphs[paragraph][..]);
                 match truncate_wrapped(&lines[index], source, max_width, &ellipsis.0, ellipsis.1, truncate) {
+                    // Measured (fixtures/layout-truncate.luau SplitWord_w_16, "G" / "ui" in 24 px): of a
+                    // SplitWord line broken inside a word of which no character fits beside the ellipsis,
+                    // the first character is drawn alone ("u"), while TextBounds are the lone ellipsis'
+                    // (23 px; "u" is 14 px wide)
+                    Some(replacement) if truncate == Truncate::SplitWord && lines[index].split && replacement.glyphs.iter().all(Glyph::is_ellipsis) => {
+                        drawn_bounds.resize(lines.len(), None);
+                        drawn_bounds[index] = Some(replacement.glyphs.iter().map(|glyph| glyph.advance).sum());
+                        let first = concat(&lines[index].glyphs[..lines[index].glyphs.len().min(1)], None, false);
+                        lines[index] = keep(first, &lines[index]);
+                    }
                     Some(replacement) => lines[index] = keep(replacement, &lines[index]),
                     None => lines[index].truncated = true,
                 }
@@ -1133,8 +1244,10 @@ impl TextEngine {
         }
 
         let mut width: f64 = 0.0;
-        for line in &lines {
-            if line.truncated {
+        for (index, line) in lines.iter().enumerate() {
+            if let Some(Some(bounds)) = drawn_bounds.get(index) {
+                width = lmax(width, *bounds);
+            } else if line.truncated {
                 let mut displayed = 0.0;
                 for glyph in &line.glyphs {
                     displayed += glyph.advance;
@@ -1174,5 +1287,87 @@ impl TextEngine {
         });
         self.measure_insert(hash, &key, result.clone());
         result
+    }
+}
+
+#[cfg(test)]
+mod truncation_tests {
+    use super::*;
+
+    /// One glyph per character, each `advance` px wide (spaces too), in run 1; `bold` characters are 2 px
+    /// wider and in run 2 with another face.
+    fn glyphs(text: &str, advance: f64, bold: std::ops::Range<usize>, faces: [FaceId; 2]) -> Vec<Glyph> {
+        let mut pen = 0.0;
+        text.chars()
+            .enumerate()
+            .map(|(index, character)| {
+                let heavy = bold.contains(&index);
+                let width = if heavy { advance + 2.0 } else { advance };
+                let glyph = Glyph {
+                    glyph: character as u32,
+                    face: faces[usize::from(heavy)],
+                    x: pen,
+                    x_offset: 0.0,
+                    advance: width,
+                    cluster: index as u32 + 1,
+                    code: character as u32,
+                    size: 20.0,
+                    run: if heavy { 2 } else { 1 },
+                    pen,
+                    end: pen + width,
+                    offset: 0.0,
+                };
+                pen += width;
+                glyph
+            })
+            .collect()
+    }
+
+    fn ellipsis(width: f64, face: FaceId) -> Arc<(Vec<Glyph>, f64)> {
+        let glyph = Glyph { glyph: 9, face, x: 0.0, x_offset: 0.0, advance: width, cluster: 1, code: 0x2026, size: 0.0, run: 0, pen: -width - 1.0, end: -1.0, offset: 0.0 };
+        Arc::new((vec![glyph], width))
+    }
+
+    fn shown(line: &Line) -> String {
+        line.glyphs.iter().map(|glyph| char::from_u32(glyph.code).unwrap()).collect()
+    }
+
+    #[test]
+    fn rich_lines_are_drawn_with_an_ellipsis_in_a_box_counted_to_its_next_pixel() {
+        let faces: [FaceId; 2] = [1, 2];
+        let line = make_line(&glyphs("Relax. This is", 10.0, 0..0, faces), 0, 14, false);
+        let dots = ellipsis(20.0, faces[0]);
+        let at = |_: usize| dots.clone();
+        // "Rel" and the ellipsis are 50 px: drawn from 49.2 px on (plain text needs 50)
+        assert_eq!(shown(&truncate_rich_drawn(&line, 49.2, Truncate::AtEnd, &at)), "Rel\u{2026}");
+        assert_eq!(shown(&truncate_rich_drawn(&line, 49.0, Truncate::AtEnd, &at)), "Re\u{2026}");
+        assert_eq!(shown(&truncate_unwrapped(&line, 49.2, &dots.0, dots.1, Truncate::AtEnd)), "Re\u{2026}");
+        // AtEnd keeps whole words once one fits; SplitWord cuts anywhere and keeps a space like a character
+        assert_eq!(shown(&truncate_rich_drawn(&line, 100.0, Truncate::AtEnd, &at)), "Relax.\u{2026}");
+        assert_eq!(shown(&truncate_rich_drawn(&line, 100.0, Truncate::SplitWord, &at)), "Relax. T\u{2026}");
+        assert_eq!(shown(&truncate_rich_drawn(&line, 90.0, Truncate::SplitWord, &at)), "Relax. \u{2026}");
+        // Not even the ellipsis fits: nothing is drawn
+        assert!(truncate_rich_drawn(&line, 19.0, Truncate::AtEnd, &at).glyphs.is_empty());
+        assert!(truncate_rich_drawn(&line, 19.0, Truncate::SplitWord, &at).glyphs.is_empty());
+        // The ellipsis is in the run and at the size of the last kept glyph, and stays an ellipsis
+        let cut = truncate_rich_drawn(&line, 60.0, Truncate::SplitWord, &at);
+        let last = cut.glyphs.last().unwrap();
+        assert!(last.is_ellipsis() && last.run == 1 && last.size == 20.0);
+        // TextBounds stay the longest prefix that fits, without an ellipsis
+        assert_eq!(shown(&truncate_rich(&line, 49.2)), "Rela");
+    }
+
+    #[test]
+    fn a_rich_ellipsis_is_as_wide_as_the_one_of_the_face_it_follows() {
+        let faces: [FaceId; 2] = [1, 2];
+        // "ab" regular (10 px each), "cdefgh" bold (12 px each); the ellipsis after a bold glyph counts
+        // 24 px, after a regular one 20
+        let line = make_line(&glyphs("abcdefgh", 10.0, 2..8, faces), 0, 8, false);
+        let (regular, bold) = (ellipsis(20.0, faces[0]), ellipsis(24.0, faces[0]));
+        let at = |count: usize| if count > 2 { bold.clone() } else { regular.clone() };
+        // 20 + 3 x 12 + 24 = 80 fits 80 px; with a 20 px ellipsis a fourth bold glyph would fit 88
+        assert_eq!(shown(&truncate_rich_drawn(&line, 80.0, Truncate::SplitWord, &at)), "abcde\u{2026}");
+        assert_eq!(shown(&truncate_rich_drawn(&line, 88.0, Truncate::SplitWord, &at)), "abcde\u{2026}");
+        assert_eq!(shown(&truncate_rich_drawn(&line, 92.0, Truncate::SplitWord, &at)), "abcdef\u{2026}");
     }
 }

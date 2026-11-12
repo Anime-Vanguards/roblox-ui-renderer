@@ -9,6 +9,7 @@
 //! (`&mut self`), results are shared `Arc`s: equal inputs return the identical `Arc` while cached, as the
 //! Luau returns the identical table (incremental layout compares layouts by identity).
 
+pub mod compose;
 pub mod fonts;
 pub mod hinted;
 pub mod layout;

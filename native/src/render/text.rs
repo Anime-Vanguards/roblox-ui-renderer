@@ -50,6 +50,9 @@ struct Placement {
     /// The pen's quarter-pixel phase (a text with `subpixel`: 4), None for whole-pixel text
     quarter: Option<u8>,
     x: f64,
+    /// The legacy TextStroke copies left and right of a tied pen that round another way than the glyph
+    /// (the line's `copies`, export.rs `tie_step`): the glyph at their x and quarter-pixel phase
+    copies: Option<Box<[Placement; 2]>>,
     baseline: f64,
 }
 struct Line {
@@ -80,8 +83,18 @@ struct Quad {
     margin: f64,
 }
 /// Synthetic italic slope, applied to a face without an italic file (fixtures/text-probe-synth.luau
-/// FaceItalic18 / 36 and Rich72: 0 px > 2 levels for 0.2197..0.2199, least absolute error at 0.21985)
+/// FaceItalic18 / 36 and Rich72: 0 px > 2 levels for 0.2197..0.2199, least absolute error at 0.21985).
+/// Studio 0.747 shears about the baseline in whole pixels: the quad, still pivoting on its bottom edge,
+/// starts round(skew x the px its bottom edge is below the baseline) further left (`italic_lean`). A glyph
+/// standing on the baseline is 2 px below it with its padding and stays; "g" at 23 px ppem (7 px) moves 2 px,
+/// at 45 px ppem (12 px) 3 px, a 3 px deep "x" 1 px, and a stroke band its radius deeper more
+/// (fixtures/text-probe-synth.luau FaceItalic18 217 -> 0 px, FaceItalic36 538 -> 0, RichPermanentMarker
+/// 249 -> 0, RichStrokeBold 819 -> 0).
 const TEXT_ITALIC_SKEW: f64 = 0.21985;
+/// Whole px a synthetic italic quad whose bottom edge is `depth` px below the baseline starts further left.
+fn italic_lean(skew: f64, depth: f64) -> f64 {
+    (skew * depth.max(0.0) + 0.5).floor()
+}
 impl Quad {
     /// The coverage box: the quad's box, widened on the right by ceil(skew x height)
     fn cover(&self) -> [f64; 4] {
@@ -146,6 +159,28 @@ fn ascent(font: &Value, ppem: f64) -> f64 {
     )
 }
 
+/// The face whose metrics place a glyph's line, and the glyph's ppem in it: the label's own face (`text.face`),
+/// a rich run's (`metrics`), whichever face the glyph itself falls back to (export.rs `face_metrics`); the
+/// glyph's own in scenes saved before those fields.
+fn line_face<'a>(text: &'a Value, run: Option<usize>, font: &'a Value, ppem: f64) -> (&'a Value, f64) {
+    let metrics = match run {
+        Some(run) => &text["runs"][run]["metrics"],
+        None => &text["face"],
+    };
+    if !metrics.is_object() || size_units(metrics) <= 0.0 {
+        return (font, ppem);
+    }
+    let own = n(metrics, "unitsPerEm", 0.0) == n(font, "unitsPerEm", 1.0)
+        && n(metrics, "ascender", 0.0) == n(font, "ascender", 0.0)
+        && n(metrics, "descender", 0.0) == n(font, "descender", 0.0)
+        && size_units(metrics) == size_units(font);
+    if own {
+        return (font, ppem);
+    }
+    let size = font_size(font, ppem);
+    let scaled = (size + 1.0) * n(metrics, "unitsPerEm", 1.0) / size_units(metrics);
+    (metrics, (scaled * 1e5).round() / 1e5)
+}
 fn placements(text: &Value, fonts: &Value, rotated: bool) -> (Vec<Placement>, Vec<Line>) {
     let mut out = Vec::new();
     let mut lines = Vec::new();
@@ -225,17 +260,31 @@ fn placements(text: &Value, fonts: &Value, rotated: bool) -> (Vec<Placement>, Ve
                     (true, false) => (num(&glyph[2], 0.0) + 0.125).floor(),
                     (false, _) => snap(num(&glyph[2], 0.0)),
                 },
+                copies: None,
                 baseline: 0.0,
             };
+            let mut p = p;
+            if let Some(copy) = arr(&line["copies"]).iter().find(|copy| copy[0].as_u64() == Some(index as u64)) {
+                let side = |side: usize| Placement {
+                    x: ox + (num(&copy[side], 0.0) + 0.125).floor(),
+                    quarter: crate::glyphs::text_quarter(text, copy.get(side), false),
+                    ..p.clone()
+                };
+                p.copies = Some(Box::new([side(1), side(2)]));
+            }
             if size > largest {
                 largest = size;
-                asc = ascent(font, ppem);
+                let (face, face_ppem) = line_face(text, run, font, ppem);
+                asc = ascent(face, face_ppem);
                 main = Some(p.clone());
             }
             local.push(p);
         }
         for p in &mut local {
             p.baseline = top + asc;
+            for copy in p.copies.iter_mut().flat_map(|copies| copies.iter_mut()) {
+                copy.baseline = top + asc;
+            }
         }
         if let Some(main) = main {
             if !arr(&line["runs"]).is_empty() {
@@ -405,6 +454,10 @@ fn glyph_draws<'a>(
         if a > 0.0 && !intrinsic {
             for offset in [[-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0], [1.0, 1.0]] {
                 for &p in &placements {
+                    let p: &Placement = match &p.copies {
+                        Some(copies) => &copies[if offset[0] < 0.0 { 0 } else { 1 }],
+                        None => p,
+                    };
                     draws.push(GlyphDraw {
                         placement: p,
                         stroke: 0.0,
@@ -646,6 +699,7 @@ fn placed_quad(
         margin = margin.min(t - t.floor()).min(t.floor() + 1. - t);
         crate::render::geometry::snap_device(v, dpi)
     };
+    let skew = if p.italic && !slanted { TEXT_ITALIC_SKEW } else { 0.0 };
     let bounds = if s == 1.0 {
         [x - 1.0, y - 1.0, x + w as f64 + 1.0, y + h as f64 + 1.0]
     } else {
@@ -656,6 +710,9 @@ fn placed_quad(
             corner(p.baseline + offset[1] + (h as f64 - top as f64 + 1.0) * s),
         ]
     };
+    // Synthetic italic: the quad starts whole pixels further left the deeper it reaches below the baseline
+    let lean = italic_lean(skew, bounds[3] - (p.baseline + offset[1]));
+    let (x, bounds) = (x - lean, [bounds[0] - lean, bounds[1], bounds[2] - lean, bounds[3]]);
     Quad {
         x,
         y,
@@ -664,7 +721,7 @@ fn placed_quad(
         coverage,
         bounds,
         scaled: s != 1.0,
-        skew: if p.italic && !slanted { TEXT_ITALIC_SKEW } else { 0.0 },
+        skew,
         color,
         alpha,
         shade: if gradient.is_object() {
@@ -757,7 +814,8 @@ fn quads_memo(
                 .unwrap_or(&line.main);
             let font = &fonts[p.font as usize];
             let size = font_size(font, p.ppem);
-            let top = line.baseline - ascent(font, p.ppem);
+            let (face, face_ppem) = line_face(text, Some(ri), font, p.ppem);
+            let top = line.baseline - ascent(face, face_ppem);
             let t = (size / scale / 20.0 - 1e-9).ceil() * scale;
             let l = line.ox + rx0;
             let r = line.ox + rx1;
@@ -2216,6 +2274,40 @@ pub fn prep_text(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn synthetic_italic_leans_left_by_its_depth_below_the_baseline() {
+        // A glyph on the baseline (its padded quad 2 px below it) stays; deeper ones start whole px left
+        assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, 2.0), 0.0);
+        assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, 3.0), 1.0);
+        assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, 7.0), 2.0);
+        assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, 12.0), 3.0);
+        assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, -20.0), 0.0);
+        assert_eq!(super::italic_lean(0.0, 12.0), 0.0);
+    }
+
+    #[test]
+    fn a_line_stands_on_the_baseline_of_the_label_face() {
+        let own = serde_json::json!({"unitsPerEm": 1000, "ascender": 974, "descender": -236, "lineGap": 0});
+        let emoji = serde_json::json!({"unitsPerEm": 2048, "ascender": 1900, "descender": -500, "lineGap": 0});
+        let text = serde_json::json!({"face": own, "runs": [{"metrics": emoji}, {}]});
+        // A fallback glyph of a plain line: the label face's metrics at the glyph's pixel size
+        let ppem = 49.0 * 2048.0 / 2400.0;
+        let (face, face_ppem) = super::line_face(&text, None, &emoji, ppem);
+        assert_eq!(face, &text["face"]);
+        assert_eq!(super::font_size(face, face_ppem), super::font_size(&emoji, ppem));
+        assert_eq!(super::ascent(face, face_ppem), 39.0);
+        assert_eq!(super::ascent(&emoji, ppem), 39.0);
+        let tall = serde_json::json!({"unitsPerEm": 1000, "ascender": 700, "descender": -500, "lineGap": 0});
+        let text_tall = serde_json::json!({"face": tall});
+        let (face, face_ppem) = super::line_face(&text_tall, None, &emoji, ppem);
+        assert_eq!(super::ascent(face, face_ppem), 29.0);
+        // The face's own glyphs keep their ppem; a rich run uses its `metrics`; old scenes the glyph's face
+        assert_eq!(super::line_face(&text, None, &own, 40.0), (&own, 40.0));
+        assert_eq!(super::line_face(&text, Some(0), &own, 40.0).0, &text["runs"][0]["metrics"]);
+        assert_eq!(super::line_face(&text, Some(1), &own, 40.0), (&own, 40.0));
+        assert_eq!(super::line_face(&serde_json::json!({}), None, &emoji, ppem), (&emoji, ppem));
+    }
+
     use super::*;
     #[test]
     fn intrinsic_requirements_detect_partial_atlases_even_while_transparent() {

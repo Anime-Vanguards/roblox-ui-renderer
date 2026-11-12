@@ -38,6 +38,11 @@ datasets in `data/studio/`, its pixels from `rur compare` captures of the `text-
 - The ellipsis of TextTruncate starts a pen of its own: a truncated line is the kept text's whole-pixel
   width plus the ellipsis's advance rounded half up. (Earlier Studio versions used FreeType's *hinted*
   advance; the engine can still generate those metrics, cached in `<state dir>/hinted`.)
+- A rich text line cut by TextTruncate is drawn with an ellipsis too, in the label's face at the size, colour
+  and weight of the last kept glyph, while its `TextBounds` stay the longest prefix that fits the box.
+- A character and the combining mark after it are shaped as the composed character when the font has it.
+- A line's baseline comes from the face of the label (of the run, in rich text), also when its glyphs fall
+  back to another face, such as emoji.
 
 ## Rasterization
 

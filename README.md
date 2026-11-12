@@ -118,8 +118,9 @@ Limitations:
   BillboardGuis in the world are not rendered.
 - A plain render captures the state after `--time`; interactive states need `--actions` or the desktop
   app's input.
-- Bit-exact Studio parity is not complete: some rich text styles, synthetic italic and image and group edge
-  cases have small known differences.
+- Bit-exact Studio parity is not complete: the edges of colour emoji, gradients under text and image and
+  group edge cases have small known differences. Text is fitted to Studio 0.747 with its quarter-pixel text
+  drawing; a Studio that draws text at whole pixels (a server flag decides) differs in every glyph.
 - Stories that depend on game services or Studio-only content, yield while mounting or contain source errors
   run as far as they can; the sweep reports these separately from rendering errors.
 - UIShadow `Mode = Text` with a BlurRadius is close to Studio 0.747 but not exact: Studio draws the glow

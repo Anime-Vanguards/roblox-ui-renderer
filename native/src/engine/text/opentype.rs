@@ -833,10 +833,21 @@ impl Font {
     /// `OpenType.Shape`: shapes (code, cluster) pairs with the default features (plus `extra` GSUB
     /// features); advances and offsets in font units.
     pub fn shape(&self, codepoints: &[(u32, u32)], extra: Option<&[&str]>) -> Vec<GlyphInfo> {
-        let mut glyphs: Vec<GlyphInfo> = codepoints
-            .iter()
-            .map(|&(code, cluster)| GlyphInfo { glyph: self.cmap.get(&code).copied().unwrap_or(0), cluster, advance: 0, x_offset: 0, kern: [0; 2] })
-            .collect();
+        // HarfBuzz composes a character and the mark after it when the font has the composed glyph
+        // (measured, fixtures/text-probe-graphemes.luau CombiningN4: "e" + U+0301 is drawn as the
+        // font's "é", not as "e" and the mark after it)
+        let mut glyphs: Vec<GlyphInfo> = Vec::with_capacity(codepoints.len());
+        let mut last_code = None;
+        for &(code, cluster) in codepoints {
+            let composed = last_code.and_then(|last| super::compose::compose(last, code)).and_then(|composed| Some((composed, *self.cmap.get(&composed)?)));
+            if let (Some((composed, glyph)), Some(last)) = (composed, glyphs.last_mut()) {
+                last.glyph = glyph;
+                last_code = Some(composed);
+                continue;
+            }
+            glyphs.push(GlyphInfo { glyph: self.cmap.get(&code).copied().unwrap_or(0), cluster, advance: 0, x_offset: 0, kern: [0; 2] });
+            last_code = Some(code);
+        }
         self.apply_gsub(&mut glyphs, extra);
         for info in glyphs.iter_mut() {
             info.advance = self.advance(info.glyph);
