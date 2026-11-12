@@ -53,7 +53,31 @@ export const DEFAULT_OUT_DIR = path.join(ROOT, "out");
 		else continue;
 		process.argv.splice(i--, 1);
 	}
+	// `--text-subpixel on|off` / `--text-subpixel=on`: the text mode (RUR_TEXT_SUBPIXEL, docs/text.md), the same way
+	for (let i = 2; i < process.argv.length; i++) {
+		const arg = process.argv[i];
+		if (arg === "--") break;
+		let value;
+		if (arg === "--text-subpixel" && process.argv[i + 1] !== undefined) {
+			value = process.argv[i + 1];
+			process.argv.splice(i, 2);
+		} else if (arg.startsWith("--text-subpixel=")) {
+			value = arg.slice("--text-subpixel=".length);
+			process.argv.splice(i, 1);
+		} else continue;
+		if (!["on", "off"].includes(value)) {
+			console.error(`--text-subpixel takes on or off, not ${JSON.stringify(value)} (docs/text.md, Text modes)`);
+			process.exit(2);
+		}
+		if (value === "on") process.env.RUR_TEXT_SUBPIXEL = "on";
+		else delete process.env.RUR_TEXT_SUBPIXEL;
+		break;
+	}
 })();
+
+// The text mode (docs/text.md, Text modes): quarter-pixel pens when RUR_TEXT_SUBPIXEL / --text-subpixel is on,
+// whole-pixel advances otherwise (the engine reads the same variable: native/src/engine/text/mod.rs)
+export const textSubpixel = (env = process.env) => ["on", "enabled", "true", "1"].includes(String(env.RUR_TEXT_SUBPIXEL ?? "").trim().toLowerCase());
 
 // RUR_ISOLATED=1 (--isolated): no render service, and the state dir's engine build as it is
 export const isolated = (env = process.env) => env.RUR_ISOLATED === "1" || env.RUR_ISOLATED === "true";

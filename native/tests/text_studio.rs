@@ -22,9 +22,19 @@ fn repo() -> String {
     std::fs::canonicalize(&root).unwrap_or(root).display().to_string().trim_start_matches(r"\\?\").to_string()
 }
 
+/// An engine in the text mode the datasets of data/studio were measured in: Studio with
+/// FFlagLegacyTextSubpixelRendering on (0.746, and 0.747 until 2026-11-12).
 fn engine() -> TextEngine {
-    let engine = TextEngine::new(FontPaths::for_repo(&repo()));
+    let mut engine = TextEngine::new(FontPaths::for_repo(&repo()));
     assert!(engine.fonts.content_root().is_some(), "these tests require the installed Roblox Studio fonts");
+    engine.set_subpixel(true);
+    engine
+}
+
+/// An engine in the mode of data/studio/whole: the flag off (production Studio 0.747 since 2026-11-12).
+fn whole_engine() -> TextEngine {
+    let mut engine = engine();
+    engine.set_subpixel(false);
     engine
 }
 
@@ -75,7 +85,17 @@ fn round(value: f64) -> f64 {
 #[test]
 fn text_truncate() {
     let mut engine = engine();
-    let data = read_json("data/studio/ellipsis.json");
+    let count = truncate_samples(&mut engine, "data/studio/ellipsis.json");
+    assert_eq!(count, 159, "ellipsis.json sample count");
+
+    assert!(engine.fonts.diagnostics.is_empty(), "font metrics must be available for regression checks: {:?}", engine.fonts.diagnostics);
+    println!("text truncation: {count} Studio samples passed");
+}
+
+/// Every sample of a layout-probe-ellipsis3 dataset: "Ab", the ellipsis and "Ab…" as ordinary text, and
+/// the truncated label's width. Returns the sample count.
+fn truncate_samples(engine: &mut TextEngine, file: &str) -> usize {
+    let data = read_json(file);
     let faces: BTreeMap<&str, (&str, f64)> =
         [("SSP", ("SourceSansPro", 400.0)), ("MB", ("Montserrat", 700.0)), ("Fre", ("FredokaOne", 400.0))].into_iter().collect();
     let mut count = 0;
@@ -83,7 +103,9 @@ fn text_truncate() {
         let (name, size) = key.split_once('_').unwrap();
         let (face_name, weight) = faces[name];
         let size: f64 = size.parse().unwrap();
+        // (Studio's widths are logical pixels in single precision: times 1.5 they are a whole pixel but for that)
         let expected: Vec<f64> = expected.as_array().unwrap().iter().map(|value| value.as_f64().unwrap()).collect();
+        let expected: Vec<f64> = expected.iter().enumerate().map(|(index, &value)| if index < 4 { round(value) } else { value }).collect();
         let family = family(face_name);
         // Plain ellipses retain normal shaping; only TextTruncate uses the hinted advance.
         for (index, text) in ["Ab", "\u{2026}", "Ab\u{2026}"].iter().enumerate() {
@@ -99,10 +121,7 @@ fn text_truncate() {
         assert!(!result.fits && result.lines[0].truncated, "{key}: expected truncated line");
         count += 1;
     }
-    assert_eq!(count, 159, "ellipsis.json sample count");
-
-    assert!(engine.fonts.diagnostics.is_empty(), "font metrics must be available for regression checks: {:?}", engine.fonts.diagnostics);
-    println!("text truncation: {count} Studio samples passed");
+    count
 }
 
 /// runtime/tests/text_bounds.luau over one dataset: (hits, total, per-font hits/total, first 25 misses).
@@ -227,10 +246,25 @@ fn text_bounds_sweep() {
 /// runtime/tests/text_wrap.luau: wrapped layout against data/studio/wrap-1.5x.json.
 #[test]
 fn text_wrap() {
-    let data = read_json("data/studio/wrap-1.5x.json");
+    let (hits, total, misses) = wrap_hits("data/studio/wrap-1.5x.json", true);
+    assert_eq!((hits, total), (538, 540), "wrap-1.5x.json misses: {misses:#?}");
+    // The known misses: runs of spaces at a break (the Luau reference missed the same kind of case).
+    assert_eq!(
+        misses,
+        vec![
+            "SourceSansPro s=20 w=30 t=3 \"a  b   c    d\" studio=(14,60) ours=(44,60) lines=2".to_string(),
+            "FredokaOne s=14 w=30 t=3 \"a  b   c    d\" studio=(11,42) ours=(38,42) lines=2".to_string(),
+        ]
+    );
+}
+
+/// The wrapped layouts of a wrap dataset that have Studio's TextBounds, and the first misses.
+fn wrap_hits(file: &str, subpixel: bool) -> (usize, usize, Vec<String>) {
+    let data = read_json(file);
     let scale = 1.5;
     let texts = data["texts"].as_array().unwrap();
     let mut engine = engine_with_cloud_fonts(texts);
+    engine.set_subpixel(subpixel);
     let (mut hits, mut total) = (0, 0);
     let mut misses = Vec::new();
     for row in data["wrap"].as_array().unwrap() {
@@ -262,19 +296,11 @@ fn text_wrap() {
             ));
         }
     }
-    println!("wrap matched {hits}/{total}");
+    println!("{file}: wrap matched {hits}/{total}");
     for miss in &misses {
         println!("  {miss}");
     }
-    assert_eq!((hits, total), (538, 540), "wrap-1.5x.json misses: {misses:#?}");
-    // The known misses: runs of spaces at a break (the Luau reference missed the same kind of case).
-    assert_eq!(
-        misses,
-        vec![
-            "SourceSansPro s=20 w=30 t=3 \"a  b   c    d\" studio=(14,60) ours=(44,60) lines=2".to_string(),
-            "FredokaOne s=14 w=30 t=3 \"a  b   c    d\" studio=(11,42) ours=(38,42) lines=2".to_string(),
-        ]
-    );
+    (hits, total, misses)
 }
 
 /// The pen adds exact advances and rounds once (Studio 0.746 TextBounds at 1.5x, Montserrat Bold at 18 px:
@@ -320,4 +346,39 @@ fn emoji_sequences() {
     assert_eq!(layout("\u{1F44D}\u{1F3FD}"), layout("\u{1F44D}"));
     assert_eq!(layout("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F466}"), layout("\u{1F3DC}"));
     assert_eq!(layout("A\u{1F468}\u{200D}\u{2764}\u{FE0F}\u{200D}\u{1F468}B"), layout("A\u{1F3DC}B"));
+}
+
+/// The datasets measured again with FFlagLegacyTextSubpixelRendering off (Studio 0.747.0.7471481,
+/// 2026-11-12, the same probes; data/studio/whole): every advance is a whole pixel and the truncation
+/// ellipsis has FreeType's hinted advance. 2,035 of the 3,808 values of text-bounds-1.5x.json differ from
+/// the flag-on dataset.
+#[test]
+fn whole_pixel_datasets() {
+    let mut engine = whole_engine();
+    for (file, expected) in [
+        ("data/studio/whole/text-bounds-1.5x.json", (3570, 3570)),
+        ("data/studio/whole/sweep-1.5x.json", (4785, 4785)),
+        ("data/studio/whole/text-bounds-linegap-1.5x.json", (3060, 3060)),
+    ] {
+        let (hits, total, _, misses) = text_bounds(&mut engine, file);
+        assert_eq!((hits, total), expected, "{file} misses: {misses:#?}");
+    }
+    let (hits, total, misses) = wrap_hits("data/studio/whole/wrap-1.5x.json", false);
+    assert_eq!((hits, total), (540, 540), "whole/wrap-1.5x.json misses: {misses:#?}");
+    assert_eq!(truncate_samples(&mut whole_engine(), "data/studio/whole/ellipsis.json"), 159);
+}
+
+/// The two modes differ in the measure, not only in the drawing: "iiiii" in SourceSansPro at TextSize 8 is
+/// five advances of 3 px with whole pixels and 13 px along the exact pen.
+#[test]
+fn modes_measure_differently() {
+    let family = family("SourceSansPro");
+    let params = LayoutParams::new(b"iiiii", &family, 400.0, "normal", 8.0, 1.5);
+    assert_eq!(whole_engine().layout(&params, false).width, 15.0);
+    assert_eq!(engine().layout(&params, false).width, 13.0);
+    // one engine switched between the modes drops what it cached in the other
+    let mut engine = engine();
+    assert_eq!(engine.layout(&params, false).width, 13.0);
+    engine.set_subpixel(false);
+    assert_eq!(engine.layout(&params, false).width, 15.0);
 }

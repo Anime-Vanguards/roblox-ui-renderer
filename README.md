@@ -121,9 +121,9 @@ Limitations:
 - Bit-exact Studio parity is not complete: the edges of colour emoji and one pixel of a thin path corner have
   small known differences. A rotated image, Frame or CanvasGroup can differ in a pixel whose centre lies on
   one of its edges, a Pixelated image under a UICorner in the pixels whose centres lie on a texel boundary,
-  and a UIGradient on a rotated element in its colour steps. Text is fitted to Studio 0.747 with its
-  quarter-pixel text drawing; a Studio that draws text at whole pixels (a server flag decides) differs in
-  every glyph.
+  and a UIGradient on a rotated element in its colour steps. Roblox draws text in one of two ways, chosen by a
+  server flag; the renderer has both and defaults to the one production serves (whole-pixel text).
+  `--text-subpixel on` selects the other, quarter-pixel text: see [docs/text.md](docs/text.md), "Text modes".
 - Stories that depend on game services or Studio-only content, yield while mounting or contain source errors
   run as far as they can; the sweep reports these separately from rendering errors.
 - UIShadow `Mode = Text` with a BlurRadius is close to Studio 0.747 but not exact: Studio draws the glow

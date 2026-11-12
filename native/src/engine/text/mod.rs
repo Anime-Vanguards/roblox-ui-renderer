@@ -114,6 +114,23 @@ pub struct TextEngine {
     pub(crate) rich_count: usize,
     pub(crate) ellipsis_cache: HashMap<(FaceId, u64), Arc<(Vec<Glyph>, f64)>>,
     pub(crate) scratch_codepoints: Vec<utf8::Codepoint>,
+    /// Which of Studio's two text drawings is laid out (`subpixel_setting`): true, pens at quarter pixels
+    /// (FFlagLegacyTextSubpixelRendering on); false, every advance a whole pixel (the flag off).
+    /// `set_subpixel` changes it.
+    pub(crate) subpixel: bool,
+}
+
+/// The text mode an engine starts in: `RUR_TEXT_SUBPIXEL` (`on` / `off`), by default what production
+/// Roblox serves, FFlagLegacyTextSubpixelRendering off since 2026-11-12 (notes/text.md "Whole-pixel
+/// text").
+/// (Read when an engine is made: a batch worker changes its environment from job to job.)
+pub fn subpixel_setting() -> bool {
+    subpixel_value(std::env::var("RUR_TEXT_SUBPIXEL").ok().as_deref())
+}
+
+/// `RUR_TEXT_SUBPIXEL`'s meaning: on for `on`, `enabled`, `true` and `1`, off otherwise.
+pub fn subpixel_value(value: Option<&str>) -> bool {
+    matches!(value.map(|value| value.trim().to_ascii_lowercase()).as_deref(), Some("on" | "enabled" | "true" | "1"))
 }
 
 impl TextEngine {
@@ -134,6 +151,26 @@ impl TextEngine {
             rich_count: 0,
             ellipsis_cache: HashMap::new(),
             scratch_codepoints: Vec::new(),
+            subpixel: subpixel_setting(),
+        }
+    }
+
+    /// Whether text is laid out for quarter-pixel pens (`subpixel_setting`).
+    pub fn subpixel(&self) -> bool {
+        self.subpixel
+    }
+
+    /// Chooses the text mode; the layouts and shapes cached in the other mode are dropped.
+    pub fn set_subpixel(&mut self, subpixel: bool) {
+        if self.subpixel != subpixel {
+            self.subpixel = subpixel;
+            self.measure_cache.clear();
+            self.measure_count = 0;
+            self.shape_cache.clear();
+            self.shape_count = 0;
+            self.rich_shape_cache.clear();
+            self.rich_count = 0;
+            self.ellipsis_cache.clear();
         }
     }
 

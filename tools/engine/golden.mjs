@@ -329,6 +329,10 @@ function listStories(place) {
 
 // Fixtures mount beside the frozen project's default place, as `rur render` mounts them; the fast subset
 // (corpus "fast") mounts them alone, so it needs no frozen project
+// The text fixtures: the ones also recorded in the quarter-pixel text mode (RUR_TEXT_SUBPIXEL=on, docs/text.md
+// "Text modes"), as `edit/<name>@quarter`, so the mode that is not the default keeps its goldens too
+const TEXT_FIXTURE = /^(text-|layout-(richscaled|text|truncate)|stroke-text-)/;
+
 function fixtureEntries(fast) {
 	const entries = [];
 	const files = [
@@ -345,6 +349,7 @@ function fixtureEntries(fast) {
 			entries.push({ ...base, name: `${mode}/${stem}` });
 			const actions = file.replace(/\.luau$/, ".actions.json");
 			if (fs.existsSync(actions)) entries.push({ ...base, name: `${mode}/${stem}+actions`, options: { ...base.options, actions } });
+			if (mode === "edit" && TEXT_FIXTURE.test(stem)) entries.push({ ...base, name: `${mode}/${stem}@quarter`, env: { RUR_TEXT_SUBPIXEL: "on" } });
 		}
 	}
 	return entries;

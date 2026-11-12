@@ -443,8 +443,11 @@ fn hinted_ellipsis_advance() {
     let glyph = *engine.face(face).font.cmap.get(&0x2026).unwrap();
     assert_eq!(engine.fonts.hinted_advance(face, 30.0, glyph), Some(24.0));
     assert_eq!(engine.fonts.hinted_advance(face, 30.5, glyph), None);
-    let ellipsis = engine.ellipsis(face, 30.0);
-    assert_eq!(ellipsis.1, 23.0);
+    engine.set_subpixel(true);
+    assert_eq!(engine.ellipsis(face, 30.0).1, 23.0);
+    // whole-pixel text (FFlagLegacyTextSubpixelRendering off) uses it again: data/studio/whole/ellipsis.json
+    engine.set_subpixel(false);
+    assert_eq!(engine.ellipsis(face, 30.0).1, 24.0);
 }
 
 /// A face recorded under one Studio version folder and asset cache is the same face read from another
@@ -470,11 +473,15 @@ fn corpus_digest(bytes: &[u8]) -> String {
     sha2::Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn corpus_path() -> PathBuf {
-    if let Ok(path) = std::env::var("RUR_TEXT_CORPUS") {
+/// The frozen corpus of a text mode: `text-corpus.json` holds the output with quarter-pixel pens
+/// (RUR_TEXT_CORPUS overrides it), `text-corpus.whole.json` the same cases with whole-pixel advances
+/// (RUR_TEXT_CORPUS_WHOLE).
+fn corpus_path(subpixel: bool) -> PathBuf {
+    let (variable, file) = if subpixel { ("RUR_TEXT_CORPUS", "text-corpus.json") } else { ("RUR_TEXT_CORPUS_WHOLE", "text-corpus.whole.json") };
+    if let Ok(path) = std::env::var(variable) {
         return PathBuf::from(path);
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../out/golden/text-corpus.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../out/golden").join(file)
 }
 
 /// The frozen font set: RUR_TEXT_CORPUS_FONTS (empty: none), else `fonts/` beside the corpus when it
@@ -516,13 +523,23 @@ fn missing_font_files(corpus: &Value, places: &Places, engine: &TextEngine) -> V
 
 #[test]
 fn text_engine_matches_frozen_corpus() {
-    let path = corpus_path();
+    replay_corpus(true, include_str!("text-corpus.sha256").trim());
+}
+
+/// The same cases in the whole-pixel text mode (FFlagLegacyTextSubpixelRendering off, what production
+/// Roblox draws since 2026-11-12): their own frozen output, so neither mode moves unnoticed.
+#[test]
+fn text_engine_matches_frozen_whole_pixel_corpus() {
+    replay_corpus(false, include_str!("text-corpus.whole.sha256").trim());
+}
+
+fn replay_corpus(subpixel: bool, recorded: &str) {
+    let path = corpus_path(subpixel);
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!("skipping: no text corpus at {} (the frozen corpus of out/golden; notes/rust-engine.md, Text API)", path.display());
         return;
     };
     let digest = corpus_digest(&bytes);
-    let recorded = include_str!("text-corpus.sha256").trim();
     if digest != recorded && std::env::var_os("RUR_TEXT_CORPUS_ANY").is_none() {
         eprintln!(
             "skipping: the text corpus at {} is not the one this commit was recorded against (sha256 {digest}, recorded {recorded}): a stale copy of out/golden. \
@@ -543,6 +560,7 @@ fn text_engine_matches_frozen_corpus() {
         fonts: fonts.clone(),
     };
     let mut engine = TextEngine::new(font_paths.clone());
+    engine.set_subpixel(subpixel);
     let places = Places::new(paths["cache"].as_str().unwrap(), engine.fonts.assets_dir(), fonts.as_deref());
     let mut faces = Faces { index: HashMap::new(), extra: Vec::new(), places };
     for (index, face) in corpus["faces"].as_array().unwrap().iter().enumerate() {
@@ -584,6 +602,10 @@ fn text_engine_matches_frozen_corpus() {
     // With RUR_TEXT_CORPUS_UPDATE and RUR_TEXT_CORPUS_UPDATE_PEN=1: the differing "pen" cases of right-aligned
     // rich lines too (a Studio-verified change of where such a line starts; other pens still fail).
     let update_pen = update_measured.is_some() && std::env::var_os("RUR_TEXT_CORPUS_UPDATE_PEN").is_some();
+    // With RUR_TEXT_CORPUS_UPDATE and RUR_TEXT_CORPUS_UPDATE_ALL=1: every differing case of every kind (how a
+    // text mode's corpus is first made from the other mode's: the same cases with this mode's output).
+    // The update variables apply to whichever corpus test runs: name one test when using them.
+    let update_all = update_measured.is_some() && std::env::var_os("RUR_TEXT_CORPUS_UPDATE_ALL").is_some();
     let right_rich_pen = |case: &Map<String, Value>| -> bool {
         case.get("p").and_then(Value::as_object).is_some_and(|params| boolean(params, "rich") && string(params, "a") == "Right")
     };
@@ -616,6 +638,7 @@ fn text_engine_matches_frozen_corpus() {
             || (update_rich_scaled.is_some() && kind == "text" && rich_scaled(case) && !actual.to_string().contains("unknown face"))
             || (update_measured.is_some() && (kind == "layout" || kind == "text") && !actual.to_string().contains("unknown face"))
             || (update_pen && kind == "pen" && right_rich_pen(case))
+            || (update_all && !actual.to_string().contains("unknown face"))
         {
             updated.push((index, actual.clone()));
         } else if failures.len() < 40 {
@@ -681,6 +704,7 @@ fn text_engine_matches_frozen_corpus() {
         }
     };
     let mut fresh = TextEngine::new(font_paths);
+    fresh.set_subpixel(subpixel);
     let cold = std::time::Instant::now();
     run_all(&mut fresh, inputs.len());
     let cold = cold.elapsed();

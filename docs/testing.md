@@ -14,7 +14,7 @@ right in Studio. Refactors of the renderer must keep 0 mismatches in the regress
 |---|---|
 | `cargo test --release` (unit tests in `native/src`, `native/tests/image_math.rs`, `paint.rs`) | nothing beyond the build, except `engine::input::tests::textbox_focus_caret_and_editing`, which needs Studio's fonts, and three that draw with the GPU (`render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph`, `render::gpu::tests::partial_redraws_match_whole_frames`, `render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas`); glyph tests use `RUR_TEST_FONT` or a system font and skip without one |
 | `native/tests/text_studio.rs`, `text_hinted.rs` | Studio's fonts (they fail without them) |
-| `native/tests/text_corpus.rs` | `out/golden/text-corpus.json`, a local artifact; skips without it (see "Text corpus") |
+| `native/tests/text_corpus.rs` | `out/golden/text-corpus.json` and `text-corpus.whole.json`, local artifacts; skips the one that is missing (see "Text corpus") |
 | `tools/tests/asset_*.mjs`, `native-assets.mjs`, `native-build-lock.mjs`, `places.mjs`, `web-bundle-directories.mjs`, `tools/analysis/image_assets_test.mjs` | Node only (HTTP is mocked) |
 | `tools/engine/golden.mjs --fast` | the built engine and Studio's fonts; the network for cloud fonts a fixture uses |
 | `tools/tests/cli.mjs`, `kept-runs.mjs`, `examples.mjs` | the built engine and Studio's fonts; `kept-runs` also a GPU (it renders through the render service) |
@@ -39,7 +39,9 @@ digests come from the maintainers' project, so outside it they are for your own 
 ## Text corpus
 
 `native/tests/text_corpus.rs` replays 85 399 frozen text cases (layouts, rich text parses, line pens, size
-helpers) and requires identical output. The corpus is the engine's own output: it was first recorded from the
+helpers) and requires identical output, once per text mode (docs/text.md, "Text modes"): `text-corpus.json`
+holds the quarter-pixel output and `text-corpus.whole.json` the whole-pixel output of the same cases, with
+their digests in `native/tests/text-corpus.sha256` and `text-corpus.whole.sha256`. The corpus is the engine's own output: it was first recorded from the
 Luau implementation the text engine was ported from, and a change of text measurement re-records the cases it
 moves.
 
@@ -47,6 +49,9 @@ moves.
   the current output of every differing layout case. Use it only for a change that Studio measurements
   verify (`native/tests/text_studio.rs` and its datasets in `data/studio/`), say which rule moved how many
   cases, and keep the corpus it replaces beside the new one.
+- The update variables apply to whichever corpus test runs, so name one:
+  `-- text_engine_matches_frozen_whole_pixel_corpus` or `-- text_engine_matches_frozen_corpus`.
+  `RUR_TEXT_CORPUS_WHOLE` names the whole-pixel corpus as `RUR_TEXT_CORPUS` names the other.
 - A differing case that a deliberate change does not explain is a regression, not something to record.
 
 ## Renderer regressions

@@ -728,8 +728,9 @@ fn color_json(color: &Option<[f64; 3]>) -> Option<Json> {
 /// is not, in the run's colour and stroke and outside its decorations; and, when no glyph is kept before
 /// it, the same in the label's colour (fixtures/text-probe-richtrunc.luau: 0 px over tolerance with the
 /// label's glyph synthesized, 37 or more per label with the run's own face at any quarter pixel).
-fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::text::Run], lines: &[Line], ellipsis: bool) -> Json {
+fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::text::Run], lines: &[Line], ellipsis: bool, scales: (f64, f64)) -> Json {
     let (family, weight, style) = font_parts(ctx, id);
+    let (dpi, scale) = (scales.0, f32r(scales.1));
     let mut result = Vec::new();
     for run in runs {
         let run_style = &run.style;
@@ -776,6 +777,12 @@ fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::
                 "face".into(),
                 json!({ "bold": face.weight >= 700.0, "italic": face.style == "italic", "weight": number(face.weight) }),
             );
+        }
+        // Whole-pixel text: a <font size> run's glyphs are rasterized at floor(f32(f32(size * UIScale) * DPI))
+        // and drawn with their quads scaled by the unfloored size over it (quarter-pixel text is not stretched)
+        if let (false, Some(size)) = (text.subpixel, run_style.size) {
+            let unfloored = f32r(f32r(size * scale) * dpi);
+            entry.insert("quadScale".into(), number(unfloored / unfloored.floor().max(1.0)));
         }
         result.push(Json::Object(entry));
     }
@@ -926,6 +933,7 @@ fn text_lines(
         None => None,
     };
     let mut built: Vec<CachedLine> = Vec::new();
+    let subpixel = text.subpixel;
     let reveal = text_reveal(ctx, text, id, result);
     let mut lines = Vec::with_capacity(result.lines.len());
     for (index, line) in result.lines.iter().enumerate() {
@@ -1010,7 +1018,7 @@ fn text_lines(
                     entry.push(Json::from(glyph.glyph));
                     // The pen at Studio's quarter pixel: the exact pen from the line's start, rounded half up
                     // (glyphs over 32 GUI pixels, 48 px at 1.5x and 32 at 1x: at its whole pixel)
-                    let steps = if glyph_size > 32.0 * pixel_scale { 1.0 } else { 4.0 };
+                    let steps = if !subpixel || glyph_size > 32.0 * pixel_scale { 1.0 } else { 4.0 };
                     let exact = segment_x + glyph.pen - segment_pen + glyph.offset;
                     pens.push((exact, glyph_size, steps));
                     entry.push(number((exact * steps + 0.5).floor() / steps));
@@ -1169,7 +1177,7 @@ fn reveal_line(line: &Line, cut: LineReveal, glyphs: Json, runs: Option<Json>, r
 }
 
 /// ExportText's fields that do not move with the label (everything but `lines` / `content`).
-fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record) -> Option<Map<String, Json>> {
+fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record, pixel_scale: f64) -> Option<Map<String, Json>> {
     let info = record.text.as_ref()?;
     let result = &info.layout;
     let x_align = ctx.enum_name(ctx.get(id, K::TextXAlignment as NameId)).unwrap_or("Center").to_string();
@@ -1186,7 +1194,9 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     export.insert("textSize".into(), number(info.text_size));
     // Glyph pens are quarter pixels and the glyphs lightly hinted (Studio 0.747; a scene without this
     // field has whole-pixel pens and fully hinted glyphs)
-    export.insert("subpixel".into(), Json::from(4));
+    if text.subpixel {
+        export.insert("subpixel".into(), Json::from(4));
+    }
     export.insert("color".into(), ctx.color(color));
     export.insert("transparency".into(), number(ctx.number(id, K::TextTransparency as NameId).unwrap_or(0.0)));
     export.insert("lineHeight".into(), number(result.line_height));
@@ -1215,6 +1225,9 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     // The FontFace's requested weight (100-900) and style ("normal" / "italic")
     export.insert("weight".into(), number(info.weight));
     export.insert("style".into(), Json::String(info.style.clone()));
+    if let (false, Some(quad_scale)) = (text.subpixel, info.quad_scale) {
+        export.insert("quadScale".into(), number(quad_scale));
+    }
     // Measured (fixtures/text-probe-selfclip.luau): the object's own ClipsDescendants also cuts its own
     // text (fill, strokes, decorations) to its rect, axis-aligned in screen space even when rotated; a
     // zero-width / zero-height clipping label draws no text. The renderers apply the cut (node rect /
@@ -1229,7 +1242,7 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     if let Some(runs) = &result.runs {
         export.insert("rich".into(), Json::Bool(true));
         let ellipsis = result.lines.iter().any(|line| line.glyphs.last().is_some_and(|glyph| glyph.is_ellipsis()));
-        export.insert("runs".into(), export_runs(ctx, text, id, runs, &result.lines, ellipsis));
+        export.insert("runs".into(), export_runs(ctx, text, id, runs, &result.lines, ellipsis, (pixel_scale, info.pixel_scale / pixel_scale)));
     }
     Some(export)
 }
@@ -1454,7 +1467,7 @@ fn export_node(
     if ctx.is(id, ctx.c.gui_object) {
         if ctx.is_text_object(id) {
             if let Some((lines, content)) = text_lines(ctx, out.text, out.registry, id, record, out.pixel_scale, matrix.is_some(), None) {
-                let mut text = text_static(ctx, out.text, id, record).unwrap_or_default();
+                let mut text = text_static(ctx, out.text, id, record, out.pixel_scale).unwrap_or_default();
                 text.insert("lines".into(), lines);
                 text.insert("content".into(), content);
                 node.insert("text".into(), Json::Object(text));
@@ -1888,7 +1901,7 @@ impl Walk<'_, '_, '_, '_> {
                     let layout = &record.text.as_ref().expect("text lines").layout;
                     let reuse_text = reuse_style && entry.text_layout.as_ref().is_some_and(|l| Arc::ptr_eq(l, layout));
                     if !reuse_text || entry.text_static.is_none() {
-                        entry.text_static = text_static(ctx, self.out.text, id, record);
+                        entry.text_static = text_static(ctx, self.out.text, id, record, self.out.pixel_scale);
                     }
                     let mut text = entry.text_static.clone().unwrap_or_default();
                     text.insert("lines".into(), lines);

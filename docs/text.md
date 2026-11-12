@@ -4,6 +4,32 @@ How text is measured (`native/src/engine/text/`) and drawn (`native/src/glyphs.r
 `native/src/render/text.rs`). Studio's numbers come from the probes in `tools/studio/` and the
 datasets in `data/studio/`, its pixels from `rur compare` captures of the `text-*` fixtures.
 
+## Text modes
+
+Roblox draws text in one of two ways, chosen by the server flag `FFlagLegacyTextSubpixelRendering`. The
+renderer implements both and one setting selects which:
+
+| Mode | Flag | What it draws |
+| --- | --- | --- |
+| whole-pixel (the default) | off | Fully hinted glyph bitmaps. Every glyph advance is rounded half up to a whole pixel on its own, so text is measured from whole advances. A size that is not a whole number of pixels draws the next smaller size on quads scaled up. |
+| quarter-pixel | on | Lightly hinted glyphs at quarter-pixel pens up to 32 GUI px. The pen adds exact advances and is rounded once per glyph position, so a line is as wide as its rounded pen. |
+
+The default follows what production Roblox serves. On 2026-11-12 the flag was off for Studio and the
+desktop and mobile clients (it had been rolled out on from about 2026-11-09 and was turned off again;
+`notes/text.md` "Whole-pixel text" has the record and how to read the live value). Text sizes differ between
+the modes: `TextBounds`, wrapping, truncation and TextScaled all follow the advances.
+
+To switch, pass `--text-subpixel on` (or `off`) to any `rur` command, or set `RUR_TEXT_SUBPIXEL=on` in the
+environment; `rur doctor` prints the mode in use. The web build takes it in its config's `env`. When Roblox
+flips the flag again, change the default in `native/src/engine/text/mod.rs` (`subpixel_setting`) and
+`cli/paths.mjs` (`textSubpixel`), swap which mode the `@quarter` golden entries record
+(`tools/engine/golden.mjs`), and re-record the goldens.
+
+Both modes are kept from rotting: the text fixtures have goldens in each mode (`edit/<name>` in the default
+mode, `edit/<name>@quarter` in the other), each mode has its frozen corpus
+(`out/golden/text-corpus.whole.json`, `out/golden/text-corpus.json`) and its measured datasets
+(`data/studio/whole/`, `data/studio/`). The sections below say where the modes differ.
+
 ## Fonts
 
 - Fonts come from the installed Studio's `content/fonts` (`RUR_ROBLOX_CONTENT` picks another `content`
@@ -26,6 +52,9 @@ datasets in `data/studio/`, its pixels from `rur compare` captures of the `text-
   that is the whole line, `(S + 1) x 64`. With one it is the line's share without the gap cut to a whole
   unit, `floor((S + 1) x 64 x (ascender - descender) / (ascender - descender + lineGap))`, so the face is a
   hair smaller than the plain ratio gives.
+- Whole-pixel mode: each advance (kerning included) is rounded half up to a whole pixel, and a glyph's pen is
+  the sum of the advances before it. The truncation ellipsis is as wide as FreeType's hinted advance of "…".
+  The rest of this list describes the pen of the quarter-pixel mode.
 - Glyph advances are FreeType's in 26.6 fixed point, `FT_MulFix(advance, x_scale)` plus the GPOS (or legacy
   `kern` table) adjustment. The pen adds these exact advances and is rounded half up to a whole pixel at
   each glyph, so a span of text is round(pen at its end) - round(pen at its start) px wide. One pen runs

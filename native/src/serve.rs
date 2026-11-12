@@ -163,7 +163,7 @@ impl Standby {
 
 /// Environment variables the engine reads: a render with other values than the service's own runs
 /// elsewhere (cli/client.mjs sends them)
-pub const ENGINE_ENV: [&str; 20] = [
+pub const ENGINE_ENV: [&str; 21] = [
     "RUR_CAMERA",
     "RUR_CLOCK",
     "RUR_ENGINE_DUMP",
@@ -183,6 +183,7 @@ pub const ENGINE_ENV: [&str; 20] = [
     "RUR_REAL_CLOCK",
     "RUR_ROBLOX_CONTENT",
     "RUR_ROTATION_CLIPPING",
+    "RUR_TEXT_SUBPIXEL",
     "RUR_VERBOSE",
 ];
 

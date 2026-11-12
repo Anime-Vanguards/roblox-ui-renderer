@@ -588,7 +588,7 @@ impl TextEngine {
             flush_segment(&mut segment, &mut paragraphs, &mut self.fonts);
         }
         paragraph_sizes.push(base_size);
-        round_pen(&mut paragraphs);
+        round_pen(&mut paragraphs, self.subpixel);
         RichShaped { paragraphs, paragraph_sizes, cache_key }
     }
 }
@@ -608,10 +608,29 @@ mod tests {
         // the exact pens before and after each glyph stay beside the whole-pixel advances
         let glyph = |advance: f64| Glyph { glyph: 1, face: 0, x: 0.0, x_offset: 0.0, advance, cluster: 0, code: 97, size: 0.0, run: 0, pen: 0.0, end: 0.0, offset: 0.0 };
         let mut line = vec![glyph(795.0 / 64.0), glyph(795.0 / 64.0), glyph(316.0 / 64.0)];
-        round_pen(std::slice::from_mut(&mut line));
+        round_pen(std::slice::from_mut(&mut line), true);
         assert_eq!(line.iter().map(|glyph| glyph.pen * 64.0).collect::<Vec<_>>(), [0.0, 795.0, 1590.0]);
         assert_eq!(line[2].end * 64.0, 1906.0);
         assert_eq!(line.iter().map(|glyph| glyph.advance).collect::<Vec<_>>(), [12.0, 13.0, 5.0]);
+        // whole-pixel text rounds each advance on its own (half up) and the pens are their sums
+        let mut line = vec![glyph(795.0 / 64.0), glyph(795.0 / 64.0), glyph(316.0 / 64.0), glyph(7.5)];
+        round_pen(std::slice::from_mut(&mut line), false);
+        assert_eq!(line.iter().map(|glyph| glyph.advance).collect::<Vec<_>>(), [12.0, 12.0, 5.0, 8.0]);
+        assert_eq!(line.iter().map(|glyph| glyph.pen).collect::<Vec<_>>(), [0.0, 12.0, 24.0, 29.0]);
+        assert_eq!(line[3].end, 37.0);
+    }
+
+    #[test]
+    fn the_text_mode_setting() {
+        use super::super::subpixel_value;
+        for on in ["on", "ON", " enabled ", "true", "1"] {
+            assert!(subpixel_value(Some(on)), "{on}");
+        }
+        for off in ["off", "", "0", "false", "quarter"] {
+            assert!(!subpixel_value(Some(off)), "{off}");
+        }
+        // unset: what production Roblox draws (FFlagLegacyTextSubpixelRendering off)
+        assert!(!subpixel_value(None));
     }
 
     #[test]

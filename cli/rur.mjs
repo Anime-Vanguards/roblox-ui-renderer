@@ -988,7 +988,7 @@ async function doctor({ fix = false } = {}) {
 	const { nativeAppStatus, describeNativeApp } = await import("../tools/native-app/config.mjs");
 	const { servicePorts, status: serviceStatus } = await import("./client.mjs");
 	const { LOCK_FILE, studioLockHolder } = await import("./lock.mjs");
-	const { isolated, serviceDisabled } = await import("./paths.mjs");
+	const { isolated, serviceDisabled, textSubpixel } = await import("./paths.mjs");
 	const { megabytes, removeLeftovers, stateLeftovers } = await import("./cleanup.mjs");
 	const leftovers = stateLeftovers();
 	const fixed = fix ? removeLeftovers(leftovers) : null;
@@ -1011,6 +1011,8 @@ async function doctor({ fix = false } = {}) {
 		engineFingerprint: engineStatus.fingerprint || null,
 		// The engine core: roblox-engine-emulator at the commit native/Cargo.toml pins, or a linked checkout
 		emulator: emulatorLink() ? `linked: ${emulatorLink()} (node tools/emulator.mjs unlink: back to ${pinnedCommit().slice(0, 12)})` : `${pinnedCommit().slice(0, 12)} (pinned in native/Cargo.toml; node tools/emulator.mjs status)`,
+		text: textSubpixel() ? "quarter-pixel pens (RUR_TEXT_SUBPIXEL / --text-subpixel on: FFlagLegacyTextSubpixelRendering on)"
+			: "whole-pixel advances (the default: FFlagLegacyTextSubpixelRendering off, what production Roblox draws; --text-subpixel on for the other)",
 		isolated: isolated() ? "yes (RUR_ISOLATED / --isolated): no render service; the engine is the state dir's build even when native/ changed" : "no",
 		service: serviceDisabled() ? `not used (${isolated() ? "--isolated" : "--no-service / RUR_NO_SERVICE"}; not contacted)`
 			: service ? `running on 127.0.0.1:${service.port} (pid ${service.pid}, ${service.executable || "an older build"}) for ${service.root}, state ${service.stateDir}`

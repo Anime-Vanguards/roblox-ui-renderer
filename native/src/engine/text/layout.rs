@@ -380,9 +380,24 @@ pub fn glyph_advance(nominal: f64, adjustment: f64, x_scale: f64, hb_scale: f64,
 /// 8-40 ("11111" in Montserrat Bold at 18 px is 31, where rounding each 6.11 px advance gives 30),
 /// "1<font>1</font>111" = "11111", and wrapped text after a newline (wrap-1.5x.json 538/540; restarting
 /// the pen per paragraph gives 531, per line 489). Earlier Studio versions rounded each advance.
-pub fn round_pen(paragraphs: &mut [Vec<Glyph>]) {
+///
+/// Without `subpixel` (FFlagLegacyTextSubpixelRendering off, production since 2026-11-12) each advance is
+/// rounded half up on its own again, and a glyph's pen is the sum of the whole-pixel advances before it:
+/// there is no exact pen. Measured (Studio 0.747, 1.5x): 1,280 glyphs of fixtures/text-probe-subpixel.luau
+/// ("n" x 20 at 7.76 px advances 8 px every time), and TextBounds of tools/studio/measure-text.luau
+/// ("iiiii" in SourceSansPro at 8 is 15 px, five advances of 3, where the pen gives 13).
+pub fn round_pen(paragraphs: &mut [Vec<Glyph>], subpixel: bool) {
     let mut pen = 0.0;
     let mut rounded = 0.0;
+    if !subpixel {
+        for glyph in paragraphs.iter_mut().flatten() {
+            glyph.pen = pen;
+            glyph.advance = idiv(glyph.advance * 64.0 + 32.0, 64.0);
+            pen += glyph.advance;
+            glyph.end = pen;
+        }
+        return;
+    }
     for glyph in paragraphs.iter_mut().flatten() {
         glyph.pen = pen / 64.0;
         pen += glyph.advance * 64.0;
@@ -954,7 +969,7 @@ impl TextEngine {
         let mut shaped = Vec::new();
         shape_paragraph(&mut self.fonts, &paragraph, face, size, None, &mut shaped);
         result.push(shaped);
-        round_pen(&mut result);
+        round_pen(&mut result, self.subpixel);
         self.scratch_codepoints = points;
 
         let value = Arc::new(result);
@@ -989,7 +1004,23 @@ impl TextEngine {
         let points = super::utf8::codepoints(text);
         let mut glyphs = Vec::new();
         shape_paragraph(&mut self.fonts, &points, face, size, None, &mut glyphs);
-        round_pen(std::slice::from_mut(&mut glyphs));
+        if self.subpixel {
+            round_pen(std::slice::from_mut(&mut glyphs), true);
+        } else {
+            // Whole-pixel text: the ellipsis advances by FreeType's hinted advance, not its rounded one
+            // (SourceSansPro at 30 px: 24 px where the advance rounds to 23; "a…" needs 36 px + 1)
+            let (x_scale, _) = scales(&font, size);
+            let mut pen = 0.0;
+            for glyph in glyphs.iter_mut() {
+                glyph.advance = match self.fonts.hinted_advance(glyph.face, size, glyph.glyph) {
+                    Some(hinted) => hinted,
+                    None => (idiv((font.advance(glyph.glyph) as f64).abs() * x_scale + 32768.0, 65536.0) / 64.0).ceil(),
+                };
+                glyph.pen = pen;
+                pen += glyph.advance;
+                glyph.end = pen;
+            }
+        }
         let width: f64 = glyphs.iter().map(|glyph| glyph.advance).sum();
         // The ellipsis is a pen of its own: its exact pens sit below zero, under every pen of the text it
         // follows, so the export starts a new stretch at it (export.rs text_lines)
