@@ -213,6 +213,7 @@ impl DrawPreparer {
             self.finish_pass(texture);
             self.composite_group(pass, node, target, physical, radii, opacity, space);
         }
+        self.group_inset_shadows(pass, node, scene, assets)?;
         self.group_strokes(pass, node, scene, assets)?;
         Ok(())
     }
@@ -1060,6 +1061,7 @@ fn has_part(node: &Value, in_group: bool, over: bool) -> bool {
             || node["selection"].is_object()
             || node["caret"].is_object()
             || (!in_group && !array(&node["strokes"]).is_empty())
+            || (!in_group && array(&node["shadows"]).iter().any(|shadow| shadow["inset"] == true))
     } else {
         (!in_group && !array(&node["shadows"]).is_empty())
             || (node["bg"].is_object()

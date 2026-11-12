@@ -188,6 +188,7 @@ static int copy_bitmap(const FT_Bitmap *bitmap, int left, int top, RurGlyph *out
 }
 
 /* join: 0 round, 1 miter (MITER_VARIABLE, limit 2.0), 2 bevel. bold: strength in 26.6 units (0: none).
+ * light: 0 the face's own hinting, 1 light hinting (quarter-pixel text), 2 unhinted.
  * A glyph FreeType cannot load or stroke is empty (rasterize.py's FT_Exception), not an error. */
 int rur_glyph_render(RurFace *face, double ppem, unsigned glyph, double stroke_px, int join, long bold, int italic,
                      int light, long shift, RurGlyph *out) {
@@ -195,7 +196,9 @@ int rur_glyph_render(RurFace *face, double ppem, unsigned glyph, double stroke_p
     if (!face) return -1;
     if (set_ppem(face, ppem) != 0) return -2;
     FT_Face ft = face->face;
-    FT_Int32 flags = light ? (face->flags | FT_LOAD_TARGET_LIGHT | FT_LOAD_NO_BITMAP) : face->flags;
+    /* light 2: the outline as designed, no hinting (the glyphs of a text shadow's glow) */
+    FT_Int32 flags = light == 2 ? (FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP)
+                     : light ? (face->flags | FT_LOAD_TARGET_LIGHT | FT_LOAD_NO_BITMAP) : face->flags;
     if (stroke_px != 0) {
         if (FT_Load_Glyph(ft, glyph, flags | FT_LOAD_NO_BITMAP) != 0) return 0;
         if (shift && ft->glyph->format == FT_GLYPH_FORMAT_OUTLINE) FT_Outline_Translate(&ft->glyph->outline, shift, 0);

@@ -1635,6 +1635,7 @@ impl DrawPreparer {
                 let text_started = Instant::now();
                 let _text_scope = crate::microprofile::scope("Text");
                 self.stats.texts += 1;
+                self.text_shadows(ctx, node, scene, assets)?;
                 let (hits, node_hits, misses) =
                     (self.text_cache.hits, self.text_cache.node_hits, self.text_cache.misses);
                 use super::text::TextPlan;
@@ -1721,6 +1722,7 @@ impl DrawPreparer {
                 self.stats.text_ms += text_started.elapsed().as_secs_f64() * 1000.;
             }
             if !in_group {
+                self.group_inset_shadows(ctx, node, scene, assets)?;
                 self.group_strokes(ctx, node, scene, assets)?;
             }
         }
@@ -2403,7 +2405,64 @@ impl DrawPreparer {
         let start = Instant::now();
         let _scope = crate::microprofile::scope("Shadows");
         self.stats.shadows += array(&node["shadows"]).len() as u64;
-        let result = self.group_shadows_inner(ctx, node, scene, assets);
+        let result = self.group_shadows_inner(ctx, node, scene, assets, false);
+        self.stats.shadows_ms += start.elapsed().as_secs_f64() * 1000.;
+        result
+    }
+    /// The node's UIShadows with Mode = Text: under its text, over its fill and image
+    /// (fixtures/shadow-probe-text.luau). BlurRadius and Offset are whole pixels of the target, whatever the
+    /// device scale and UIScale: a glow spans 2 x BlurRadius px each side of a glyph's edge
+    /// (shadow-probe-text2.luau: 16.07 px for BlurRadius 8 at 1.5x, and under UIScale 2).
+    fn text_shadows(&mut self, ctx: &mut BuildContext, node: &Value, scene: &SceneStore, assets: &AssetStore) -> Result<(), DrawError> {
+        let mut shadows: Vec<&Value> = array(&node["shadows"])
+            .iter()
+            .filter(|s| s["mode"] == "Text" && number(&s["transparency"], 0.) < 1.)
+            .collect();
+        if shadows.is_empty() || !node["text"].is_object() {
+            return Ok(());
+        }
+        shadows.sort_by(|a, b| number(&a["zIndex"], 0.).total_cmp(&number(&b["zIndex"], 0.)));
+        for shadow in shadows {
+            let rgb = color(&shadow["color"], [0.; 3]).map(|c| stop_byte(c) as f64);
+            let opacity = (1. - number(&shadow["transparency"], 0.)).clamp(0., 1.);
+            let width = 2. * number(&shadow["blur"], 0.).max(0.);
+            let quads = match super::text::text_shadow(node, scene.fonts(), assets, self.scale, rgb, opacity, width) {
+                Ok(quads) => quads,
+                Err(_) if assets.pending_count() > 0 => Vec::new(),
+                Err(e) => return Err(e.into()),
+            };
+            let by = [component(&shadow["offset"], 0, 0.).trunc(), component(&shadow["offset"], 1, 0.).trunc()];
+            for q in quads {
+                let id = self.upload_shared(q.width, q.height, &q.rgba);
+                let mut m = node_transform(node, ctx.origin, self.scale);
+                m[4] += by[0];
+                m[5] += by[1];
+                let clip = text_clip_rect(node, ctx.origin, self.scale);
+                let qr = Rect::new(q.x, q.y, q.w, q.h);
+                if m == [1., 0., 0., 1., m[4], m[5]] && q.opacity == 1. && q.w == q.width as f64 && q.h == q.height as f64 {
+                    self.layer(ctx, qr.translated(m[4], m[5]), id, clip, 0, &[]);
+                } else {
+                    self.text_quad(ctx, qr, q.width, q.height, id, m, clip, q.opacity, 0, &[]);
+                }
+            }
+        }
+        Ok(())
+    }
+    /// The node's Inset UIShadows: over its fill, image and text (a CanvasGroup's: over its composite, not
+    /// faded by it), under its strokes and children (fixtures/shadow-probe-inset2.luau)
+    pub(crate) fn group_inset_shadows(
+        &mut self,
+        ctx: &mut BuildContext,
+        node: &Value,
+        scene: &SceneStore,
+        assets: &AssetStore,
+    ) -> Result<(), DrawError> {
+        if !array(&node["shadows"]).iter().any(inset_shadow) {
+            return Ok(());
+        }
+        let start = Instant::now();
+        let _scope = crate::microprofile::scope("Shadows");
+        let result = self.group_shadows_inner(ctx, node, scene, assets, true);
         self.stats.shadows_ms += start.elapsed().as_secs_f64() * 1000.;
         result
     }
@@ -2413,19 +2472,31 @@ impl DrawPreparer {
         node: &Value,
         _scene: &SceneStore,
         _assets: &AssetStore,
+        inset: bool,
     ) -> Result<(), DrawError> {
         let p = physical_rect(node, self.scale);
         let r = p.rect;
         let m = node_transform(node, ctx.origin, self.scale);
         let radii = radius(&node["corner"], self.scale);
         let mut shadows: Vec<_> = array(&node["shadows"]).iter().enumerate().collect();
-        // UIShadows draw below the element in ZIndex order (child order among equals). Inset and
-        // ShowBehindParent are exported but not live in Studio: ignored here.
-        shadows.sort_by(|a, b| number(&a.1["zIndex"], 0.).total_cmp(&number(&b.1["zIndex"], 0.)));
+        // UIShadows draw below the element in ZIndex order (child order among equals), Inset ones over its
+        // fill, image and text; without ShowBehindParent the frame's shape is cut out. Mode = Text draws nothing here:
+        // it is the glow of a text object's glyphs, and nothing on any other object.
+        // Among equals, the ones the frame cuts (ShowBehindParent = false) come after the others
+        // (fixtures/shadow-probe-behind.luau: a cut first child lies over the second child's shadow)
+        shadows.sort_by(|a, b| {
+            number(&a.1["zIndex"], 0.)
+                .total_cmp(&number(&b.1["zIndex"], 0.))
+                .then((a.1["behind"] == false).cmp(&(b.1["behind"] == false)))
+        });
         let node_id = node["id"].as_u64().unwrap_or(0);
         for (index, shadow) in shadows {
             let alpha = 1. - number(&shadow["transparency"], 0.);
-            if alpha <= 0. {
+            if alpha <= 0. || shadow["mode"] == "Text" || inset_shadow(shadow) != inset {
+                continue;
+            }
+            if inset || shadow["behind"] == false {
+                self.cut_shadow(ctx, node, shadow, p, m, radii, alpha, inset);
                 continue;
             }
             // UIShadow geometry: the snapped element rect grown by Spread (the total per axis, not per side) and
@@ -2484,7 +2555,7 @@ impl DrawPreparer {
             let alpha = move || {
                 let (x, y) = (lx0, ly0);
                 let corners = (sigma > 0.).then(|| super::coverage::shadow_mesh(w, h, sigma, radii, scale));
-                let fields = radii.map(|radius| super::coverage::ShadowField::new(w, h, radius));
+                let fields = radii.map(|radius| super::coverage::ShadowField::polygonal(w, h, radius, scale));
                 let mut alpha = vec![0; width as usize * height as usize];
                 for py in 0..height {
                     for px in 0..width {
@@ -2584,6 +2655,193 @@ impl DrawPreparer {
         }
         Ok(())
     }
+    /// A UIShadow that the frame's shape cuts (Studio 0.747; fixtures/shadow-probe-inset.luau, -inset2,
+    /// -behind, notes/images.md), rasterized in device space through the node's transform:
+    /// - Inset: the outer shadow's mesh of the hole, read through the profile the other way round, inside the
+    ///   frame only. The hole is the frame shrunk by Spread (the total per axis) and moved by Offset; its
+    ///   corner radii above 0 shrink by half the smaller spread.
+    /// - ShowBehindParent = false: the outer shadow, outside the frame only.
+    /// The frame cuts with the rounded fill's mask (the distance to the rounded box over its coarse
+    /// derivative, sharp frames too, so a pixel beside a corner can hold a little): a pixel is the profile
+    /// times the mask's coverage, or times what the mask leaves.
+    #[allow(clippy::too_many_arguments)]
+    fn cut_shadow(
+        &mut self,
+        ctx: &mut BuildContext,
+        node: &Value,
+        shadow: &Value,
+        p: PhysicalRect,
+        m: Transform,
+        radii: [f64; 4],
+        alpha: f64,
+        inset: bool,
+    ) {
+        let frame = p.rect;
+        let scale = self.scale;
+        let sigma = number(&shadow["blur"], 0.).max(0.) * scale / 2.;
+        let sx = component(&shadow["spread"], 0, 0.) * scale;
+        let sy = component(&shadow["spread"], 1, 0.) * scale;
+        // The shadow's shape: the hole of an inner shadow, the grown frame of an outer one
+        let (w, h) = if inset { (frame.w - sx, frame.h - sy) } else { (frame.w + sx, frame.h + sy) };
+        let shaped = w > 0. && h > 0.;
+        if !inset && !shaped {
+            return;
+        }
+        let grow = if inset { -sx.min(sy) / 2. } else { sx.min(sy) / 2. };
+        let shape_radii = radii.map(|v| if v > 0. { (v + grow).max(0.) } else { 0. });
+        let cx = frame.x + frame.w / 2. + component(&shadow["offset"], 0, 0.) * scale;
+        let cy = frame.y + frame.h / 2. + component(&shadow["offset"], 1, 0.) * scale;
+        let va = if sigma > 0. && shaped {
+            super::coverage::shadow_vertex_alpha(w / 2., h / 2., sigma, alpha)
+        } else {
+            (255. * alpha - 0.5).ceil().max(0.) as u32
+        };
+        if va == 0 {
+            return;
+        }
+        let hard = (255. * alpha).floor().clamp(0., 255.) as u8;
+        // What is drawn, in the node's space: the frame and a pixel around it, or the shadow's reach
+        let pad = 3. * sigma;
+        let local = if inset {
+            Rect::new(frame.x, frame.y, frame.w, frame.h)
+        } else {
+            Rect::new(cx - w / 2. - pad, cy - h / 2. - pad, w + 2. * pad, h + 2. * pad)
+        };
+        // The layer is placed and rasterized in whole device pixels of the target; the translation's whole
+        // part is left out of what it shows, so a shadow that moves by whole pixels keeps its layer
+        let shift = [m[4].floor(), m[5].floor()];
+        let about = [m[0], m[1], m[2], m[3], m[4] - shift[0], m[5] - shift[1]];
+        let e = transformed_extent(about, local);
+        let x = (e[0] - 1.).floor();
+        let y = (e[1] - 1.).floor();
+        let width = ((e[2] + 1.).ceil() - x) as u32;
+        let height = ((e[3] + 1.).ceil() - y) as u32;
+        if width == 0 || height == 0 || width > 16384 || height > 16384 {
+            return;
+        }
+        let limit = (p.raw.w / 2.).min(p.raw.h / 2.);
+        let rgb = color(&shadow["color"], [0.; 3]).map(stop_byte);
+        // Whether the hole and its mesh lie wholly off the frame
+        let apart = !shaped
+            || (cx - (frame.x + frame.w / 2.)).abs() >= (frame.w + w) / 2. + pad
+            || (cy - (frame.y + frame.h / 2.)).abs() >= (frame.h + h) / 2. + pad;
+        // The mask's derivative quads sit on even pixels of the target
+        let parity = [((x + shift[0]) as i64).rem_euclid(2), ((y + shift[1]) as i64).rem_euclid(2)];
+        let dyadic = |v: f64| (v * 1024.).fract() == 0. && v.abs() < 1e9;
+        let translation = about[..4] == [1., 0., 0., 1.];
+        // (an unturned shadow is keyed about its layer's corner, as the outer shadows are)
+        let (ox, oy) = if translation && [cx, cy, frame.x, frame.y].into_iter().all(dyadic) { (x, y) } else { (0., 0.) };
+        let key = format!(
+            "cut-shadow:{}",
+            serde_json::to_string(&(
+                (x - ox, y - oy, cx - ox, cy - oy, frame.x - ox, frame.y - oy, frame.w, frame.h),
+                (width, height, w, h, sigma, radii, shape_radii, limit),
+                (scale, va, hard, inset, parity, rgb, about)
+            ))
+            .unwrap_or_default()
+        );
+        let raster = move || {
+            let (x, y, cx, cy) = (x - ox, y - oy, cx - ox, cy - oy);
+            let (hw, hh) = (frame.w / 2., frame.h / 2.);
+            let (fx, fy) = (frame.x - ox + hw, frame.y - oy + hh);
+            let to_local = invert(about);
+            let radii = radii.map(|r| r.max(0.).min(limit));
+            // The signed distance to the frame's rounded box at a layer pixel's centre
+            let sd = |i: i64, j: i64| {
+                let [lx, ly] = apply(to_local, x + ox + i as f64 + 0.5, y + oy + j as f64 + 0.5);
+                let (px, py) = (lx - ox - fx, ly - oy - fy);
+                let r = radii[if py < 0. {
+                    if px < 0. { 0 } else { 1 }
+                } else if px < 0. {
+                    3
+                } else {
+                    2
+                }];
+                let qx = px.abs() - hw + r;
+                let qy = py.abs() - hh + r;
+                qx.max(0.).hypot(qy.max(0.)) + qx.max(qy).min(0.) - r
+            };
+            let corners = (sigma > 0. && shaped).then(|| super::coverage::shadow_mesh(w, h, sigma, shape_radii, scale));
+            let fields = shape_radii.map(|radius| super::coverage::ShadowField::polygonal(w, h, radius, scale));
+            let mut bytes = vec![0; (width * height) as usize * 4];
+            let mut quad_fw = vec![(i64::MIN, 0.0f64); width as usize + 2];
+            for py in 0..height as i64 {
+                for px in 0..width as i64 {
+                    let d = sd(px, py);
+                    let coverage = if d < -1.5 {
+                        1.
+                    } else if d > 1.5 {
+                        0.
+                    } else {
+                        let qi = px - (px + parity[0]) % 2;
+                        let qj = py - (py + parity[1]) % 2;
+                        let slot = &mut quad_fw[(qi + 1) as usize];
+                        let fw = if slot.0 == qj {
+                            slot.1
+                        } else {
+                            let origin = sd(qi, qj);
+                            let fw = (sd(qi + 1, qj) - origin).abs() + (sd(qi, qj + 1) - origin).abs();
+                            *slot = (qj, fw);
+                            fw
+                        };
+                        let t = if fw > 0. {
+                            (0.5 - d / fw).clamp(0., 1.)
+                        } else if d < 0. {
+                            1.
+                        } else {
+                            0.
+                        };
+                        t * t * (3. - 2. * t)
+                    };
+                    let keep = if inset { coverage } else { 1. - coverage };
+                    if keep <= 0. {
+                        continue;
+                    }
+                    let [lx, ly] = apply(to_local, x + ox + px as f64 + 0.5, y + oy + py as f64 + 0.5);
+                    // An inner shadow's pixel outside the frame (the mask leaves a little beside a corner) is
+                    // drawn where the hole's mesh reaches, or when the mesh lies wholly off the frame: what
+                    // fills the frame around the mesh ends on the frame's edges
+                    let beside = inset && ((lx - ox - fx).abs() > hw || (ly - oy - fy).abs() > hh);
+                    let (lx, ly) = (lx - ox - cx, ly - oy - cy);
+                    if beside && !apart && !(lx.abs() < w / 2. + pad && ly.abs() < h / 2. + pad) {
+                        continue;
+                    }
+                    let quadrant = if ly < 0. {
+                        if lx < 0. { 0 } else { 1 }
+                    } else if lx < 0. {
+                        3
+                    } else {
+                        2
+                    };
+                    let a = match &corners {
+                        Some(corners) => {
+                            let d = corners[quadrant].d(lx.abs(), ly.abs());
+                            if beside && !apart && d < -3. {
+                                continue;
+                            }
+                            super::coverage::shadow_cut_alpha8(if inset { -d } else { d }, va, keep)
+                        }
+                        None => {
+                            let inside = shaped && fields[quadrant].at(lx, ly) > 0.;
+                            if inside != inset { (hard as f64 * keep + 1e-6).floor() as u8 } else { 0 }
+                        }
+                    };
+                    if a == 0 {
+                        continue;
+                    }
+                    let index = (py as u32 * width + px as u32) as usize * 4;
+                    bytes[index..index + 3].copy_from_slice(&rgb);
+                    bytes[index + 3] = a;
+                }
+            }
+            premultiply(&mut bytes);
+            bytes
+        };
+        let rect = Rect::new(x + shift[0], y + shift[1], width as f64, height as f64);
+        let clip = clip_rect(node, ctx.origin, scale);
+        let (.., id) = self.cached_layer(key, x as i32, y as i32, width, height, Box::new(raster));
+        self.layer(ctx, rect, id, clip, 0, &[]);
+    }
     pub(crate) fn group_strokes(
         &mut self,
         ctx: &mut BuildContext,
@@ -2639,7 +2897,9 @@ impl DrawPreparer {
                 continue;
             }
             let alpha = 1. - number(&stroke["transparency"], 0.);
-            let thickness = number(&stroke["thickness"], 0.) * self.scale;
+            // Device px in float32, as Studio multiplies: a thickness of 1 / 3 logical px is exactly 0.5 px at
+            // 1.5x, an edge on the pixel centres, which the top-left rule then decides (fixtures/stroke-margin.luau)
+            let thickness = (number(&stroke["thickness"], 0.) as f32 * self.scale as f32) as f64;
             if alpha <= 0. || thickness <= 0. {
                 continue;
             }
@@ -3400,12 +3660,17 @@ fn node_extent(node: &Value, scale: f64) -> Option<[f64; 4]> {
     e.iter().all(|v| v.is_finite()).then_some(e)
 }
 
+/// Whether a UIShadow is drawn inside its frame: Inset, which the glow of Mode = Text does not take
+fn inset_shadow(shadow: &Value) -> bool {
+    shadow["inset"] == true && shadow["mode"] != "Text"
+}
+
 /// A shadow's layer box [x0, y0, x1, y1) in device pixels: the spread rect about its offset centre padded by
 /// 3 sigma (sigma = BlurRadius * DPI / 2, the profile's [-3, 3] sigma span), whole pixels outward; None when
 /// the shadow draws nothing
 fn shadow_layer_box(r: Rect, shadow: &Value, scale: f64) -> Option<[f64; 4]> {
     let alpha = 1. - number(&shadow["transparency"], 0.);
-    if alpha <= 0. {
+    if alpha <= 0. || inset_shadow(shadow) || shadow["mode"] == "Text" {
         return None;
     }
     let sigma = (number(&shadow["blur"], 0.) * scale / 2.).max(0.);

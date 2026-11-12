@@ -449,6 +449,14 @@ pub fn glyph_requirements(node: &Value, fonts: &Value, scale: f64) -> Vec<Vec<Gl
             requirements.push(keys);
         }
     }
+    if crate::glyphs::text_glow(node) {
+        for p in &placements {
+            let keys = unhinted_keys(p);
+            if seen.insert(keys.clone()) {
+                requirements.push(keys);
+            }
+        }
+    }
     requirements
 }
 /// A glyph's atlas bitmap as glyph_quad uses it: coverage bytes (alpha of the atlas rows), size,
@@ -493,7 +501,20 @@ fn glyph_bitmap(
     join: Option<&str>,
     assets: &AssetStore,
 ) -> Result<Option<GlyphBitmap>, TextError> {
-    let keys = glyph_keys(p, stroke, join);
+    glyph_bitmap_of(&glyph_keys(p, stroke, join), assets)
+}
+/// The unhinted variant of each of a fill glyph's keys (glyphs.rs UNHINTED)
+fn unhinted_keys(p: &Placement) -> Vec<GlyphKey> {
+    glyph_keys(p, 0.0, None)
+        .into_iter()
+        .map(|key| {
+            let style = key.0.splitn(5, '|').nth(4).map(str::to_string);
+            let base: Vec<&str> = key.0.splitn(5, '|').take(4).collect();
+            GlyphKey(format!("{}|{}", base.join("|"), crate::glyphs::unhinted_style(style.as_deref())))
+        })
+        .collect()
+}
+fn glyph_bitmap_of(keys: &[GlyphKey], assets: &AssetStore) -> Result<Option<GlyphBitmap>, TextError> {
     let found = keys.iter().find_map(|key| assets.glyph(key).map(|entry| (entry, legacy_italic(key))));
     let (entry, slanted) = found.ok_or_else(|| TextError(format!("missing shaped glyph {}", keys[0].0)))?;
     let drawn = |w: u32, h: u32| w > 0 && h > 0;
@@ -1842,6 +1863,284 @@ impl TextLayerCache {
 
 /// Prepare ordered premultiplied layers, already laid out in device coordinates.
 /// Glyph atlas misses are explicit errors; callers can retry after loading the requested atlas.
+/// The reach of a text shadow's distance field around a glyph, in text sizes (device px): a glow wider than
+/// this keeps this width (fixtures/shadow-probe-text2.luau: 60.4 px at 150 ppem, 36.4 at 90, 8.5 at 21)
+const TEXT_SHADOW_REACH: f64 = 0.405;
+/// A text shadow's glow at signed distance `d` from the glyph's edge (device px, outside positive):
+/// a smoothstep from the full shadow `width` px inside the edge to nothing `width` px outside
+pub(crate) fn text_shadow_profile(d: f64, width: f64) -> f64 {
+    let t = (0.5 - d / (2.0 * width)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+/// What a glow keeps of its strength when its width passes the field's reach (`over` = width / reach)
+pub(crate) fn text_shadow_gain(over: f64) -> f64 {
+    if over <= 0.0 {
+        return 1.0;
+    }
+    // Measured on a solid block and on a word (shadow-probe-text2 B, shadow-probe-text A): 0.94 at 0.8,
+    // 0.84 at 1.06, 0.72 at 1.32, 0.61 at 1.59, 0.50 at 1.88, 0.32 at 2.63
+    (erf(1.05 / over) * (1.0 - 0.2 * (over - 1.3).max(0.0)).max(0.0)).min(1.0)
+}
+fn erf(x: f64) -> f64 {
+    // Abramowitz and Stegun 7.1.26 (error below 1.5e-7)
+    let t = 1.0 / (1.0 + 0.3275911 * x.abs());
+    let y = 1.0
+        - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592)
+            * t
+            * (-x * x).exp();
+    if x < 0.0 { -y } else { y }
+}
+/// Signed distances (px, outside positive) to the edge of a coverage bitmap (0..255, `w` x `h`), over
+/// the bitmap padded by `pad` px on every side. An edge pixel's coverage places the edge within it.
+fn coverage_distances(coverage: &[f64], w: usize, h: usize, pad: usize) -> Vec<f64> {
+    let (gw, gh) = (w + 2 * pad, h + 2 * pad);
+    let at = |x: i64, y: i64| -> f64 {
+        let (x, y) = (x - pad as i64, y - pad as i64);
+        if x < 0 || y < 0 || x >= w as i64 || y >= h as i64 {
+            0.0
+        } else {
+            coverage[y as usize * w + x as usize] / 255.0
+        }
+    };
+    // Seeds: every pixel on the edge, with the edge's signed offset from its centre
+    let mut offset = vec![f64::NAN; gw * gh];
+    for y in 0..gh as i64 {
+        for x in 0..gw as i64 {
+            let c = at(x, y);
+            let i = y as usize * gw + x as usize;
+            if c > 0.0 && c < 1.0 {
+                offset[i] = 0.5 - c;
+            } else {
+                // (a full pixel beside an empty one: the edge runs between them)
+                let other = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dy)| {
+                    let beside = at(x + dx, y + dy);
+                    (beside <= 0.0 || beside >= 1.0) && (beside >= 0.5) != (c >= 0.5)
+                });
+                if other {
+                    offset[i] = if c >= 0.5 { -0.5 } else { 0.5 };
+                }
+            }
+        }
+    }
+    let mut out = vec![0.0; gw * gh];
+    for inside in [false, true] {
+        let sign = if inside { -1.0 } else { 1.0 };
+        let mut seed: Vec<u32> = vec![u32::MAX; gw * gh];
+        for (i, o) in offset.iter().enumerate() {
+            if !o.is_nan() {
+                seed[i] = i as u32;
+            }
+        }
+        let cost = |x: usize, y: usize, s: u32| -> f64 {
+            if s == u32::MAX {
+                return f64::INFINITY;
+            }
+            let (sx, sy) = ((s as usize % gw) as f64, (s as usize / gw) as f64);
+            (x as f64 - sx).hypot(y as f64 - sy) + sign * offset[s as usize]
+        };
+        for _ in 0..2 {
+            for y in 0..gh {
+                for x in 0..gw {
+                    let i = y * gw + x;
+                    let mut best = cost(x, y, seed[i]);
+                    for (dx, dy) in [(-1i64, 0i64), (0, -1), (-1, -1), (1, -1)] {
+                        let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                        if nx < 0 || ny < 0 || nx >= gw as i64 {
+                            continue;
+                        }
+                        let s = seed[ny as usize * gw + nx as usize];
+                        let c = cost(x, y, s);
+                        if c < best {
+                            best = c;
+                            seed[i] = s;
+                        }
+                    }
+                }
+            }
+            for y in (0..gh).rev() {
+                for x in (0..gw).rev() {
+                    let i = y * gw + x;
+                    let mut best = cost(x, y, seed[i]);
+                    for (dx, dy) in [(1i64, 0i64), (0, 1), (1, 1), (-1, 1)] {
+                        let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                        if nx < 0 || nx >= gw as i64 || ny >= gh as i64 {
+                            continue;
+                        }
+                        let s = seed[ny as usize * gw + nx as usize];
+                        let c = cost(x, y, s);
+                        if c < best {
+                            best = c;
+                            seed[i] = s;
+                        }
+                    }
+                }
+            }
+        }
+        for y in 0..gh {
+            for x in 0..gw {
+                let i = y * gw + x;
+                let covered = at(x as i64, y as i64) >= 0.5;
+                if covered == inside {
+                    let c = cost(x, y, seed[i]);
+                    out[i] = if c.is_finite() { sign * c } else { sign * 1e9 };
+                }
+            }
+        }
+    }
+    out
+}
+/// A UIShadow with Mode = Text (Studio 0.747, fixtures/shadow-probe-text.luau and -text2): the label's
+/// glyphs in the shadow's colour and transparency, whatever the text's own colour, transparency, gradient
+/// and strokes. `width` 0 (BlurRadius 0) is the text's own raster; above 0 each glyph glows by its distance
+/// field (text_shadow_profile), no wider than the field reaches (TEXT_SHADOW_REACH, text_shadow_gain).
+/// The quads are placed like prep_text's; a glow is one unrotated layer.
+pub fn text_shadow(
+    node: &Value,
+    fonts: &Value,
+    assets: &AssetStore,
+    scale: f64,
+    rgb: [f64; 3],
+    opacity: f64,
+    width: f64,
+) -> Result<Vec<TextQuad>, TextError> {
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(TextError("invalid text device scale".into()));
+    }
+    let mut plain = node.clone();
+    plain["gradient"] = Value::Null;
+    plain["strokes"] = Value::Null;
+    plain["selection"] = Value::Null;
+    plain["caret"] = Value::Null;
+    let straight: Vec<Value> = rgb.iter().map(|c| serde_json::json!(c / 255.0)).collect();
+    if let Some(text) = plain["text"].as_object_mut() {
+        text.insert("color".into(), Value::Array(straight));
+        text.insert("transparency".into(), serde_json::json!(0.0));
+        text.remove("stroke");
+        if let Some(runs) = text.get_mut("runs").and_then(Value::as_array_mut) {
+            for run in runs {
+                if let Some(run) = run.as_object_mut() {
+                    for key in ["color", "transparency", "stroke", "mark"] {
+                        run.remove(key);
+                    }
+                }
+            }
+        }
+    }
+    let fade = |quads: Vec<TextQuad>| -> Vec<TextQuad> {
+        if opacity >= 1.0 {
+            return quads;
+        }
+        quads
+            .into_iter()
+            .map(|mut q| {
+                let rgba: Vec<u8> = q.rgba.iter().map(|v| snap(*v as f64 * opacity) as u8).collect();
+                q.rgba = rgba.into();
+                q
+            })
+            .collect()
+    };
+    if width <= 0.0 {
+        return Ok(fade(prep_text(&plain, fonts, assets, scale)?));
+    }
+    // The glow's glyphs: the unhinted outlines at the text's pens (an atlas built before they were
+    // wanted: the text's own bitmaps)
+    let (placed, _) = placements(&plain["text"], fonts, node["matrix"].is_array());
+    let mut glyphs = Vec::new();
+    for p in placed.iter().filter(|p| p.shown) {
+        let bitmap = match glyph_bitmap_of(&unhinted_keys(p), assets) {
+            Ok(bitmap) => bitmap,
+            Err(_) => glyph_bitmap(p, 0.0, None, assets)?,
+        };
+        let Some(bitmap) = bitmap else { continue };
+        if bitmap.layers.is_empty() {
+            glyphs.push(placed_quad(p, bitmap, [0.0; 2], rgb, 255.0, &Value::Null, [0.0; 4], scale));
+        } else {
+            // A colour glyph glows in its own colours, layer by layer (shadow-probe-text: the emoji's
+            // halo is yellow under a red shadow)
+            for layer in bitmap.layers {
+                let own = if layer.foreground { rgb } else { [layer.color[0] as f64, layer.color[1] as f64, layer.color[2] as f64] };
+                glyphs.push(placed_quad(p, layer.bitmap, [0.0; 2], own, 255.0, &Value::Null, [0.0; 4], scale));
+            }
+        }
+    }
+    let Some(layout) = composite_layout(&glyphs)? else {
+        return Ok(Vec::new());
+    };
+    let size = placed
+        .iter()
+        .map(|p| font_size(&fonts[p.font as usize], p.ppem) * p.scale)
+        .fold(0.0, f64::max);
+    let reach = TEXT_SHADOW_REACH * size;
+    let (reach_width, gain) = if reach > 0.0 && width > reach {
+        (reach, text_shadow_gain(width / reach))
+    } else {
+        (width, if reach > 0.0 { text_shadow_gain(width / reach) } else { 1.0 })
+    };
+    let pad = reach_width.ceil() as usize + 1;
+    let (lw, lh) = (layout.width as usize + 2 * pad, layout.height as usize + 2 * pad);
+    if lw.checked_mul(lh).filter(|p| *p <= 64 * 1024 * 1024).is_none() {
+        return Err(TextError("text shadow exceeds allocation limit".into()));
+    }
+    let mut layer = vec![0.0f64; lw * lh * 4];
+    for q in &glyphs {
+        let box_w = (q.bounds[2] - q.bounds[0]) as usize;
+        let (qx, qy, qw, qh) = if q.resampled() {
+            let cover = q.cover();
+            (cover[0], cover[1], (cover[2] - cover[0]) as usize, (cover[3] - cover[1]) as usize)
+        } else {
+            (q.x, q.y, q.w, q.h)
+        };
+        if qw == 0 || qh == 0 {
+            continue;
+        }
+        let mut coverage = vec![0.0; qw * qh];
+        for j in 0..qh {
+            for i in 0..qw {
+                coverage[j * qw + i] = coverage_at(q, i, j, box_w, qh);
+            }
+        }
+        let field = coverage_distances(&coverage, qw, qh, pad);
+        let gw = qw + 2 * pad;
+        let (ox, oy) = ((qx - layout.x) as i64, (qy - layout.y) as i64);
+        for j in 0..qh + 2 * pad {
+            for i in 0..gw {
+                let a = gain * text_shadow_profile(field[j * gw + i], reach_width);
+                if a <= 0.0 {
+                    continue;
+                }
+                let (x, y) = (ox + i as i64, oy + j as i64);
+                if x < 0 || y < 0 || x >= lw as i64 || y >= lh as i64 {
+                    continue;
+                }
+                let k = (y as usize * lw + x as usize) * 4;
+                for c in 0..3 {
+                    layer[k + c] = q.color[c] * a + layer[k + c] * (1.0 - a);
+                }
+                layer[k + 3] = a + layer[k + 3] * (1.0 - a);
+            }
+        }
+    }
+    let mut rgba = vec![0u8; lw * lh * 4];
+    for k in (0..rgba.len()).step_by(4) {
+        let a = snap(layer[k + 3] * opacity * 255.0).clamp(0.0, 255.0);
+        if a > 0.0 {
+            for c in 0..3 {
+                rgba[k + c] = premul(snap(layer[k + c] / layer[k + 3]).min(255.0), a);
+            }
+            rgba[k + 3] = a as u8;
+        }
+    }
+    Ok(vec![image(
+        layout.x - pad as f64,
+        layout.y - pad as f64,
+        lw as f64,
+        lh as f64,
+        lw,
+        lh,
+        rgba,
+        1.0,
+    )])
+}
 pub fn prep_text(
     node: &Value,
     fonts: &Value,
@@ -2229,6 +2528,39 @@ mod tests {
         };
         let layer = composite(&[q.clone(), q]).unwrap();
         assert_eq!(&layer[0].rgba[16..20], &[75, 150, 38, 192]);
+    }
+    /// A text shadow's glow: half strength on the glyph's edge, full one width inside, nothing one width
+    /// outside; weaker once the width passes the field's reach (fixtures/shadow-probe-text2.luau)
+    #[test]
+    fn text_shadow_glow_profile_and_gain() {
+        assert_eq!(text_shadow_profile(0.0, 16.0), 0.5);
+        assert_eq!(text_shadow_profile(-16.0, 16.0), 1.0);
+        assert_eq!(text_shadow_profile(16.0, 16.0), 0.0);
+        assert!((text_shadow_profile(-8.0, 16.0) - 0.84375).abs() < 1e-12);
+        assert!(text_shadow_gain(0.5) > 0.995);
+        for (over, gain) in [(0.8, 0.94), (1.06, 0.84), (1.32, 0.72), (1.59, 0.61), (1.88, 0.50), (2.63, 0.32)] {
+            assert!((text_shadow_gain(over) - gain).abs() < 0.03, "{over}: {}", text_shadow_gain(over));
+        }
+    }
+    /// Distances to a bitmap's edge: half a pixel from the centre of a full edge pixel, less where the
+    /// edge pixel is partly covered
+    #[test]
+    fn coverage_distances_place_the_edge_within_a_pixel() {
+        let d = coverage_distances(&[255.0; 16], 4, 4, 3);
+        let at = |x: usize, y: usize| d[y * 10 + x];
+        assert_eq!(at(0, 4), 2.5);
+        assert_eq!(at(3, 4), -0.5);
+        assert_eq!(at(4, 4), -1.5);
+        assert!((at(0, 0) - (18.0f64.sqrt() - 0.5)).abs() < 1e-9);
+        // The left column a quarter covered: the edge is a quarter pixel into it
+        let mut soft = [255.0; 16];
+        for row in 0..4 {
+            soft[row * 4] = 63.75;
+        }
+        let d = coverage_distances(&soft, 4, 4, 3);
+        assert!((d[4 * 10 + 3] - 0.25).abs() < 1e-9);
+        assert!((d[4 * 10 + 1] - 2.25).abs() < 1e-9);
+        assert!((d[4 * 10 + 4] + 0.75).abs() < 1e-9);
     }
     #[test]
     fn text_takes_the_gradient_at_its_pixel() {

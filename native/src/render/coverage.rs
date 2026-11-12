@@ -298,6 +298,8 @@ pub fn border_stroke_alpha_modes(
     let round = joins != "Miter" && joins != "Bevel";
     let bevel = joins == "Bevel";
     let radii = radii.map(|r| r.max(0.0).min(limit));
+    // (measured on unrotated frames; a rotated frame keeps the ramp)
+    let mixed = !rotated && radii.iter().any(|r| *r != radii[0]);
     let quadrants = radii.map(|r| {
         let sharp = r == 0.0;
         let mut mode = Mode::Smooth;
@@ -443,6 +445,32 @@ pub fn border_stroke_alpha_modes(
                 } else {
                     qx.hypot(qy)
                 };
+                // A frame whose corners differ in radius cuts the hole out of its straight sides by geometry
+                // (pixel centres, top-left rule) and ramps only inside each corner's square: an inner edge
+                // 0.3 px past a pixel centre leaves that pixel empty where equal radii leave it 0.2
+                // (fixtures/stroke-probe-mixed.luau)
+                if mixed
+                    && (qx <= 0.0 || qy <= 0.0)
+                    && x >= x0 + inset
+                    && x < x1 - inset
+                    && y >= y0 + inset
+                    && y < y1 - inset
+                {
+                    continue;
+                }
+                // In the last half pixel of a left corner's square, a pixel centred half a pixel or more
+                // past the straight inner edges is empty (the arc's ramp would leave it 1 to 5 %); nearer
+                // the edge it holds the ramp (0.25 px past: 26 %)
+                if mixed
+                    && left
+                    && (qx <= 0.5 || qy <= 0.5)
+                    && x >= x0 + inset + 0.5
+                    && y >= y0 + inset + 0.5
+                    && x <= x1 - inset - 0.5
+                    && y <= y1 - inset - 0.5
+                {
+                    continue;
+                }
                 // (one device pixel wide at any scale: Studio 0.747, notes/strokes.md Round 8)
                 let mut a = (distance - (q.r - inset) + 0.5).clamp(0.0, 1.0);
                 if round {
@@ -451,12 +479,15 @@ pub fn border_stroke_alpha_modes(
                 ring[(j * gw + i) as usize] = 1;
                 a
             } else {
-                let mut hole = if position == "Inner" && q.sharp {
+                // (a sharp corner of a frame with other corners rounded keeps the top-left rule:
+                // fixtures/stroke-modes.luau S10_8)
+                let flipped = position == "Inner" && q.sharp && !mixed;
+                let mut hole = if flipped {
                     x > x0 + inset && x <= x1 - inset && y > y0 + inset && y <= y1 - inset
                 } else {
                     x >= x0 + inset && x < x1 - inset && y >= y0 + inset && y < y1 - inset
                 };
-                if !(position == "Inner" && q.sharp) && hole && bevel && position == "Inner" {
+                if !flipped && hole && bevel && position == "Inner" {
                     let s = u + v - 3.0 * inset;
                     hole = s > 0.0 || (s == 0.0 && left);
                 }
@@ -490,10 +521,19 @@ pub struct ShadowField {
     w: f64,
     h: f64,
     radius: f64,
+    /// The straight pieces of a quarter arc; 0: the circle itself
+    segments: u32,
 }
 impl ShadowField {
     pub fn new(w: f64, h: f64, radius: f64) -> Self {
-        Self { w, h, radius }
+        Self { w, h, radius, segments: 0 }
+    }
+    /// The shape as Studio's mesh has it: a corner's arc is 8 straight pieces, 32 above a radius of 50
+    /// logical px (shadow_mesh), so a pixel centre between the chord and the circle is outside
+    /// (fixtures/shadows.luau, the hard shadow of a frame with radius 16: 2 px a corner).
+    pub fn polygonal(w: f64, h: f64, radius: f64, scale: f64) -> Self {
+        let r = radius.min(w / 2.0).min(h / 2.0);
+        Self { w, h, radius, segments: if r / scale > 50.0 { 32 } else { 8 } }
     }
     pub fn at(self, x: f64, y: f64) -> f64 {
         let hw = self.w / 2.0;
@@ -505,8 +545,20 @@ impl ShadowField {
         if r > 0.0 {
             let qx = x.abs() - (hw - r);
             let qy = y.abs() - (hh - r);
-            if qx > 0.0 && qy > 0.0 && qx * qx + qy * qy > r * r {
-                return 0.0;
+            if qx > 0.0 && qy > 0.0 {
+                if qx * qx + qy * qy > r * r {
+                    return 0.0;
+                }
+                if self.segments > 0 {
+                    let step = std::f64::consts::FRAC_PI_2 / self.segments as f64;
+                    let j = ((qy.atan2(qx) / step).floor() as u32).min(self.segments - 1) as f64;
+                    let (ay, ax) = (j * step).sin_cos();
+                    let (by, bx) = ((j + 1.0) * step).sin_cos();
+                    // (inside the chord from a to b: on the centre's side of it)
+                    if (bx - ax) * (qy - r * ay) - (by - ay) * (qx - r * ax) < 0.0 {
+                        return 0.0;
+                    }
+                }
             }
         }
         1.0
@@ -557,6 +609,20 @@ pub fn shadow_alpha8(d: f64, va: u32) -> u8 {
     let w = ((c - i as f64) * 256.0 + 0.5).floor() as u64;
     let n = (t[i] as u64 * (256 - w) + t[i + 1] as u64 * w) * va as u64;
     let t12 = n * 4096 / 16_646_400;
+    ((255 * t12 + 2048) >> 12) as u8
+}
+
+/// The alpha byte of a UIShadow the frame's mask cuts (an Inset one, or one without ShowBehindParent) at the
+/// profile coordinate `d` where the mask keeps `keep` of it: the profile times the vertex alpha and what is
+/// kept, cut as shadow_alpha8 cuts it. An inner shadow passes -D of its hole (fixtures/shadow-probe-inset.luau:
+/// every pixel of a sharp frame's shadow, where 1 - profile(D) is a level off on most).
+pub fn shadow_cut_alpha8(d: f64, va: u32, keep: f64) -> u8 {
+    let t = shadow_profile();
+    let c = ((d.clamp(-3.0, 3.0) + 3.0) / 6.0 * 256.0 - 0.5).clamp(0.0, 255.0);
+    let i = (c.floor() as usize).min(254);
+    let w = ((c - i as f64) * 256.0 + 0.5).floor() as u64;
+    let n = (t[i] as u64 * (256 - w) + t[i + 1] as u64 * w) * va as u64;
+    let t12 = (n as f64 * keep.clamp(0.0, 1.0) * 4096.0 / 16_646_400.0 + 1e-9).floor() as u64;
     ((255 * t12 + 2048) >> 12) as u8
 }
 
@@ -782,7 +848,7 @@ mod tests {
             693515872,
         ];
         let strokes = [
-            3433177817u32,
+            2436972246u32,
             3002565937,
             1734602426,
             3430542588,
@@ -790,7 +856,7 @@ mod tests {
             1339572075,
             1819584623,
             53136845,
-            2115426509,
+            1574060111,
             2514612688,
             117468618,
             1074766995,
@@ -798,11 +864,11 @@ mod tests {
             2562567434,
             1685356165,
             3606728384,
-            2668461141,
+            4211294253,
             2982063452,
             3302788288,
             1214368773,
-            713195895,
+            1153362503,
             2377840651,
             2905977538,
             162110940,
@@ -873,6 +939,62 @@ mod tests {
         assert_eq!(f.at(-5.0, -4.0), 1.0);
         assert_eq!(f.at(5.0, 0.0), 0.0);
         assert_eq!(f.at(0.0, 4.0), 0.0);
+    }
+    /// A hard shadow's arc is the mesh's 8 chords: a pixel centre between a chord and the circle is outside
+    #[test]
+    fn hard_shadow_arcs_are_chords() {
+        let angle = std::f64::consts::FRAC_PI_2 / 16.0;
+        let (x, y) = (34.0 + 15.96 * angle.cos(), 34.0 + 15.96 * angle.sin());
+        assert_eq!(ShadowField::new(100.0, 100.0, 16.0).at(x, y), 1.0);
+        assert_eq!(ShadowField::polygonal(100.0, 100.0, 16.0, 1.0).at(x, y), 0.0);
+        assert_eq!(ShadowField::polygonal(100.0, 100.0, 16.0, 1.0).at(34.0 + 15.9 * angle.cos(), 34.0 + 15.9 * angle.sin()), 1.0);
+    }
+    /// A shadow the frame's mask cuts: the profile's ends are nothing and the vertex alpha, scaled by what
+    /// the mask keeps
+    #[test]
+    fn cut_shadow_alpha_scales_with_the_mask() {
+        let ends = [shadow_cut_alpha8(-3.0, 255, 1.0), shadow_cut_alpha8(3.0, 255, 1.0)];
+        assert_eq!(*ends.iter().min().unwrap(), 0);
+        assert!(*ends.iter().max().unwrap() >= 254);
+        for d in [-3.0, -1.0, 0.0, 0.7, 3.0] {
+            assert_eq!(shadow_cut_alpha8(d, 255, 0.0), 0);
+            let (full, most) = (shadow_cut_alpha8(d, 255, 1.0) as f64, shadow_cut_alpha8(d, 255, 0.84375) as f64);
+            assert!((most - full * 0.84375).abs() <= 1.0, "d {d}: {most} of {full}");
+            assert!((shadow_cut_alpha8(d, 128, 1.0) as f64 - full * 128.0 / 255.0).abs() <= 1.0);
+        }
+    }
+    /// A frame with different corner radii cuts the hole of its stroke by geometry on its straight sides
+    /// (fixtures/stroke-probe-mixed.luau): an inner edge 0.3 px past a pixel centre leaves the pixel empty,
+    /// where equal radii ramp to 0.2; and the last pixel of a left corner's square, half a pixel past the
+    /// straight inner edge, is empty where a right corner's keeps the arc's ramp
+    #[test]
+    fn mixed_radii_cut_the_stroke_hole_by_geometry() {
+        let stroke = |radii: [f64; 4], thickness: f64, position: &str| {
+            border_stroke_alpha(
+                Rect::new(0.0, 0.0, 90.0, 60.0),
+                radii,
+                thickness,
+                position,
+                "Round",
+                [-3, -3],
+                [96, 66],
+                super::super::geometry::IDENTITY,
+                false,
+                1.5,
+            )
+        };
+        let at = |a: &[f32], x: usize, y: usize| a[(y + 3) * 96 + x + 3];
+        let equal = stroke([12.0; 4], 1.2, "Inner");
+        let mixed = stroke([12.0, 0.0, 4.5, 18.0], 1.2, "Inner");
+        assert!((at(&equal, 40, 1) - 0.2).abs() < 1e-6);
+        assert_eq!(at(&mixed, 40, 1), 0.0);
+        assert_eq!(at(&mixed, 40, 0), 1.0);
+        let outer = stroke([12.0, 12.0, 0.0, 0.0], 1.5, "Outer");
+        assert_eq!(at(&outer, 11, 0), 0.0);
+        assert!(at(&outer, 78, 0) > 0.005 && at(&outer, 78, 0) < 0.02);
+        // On the straight inner edge itself the arc's ramp stays (a Center stroke of 9 px: 4.5 in)
+        let center = stroke([12.0, 12.0, 0.0, 0.0], 9.0, "Center");
+        assert!((at(&center, 11, 4) - 0.5167).abs() < 0.001);
     }
     #[test]
     fn inner_stroke_has_a_hole() {

@@ -315,6 +315,24 @@ pub(crate) fn text_quarter(text: &Value, x: Option<&Value>, rotated: bool) -> Op
     Some((((x - x.floor()) * 4.0 + 0.5).floor() as u8) & 3)
 }
 
+/// The style token of a glyph rasterized without hinting: the glyphs under a text shadow's glow (a
+/// UIShadow with Mode = Text and a BlurRadius), which Studio draws from the unhinted outline
+pub const UNHINTED: &str = "u";
+/// `style` with the unhinted token
+pub fn unhinted_style(style: Option<&str>) -> String {
+    match style.filter(|style| !style.is_empty()) {
+        Some(style) => format!("{style}+{UNHINTED}"),
+        None => UNHINTED.to_string(),
+    }
+}
+/// Whether a node draws a text shadow's glow (render/text.rs text_shadow)
+pub fn text_glow(node: &Value) -> bool {
+    as_array(node.get("shadows")).iter().any(|shadow| {
+        shadow.get("mode").and_then(Value::as_str) == Some("Text")
+            && shadow.get("blur").and_then(Value::as_f64).is_some_and(|blur| blur > 0.0)
+    })
+}
+
 /// cli/rur.mjs textGlyphStyle
 fn text_glyph_style(join: Option<&str>, bold: f64, quarter: Option<u8>) -> Option<String> {
     let bold = (bold != 0.0 && !bold.is_nan()).then(|| format!("b{}", js_number_string(bold)));
@@ -354,6 +372,7 @@ pub fn atlas_entries(scene: &Value) -> Vec<AtlasEntry> {
             .filter(|stroke| stroke.get("mode").and_then(Value::as_str) == Some("Contextual"))
             .collect();
         let runs = as_array(text.get("runs"));
+        let glow = text_glow(node);
         for line in as_array(text.get("lines")) {
             for row in as_array(line.get("glyphs")) {
                 let Some(row) = row.as_array() else {
@@ -386,6 +405,16 @@ pub fn atlas_entries(scene: &Value) -> Vec<AtlasEntry> {
                     font_index,
                     style: text_glyph_style(None, bold, quarter),
                 });
+                if glow {
+                    want(AtlasEntry {
+                        font_file: file.to_string(),
+                        ppem,
+                        glyph,
+                        stroke_px: 0.0,
+                        font_index,
+                        style: Some(unhinted_style(text_glyph_style(None, bold, quarter).as_deref())),
+                    });
+                }
                 let tag = run.and_then(|run| run.get("stroke")).filter(|tag| truthy(Some(tag)));
                 let chosen: Vec<&Value> = match tag {
                     Some(tag) => vec![tag],
@@ -612,6 +641,7 @@ impl Rasterizer {
             }
         }
         let (join, bold, italic, quarter) = parse_style(style);
+        let unhinted = style.is_some_and(|style| style.split('+').any(|token| token == UNHINTED));
         let font = self.font(file)?;
         let mut out = RurGlyph { width: 0, rows: 0, left: 0, top: 0, buffer: std::ptr::null_mut() };
         let status = unsafe {
@@ -623,7 +653,7 @@ impl Rasterizer {
                 join,
                 bold.clamp(c_long::MIN as i64, c_long::MAX as i64) as c_long,
                 c_int::from(italic),
-                c_int::from(quarter.is_some()),
+                if unhinted { 2 } else { c_int::from(quarter.is_some()) },
                 c_long::from(quarter.unwrap_or(0)) * 16,
                 &mut out,
             )
@@ -1038,6 +1068,24 @@ mod tests {
         assert!(text_stroke_radius(f64::NAN, 1.5).is_nan());
     }
 
+    /// A label under a text shadow with a blur also wants each glyph unhinted (the glow's outlines); a
+    /// hard text shadow and a frame shadow want nothing more
+    #[test]
+    fn a_text_glow_wants_unhinted_glyphs() {
+        let scene = |shadow: Value| {
+            json!({
+                "viewport": {"scale": 1.5},
+                "fonts": [{"file": "a.ttf", "weight": 400, "ascender": 900, "descender": -300, "unitsPerEm": 1000}],
+                "nodes": [{"text": {"subpixel": 4, "lines": [{"glyphs": [[0, 5, 0.25, 18]]}]}, "shadows": [shadow]}]
+            })
+        };
+        let keys = |shadow: Value| atlas_entries(&scene(shadow)).iter().map(AtlasEntry::key).collect::<Vec<String>>();
+        assert_eq!(keys(json!({"mode": "Text", "blur": 4})), ["0|18|5|0|q1", "0|18|5|0|q1+u"]);
+        assert_eq!(keys(json!({"mode": "Text", "blur": 0})), ["0|18|5|0|q1"]);
+        assert_eq!(keys(json!({"mode": "Shape", "blur": 4})), ["0|18|5|0|q1"]);
+        assert_eq!(unhinted_style(None), "u");
+        assert_eq!(unhinted_style(Some("b42+q3")), "b42+q3+u");
+    }
     #[test]
     fn entries_keep_map_order_and_variants() {
         let scene = json!({
