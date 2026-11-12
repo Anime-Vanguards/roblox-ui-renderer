@@ -48,6 +48,12 @@ fn check_layer(actual: Option<ImageLayer>, expected: &Value, index: usize, mode:
         ],
         "{mode} geometry {index}"
     );
+    if let Some(out) = std::env::var_os("RUR_IMAGE_GOLDEN_FIELDS") {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(out).expect("the list");
+        writeln!(file, "{mode} {index} 0 {} {}", expected["hash"].as_str().unwrap(), hash(&actual.rgba)).unwrap();
+        return;
+    }
     assert_eq!(
         hash(&actual.rgba),
         expected["hash"].as_str().unwrap(),
@@ -102,6 +108,15 @@ fn canonical_js_image_goldens() {
                     array::<3>(&c["image"]["color"]).map(|v| quantize(v) as f64),
                     alpha8(1. - f(&c["image"]["transparency"])) as f64,
                 );
+                // RUR_IMAGE_GOLDEN_FIELDS=<file> lists the hashes of the gradient fields and of the drawn
+                // pixels as they are now (kind, case, quad, old, new per line) instead of comparing: for
+                // re-recording them after the gradient's shading changed
+                if let Some(out) = std::env::var_os("RUR_IMAGE_GOLDEN_FIELDS") {
+                    use std::io::Write;
+                    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(out).expect("the list");
+                    writeln!(file, "vertex {i} {j} {} {}", hashes[j].as_str().unwrap(), float_hash(&vertices)).unwrap();
+                    continue;
+                }
                 assert_eq!(
                     float_hash(&vertices),
                     hashes[j].as_str().unwrap(),

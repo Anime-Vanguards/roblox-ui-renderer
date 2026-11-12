@@ -1,25 +1,9 @@
-//! Canonical UIGradient vertex triangulation and float32 interpolation.
+//! UIGradient: the gradient's parameter at a pixel, its colours between the keypoints and the dither
+//! (notes/gradients.md).
 use super::geometry::{array, component, f32_round as f, gpu8, number, Rect};
+use serde::Serialize;
 use serde_json::Value;
 
-pub fn gradient_plane(g: &Value, r: [f64; 4]) -> [f64; 3] {
-    let angle = number(&g["rotation"], 0.) * std::f64::consts::PI / 180.;
-    let dy = super::trig::sin(angle);
-    let dx = super::trig::cos(angle);
-    let cx = f(r[0] + f(r[2] / 2.) + f(f(component(&g["offset"], 0, 0.)) * r[2]));
-    let cy = f(r[1] + f(r[3] / 2.) + f(f(component(&g["offset"], 1, 0.)) * r[3]));
-    let span = (if dx.abs() > 1e-9 {
-        r[2] / dx.abs()
-    } else {
-        f64::INFINITY
-    })
-    .min(if dy.abs() > 1e-9 {
-        r[3] / dy.abs()
-    } else {
-        f64::INFINITY
-    });
-    [dx / span, dy / span, -(cx * dx + cy * dy) / span + 0.5]
-}
 fn sequence(keys: &[Vec<f64>], t: f64, n: usize, default: f64) -> Vec<f64> {
     if keys.is_empty() {
         return vec![default; n];
@@ -44,32 +28,6 @@ fn sequence(keys: &[Vec<f64>], t: f64, n: usize, default: f64) -> Vec<f64> {
     }
     (0..n).map(|i| val(keys.last().unwrap(), i)).collect()
 }
-fn clip(poly: Vec<[f64; 2]>, p: [f64; 3], keep: f64) -> Vec<[f64; 2]> {
-    let mut out = Vec::new();
-    let mut enter = None;
-    for i in 0..poly.len() {
-        let a = poly[i];
-        let b = poly[(i + 1) % poly.len()];
-        let fa = keep * (p[0] * a[0] + p[1] * a[1] + p[2]);
-        let fb = keep * (p[0] * b[0] + p[1] * b[1] + p[2]);
-        if fa >= -1e-9 {
-            out.push(a)
-        }
-        if (fa >= -1e-9) != (fb >= -1e-9) {
-            let s = fa / (fa - fb);
-            if fb >= -1e-9 {
-                enter = Some(out.len())
-            }
-            out.push([a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s]);
-        }
-    }
-    if let Some(n) = enter {
-        if n > 0 {
-            out.rotate_left(n)
-        }
-    }
-    out
-}
 pub fn gradient_vertex_field(
     g: &Value,
     raw: [f64; 4],
@@ -79,9 +37,8 @@ pub fn gradient_vertex_field(
 ) -> Vec<f32> {
     gradient_vertex_field_quad(g, raw, bounds, colour, alpha, bounds)
 }
-/// The per-vertex UIGradient field at the pixels `bounds` of the quad `quad` (device px). The keypoint cuts and
-/// the triangulation come from the whole quad, so a crop (a clip, rows scrolled out) only limits which pixels
-/// are evaluated, never how they are shaded.
+/// The UIGradient field at the pixels `bounds` (device px). A crop (a clip, rows scrolled out) only limits
+/// which pixels are evaluated, never how they are shaded.
 pub fn gradient_vertex_field_quad(
     g: &Value,
     raw: [f64; 4],
@@ -93,13 +50,69 @@ pub fn gradient_vertex_field_quad(
     gradient_mesh(g, raw, colour, alpha, quad).field(bounds)
 }
 
-/// A UIGradient triangulated over a quad: the triangles (device px, after the 1e-6 vertex grid) and their
-/// vertex values (colour 0-255, alpha 0-alpha), degenerate triangles dropped. [`GradientMesh::field`]
-/// shades pixels from these alone, through differences of vertex and pixel coordinates.
+/// How the gradient's parameter runs over its rect (UIGradient.Type)
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+enum Kind {
+    Linear,
+    Radial,
+    Conical,
+}
+
+/// What lies beyond the gradient's ends (UIGradient.TileMode)
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+enum Tile {
+    Clamp,
+    Repeat,
+    Mirror,
+}
+
+/// Keypoints closer together than this are drawn from a table of [`TABLE`] entries, not from the keypoints
+const CLOSE: f64 = 1. / 256.;
+/// The entries of that table, from one end of the part of the gradient its rect shows to the other
+const TABLE: usize = 512;
+/// How far past 1 the last keypoint of an unevenly spaced list sits
+const LAST: f64 = 1. / 2048.;
+/// The ordered dither added before a colour is cut to 8 bits, by device pixel (row y mod 4, column x mod 4)
+const DITHER: [[f64; 4]; 4] = [
+    [0. / 16., 8. / 16., 2. / 16., 10. / 16.],
+    [12. / 16., 4. / 16., 14. / 16., 6. / 16.],
+    [3. / 16., 11. / 16., 1. / 16., 9. / 16.],
+    [15. / 16., 7. / 16., 13. / 16., 5. / 16.],
+];
+
+/// A UIGradient over a rect as Studio 0.747 draws it (notes/gradients.md): the parameter t of a pixel from
+/// its place relative to the rect, the colours between the keypoints interpolated in squared space, and the
+/// dither. [`GradientMesh::field`] shades pixels from these alone, through differences of rect and pixel
+/// coordinates.
 #[derive(Clone, Debug)]
 pub struct GradientMesh {
-    triangles: Vec<[[f64; 2]; 3]>,
-    values: Vec<[[f64; 4]; 3]>,
+    /// The rect's origin (device px); everything else is relative to it
+    origin: [f64; 2],
+    form: Form,
+}
+
+/// A gradient without its place: equal forms shade equal pixels at equal places relative to their origins
+/// and to the dither's 4 px grid
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct Form {
+    kind: Kind,
+    tile: Tile,
+    /// The centre relative to the rect's origin, None when the rect has no area
+    centre: Option<[f64; 2]>,
+    /// A rect without area: the x of its middle, relative to its origin. t is 0 left of it and 1 from it on,
+    /// whatever the rotation (fixtures/text-gradient-degenerate.luau: text in a box 0 px high or wide)
+    middle: f64,
+    /// Linear: the unit direction over the device px t spans from 0 to 1; radial: 1 / that radius
+    slope: [f64; 2],
+    /// Conical: the rotation in turns and 1 / min(Scale, 1)
+    turn: [f64; 2],
+    /// The keypoints of colour and transparency merged: t, the squared colour (0-1) and the opacity (0-1)
+    knots: Vec<[f64; 5]>,
+    /// The table of keypoints too close to draw apart: the t of its first and last entry and the entries
+    table: Option<(f64, f64, Vec<[f64; 4]>)>,
+    /// The colour the keypoints multiply (0-255) and the opacity's scale
+    colour: [f64; 3],
+    alpha: f64,
 }
 
 /// `v - origin` when it is exact (TwoSum: no rounding error), else None
@@ -116,36 +129,115 @@ pub enum Profile {
     Column(Vec<f32>),
 }
 
-/// The mesh relative to a whole-pixel origin (GradientMesh::local)
-pub type LocalMesh<'a> = (Vec<[[f64; 2]; 3]>, &'a [[[f64; 4]; 3]]);
+/// The gradient relative to a whole-pixel origin (GradientMesh::local)
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LocalMesh<'a> {
+    origin: [f64; 2],
+    dither: [i64; 2],
+    form: &'a Form,
+}
+
+impl Form {
+    /// t at the pixel centre `p`, relative to the rect's origin
+    fn parameter(&self, p: [f64; 2]) -> f64 {
+        let Some(centre) = self.centre else {
+            return if p[0] >= self.middle { 1. } else { 0. };
+        };
+        let (x, y) = (p[0] - centre[0], p[1] - centre[1]);
+        match self.kind {
+            Kind::Linear => x * self.slope[0] + y * self.slope[1] + 0.5,
+            Kind::Radial => (x * x + y * y).sqrt() * self.slope[0],
+            Kind::Conical => (y.atan2(x) / std::f64::consts::TAU - self.turn[0]).rem_euclid(1.) * self.turn[1],
+        }
+    }
+    /// The squared colour and the opacity at t
+    fn value(&self, t: f64) -> [f64; 4] {
+        let t = match self.tile {
+            Tile::Clamp => t.clamp(0., 1.),
+            Tile::Repeat => t - t.floor(),
+            Tile::Mirror => {
+                let m = t.rem_euclid(2.);
+                if m > 1. {
+                    2. - m
+                } else {
+                    m
+                }
+            }
+        };
+        if let Some((lo, hi, entries)) = &self.table {
+            let u = ((t - lo) / (hi - lo) * (entries.len() - 1) as f64).clamp(0., (entries.len() - 1) as f64);
+            let i = (u.floor() as usize).min(entries.len() - 2);
+            let s = u - i as f64;
+            let (a, b) = (entries[i], entries[i + 1]);
+            return std::array::from_fn(|c| a[c] + (b[c] - a[c]) * s);
+        }
+        knot_value(&self.knots, t)
+    }
+    /// The field's RGBA at the device pixel (`px`, `py`), whose centre is `p` relative to the rect's origin
+    fn shade(&self, p: [f64; 2], px: i64, py: i64) -> [f32; 4] {
+        let value = self.value(self.parameter(p));
+        let dither = DITHER[py.rem_euclid(4) as usize][px.rem_euclid(4) as usize];
+        let channel = |c: usize| (value[c].max(0.).sqrt() * self.colour[c] + dither).floor().clamp(0., 255.) as f32;
+        [channel(0), channel(1), channel(2), (value[3] * self.alpha) as f32]
+    }
+}
+
+/// The piecewise-linear value of `knots` (t, then four values) at t, held beyond its ends
+fn knot_value(knots: &[[f64; 5]], t: f64) -> [f64; 4] {
+    let tail = |k: &[f64; 5]| [k[1], k[2], k[3], k[4]];
+    let (Some(first), Some(last)) = (knots.first(), knots.last()) else {
+        return [1.; 4];
+    };
+    if t <= first[0] {
+        return tail(first);
+    }
+    for pair in knots.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        if t <= b[0] {
+            let s = if b[0] > a[0] { (t - a[0]) / (b[0] - a[0]) } else { 1. };
+            return std::array::from_fn(|c| a[c + 1] + (b[c + 1] - a[c + 1]) * s);
+        }
+    }
+    tail(last)
+}
 
 impl GradientMesh {
-    /// The mesh relative to the whole-pixel `origin`: vertex coordinates minus the origin (exact) and the
-    /// vertex values. Two meshes with equal local forms shade equal pixels at the same place relative to
-    /// their origins (field() computes only differences of coordinates, each exact, so each operation rounds
-    /// the same real number): a layer rasterized from one is the other's, moved by whole pixels. None when a
-    /// coordinate minus the origin is inexact (or the origin is not whole).
+    /// The gradient relative to the whole-pixel `origin`: its rect's origin minus `origin` (exact), the
+    /// origin's place on the dither's grid and the gradient's form. Two gradients with equal local forms
+    /// shade equal pixels at the same place relative to their origins (field() computes only differences of
+    /// coordinates, each exact, so each operation rounds the same real number): a layer rasterized from one
+    /// is the other's, moved by whole pixels. None when a coordinate minus the origin is inexact (or the
+    /// origin is not whole).
     pub fn local(&self, origin: [f64; 2]) -> Option<LocalMesh<'_>> {
         if origin.iter().any(|v| v.fract() != 0.0 || !v.is_finite()) {
             return None;
         }
-        let triangles = self
-            .triangles
-            .iter()
-            .map(|triangle| {
-                let mut local = [[0.0; 2]; 3];
-                for (point, out) in triangle.iter().zip(local.iter_mut()) {
-                    *out = [
-                        exact_difference(point[0], origin[0])?,
-                        exact_difference(point[1], origin[1])?,
-                    ];
-                }
-                Some(local)
-            })
-            .collect::<Option<Vec<_>>>()?;
-        Some((triangles, &self.values))
+        Some(LocalMesh {
+            origin: [exact_difference(self.origin[0], origin[0])?, exact_difference(self.origin[1], origin[1])?],
+            dither: [(origin[0] as i64).rem_euclid(4), (origin[1] as i64).rem_euclid(4)],
+            form: &self.form,
+        })
     }
-    /// The interpolated field (RGBA per pixel, row-major) at the pixels `bounds` (whole device px)
+    /// The field's RGBA at the device position `p` (a pixel centre, or the place a resampled texel is drawn),
+    /// dithered by the pixel `p` is in
+    pub fn at(&self, p: [f64; 2]) -> [f64; 4] {
+        let local = [p[0] - self.origin[0], p[1] - self.origin[1]];
+        self.form.shade(local, p[0].floor() as i64, p[1].floor() as i64).map(f64::from)
+    }
+    /// Everything the field depends on, as bits (a cache key)
+    pub fn bits(&self) -> Vec<u64> {
+        let form = &self.form;
+        let mut bits = vec![form.kind as u64, form.tile as u64, form.centre.is_some() as u64, form.middle.to_bits()];
+        let numbers = self.origin.iter().chain(form.centre.iter().flatten()).chain(&form.slope).chain(&form.turn).chain(&form.colour);
+        bits.extend(numbers.chain([&form.alpha]).chain(form.knots.iter().flatten()).map(|v| v.to_bits()));
+        if let Some((lo, hi, entries)) = &form.table {
+            bits.extend([lo.to_bits(), hi.to_bits()]);
+            bits.extend(entries.iter().flatten().map(|v| v.to_bits()));
+        }
+        bits
+    }
+    /// The field (RGBA per pixel, row-major: the colour as whole levels 0-255 after the dither, the opacity
+    /// 0-alpha) at the pixels `bounds` (whole device px)
     pub fn field(&self, bounds: [f64; 4]) -> Vec<f32> {
         self.field_where(bounds, |_| true)
     }
@@ -159,148 +251,60 @@ impl GradientMesh {
         if w == 0 || h == 0 {
             return field;
         }
-        // A field varying along one axis only is one row (column) repeated
-        if let Some(profile) = self.profile(bounds) {
-            match &profile {
-                Profile::Row(row) => {
-                    for out in field.chunks_exact_mut(w * 4) {
-                        out.copy_from_slice(row);
-                    }
-                }
-                Profile::Column(column) => {
-                    for (out, value) in field.chunks_exact_mut(w * 4).zip(column.chunks_exact(4)) {
-                        for pixel in out.chunks_exact_mut(4) {
-                            pixel.copy_from_slice(value);
-                        }
-                    }
-                }
-            }
-            for (k, pixel) in field.chunks_exact_mut(4).enumerate() {
-                if !keep(k) {
-                    pixel.fill(0.);
-                }
-            }
-            return field;
-        }
-        // Rows are independent (a pixel takes the first triangle covering it, in the same order in
-        // every band): a large field shades bands of rows in parallel
+        // Rows are independent: a large field shades bands of rows in parallel
         if super::sampling::parallel_rows(w * h) {
             use rayon::prelude::*;
             let band = (super::sampling::PARALLEL_PIXELS / w).max(1);
             field.par_chunks_mut(band * w * 4).enumerate().for_each(|(i, rows)| {
-                let top = y0 + (i * band) as f64;
-                self.field_rows(rows, [x0, top, x1, top + (rows.len() / (w * 4)) as f64], w, i * band * w, &keep);
+                self.field_rows(rows, [x0, y0 + (i * band) as f64], w, i * band * w, &keep);
             });
         } else {
-            self.field_rows(&mut field, bounds, w, 0, &keep);
+            self.field_rows(&mut field, [x0, y0], w, 0, &keep);
         }
         field
     }
-    /// The colour (RGB) every pixel of field() takes when all the vertices share it (a gradient of
-    /// transparency alone): the interpolation of equal whole values rounds back to them exactly in f32
+    /// The colour (RGB) every pixel of field() takes when it is one whole colour throughout (a gradient of
+    /// transparency alone over a whole colour: the dither leaves whole levels alone)
     pub fn uniform_colour(&self) -> Option<[f32; 3]> {
-        let first = self.values.first()?[0];
-        self.values
-            .iter()
-            .flatten()
-            .all(|value| value[..3] == first[..3])
-            .then(|| [first[0] as f32, first[1] as f32, first[2] as f32])
+        let form = &self.form;
+        let first = form.table.as_ref().map_or_else(|| form.knots.first().map(|k| [k[1], k[2], k[3]]), |t| t.2.first().map(|e| [e[0], e[1], e[2]]))?;
+        let same = |v: [f64; 3]| v == first;
+        let all = match &form.table {
+            Some((.., entries)) => entries.iter().all(|e| same([e[0], e[1], e[2]])),
+            None => form.knots.iter().all(|k| same([k[1], k[2], k[3]])),
+        };
+        let levels: [f64; 3] = std::array::from_fn(|c| first[c].max(0.).sqrt() * form.colour[c]);
+        (all && levels.iter().all(|v| v.fract() < 1. / 16. && (0. ..=255.).contains(v))).then(|| levels.map(|v| v.floor() as f32))
     }
-    /// The field at the pixels `bounds` as one row every row equals, or one column every column equals, when
-    /// it varies along one axis only (a UIGradient at 0 / 90 / 180 / 270 degrees on a rect): interpolated
-    /// once, exactly as field() interpolates the first row (column), which the rest repeat
-    pub fn profile(&self, bounds: [f64; 4]) -> Option<Profile> {
-        let [x0, y0, x1, y1] = bounds;
-        let w = (x1 - x0).max(0.) as usize;
-        let h = (y1 - y0).max(0.) as usize;
-        if h > 1 && self.varies_along(0, [y0 + 0.5, y1 - 0.5]) {
-            let mut row = vec![0.; w * 4];
-            self.field_rows(&mut row, [x0, y0, x1, y0 + 1.], w, 0, &|_| true);
-            return Some(Profile::Row(row));
-        }
-        if w > 1 && self.varies_along(1, [x0 + 0.5, x1 - 0.5]) {
-            let mut column = vec![0.; h * 4];
-            self.field_rows(&mut column, [x0, y0, x0 + 1., y1], 1, 0, &|_| true);
-            return Some(Profile::Column(column));
-        }
+    /// A field varying along one axis as its one row or column. The dither varies along both, so no field is
+    /// one row or column repeated: always None.
+    pub fn profile(&self, _bounds: [f64; 4]) -> Option<Profile> {
         None
     }
-    /// Whether the field varies along coordinate `axis` alone over pixel centres `span` (the other coordinate's
-    /// range): every triangle is half an axis-aligned rect spanning `span` across, its two vertices on one
-    /// line along `axis` valued alike, every coordinate along `axis` has one value throughout, and the
-    /// triangles' extents along `axis` are equal or disjoint (each pixel is interpolated between the same
-    /// two values on every line across)
-    fn varies_along(&self, axis: usize, span: [f64; 2]) -> bool {
-        let across = 1 - axis;
-        let mut knots: Vec<(f64, [f64; 4])> = Vec::new();
-        let mut extents: Vec<[f64; 2]> = Vec::new();
-        for (triangle, values) in self.triangles.iter().zip(&self.values) {
-            let at = triangle.map(|point| point[axis]);
-            let (low, high) = (at[0].min(at[1]).min(at[2]), at[0].max(at[1]).max(at[2]));
-            if low == high || at.iter().any(|v| *v != low && *v != high) {
-                return false;
+    /// field_where() over rows from the pixel `start` into `field` (`w` pixels a row, the first `offset` in
+    /// the whole)
+    fn field_rows(&self, field: &mut [f32], start: [f64; 2], w: usize, offset: usize, keep: &(impl Fn(usize) -> bool + Sync)) {
+        for (k, pixel) in field.chunks_exact_mut(4).enumerate() {
+            if !keep(offset + k) {
+                continue;
             }
-            let side = triangle.map(|point| point[across]);
-            if side[0].min(side[1]).min(side[2]) > span[0] || side[0].max(side[1]).max(side[2]) < span[1] {
-                return false;
-            }
-            for (v, value) in at.iter().zip(values) {
-                match knots.iter().find(|knot| knot.0 == *v) {
-                    Some(knot) if knot.1 != *value => return false,
-                    Some(_) => {}
-                    None => knots.push((*v, *value)),
-                }
-            }
-            extents.push([low, high]);
-        }
-        !extents.is_empty()
-            && extents.iter().all(|a| extents.iter().all(|b| a == b || a[1] <= b[0] || b[1] <= a[0]))
-    }
-    /// field_where() over the rows `bounds` into `field` (`w` pixels a row, the first `offset` in the whole)
-    fn field_rows(&self, field: &mut [f32], bounds: [f64; 4], w: usize, offset: usize, keep: &(impl Fn(usize) -> bool + Sync)) {
-        let [x0, y0, x1, y1] = bounds;
-        // A pixel left out counts as shaded
-        let mut done: Vec<bool> = (0..field.len() / 4).map(|k| !keep(offset + k)).collect();
-        for ([p, q, r], [vp, vq, vr]) in self.triangles.iter().zip(&self.values) {
-            let det = (q[1] - r[1]) * (p[0] - r[0]) + (r[0] - q[0]) * (p[1] - r[1]);
-            let bx0 = x0.max(p[0].min(q[0]).min(r[0]).floor()) as i64;
-            let bx1 = x1.min(p[0].max(q[0]).max(r[0]).ceil()) as i64;
-            let by0 = y0.max(p[1].min(q[1]).min(r[1]).floor()) as i64;
-            let by1 = y1.min(p[1].max(q[1]).max(r[1]).ceil()) as i64;
-            for py in by0..by1 {
-                for px in bx0..bx1 {
-                    let k = ((py as f64 - y0) as usize) * w + (px as f64 - x0) as usize;
-                    if done[k] {
-                        continue;
-                    }
-                    let x = px as f64 + 0.5;
-                    let y = py as f64 + 0.5;
-                    let a = ((q[1] - r[1]) * (x - r[0]) + (r[0] - q[0]) * (y - r[1])) / det;
-                    let b = ((r[1] - p[1]) * (x - r[0]) + (p[0] - r[0]) * (y - r[1])) / det;
-                    let c = 1. - a - b;
-                    if a < -1e-9 || b < -1e-9 || c < -1e-9 {
-                        continue;
-                    }
-                    done[k] = true;
-                    for ch in 0..4 {
-                        field[k * 4 + ch] = (a * vp[ch] + b * vq[ch] + c * vr[ch]) as f32;
-                    }
-                }
-            }
+            let (px, py) = (start[0] + (k % w) as f64, start[1] + (k / w) as f64);
+            let p = [px + 0.5 - self.origin[0], py + 0.5 - self.origin[1]];
+            pixel.copy_from_slice(&self.form.shade(p, px as i64, py as i64));
         }
     }
 }
 
-/// The UIGradient `g` over `raw` (the unsnapped rect its plane spans), triangulated over the quad `quad`
+/// The UIGradient `g` over `raw` (the unsnapped rect it spans), multiplying `colour` (0-255) and `alpha`
+/// (the opacity's scale). `_quad` (the pixels it is drawn over) does not change how a pixel is shaded.
 pub fn gradient_mesh(
     g: &Value,
     raw: [f64; 4],
     colour: [f64; 3],
     alpha: f64,
-    quad: [f64; 4],
+    _quad: [f64; 4],
 ) -> GradientMesh {
-    // Scenes exported with 4-decimal keypoints put fromRGB colours a hair off k / 255 (0.2510 for 64 / 255),
-    // which flips vertex colours that sit on .5 (every remaining miss of fixtures/text-probe-gradient.luau):
+    // Scenes exported with 4-decimal keypoints put fromRGB colours a hair off k / 255 (0.2510 for 64 / 255):
     // colour values within 0.0128 levels of k / 255 (|v * 255 - k| < 0.0128; 4 decimals move v * 255 by at
     // most 0.01275) snap back to k / 255; exact exports are unaffected.
     let colours: Vec<Vec<f64>> = array(&g["color"])
@@ -327,89 +331,86 @@ pub fn gradient_mesh(
         .map(|k| array(k).iter().map(|v| number(v, 0.)).collect())
         .filter(|v: &Vec<f64>| !v.is_empty())
         .collect();
-    let vertex = |t: f64| {
-        let t = t.clamp(0., 1.);
+    let kind = match g["type"].as_str() {
+        Some("Radial") => Kind::Radial,
+        Some("Conical") => Kind::Conical,
+        _ => Kind::Linear,
+    };
+    let tile = match g["tile"].as_str() {
+        Some("Repeat") => Tile::Repeat,
+        Some("Mirror") => Tile::Mirror,
+        _ => Tile::Clamp,
+    };
+    let scale = number(&g["scale"], 1.).max(1e-6);
+    let angle = number(&g["rotation"], 0.) * std::f64::consts::PI / 180.;
+    let (dx, dy) = (super::trig::cos(angle), super::trig::sin(angle));
+    let (w, h) = (raw[2], raw[3]);
+    let centre = (w > 0. && h > 0.).then(|| {
+        [
+            w / 2. + f(component(&g["offset"], 0, 0.)) * w,
+            h / 2. + f(component(&g["offset"], 1, 0.)) * h,
+        ]
+    });
+    let slope = match kind {
+        Kind::Linear => {
+            let along = |d: f64, size: f64| if d.abs() > 1e-9 { size / d.abs() } else { f64::INFINITY };
+            let span = along(dx, w).min(along(dy, h)) * scale;
+            [dx / span, dy / span]
+        }
+        Kind::Radial => [1. / ((w + h) / 4. * scale), 0.],
+        Kind::Conical => [0., 0.],
+    };
+    let turn = [angle / std::f64::consts::TAU, 1. / scale.min(1.)];
+    let mut form = Form { kind, tile, centre, middle: w.max(0.) / 2., slope, turn, knots: Vec::new(), table: None, colour, alpha };
+
+    // The keypoints of the two sequences merged; a keypoint of one takes the other's value there, which
+    // is interpolated between that one's keypoints without the squaring
+    let mut times: Vec<f64> = colours.iter().chain(transparency.iter()).map(|v| v[0]).filter(|t| (0. ..=1.).contains(t)).collect();
+    times.extend([0., 1.]);
+    times.sort_by(f64::total_cmp);
+    times.dedup();
+    let close = times.windows(2).any(|pair| pair[1] - pair[0] < CLOSE);
+    // Close keypoints: the table runs over the part of the gradient the rect shows, and takes that
+    // part's two ends as keypoints
+    let mut window = [0., 1.];
+    if close && tile == Tile::Clamp && centre.is_some() {
+        let corners = [[0., 0.], [w, 0.], [0., h], [w, h]].map(|p| form.parameter(p));
+        let (low, high) = corners.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), t| (low.min(*t), high.max(*t)));
+        let shown = match kind {
+            Kind::Linear => [low.max(0.), high.min(1.)],
+            Kind::Radial => [0., high.min(1.)],
+            Kind::Conical => [0., 1.],
+        };
+        if shown[1] > shown[0] {
+            window = shown;
+            times.extend(window);
+            times.sort_by(f64::total_cmp);
+            times.dedup();
+        }
+    }
+    let knot = |t: f64| {
         let c = sequence(&colours, t, 3, 1.);
         let tr = sequence(&transparency, t, 1, 0.);
-        [
-            (f(f(c[0] * f(colour[0] / 255.)) * 255.) + 0.5).floor(),
-            (f(f(c[1] * f(colour[1] / 255.)) * 255.) + 0.5).floor(),
-            (f(f(c[2] * f(colour[2] / 255.)) * 255.) + 0.5).floor(),
-            (f(f(1. - tr[0]) * alpha) + 0.5).floor(),
-        ]
+        // The squared colour is held in 8 bits
+        let squared = |v: f64| (v * v * 255. + 0.5).floor() / 255.;
+        [t, squared(c[0]), squared(c[1]), squared(c[2]), 1. - tr[0]]
     };
-    let [l, t, r, b] = quad;
-    let corners = vec![[l, t], [r, t], [r, b], [l, b]];
-    let plane = if raw[2] > 0. && raw[3] > 0. {
-        Some(gradient_plane(g, raw))
+    form.knots = times.iter().map(|t| knot(*t)).collect();
+    if close {
+        let entries = (0..TABLE)
+            .map(|i| knot_value(&form.knots, window[0] + (window[1] - window[0]) * i as f64 / (TABLE - 1) as f64))
+            .collect();
+        form.table = Some((window[0], window[1], entries));
     } else {
-        None
-    };
-    let mut pieces = vec![corners.clone()];
-    if let Some(p) = plane {
-        let mut times = vec![0., 1.];
-        times.extend(
-            colours
-                .iter()
-                .chain(transparency.iter())
-                .map(|v| v[0])
-                .filter(|t| *t >= 0. && *t <= 1.),
-        );
-        times.sort_by(f64::total_cmp);
-        times.dedup();
-        times.insert(0, f64::NEG_INFINITY);
-        times.push(f64::INFINITY);
-        pieces.clear();
-        for interval in times.windows(2) {
-            let mut poly = corners.clone();
-            if interval[0].is_finite() {
-                poly = clip(poly, [p[0], p[1], p[2] - interval[0]], 1.)
-            }
-            if interval[1].is_finite() && poly.len() >= 3 {
-                poly = clip(poly, [p[0], p[1], p[2] - interval[1]], -1.)
-            }
-            if poly.len() >= 3 {
-                pieces.push(poly)
+        let gaps: Vec<f64> = times.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        let even = gaps.iter().all(|gap| (gap - gaps[0]).abs() < 1e-6);
+        if !even {
+            if let Some(last) = form.knots.last_mut() {
+                last[0] += LAST;
             }
         }
     }
-    let mut triangles = Vec::new();
-    for poly in pieces {
-        let mut xs: Vec<f64> = poly
-            .iter()
-            .map(|p| (p[0] * 1e6 + 0.5).floor() / 1e6)
-            .collect();
-        let mut ys: Vec<f64> = poly
-            .iter()
-            .map(|p| (p[1] * 1e6 + 0.5).floor() / 1e6)
-            .collect();
-        xs.sort_by(f64::total_cmp);
-        ys.sort_by(f64::total_cmp);
-        xs.dedup();
-        ys.dedup();
-        if poly.len() == 4 && xs.len() == 2 && ys.len() == 2 {
-            triangles.push([[xs[0], ys[0]], [xs[1], ys[0]], [xs[1], ys[1]]]);
-            triangles.push([[xs[0], ys[0]], [xs[1], ys[1]], [xs[0], ys[1]]]);
-        } else {
-            for i in 1..poly.len() - 1 {
-                triangles.push([poly[0], poly[i], poly[i + 1]])
-            }
-        }
-    }
-    let value = |p: [f64; 2]| vertex(plane.map_or(0., |a| a[0] * p[0] + a[1] * p[1] + a[2]));
-    let mut mesh = GradientMesh {
-        triangles: Vec::with_capacity(triangles.len()),
-        values: Vec::with_capacity(triangles.len()),
-    };
-    for [p, q, r] in triangles {
-        let det = (q[1] - r[1]) * (p[0] - r[0]) + (r[0] - q[0]) * (p[1] - r[1]);
-        if det.abs() < 1e-9 {
-            continue;
-        }
-        mesh.values.push([value(p), value(q), value(r)]);
-        mesh.triangles.push([p, q, r]);
-    }
-    mesh
+    GradientMesh { origin: [raw[0], raw[1]], form }
 }
 
 #[cfg(test)]
@@ -419,16 +420,19 @@ mod tests {
     #[test]
     fn constant_field() {
         let g = json!({});
-        let field = gradient_vertex_field(
-            &g,
-            [0., 0., 4., 4.],
-            [0., 0., 4., 4.],
-            [23., 51., 209.],
-            127.,
-        );
+        let field = gradient_vertex_field(&g, [0., 0., 4., 4.], [0., 0., 4., 4.], [23., 51., 209.], 127.);
         for p in field.chunks_exact(4) {
             assert_eq!(p, &[23., 51., 209., 127.]);
         }
+    }
+    /// A rect without area takes the first colour left of its middle and the last from it on
+    #[test]
+    fn rect_without_area_steps_at_its_middle() {
+        let g = json!({"rotation":90,"color":[[0,1,0,0],[1,0,0,1]]});
+        let field = gradient_vertex_field(&g, [10., 5., 6., 0.], [10., 3., 16., 5.], [255.; 3], 255.);
+        assert_eq!(&field[..4], &[255., 0., 0., 255.]);
+        assert_eq!(&field[2 * 4..3 * 4], &[255., 0., 0., 255.]);
+        assert_eq!(&field[3 * 4..4 * 4], &[0., 0., 255., 255.]);
     }
     #[test]
     fn exact_difference_rejects_rounded_results() {
@@ -436,21 +440,67 @@ mod tests {
         assert_eq!(exact_difference(0.1, 1000.), None);
         assert_eq!(exact_difference(f64::INFINITY, 0.), None);
     }
-    /// A mesh with the same local form at another whole-pixel place shades the same pixels (the layer
+    /// Colours run between two keypoints in squared space: halfway from white to black is 180, not 128
+    /// (fixtures/gradient-probe-keys.luau), and the squared keypoint colour is held in 8 bits (20 of 255
+    /// is 2 / 255 squared: 22.6, fixtures/gradient-probe-types.luau)
+    #[test]
+    fn colours_interpolate_in_squared_space() {
+        let g = json!({"color":[[0,1,1,1],[1,0,0,0]]});
+        let field = gradient_vertex_field(&g, [0., 0., 101., 4.], [0., 0., 101., 4.], [255.; 3], 255.);
+        let middle = field[50 * 4];
+        assert!((middle - 180.).abs() <= 1., "{middle}");
+        assert_eq!(&field[..4], &[254., 254., 254., 255.]);
+        let dark = json!({"color":[[0,20.0 / 255.0,0,0],[1,20.0 / 255.0,0,0]]});
+        let field = gradient_vertex_field(&dark, [0., 0., 8., 8.], [0., 0., 8., 8.], [255.; 3], 255.);
+        assert!(field.chunks_exact(4).all(|p| p[0] == 22. || p[0] == 23.));
+        assert!(field.chunks_exact(4).any(|p| p[0] == 23.));
+    }
+    /// Radial: t is the distance from the centre over a quarter of the rect's width plus height; conical:
+    /// the angle from the rotation, clockwise, in turns; Scale divides t about the middle, and TileMode
+    /// repeats or mirrors it beyond 0 and 1 (fixtures/gradient-probe-types.luau)
+    #[test]
+    fn types_scale_and_tiling_set_the_parameter() {
+        let raw = [10., 20., 180., 120.];
+        let form = |g: Value| gradient_mesh(&g, raw, [255.; 3], 255., [0.; 4]).form;
+        let radial = form(json!({"type":"Radial"}));
+        assert!((radial.parameter([90. + 37.5, 60.]) - 0.5).abs() < 1e-12);
+        assert!((radial.parameter([90., 60. - 75.]) - 1.).abs() < 1e-12);
+        let conical = form(json!({"type":"Conical","rotation":90}));
+        assert!((conical.parameter([90., 60. + 10.]) - 0.).abs() < 1e-12);
+        assert!((conical.parameter([90. - 10., 60.]) - 0.25).abs() < 1e-12);
+        let scaled = form(json!({"scale":0.5,"tile":"Mirror","color":[[0,0,0,0],[1,1,1,1]]}));
+        assert!((scaled.parameter([0., 0.]) + 0.5).abs() < 1e-12);
+        assert_eq!(scaled.value(-0.25)[0], scaled.value(0.25)[0]);
+        let repeated = form(json!({"scale":0.5,"tile":"Repeat","color":[[0,0,0,0],[1,1,1,1]]}));
+        assert_eq!(repeated.value(-0.25)[0], repeated.value(0.75)[0]);
+    }
+    /// Keypoints under 1 / 256 apart are drawn from a table over the part of the gradient the rect shows,
+    /// with the colours at that part's ends interpolated without the squaring; an unevenly spaced list's
+    /// last keypoint sits 1 / 2048 past 1 (fixtures/gradient-probe-close.luau, gradient-probe-ends.luau)
+    #[test]
+    fn close_keypoints_and_uneven_ends() {
+        let raw = [0., 0., 1350., 24.];
+        let form = |g: Value| gradient_mesh(&g, raw, [255.; 3], 255., [0.; 4]).form;
+        let far = form(json!({"scale":4,"color":[[0,0,0,0],[0.3,1,1,1],[0.8,0,0,0],[0.85,1,1,1],[1,0,0,0]]}));
+        assert!(far.table.is_none());
+        assert!((far.value(0.375)[0] - 0.85).abs() < 1e-3);
+        let close = form(json!({"scale":4,"color":[[0,0,0,0],[0.3,1,1,1],[0.8,0,0,0],[0.801,1,1,1],[1,0,0,0]]}));
+        let (lo, hi, entries) = close.table.as_ref().expect("a table");
+        assert_eq!((*lo, *hi, entries.len()), (0.375, 0.625, 512));
+        assert!((close.value(0.375)[0] - 0.85f64.powi(2)).abs() < 3e-3);
+        let uneven = form(json!({"color":[[0,0,0,0],[0.3,1,1,1],[1,0,0,0]]}));
+        assert!((uneven.value(1.)[0] - LAST / (0.7 + LAST)).abs() < 1e-12);
+        let even = form(json!({"color":[[0,0,0,0],[0.5,1,1,1],[1,0,0,0]]}));
+        assert_eq!(even.value(1.)[0], 0.);
+    }
+    /// A gradient with the same local form at another whole-pixel place shades the same pixels (the layer
     /// cache reuses one for the other: scene_draw's fill-straight-local / stroke-local keys)
     #[test]
     fn equal_local_meshes_shade_equal_fields() {
         let g = json!({"rotation":90,"color":[[0,1,0,0],[0.37,0,1,0],[1,0,0,1]],"transparency":[[0,0],[0.6,0.4],[1,0.1]]});
-        let raw = |dy: f64| {
-            [
-                f32_round_test(612.3374) as f64,
-                f32_round_test(401.2256 + dy) as f64,
-                f32_round_test(180.75) as f64,
-                f32_round_test(57.3) as f64,
-            ]
-        };
+        let raw = |dy: f64| [612.3374f32 as f64, (401.2256 + dy) as f32 as f64, 180.75, 57.3f32 as f64];
         let mut compared = 0;
-        for dy in [0., 3., 64., 517., 1021.] {
+        for dy in [0., 3., 64., 516., 1024.] {
             let (a, b) = (raw(0.), raw(dy));
             let quad = |r: [f64; 4]| [r[0].floor(), r[1].floor(), (r[0] + r[2]).ceil(), (r[1] + r[3]).ceil()];
             let (qa, qb) = (quad(a), quad(b));
@@ -462,43 +512,35 @@ mod tests {
             if la == lb {
                 compared += 1;
                 assert_eq!(ma.field(qa), mb.field(qb), "dy {dy}");
+            } else {
+                assert!(dy % 4. != 0. || la.origin != lb.origin, "dy {dy}");
             }
         }
-        assert!(compared > 0);
+        assert!(compared > 1);
     }
-    fn f32_round_test(v: f64) -> f32 {
-        v as f32
-    }
-    /// A gradient varying along one axis (field's repeated row or column, profile) shades exactly the pixels
-    /// interpolating every one does; field_where leaves the pixels it is not asked for at 0
+    /// field_where leaves the pixels it is not asked for at 0, and shades the rest as field does
     #[test]
-    fn one_axis_fields_repeat_their_first_row_or_column() {
-        let mut repeated = 0;
-        for rotation in [0., 90., 180., 270., 37.] {
+    fn field_where_shades_the_pixels_kept() {
+        for rotation in [0., 90., 37.] {
             let g = json!({"rotation":rotation,"color":[[0,1,0,0],[0.37,0,1,0],[1,0,0,1]],"transparency":[[0,0],[0.6,0.4],[1,0.1]]});
-            let raw = [100.25, 40.5, 333.75, 97.3];
             let quad = [100., 40., 435., 138.];
-            let mesh = gradient_mesh(&g, raw, [255., 200., 100.], 230., quad);
-            let (w, h) = (335, 98);
-            let mut each = vec![0.; w * h * 4];
-            mesh.field_rows(&mut each, quad, w, 0, &|_| true);
-            assert_eq!(mesh.profile(quad).is_some(), rotation != 37., "rotation {rotation}");
-            repeated += usize::from(mesh.profile(quad).is_some());
-            assert_eq!(mesh.field(quad), each, "rotation {rotation}");
+            let mesh = gradient_mesh(&g, [100.25, 40.5, 333.75, 97.3], [255., 200., 100.], 230., quad);
+            let each = mesh.field(quad);
+            assert!(mesh.profile(quad).is_none());
             let some = mesh.field_where(quad, |k| k % 3 == 0);
             for (k, (a, b)) in some.chunks_exact(4).zip(each.chunks_exact(4)).enumerate() {
                 assert_eq!(a, if k % 3 == 0 { b } else { &[0.; 4][..] });
             }
         }
-        assert_eq!(repeated, 4);
     }
-    /// A gradient of transparency alone gives every pixel the vertices' colour
+    /// A gradient of transparency alone gives every pixel the colour it multiplies
     #[test]
     fn uniform_colour_is_the_fields_colour() {
         let g = json!({"rotation":23,"transparency":[[0,1],[0.55,1],[1,0.2]]});
         let quad = [3., 5., 290., 77.];
         let mesh = gradient_mesh(&g, [3.4, 5.1, 286.2, 71.7], [200., 120., 33.], 255., quad);
         let colour = mesh.uniform_colour().expect("one colour");
+        assert_eq!(colour, [200., 120., 33.]);
         for pixel in mesh.field(quad).chunks_exact(4) {
             assert_eq!(pixel[..3], colour);
         }
@@ -509,19 +551,9 @@ mod tests {
     fn crop_preserves_original_quad() {
         let g = json!({"rotation":37,"color":[[0,1,0,0],[0.4,0,1,0],[1,0,0,1]]});
         let full = gradient_vertex_field(&g, [0., 0., 10., 8.], [0., 0., 10., 8.], [255.; 3], 255.);
-        let crop = gradient_vertex_field_quad(
-            &g,
-            [0., 0., 10., 8.],
-            [2., 3., 7., 6.],
-            [255.; 3],
-            255.,
-            [0., 0., 10., 8.],
-        );
+        let crop = gradient_vertex_field_quad(&g, [0., 0., 10., 8.], [2., 3., 7., 6.], [255.; 3], 255., [0., 0., 10., 8.]);
         for y in 0..3 {
-            assert_eq!(
-                &crop[y * 20..y * 20 + 20],
-                &full[((y + 3) * 10 + 2) * 4..((y + 3) * 10 + 7) * 4]
-            );
+            assert_eq!(&crop[y * 20..y * 20 + 20], &full[((y + 3) * 10 + 2) * 4..((y + 3) * 10 + 7) * 4]);
         }
     }
 }

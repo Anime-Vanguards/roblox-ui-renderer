@@ -73,7 +73,7 @@ struct Quad {
     skew: f64,
     color: [f64; 3],
     alpha: f64,
-    shade: Option<Vec<Triangle>>,
+    shade: Option<Shade>,
     /// How far the snapped corners of a scaled quad were from a snapping boundary (snap_device's floor
     /// argument's distance to the nearest integer; infinite when nothing was snapped): a quad moved by
     /// whole px snaps to the moved corners when this is not tiny (TextLayerCache node entries)
@@ -92,12 +92,7 @@ impl Quad {
         self.scaled || self.skew != 0.0
     }
 }
-#[derive(Clone)]
-struct Triangle {
-    l1: [f64; 3],
-    l2: [f64; 3],
-    values: [[f64; 4]; 3],
-}
+type Shade = super::gradients::GradientMesh;
 fn arr(v: &Value) -> &[Value] {
     v.as_array().map(Vec::as_slice).unwrap_or(&[])
 }
@@ -258,195 +253,16 @@ fn placements(text: &Value, fonts: &Value, rotated: bool) -> (Vec<Placement>, Ve
     (out, lines)
 }
 
-/// Keypoint channel `channel` of a sequence at t. snap_colors: colour values within 0.0128 levels of k / 255
-/// snap back to k / 255 (4-decimal scene exports; fixtures/text-probe-gradient.luau, as in
-/// gradients::gradient_vertex_field_quad).
-fn sample(seq: &Value, t: f64, channel: usize, fallback: f64, snap_colors: bool) -> f64 {
-    let seq = arr(seq);
-    if seq.is_empty() {
-        return fallback;
-    }
-    let value = |k: &Value| {
-        let v = num(&k[channel], fallback);
-        let b = snap(v * 255.0);
-        if snap_colors && (v * 255.0 - b).abs() < 0.0128 {
-            b / 255.0
-        } else {
-            v
-        }
-    };
-    if t <= num(&seq[0][0], 0.0) {
-        return value(&seq[0]);
-    }
-    for i in 1..seq.len() {
-        let a = &seq[i - 1];
-        let b = &seq[i];
-        let at = num(&a[0], 0.0);
-        let bt = num(&b[0], 0.0);
-        if t <= bt {
-            let f = if bt == at { 0.0 } else { (t - at) / (bt - at) };
-            return value(a) + (value(b) - value(a)) * f;
-        }
-    }
-    value(seq.last().unwrap())
-}
-fn clip_piece(poly: &[[f64; 2]], plane: [f64; 3], keep: f64) -> Vec<[f64; 2]> {
-    let mut out = Vec::new();
-    let mut enter = None;
-    for i in 0..poly.len() {
-        let p = poly[i];
-        let q = poly[(i + 1) % poly.len()];
-        let fp = keep * (plane[0] * p[0] + plane[1] * p[1] + plane[2]);
-        let fq = keep * (plane[0] * q[0] + plane[1] * q[1] + plane[2]);
-        if fp >= -1e-9 {
-            out.push(p);
-        }
-        if (fp >= -1e-9) != (fq >= -1e-9) {
-            let s = fp / (fp - fq);
-            if fq >= -1e-9 {
-                enter = Some(out.len());
-            }
-            out.push([p[0] + (q[0] - p[0]) * s, p[1] + (q[1] - p[1]) * s]);
-        }
-    }
-    if let Some(i) = enter {
-        if i > 0 && !out.is_empty() {
-            out.rotate_left(i);
-        }
-    }
-    out
-}
-fn triangles(
-    gradient: &Value,
-    rect: [f64; 4],
-    bounds: [f64; 4],
-    color: [f64; 3],
-    alpha: f64,
-) -> Vec<Triangle> {
-    let [x, y, w, h] = rect;
-    let [l, t, r, b] = bounds;
-    let quad = vec![[l, t], [r, t], [r, b], [l, b]];
-    let mut plane = None;
-    let mut pieces = vec![quad.clone()];
-    if w > 0.0 && h > 0.0 {
-        let angle = n(gradient, "rotation", 0.0) * std::f64::consts::PI / 180.0;
-        let dx = super::trig::cos(angle);
-        let dy = super::trig::sin(angle);
-        let ox = num(&gradient["offset"][0], 0.0);
-        let oy = num(&gradient["offset"][1], 0.0);
-        let cx =
-            (x + (w / 2.0) as f32 as f64 + ((ox as f32 as f64) * w) as f32 as f64) as f32 as f64;
-        let cy =
-            (y + (h / 2.0) as f32 as f64 + ((oy as f32 as f64) * h) as f32 as f64) as f32 as f64;
-        let span = (if dx.abs() > 1e-9 {
-            w / dx.abs()
-        } else {
-            f64::INFINITY
-        })
-        .min(if dy.abs() > 1e-9 {
-            h / dy.abs()
-        } else {
-            f64::INFINITY
-        });
-        let p = [dx / span, dy / span, -(cx * dx + cy * dy) / span + 0.5];
-        plane = Some(p);
-        let mut times = vec![0.0, 1.0];
-        for seq in [&gradient["color"], &gradient["transparency"]] {
-            times.extend(
-                arr(seq)
-                    .iter()
-                    .map(|k| num(&k[0], 0.0))
-                    .filter(|t| *t >= 0.0 && *t <= 1.0),
-            );
-        }
-        times.sort_by(f64::total_cmp);
-        times.dedup();
-        times.insert(0, f64::NEG_INFINITY);
-        times.push(f64::INFINITY);
-        pieces.clear();
-        for pair in times.windows(2) {
-            let mut poly = quad.clone();
-            if pair[0].is_finite() {
-                poly = clip_piece(&poly, [p[0], p[1], p[2] - pair[0]], 1.0);
-            }
-            if pair[1].is_finite() && poly.len() >= 3 {
-                poly = clip_piece(&poly, [p[0], p[1], p[2] - pair[1]], -1.0);
-            }
-            if poly.len() >= 3 {
-                pieces.push(poly);
-            }
-        }
-    }
-    let value = |p: [f64; 2]| {
-        let t = plane
-            .map(|v| v[0] * p[0] + v[1] * p[1] + v[2])
-            .unwrap_or(0.0)
-            .clamp(0.0, 1.0);
-        [
-            snap(sample(&gradient["color"], t, 1, 1.0, true) * color[0]),
-            snap(sample(&gradient["color"], t, 2, 1.0, true) * color[1]),
-            snap(sample(&gradient["color"], t, 3, 1.0, true) * color[2]),
-            snap((1.0 - sample(&gradient["transparency"], t, 1, 0.0, false)) * alpha),
-        ]
-    };
-    let mut result = Vec::new();
-    let mut add = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
-        let det = (q[1] - r[1]) * (p[0] - r[0]) + (r[0] - q[0]) * (p[1] - r[1]);
-        if det.abs() < 1e-12 {
-            return;
-        }
-        result.push(Triangle {
-            l1: [
-                (q[1] - r[1]) / det,
-                (r[0] - q[0]) / det,
-                -((q[1] - r[1]) * r[0] + (r[0] - q[0]) * r[1]) / det,
-            ],
-            l2: [
-                (r[1] - p[1]) / det,
-                (p[0] - r[0]) / det,
-                -((r[1] - p[1]) * r[0] + (p[0] - r[0]) * r[1]) / det,
-            ],
-            values: [value(p), value(q), value(r)],
-        });
-    };
-    for poly in pieces {
-        let mut xs: Vec<_> = poly.iter().map(|p| snap(p[0] * 1e6) / 1e6).collect();
-        let mut ys: Vec<_> = poly.iter().map(|p| snap(p[1] * 1e6) / 1e6).collect();
-        xs.sort_by(f64::total_cmp);
-        ys.sort_by(f64::total_cmp);
-        xs.dedup();
-        ys.dedup();
-        if poly.len() == 4 && xs.len() == 2 && ys.len() == 2 {
-            add([xs[0], ys[0]], [xs[1], ys[0]], [xs[1], ys[1]]);
-            add([xs[0], ys[0]], [xs[1], ys[1]], [xs[0], ys[1]]);
-        } else {
-            for i in 1..poly.len() - 1 {
-                add(poly[0], poly[i], poly[i + 1]);
-            }
-        }
-    }
-    result
+/// The text's UIGradient over the node's rect: the fill's gradient (gradients::GradientMesh), multiplying the
+/// text's colour and opacity
+fn triangles(gradient: &Value, rect: [f64; 4], bounds: [f64; 4], color: [f64; 3], alpha: f64) -> Shade {
+    super::gradients::gradient_mesh(gradient, rect, color, alpha, bounds)
 }
 fn shading(q: &Quad, x: f64, y: f64, coverage: f64) -> [f64; 4] {
     if let Some(shade) = &q.shade {
-        for tri in shade {
-            let u = tri.l1[0] * x + tri.l1[1] * y + tri.l1[2];
-            let v = tri.l2[0] * x + tri.l2[1] * y + tri.l2[2];
-            let w = 1.0 - u - v;
-            if u < -1e-9 || v < -1e-9 || w < -1e-9 {
-                continue;
-            }
-            let c: [f64; 4] = std::array::from_fn(|i| {
-                u * tri.values[0][i] + v * tri.values[1][i] + w * tri.values[2][i]
-            });
-            return [
-                gpu8(c[0] / 255.0),
-                gpu8(c[1] / 255.0),
-                gpu8(c[2] / 255.0),
-                gpu8(coverage / 255.0 * (c[3] / 255.0)),
-            ];
-        }
-        return [0.0; 4];
+        // The gradient at the place the texel is drawn, dithered by that place's pixel
+        let c = shade.at([x, y]);
+        return [c[0], c[1], c[2], gpu8(coverage / 255.0 * (c[3] / 255.0))];
     }
     [
         q.color[0],
@@ -1734,15 +1550,9 @@ fn quads_key(quads: &[Quad]) -> (u64, Vec<u64>, [f64; 2], bool) {
         match &q.shade {
             None => key.push(u64::MAX),
             Some(shade) => {
-                key.push(shade.len() as u64);
-                for t in shade {
-                    key.extend(
-                        t.l1.iter()
-                            .chain(&t.l2)
-                            .chain(t.values.iter().flatten())
-                            .map(|v| v.to_bits()),
-                    );
-                }
+                let bits = shade.bits();
+                key.push(bits.len() as u64);
+                key.extend(bits);
             }
         }
         key.push(q.coverage.len() as u64);
@@ -2185,77 +1995,78 @@ mod tests {
     }
     #[test]
     fn layers_match_javascript_reference_bytes() {
-        // Frozen from the retired JS reference renderer's composited text layers (premultiplied like putImageData).
-        // Includes overlapping alpha, clipped gradient stops, and rounded scaled glyph boxes.
+        // The renderer's own composited text layers (premultiplied like putImageData): overlapping alpha,
+        // gradients, and rounded scaled glyph boxes. First frozen from the retired JS reference renderer;
+        // re-recorded when gradients took Studio 0.747's shading (notes/gradients.md).
         let expected = [
-            795514923u32,
-            1397251247,
-            1718230309,
-            482732101,
-            2196206338,
-            3835243975,
-            258691177,
-            3885328313,
-            2553756820,
-            1878280740,
-            3229430162,
-            1833775568,
-            4147566877,
-            564255747,
-            3294964028,
-            3222171571,
-            2127076038,
-            3703143411,
-            465531354,
-            1977702499,
-            1830603020,
-            148017296,
-            1956772938,
-            1544500343,
-            1987728401,
-            4176456301,
-            2491048614,
-            641303229,
-            247240106,
-            1057058428,
-            3668458267,
-            1047556120,
+            152133933u32,
+            2151987651,
+            3865013693,
+            107218451,
+            36224343,
+            3596900980,
+            3831697897,
+            745336558,
+            2346253978,
+            2407493611,
+            2971524314,
+            484022522,
+            3602327637,
+            3510380532,
+            3983779230,
+            1881406681,
+            1012277439,
+            1317866715,
+            3383924190,
+            4141522597,
+            2497448911,
+            938811360,
+            1539427742,
+            293323101,
+            4217771824,
+            3216222403,
+            290088886,
+            1799847425,
+            3347736062,
+            9123480,
+            1367455976,
+            431923343,
         ];
         // Scaled + shaded cases (seed + z = 0 mod 6) re-recorded when shadedGlyph started evaluating the
         // gradient where a scaled quad's texel is drawn (in the retired JS reference renderer)
         let rotated_expected = [
-            1515719104u32,
-            1912639974,
-            2597351161,
-            3827346189,
-            297909490,
-            2632753160,
-            806092027,
-            3616111445,
-            773704399,
-            2433220706,
-            3529105427,
-            4140553272,
-            3637519320,
-            1016062483,
-            2586577005,
-            1736193874,
-            1953346878,
-            4139818670,
-            1101513707,
-            2739917227,
-            1190606772,
-            2266861383,
-            3172444680,
-            1848852340,
-            4225301600,
-            3833086068,
-            2750511660,
-            2685179434,
-            4187919639,
-            4193659453,
-            1659103547,
-            471287092,
+            3460676127u32,
+            3845739527,
+            2348228749,
+            2794967889,
+            743280629,
+            3142216915,
+            1181634440,
+            1353965785,
+            1912614205,
+            2840578386,
+            1610427896,
+            3524184730,
+            1806629210,
+            2539997954,
+            145893460,
+            3304151603,
+            494620619,
+            1505683533,
+            4025088656,
+            2305794818,
+            2680432833,
+            4019654550,
+            2334939259,
+            3272199215,
+            2904627692,
+            1488435707,
+            4118134363,
+            1021702607,
+            3772958744,
+            3139266782,
+            2297257170,
+            3906520739,
         ];
         for seed in 0..32usize {
             let gradient = serde_json::json!({"rotation":(seed*29)%360,"offset":[(seed as i32%3-1) as f64*0.13,(seed as i32%5-2) as f64*0.07],"color":[[0,0.1000,0.5020,1],[0.35,1,0.25,0],[0.8,0,0.7,1],[1,0.8,0,0.3]],"transparency":[[0,0.1],[0.6,0.7],[1,0]]});
@@ -2336,9 +2147,11 @@ mod tests {
     }
     #[test]
     fn rotated_gradient_quads_match_javascript_pixels() {
-        // Frozen from the retired JS reference (straight bytes premultiplied like premul, with the layer's
-        // device x, y, w, h), rotation 0.3 rad plus a translation; scaled and skewed quads included.
-        let expected: [u32; 32] = [4046844005, 2105277395, 3240981497, 2763284153, 499975713, 236160845, 2992099623, 1807640933, 1169979711, 280871228, 1519905550, 800976300, 3419648481, 1565304502, 392783378, 311616578, 2162030675, 15692022, 969357421, 2746668165, 3523407588, 1480329797, 677711040, 3909179993, 1047758176, 3544279455, 1268173660, 3740433242, 1805078158, 1526104208, 2091230191, 161053921];
+        // The renderer's own pixels (straight bytes premultiplied like premul, with the layer's device
+        // x, y, w, h), rotation 0.3 rad plus a translation; scaled and skewed quads included. First frozen
+        // from the retired JS reference; re-recorded when gradients took Studio 0.747's shading
+        // (notes/gradients.md).
+        let expected: [u32; 32] = [586838623, 1011659745, 1958216108, 1335915821, 286540834, 1261274220, 3249525594, 1159370069, 2313921354, 3430172423, 190058411, 4224135584, 3446523647, 1319520680, 1378494408, 2524234903, 967837526, 3049370069, 1356555190, 1611016131, 2168049967, 2746809398, 3050758267, 2817750039, 1680019585, 1070852938, 3542117968, 2246948006, 899939119, 1561029642, 3006450711, 2244093526];
         let (cos, sin) = (0.3f64.cos(), 0.3f64.sin());
         let m = [cos, sin, -sin, cos, 7.25, -3.5];
         for seed in 0..32usize {
@@ -2418,7 +2231,7 @@ mod tests {
         assert_eq!(&layer[0].rgba[16..20], &[75, 150, 38, 192]);
     }
     #[test]
-    fn gradient_keypoint_clipping_uses_vertex_triangles() {
+    fn text_takes_the_gradient_at_its_pixel() {
         let g = serde_json::json!({"color":[[0,1,0,0],[0.5,0,1,0],[1,0,0,1]],"transparency":[[0,0],[1,0]]});
         let shade = triangles(
             &g,
@@ -2427,7 +2240,6 @@ mod tests {
             [255.0; 3],
             255.0,
         );
-        assert_eq!(shade.len(), 4);
         let q = Quad {
             x: 0.0,
             y: 0.0,

@@ -50,10 +50,13 @@ Fixtures: `group-resample`, `group-misc`, `group-blend`, `canvasgroup*`, `group-
 
 ## UIGradient
 
-- Shaded per vertex: the snapped quad is cut along the lines where the gradient's `t` equals a keypoint
-  time; each vertex takes the colour and transparency at its `t` in float32; the GPU interpolates.
-- `t` uses the rotation as a screen-space angle over the unsnapped rect, the centre moved by
-  `Offset * size`.
+- Shaded per pixel (Studio 0.747, notes/gradients.md): the pixel's `t`, the colour between the two
+  keypoints around it interpolated in squared space (the squared keypoint colours held in 8 bits), the
+  opacity linearly, then an ordered 4x4 dither before the colour is cut to 8 bits.
+- `t`: Linear uses the rotation as a screen-space angle over the unsnapped rect, the centre moved by
+  `Offset * size`; Radial is the distance from that centre over a quarter of width plus height; Conical the
+  angle from the rotation in turns. `Scale` divides `t` about its middle; `TileMode` repeats or mirrors it.
+- Keypoints under 1 / 256 apart draw from a 512-entry table over the part of the gradient the rect shows.
 
 Fixtures: `gradients`, `gradient-edges`, `gradient-probe-*`, `stroke-gradient`.
 

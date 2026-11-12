@@ -219,6 +219,8 @@ struct Names {
     max_visible_graphemes: Option<NameId>,
     closed: Option<NameId>,
     color3: Option<NameId>,
+    gradient_type: Option<NameId>,
+    tile_mode: Option<NameId>,
 }
 
 impl Names {
@@ -230,6 +232,8 @@ impl Names {
             text_stroke_color3: id("TextStrokeColor3"),
             text_truncate: id("TextTruncate"),
             max_visible_graphemes: id("MaxVisibleGraphemes"),
+            gradient_type: id("Type"),
+            tile_mode: id("TileMode"),
             closed: id("Closed"),
             color3: id("Color3"),
         }
@@ -395,12 +399,24 @@ fn number_sequence(value: Option<&Value>) -> Json {
 
 fn gradient(ctx: &Ctx, id: InstanceId) -> Json {
     let offset = ctx.get(id, K::Offset as NameId).and_then(Value::as_vector2);
-    json!({
+    let mut gradient = json!({
         "color": color_sequence(ctx.get(id, K::Color as NameId)),
         "transparency": number_sequence(ctx.get(id, K::Transparency as NameId)),
         "rotation": number(ctx.number(id, K::Rotation as NameId).unwrap_or(0.0)),
         "offset": numbers(&offset.map(|o| [o.x as f64, o.y as f64]).unwrap_or([0.0, 0.0])),
-    })
+    });
+    // Type, Scale and TileMode only when they are not the defaults (Linear, 1, Clamp): a gradient without
+    // them reads as it always did
+    if let Some(kind) = ctx.enum_name(ctx.get_opt(id, ctx.n.gradient_type)).filter(|kind| *kind != "Linear") {
+        gradient["type"] = json!(kind);
+    }
+    if let Some(scale) = ctx.number(id, K::Scale as NameId).filter(|scale| *scale != 1.0) {
+        gradient["scale"] = number(scale);
+    }
+    if let Some(tile) = ctx.enum_name(ctx.get_opt(id, ctx.n.tile_mode)).filter(|tile| *tile != "Clamp") {
+        gradient["tile"] = json!(tile);
+    }
+    gradient
 }
 
 #[inline]
@@ -706,9 +722,8 @@ fn color_json(color: &Option<[f64; 3]>) -> Option<Json> {
 }
 
 /// ExportRuns: RichText runs for the renderer (glyph entries index them).
-fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::text::Run], dpi: f64, ui_scale: f64) -> Json {
+fn export_runs(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, runs: &[super::text::Run]) -> Json {
     let (family, weight, style) = font_parts(ctx, id);
-    let scale = f32r(ui_scale);
     let mut result = Vec::new();
     for run in runs {
         let run_style = &run.style;
@@ -1023,7 +1038,7 @@ fn reveal_line(line: &Line, cut: LineReveal, glyphs: Json, runs: Option<Json>, e
 }
 
 /// ExportText's fields that do not move with the label (everything but `lines` / `content`).
-fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record, pixel_scale: f64) -> Option<Map<String, Json>> {
+fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record) -> Option<Map<String, Json>> {
     let info = record.text.as_ref()?;
     let result = &info.layout;
     let x_align = ctx.enum_name(ctx.get(id, K::TextXAlignment as NameId)).unwrap_or("Center").to_string();
@@ -1075,7 +1090,7 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     }
     if let Some(runs) = &result.runs {
         export.insert("rich".into(), Json::Bool(true));
-        export.insert("runs".into(), export_runs(ctx, text, id, runs, pixel_scale, info.pixel_scale / pixel_scale));
+        export.insert("runs".into(), export_runs(ctx, text, id, runs));
     }
     Some(export)
 }
@@ -1300,7 +1315,7 @@ fn export_node(
     if ctx.is(id, ctx.c.gui_object) {
         if ctx.is_text_object(id) {
             if let Some((lines, content)) = text_lines(ctx, out.text, out.registry, id, record, out.pixel_scale, matrix.is_some(), None) {
-                let mut text = text_static(ctx, out.text, id, record, out.pixel_scale).unwrap_or_default();
+                let mut text = text_static(ctx, out.text, id, record).unwrap_or_default();
                 text.insert("lines".into(), lines);
                 text.insert("content".into(), content);
                 node.insert("text".into(), Json::Object(text));
@@ -1734,7 +1749,7 @@ impl Walk<'_, '_, '_, '_> {
                     let layout = &record.text.as_ref().expect("text lines").layout;
                     let reuse_text = reuse_style && entry.text_layout.as_ref().is_some_and(|l| Arc::ptr_eq(l, layout));
                     if !reuse_text || entry.text_static.is_none() {
-                        entry.text_static = text_static(ctx, self.out.text, id, record, self.out.pixel_scale);
+                        entry.text_static = text_static(ctx, self.out.text, id, record);
                     }
                     let mut text = entry.text_static.clone().unwrap_or_default();
                     text.insert("lines".into(), lines);

@@ -32,8 +32,32 @@
 			"digest": "c2491683aed78b456058997823931a460979b6f711ecec6a82686bd9eb771e9c",
 			"status": "ok"
 		},
+		"fast/edit/gradient-probe-close": {
+			"digest": "c0527c565c33f4558b52b1954f382173ad38bb561eda0523848ad78c68f57256",
+			"status": "ok"
+		},
+		"fast/edit/gradient-probe-ends": {
+			"digest": "ac14e13198e351e07ffdcab8c03fbc83865c87ecd8cf2a6ba8e13e0dfa7ba72f",
+			"status": "ok"
+		},
+		"fast/edit/gradient-probe-ends2": {
+			"digest": "d9ac7cc8102e48ac3dfcd7b667a9dd7441c2b31e50df53c73ae46c16814c0bb1",
+			"status": "ok"
+		},
+		"fast/edit/gradient-probe-keys": {
+			"digest": "7b3a48739c60caf67c5a8c59302316643ccd2f6e0b2ff213739233791456a92c",
+			"status": "ok"
+		},
+		"fast/edit/gradient-probe-lut": {
+			"digest": "eeab6fe33ba7833a0e4b0f8906535a1186ab4881aa13607d2affe223cf8f474f",
+			"status": "ok"
+		},
+		"fast/edit/gradient-probe-types": {
+			"digest": "0260be634969b12a016572719f009c9c05dd768fd4273579802e135cb3a4de43",
+			"status": "ok"
+		},
 		"fast/edit/gradients": {
-			"digest": "e111cfbd5b979f8bca3587d430bb66327def94077d399fb21e92e89a732139c4",
+			"digest": "750a10bc51e73fbec6bb3102e50bd64e0162ca279c6eb9d200756655beb01a4a",
 			"status": "ok"
 		},
 		"fast/edit/group-blend": {
@@ -696,8 +720,32 @@
 			"digest": "b8b87922ea2f635e26a86a2a28bc6774fe19874f8ac4d78c7044774e3c10a4da",
 			"status": "ok"
 		},
+		"fixtures/edit/gradient-probe-close": {
+			"digest": "dd10ce8b4631001a61660ca6b75e779b73cfd71fae9c8ea5463af17b05438704",
+			"status": "ok"
+		},
+		"fixtures/edit/gradient-probe-ends": {
+			"digest": "dd21360b3ae3125ada3177fa7318013c4c5315cd5b557cc2185c0c0670e84aab",
+			"status": "ok"
+		},
+		"fixtures/edit/gradient-probe-ends2": {
+			"digest": "f8a2145d01f18fd1f1ccd37333f10d2e738d29bb4e9ee2c2be3f30523958a72d",
+			"status": "ok"
+		},
+		"fixtures/edit/gradient-probe-keys": {
+			"digest": "1f48a43398bdc8e192de007fb0594800a9a7731c8cf5b6e40caa5da5f314b965",
+			"status": "ok"
+		},
+		"fixtures/edit/gradient-probe-lut": {
+			"digest": "15705bb6ea6ce6287cdaff6b7420df20ee418c5fd64e6b29417edeeb47bf4f6f",
+			"status": "ok"
+		},
+		"fixtures/edit/gradient-probe-types": {
+			"digest": "b7498846addfba02adbbd7518a6759fd054245aee9922d199392c04636dd53e6",
+			"status": "ok"
+		},
 		"fixtures/edit/gradients": {
-			"digest": "585c903a54705c421caca62218dc7796bd7935ea91ac697e6c063f6758955320",
+			"digest": "7e35dea940639516c4398b0f31bd32094775d5ea6f56f4ae4b41f112371decd7",
 			"status": "ok"
 		},
 		"fixtures/edit/group-blend": {
@@ -1348,8 +1396,32 @@
 			"digest": "c23a150a315ddb0c5f3c21398b9d43cb2e46163fa37773a60320b63b52f59856",
 			"status": "ok"
 		},
+		"fixtures/play/gradient-probe-close": {
+			"digest": "ec13d5a74e5f1810790241adc9e5169fa361225bb39f3324ba7caa77e2a9d16e",
+			"status": "ok"
+		},
+		"fixtures/play/gradient-probe-ends": {
+			"digest": "67f851d909c6b453cbd982e7e608f5553475030859103b99293a9e78b154d504",
+			"status": "ok"
+		},
+		"fixtures/play/gradient-probe-ends2": {
+			"digest": "6d9e1e6fb1375cb8a5c4d28bc77a0e42551eceef212a86fe03893036b0b601d4",
+			"status": "ok"
+		},
+		"fixtures/play/gradient-probe-keys": {
+			"digest": "6a12bd378c1b2837751bc466a7973dccc7d99eb3490e0e98d5a7f3db808e7356",
+			"status": "ok"
+		},
+		"fixtures/play/gradient-probe-lut": {
+			"digest": "6fee969b489011fff2d81005380283f1f6ce3086c4af5028131934dc5d49660f",
+			"status": "ok"
+		},
+		"fixtures/play/gradient-probe-types": {
+			"digest": "97d773db7438fdf8fbd9d8b652313fcc7aece675214486e0e8813dd38f107d9b",
+			"status": "ok"
+		},
 		"fixtures/play/gradients": {
-			"digest": "9cf402c0f141eb2d5cee64c3968405376d2227436beed4241573a1755cf68a3c",
+			"digest": "6a29dbe803191daf6e302a9435302eaafaaeb3c2fd4106b193ecb4e95b7c9936",
 			"status": "ok"
 		},
 		"fixtures/play/group-blend": {
@@ -2209,7 +2281,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T01:05:15.008Z",
+	"recorded": "2026-11-12T02:06:48.491Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

@@ -343,12 +343,6 @@ pub fn scales(font: &Font, size: f64) -> (f64, f64) {
     (x_scale, hb_scale)
 }
 
-#[inline]
-fn mul_fix(a: f64, b: f64) -> f64 {
-    let result = idiv(a.abs() * b.abs() + 32768.0, 65536.0);
-    if (a < 0.0) != (b < 0.0) { -result } else { result }
-}
-
 /// A glyph's unhinted advance in 26.6 as HarfBuzz reads it from FreeType: FT_Get_Advance's 16.16 value
 /// (the font units times the scale over 64, rounded) rounded again to 26.6. The two roundings land one
 /// 1/64 px above FT_MulFix for a few advances.

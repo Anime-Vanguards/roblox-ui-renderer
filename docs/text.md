@@ -71,8 +71,8 @@ datasets in `data/studio/`, its pixels from `rur compare` captures of the `text-
   `round((c * A + D * (255 - A)) / 255)` ([images.md](images.md) defines `alpha8` and `gpu8`).
 - `<u>` and `<s>` are whole-pixel rects: thickness `ceil(S / DPI / 20)` logical px; underline is the run
   box's last rows, strike starts at `ceil(S / 2) + 1`.
-- UIGradient on text is evaluated per vertex of each glyph quad (the bitmap box grown by 1 px), the quad
-  cut along the keypoint times, over the label's rect; it also tints strokes without a gradient of their own.
+- UIGradient on text is the fill's gradient (images.md "UIGradient") over the label's rect, evaluated at
+  each texel's place; it also tints strokes without a gradient of their own.
 
 Fixtures: `text-raster`, `text-probe-blend`, `text-probe-rich`, `text-probe-decor*`, `text-probe-synth`,
 `text-probe-rotate`, `text-probe-gradient*`, `text-probe-uiscale`, `layout-textpen*`, `layout-truncate*`.
