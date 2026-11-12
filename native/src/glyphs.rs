@@ -60,6 +60,8 @@ unsafe extern "C" {
         foreground: *mut c_int,
     ) -> c_int;
     fn rur_glyph_truncation_advances(face: *mut c_void, maximum: c_int, glyph: *mut c_uint, advances: *mut f64) -> c_int;
+    #[cfg(test)]
+    fn rur_glyph_face_units(face: *mut c_void, real_units: *mut c_long, height_units: *mut c_long);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1212,6 +1214,27 @@ mod tests {
         let json: Value = serde_json::from_str(&atlas.json_text()).unwrap();
         assert_eq!(json["glyphs"][0]["layers"].as_array().unwrap().len(), plain.layers.len());
         assert!(json["glyphs"][1].get("layers").is_none());
+    }
+
+    /// A face is sized from its hhea metrics, as Studio sizes it, also when it sets OS/2 USE_TYPO_METRICS and
+    /// FreeType reports its typographic ones: TwemojiMozilla spreads S + 1 px over hhea 475 + 91 + 46 = 612
+    /// units, not typo 448 + 64 + 46 = 558 (fixtures/text-probe-gapfaces.luau, notes/text.md).
+    #[test]
+    fn faces_are_sized_from_hhea() {
+        let Some(root) = crate::engine::text::fonts::discover_content_root() else {
+            eprintln!("face size checks skipped (no Studio install)");
+            return;
+        };
+        let file = format!("{}/fonts/TwemojiMozilla.ttf", root.trim_end_matches(['/', '\\']));
+        if !Path::new(&file).is_file() {
+            eprintln!("face size checks skipped ({file} missing)");
+            return;
+        }
+        let mut rasterizer = Rasterizer::new().unwrap();
+        let face = rasterizer.font(&file).unwrap().face;
+        let (mut real, mut height) = (0 as c_long, 0 as c_long);
+        unsafe { rur_glyph_face_units(face, &mut real, &mut height) };
+        assert_eq!((real, height), (566, 612));
     }
 
     #[test]

@@ -126,7 +126,11 @@ RurFace *rur_glyph_face_open(RurContext *context, const unsigned char *bytes, si
     face->flags = unhinted_truetype(ft) ? FT_LOAD_FORCE_AUTOHINT : FT_LOAD_DEFAULT;
     /* the line height requested as S + 1 px includes the hhea line gap (layout.rs height_units) */
     TT_HoriHeader *hhea = (TT_HoriHeader *)FT_Get_Sfnt_Table(ft, FT_SFNT_HHEA);
-    face->real_units = ft->ascender - ft->descender;
+    /* Sized from the hhea table, as Studio sizes it, even when the font sets OS/2 USE_TYPO_METRICS and FreeType's
+     * own ascender and descender are the typographic ones (TwemojiMozilla: hhea 475 / -91 against typo 448 / -64;
+     * fixtures/text-probe-gapfaces.luau, notes/text.md "Colour emoji: the face is sized from hhea"). FreeType's
+     * values only when the hhea table has none. */
+    face->real_units = (hhea && hhea->Ascender - hhea->Descender > 0) ? hhea->Ascender - hhea->Descender : ft->ascender - ft->descender;
     face->height_units = face->real_units + (hhea ? hhea->Line_Gap : 0);
     face->upm = ft->units_per_EM;
     if (face->flags & FT_LOAD_FORCE_AUTOHINT) unmapped_glyphs_to_fallback_style(context->library, ft);
@@ -236,6 +240,12 @@ int rur_glyph_render(RurFace *face, double ppem, unsigned glyph, double stroke_p
 }
 
 void rur_glyph_free(unsigned char *buffer) { free(buffer); }
+
+/* The units a face's size request spreads (set_ppem): ascender - descender, the same with the line gap */
+void rur_glyph_face_units(RurFace *face, long *real_units, long *height_units) {
+    *real_units = face ? face->real_units : 0;
+    *height_units = face ? face->height_units : 0;
+}
 
 /* A colour glyph's COLR (v0) layers, bottom first, as FreeType's FT_Render_Glyph walks them with
  * FT_LOAD_COLOR; the colours from palette 0 (FT_Palette_Select). The caller rasterizes each layer glyph
