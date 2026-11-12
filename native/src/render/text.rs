@@ -2298,7 +2298,7 @@ mod tests {
         // gradients, and rounded scaled glyph boxes. First frozen from the retired JS reference renderer;
         // re-recorded when gradients took Studio 0.747's shading (notes/gradients.md).
         let expected = [
-            152133933u32,
+            1932277669u32,
             2151987651,
             3865013693,
             107218451,
@@ -2310,7 +2310,7 @@ mod tests {
             2407493611,
             2971524314,
             484022522,
-            3602327637,
+            4081710380,
             3510380532,
             3983779230,
             1881406681,
@@ -2334,12 +2334,12 @@ mod tests {
         // Scaled + shaded cases (seed + z = 0 mod 6) re-recorded when shadedGlyph started evaluating the
         // gradient where a scaled quad's texel is drawn (in the retired JS reference renderer)
         let rotated_expected = [
-            3460676127u32,
+            2394459263u32,
             3845739527,
             2348228749,
             2794967889,
             743280629,
-            3142216915,
+            1625943942,
             1181634440,
             1353965785,
             1912614205,
@@ -2450,7 +2450,7 @@ mod tests {
         // x, y, w, h), rotation 0.3 rad plus a translation; scaled and skewed quads included. First frozen
         // from the retired JS reference; re-recorded when gradients took Studio 0.747's shading
         // (notes/gradients.md).
-        let expected: [u32; 32] = [586838623, 1011659745, 1958216108, 1335915821, 286540834, 1261274220, 3249525594, 1159370069, 2313921354, 3430172423, 190058411, 4224135584, 3446523647, 1319520680, 1378494408, 2524234903, 967837526, 3049370069, 1356555190, 1611016131, 2168049967, 2746809398, 3050758267, 2817750039, 1680019585, 1070852938, 3542117968, 2246948006, 899939119, 1561029642, 3006450711, 2244093526];
+        let expected: [u32; 32] = [586838623, 1011659745, 1958216108, 1335915821, 485531434, 1261274220, 3249525594, 1159370069, 2313921354, 3430172423, 190058411, 4224135584, 3446523647, 1319520680, 1378494408, 2524234903, 967837526, 3049370069, 1356555190, 1611016131, 2168049967, 2746809398, 3050758267, 2817750039, 1680019585, 1070852938, 3542117968, 2246948006, 899939119, 1561029642, 3006450711, 2244093526];
         let (cos, sin) = (0.3f64.cos(), 0.3f64.sin());
         let m = [cos, sin, -sin, cos, 7.25, -3.5];
         for seed in 0..32usize {

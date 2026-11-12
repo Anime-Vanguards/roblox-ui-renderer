@@ -66,10 +66,15 @@ enum Tile {
     Mirror,
 }
 
-/// Keypoints closer together than this are drawn from a table of [`TABLE`] entries, not from the keypoints
+/// Keypoints closer together than this are drawn from a table over the part of the gradient the rect shows
 const CLOSE: f64 = 1. / 256.;
-/// The entries of that table, from one end of the part of the gradient its rect shows to the other
+/// The entries of the table an unevenly spaced list is drawn from, read with linear interpolation: entry i
+/// holds the colour at i / 511 of the gradient (of the part shown, for close keypoints)
 const TABLE: usize = 512;
+/// How far right of and below a pixel's centre a conical gradient takes its angle (device px)
+const CONICAL_NUDGE: f64 = 0.003;
+/// The steps between two keypoints of an evenly spaced list: the colour is that of the nearest step
+const STEPS: f64 = 256.;
 /// How far past 1 the last keypoint of an unevenly spaced list sits
 const LAST: f64 = 1. / 2048.;
 /// The ordered dither added before a colour is cut to 8 bits, by device pixel (row y mod 4, column x mod 4)
@@ -108,8 +113,10 @@ struct Form {
     turn: [f64; 2],
     /// The keypoints of colour and transparency merged: t, the squared colour (0-1) and the opacity (0-1)
     knots: Vec<[f64; 5]>,
-    /// The table of keypoints too close to draw apart: the t of its first and last entry and the entries
+    /// The table of an unevenly spaced list: the t of its first and last entry and the entries
     table: Option<(f64, f64, Vec<[f64; 4]>)>,
+    /// Whether the keypoints are cut to the part of the gradient the rect shows (close keypoints)
+    cut: bool,
     /// The colour the keypoints multiply (0-255) and the opacity's scale
     colour: [f64; 3],
     alpha: f64,
@@ -147,14 +154,26 @@ impl Form {
         match self.kind {
             Kind::Linear => x * self.slope[0] + y * self.slope[1] + 0.5,
             Kind::Radial => (x * x + y * y).sqrt() * self.slope[0],
-            Kind::Conical => (y.atan2(x) / std::f64::consts::TAU - self.turn[0]).rem_euclid(1.) * self.turn[1],
+            // The angle is taken a little right of and below the pixel's centre: the pixel centred on the
+            // gradient's centre is an eighth of a turn along, and a pixel whose centre lies on a step's
+            // boundary (0.5 px below the centre's row, 81.5 px beside it, at Scale 0.5) falls on the far side.
+            // Measured between 0.0025 and 0.0035 px (fixtures/gradient-probe-types.luau, the conical tiles)
+            Kind::Conical => {
+                let angle = (y + CONICAL_NUDGE).atan2(x + CONICAL_NUDGE);
+                (angle / std::f64::consts::TAU - self.turn[0]).rem_euclid(1.) * self.turn[1]
+            }
         }
     }
     /// The squared colour and the opacity at t
     fn value(&self, t: f64) -> [f64; 4] {
         let t = match self.tile {
+            // (a list cut to the part shown is read where the pixel lies, also before 0 and past 1: its
+            // entries there hold the end colours)
+            Tile::Clamp if self.cut => t,
             Tile::Clamp => t.clamp(0., 1.),
-            Tile::Repeat => t - t.floor(),
+            // (a pixel centred on a seam takes the end's colour, not the start's:
+            // fixtures/gradient-probe-ends2.luau strip 6, both seams)
+            Tile::Repeat => t - t.ceil() + 1.,
             Tile::Mirror => {
                 let m = t.rem_euclid(2.);
                 if m > 1. {
@@ -167,11 +186,13 @@ impl Form {
         if let Some((lo, hi, entries)) = &self.table {
             let u = ((t - lo) / (hi - lo) * (entries.len() - 1) as f64).clamp(0., (entries.len() - 1) as f64);
             let i = (u.floor() as usize).min(entries.len() - 2);
-            let s = u - i as f64;
+            // (the weight between two entries has 8 bits: a pixel 0.0018 of an entry past a black first
+            // entry is black, fixtures/gradient-probe-table.luau strip 18)
+            let s = ((u - i as f64) * 256. + 0.5).floor() / 256.;
             let (a, b) = (entries[i], entries[i + 1]);
             return std::array::from_fn(|c| a[c] + (b[c] - a[c]) * s);
         }
-        knot_value(&self.knots, t)
+        knot_value(&self.knots, t, STEPS)
     }
     /// The field's RGBA at the device pixel (`px`, `py`), whose centre is `p` relative to the rect's origin
     fn shade(&self, p: [f64; 2], px: i64, py: i64) -> [f32; 4] {
@@ -182,8 +203,9 @@ impl Form {
     }
 }
 
-/// The piecewise-linear value of `knots` (t, then four values) at t, held beyond its ends
-fn knot_value(knots: &[[f64; 5]], t: f64) -> [f64; 4] {
+/// The piecewise-linear value of `knots` (t, then four values) at t, held beyond its ends; with `steps`
+/// above 0 the place between two knots is rounded to that many steps
+fn knot_value(knots: &[[f64; 5]], t: f64, steps: f64) -> [f64; 4] {
     let tail = |k: &[f64; 5]| [k[1], k[2], k[3], k[4]];
     let (Some(first), Some(last)) = (knots.first(), knots.last()) else {
         return [1.; 4];
@@ -195,6 +217,7 @@ fn knot_value(knots: &[[f64; 5]], t: f64) -> [f64; 4] {
         let (a, b) = (&pair[0], &pair[1]);
         if t <= b[0] {
             let s = if b[0] > a[0] { (t - a[0]) / (b[0] - a[0]) } else { 1. };
+            let s = if steps > 0. { (s * steps + 0.5).floor() / steps } else { s };
             return std::array::from_fn(|c| a[c + 1] + (b[c + 1] - a[c + 1]) * s);
         }
     }
@@ -361,7 +384,7 @@ pub fn gradient_mesh(
         Kind::Conical => [0., 0.],
     };
     let turn = [angle / std::f64::consts::TAU, 1. / scale.min(1.)];
-    let mut form = Form { kind, tile, centre, middle: w.max(0.) / 2., slope, turn, knots: Vec::new(), table: None, colour, alpha };
+    let mut form = Form { kind, tile, centre, middle: w.max(0.) / 2., slope, turn, knots: Vec::new(), table: None, cut: false, colour, alpha };
 
     // The keypoints of the two sequences merged; a keypoint of one takes the other's value there, which
     // is interpolated between that one's keypoints without the squaring
@@ -370,45 +393,54 @@ pub fn gradient_mesh(
     times.sort_by(f64::total_cmp);
     times.dedup();
     let close = times.windows(2).any(|pair| pair[1] - pair[0] < CLOSE);
-    // Close keypoints: the table runs over the part of the gradient the rect shows, and takes that
-    // part's two ends as keypoints
+    // Close keypoints: the list is cut to the part of the gradient the rect shows (t at the rect's corners,
+    // also where that lies before 0 or past 1), whose two ends become keypoints with the colours there,
+    // and the cut list is drawn like any other: in steps when it is evenly spaced (a strip showing -1/8 to
+    // 1/8 of a gradient whose first keypoint is black: keypoints at -1/8, 0 and 1/8), else from the table
+    // over that part (fixtures/gradient-probe-lut.luau strips 2 and 3, gradient-probe-ends2.luau strip 7)
     let mut window = [0., 1.];
     if close && tile == Tile::Clamp && centre.is_some() {
         let corners = [[0., 0.], [w, 0.], [0., h], [w, h]].map(|p| form.parameter(p));
         let (low, high) = corners.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), t| (low.min(*t), high.max(*t)));
         let shown = match kind {
-            Kind::Linear => [low.max(0.), high.min(1.)],
+            Kind::Linear => [low, high],
             Kind::Radial => [0., high.min(1.)],
             Kind::Conical => [0., 1.],
         };
         if shown[1] > shown[0] {
             window = shown;
+            form.cut = true;
+            times.retain(|t| *t > window[0] && *t < window[1]);
             times.extend(window);
             times.sort_by(f64::total_cmp);
             times.dedup();
         }
     }
     let knot = |t: f64| {
-        let c = sequence(&colours, t, 3, 1.);
-        let tr = sequence(&transparency, t, 1, 0.);
+        let c = sequence(&colours, t.clamp(0., 1.), 3, 1.);
+        let tr = sequence(&transparency, t.clamp(0., 1.), 1, 0.);
         // The squared colour is held in 8 bits
         let squared = |v: f64| (v * v * 255. + 0.5).floor() / 255.;
         [t, squared(c[0]), squared(c[1]), squared(c[2]), 1. - tr[0]]
     };
     form.knots = times.iter().map(|t| knot(*t)).collect();
-    if close {
-        let entries = (0..TABLE)
-            .map(|i| knot_value(&form.knots, window[0] + (window[1] - window[0]) * i as f64 / (TABLE - 1) as f64))
-            .collect();
-        form.table = Some((window[0], window[1], entries));
-    } else {
-        let gaps: Vec<f64> = times.windows(2).map(|pair| pair[1] - pair[0]).collect();
-        let even = gaps.iter().all(|gap| (gap - gaps[0]).abs() < 1e-6);
-        if !even {
+    let gaps: Vec<f64> = times.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    let even = gaps.iter().all(|gap| (gap - gaps[0]).abs() < 1e-6 * (window[1] - window[0]));
+    // An evenly spaced list is drawn from its keypoints, in 256 steps between two of them (the colour 5 px
+    // into a 21 px step of a strip that shows 1 / 16 of black to white is the step's, not the place's). Any
+    // other list is drawn from the table: a dark keypoint between two bright ones is as bright as the two
+    // entries around it (white, black at 0.3, white: 11 of 255 across one entry, never 0)
+    // (fixtures/gradient-probe-table.luau, gradient-probe-valley.luau)
+    if !even {
+        if !close {
             if let Some(last) = form.knots.last_mut() {
                 last[0] += LAST;
             }
         }
+        let entries = (0..TABLE)
+            .map(|i| knot_value(&form.knots, window[0] + (window[1] - window[0]) * i as f64 / (TABLE - 1) as f64, 0.))
+            .collect();
+        form.table = Some((window[0], window[1], entries));
     }
     GradientMesh { origin: [raw[0], raw[1]], form }
 }
@@ -466,28 +498,74 @@ mod tests {
         assert!((radial.parameter([90. + 37.5, 60.]) - 0.5).abs() < 1e-12);
         assert!((radial.parameter([90., 60. - 75.]) - 1.).abs() < 1e-12);
         let conical = form(json!({"type":"Conical","rotation":90}));
-        assert!((conical.parameter([90., 60. + 10.]) - 0.).abs() < 1e-12);
-        assert!((conical.parameter([90. - 10., 60.]) - 0.25).abs() < 1e-12);
+        assert!((conical.parameter([90., 60. + 10.]) - (1. - CONICAL_NUDGE / 10. / std::f64::consts::TAU)).abs() < 1e-7);
+        assert!((conical.parameter([90. - 10., 60.]) - 0.25).abs() < 1e-4);
+        // The pixel centred on the centre is an eighth of a turn along
+        assert_eq!(form(json!({"type":"Conical"})).parameter([90., 60.]), 0.125);
         let scaled = form(json!({"scale":0.5,"tile":"Mirror","color":[[0,0,0,0],[1,1,1,1]]}));
         assert!((scaled.parameter([0., 0.]) + 0.5).abs() < 1e-12);
         assert_eq!(scaled.value(-0.25)[0], scaled.value(0.25)[0]);
         let repeated = form(json!({"scale":0.5,"tile":"Repeat","color":[[0,0,0,0],[1,1,1,1]]}));
         assert_eq!(repeated.value(-0.25)[0], repeated.value(0.75)[0]);
+        // A pixel centred on a seam takes the end's colour
+        assert_eq!((repeated.value(0.)[0], repeated.value(1.)[0], repeated.value(2.)[0]), (1., 1., 1.));
     }
-    /// Keypoints under 1 / 256 apart are drawn from a table over the part of the gradient the rect shows,
-    /// with the colours at that part's ends interpolated without the squaring; an unevenly spaced list's
-    /// last keypoint sits 1 / 2048 past 1 (fixtures/gradient-probe-close.luau, gradient-probe-ends.luau)
+    /// An evenly spaced list is drawn in 256 steps between two keypoints, the colour of the nearest step
+    /// (fixtures/gradient-probe-table.luau strips 7 to 14)
+    #[test]
+    fn even_lists_run_in_steps() {
+        let form = |g: Value| gradient_mesh(&g, [0., 0., 1350., 24.], [255.; 3], 255., [0.; 4]).form;
+        let two = form(json!({"color":[[0,0,0,0],[1,1,1,1]]}));
+        assert!(two.table.is_none());
+        assert_eq!(two.value(0.4 / 256.)[0], 0.);
+        assert_eq!(two.value(0.6 / 256.)[0], 1. / 256.);
+        assert_eq!(two.value(1.4 / 256.)[0], 1. / 256.);
+        let three = form(json!({"color":[[0,0,0,0],[0.5,1,1,1],[1,0,0,0]]}));
+        assert_eq!(three.value(0.6 / 512.)[0], 1. / 256.);
+        assert_eq!(three.value(1.)[0], 0.);
+    }
+    /// An unevenly spaced list is drawn from a table of 512 entries at i / 511, read with 8-bit weights: a
+    /// black keypoint between two white ones is as bright as the entries around it, and a pixel under
+    /// 1 / 512 of an entry past an entry has the entry's colour (fixtures/gradient-probe-valley.luau,
+    /// gradient-probe-table.luau strip 18)
+    #[test]
+    fn uneven_lists_are_read_from_a_table() {
+        let form = |g: Value| gradient_mesh(&g, [0., 0., 1350., 24.], [255.; 3], 255., [0.; 4]).form;
+        let valley = form(json!({"color":[[0,1,1,1],[0.3,0,0,0],[1,1,1,1]]}));
+        let (lo, hi, entries) = valley.table.as_ref().expect("a table");
+        assert_eq!((*lo, *hi, entries.len()), (0., 1., 512));
+        // Entries 153 and 154 lie 0.3 / 511 before and 0.7 / 511 past the keypoint: both 1 / 511 bright
+        for t in [153. / 511., 0.3, 154. / 511.] {
+            assert!((valley.value(t)[0] - 1. / 511.).abs() < 1e-5, "{t}: {}", valley.value(t)[0]);
+        }
+        assert!((valley.value(0.29)[0] - (0.3 - 0.29) / 0.3).abs() < 1e-3);
+        let start = form(json!({"color":[[0,0,0,0],[0.01,1,1,1],[1,0,0,0]]}));
+        assert_eq!(start.value(0.4 / 256. / 511.)[0], 0.);
+        assert!(start.value(0.6 / 256. / 511.)[0] > 0.);
+    }
+    /// A list with keypoints under 1 / 256 apart is cut to the part of the gradient the rect shows (also
+    /// before 0 and past 1), with the colours at that part's ends interpolated without the squaring, and
+    /// drawn like any list: in steps when what is left is evenly spaced, else from the table over that part;
+    /// an unevenly spaced list's last keypoint sits 1 / 2048 past 1 (fixtures/gradient-probe-close.luau,
+    /// gradient-probe-ends.luau, gradient-probe-ends2.luau strip 7, gradient-probe-lut.luau strip 3)
     #[test]
     fn close_keypoints_and_uneven_ends() {
         let raw = [0., 0., 1350., 24.];
         let form = |g: Value| gradient_mesh(&g, raw, [255.; 3], 255., [0.; 4]).form;
         let far = form(json!({"scale":4,"color":[[0,0,0,0],[0.3,1,1,1],[0.8,0,0,0],[0.85,1,1,1],[1,0,0,0]]}));
-        assert!(far.table.is_none());
-        assert!((far.value(0.375)[0] - 0.85).abs() < 1e-3);
+        assert!(!far.cut);
+        assert!((far.value(0.375)[0] - 0.85).abs() < 3e-3);
         let close = form(json!({"scale":4,"color":[[0,0,0,0],[0.3,1,1,1],[0.8,0,0,0],[0.801,1,1,1],[1,0,0,0]]}));
-        let (lo, hi, entries) = close.table.as_ref().expect("a table");
-        assert_eq!((*lo, *hi, entries.len()), (0.375, 0.625, 512));
+        // (what is left of this list is its two ends: evenly spaced, so drawn in steps)
+        assert!(close.cut && close.table.is_none());
+        assert_eq!((close.knots[0][0], close.knots[1][0], close.knots.len()), (0.375, 0.625, 2));
         assert!((close.value(0.375)[0] - 0.85f64.powi(2)).abs() < 3e-3);
+        // Half as wide as its rect, the list is cut at -0.5 and 1.5 and read from the table there
+        let wide = form(json!({"scale":0.5,"color":[[0,0,0,0],[0.3,1,1,1],[0.3001,0.5,0.5,0.5],[1,0,0,0]]}));
+        let (lo, hi, entries) = wide.table.as_ref().expect("a table");
+        assert_eq!((*lo, *hi, entries.len()), (-0.5, 1.5, 512));
+        assert_eq!(wide.value(-0.1)[0], 0.);
+        assert!(wide.value(-0.001)[0] > 0.);
         let uneven = form(json!({"color":[[0,0,0,0],[0.3,1,1,1],[1,0,0,0]]}));
         assert!((uneven.value(1.)[0] - LAST / (0.7 + LAST)).abs() < 1e-12);
         let even = form(json!({"color":[[0,0,0,0],[0.5,1,1,1],[1,0,0,0]]}));
