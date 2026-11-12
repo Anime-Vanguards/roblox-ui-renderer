@@ -379,7 +379,10 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 	} else if (quarter && !rounded) {
 		a = 1.0;
 	} else if (!rounded) {
-		a = clamp(1.0 - sdBox(p, halfSize), 0.0, 1.0);
+		// Past a corner the coverage follows the nearer edge's ramp alone (a mitred corner), not the distance
+		// to the corner point
+		vec2 q = abs(p) - halfSize;
+		a = clamp(1.0 - max(q.x, q.y), 0.0, 1.0);
 	} else if (!quarter && (p.x < -halfSize.x || p.x >= halfSize.x || p.y < -halfSize.y || p.y >= halfSize.y)) {
 		a = 0.0;
 	} else {
