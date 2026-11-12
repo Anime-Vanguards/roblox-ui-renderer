@@ -7,7 +7,7 @@
 //   node tools/studio/play-capture.mjs --fixture fixtures/screen-layers.luau --studio <name> [--viewport 400x300]
 //       [--background 20,20,26] [--time 1] [--out out/compare/<fixture>-play] [--reuse]
 //
-// In the play session the script hides the core interface (top bar, chat, player list, backpack) and puts one
+// In the play session the script hides the core interface (chat, player list, backpack and the rest) and puts one
 // more ScreenGui under the PlayerGui, DisplayOrder -1000000 and covering the screen with the background colour:
 // the world and the core interface would otherwise show between the layers. The compared area is the
 // viewport's top-left --viewport logical pixels. Roblox keeps its two menu buttons on screen whatever a script
