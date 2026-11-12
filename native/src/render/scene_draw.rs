@@ -121,6 +121,27 @@ mod tests {
         assert_eq!(packet.texels[64], [-2., -2., 361., 181.]);
     }
     #[test]
+    fn a_fill_whose_rotation_cancels_is_drawn_on_snapped_edges() {
+        // fixtures/image-probe-translated Holder7.Fill: a frame turned back by -90 in a holder turned 90 has
+        // the matrix of a translation, and its edges at 943.5 and 526.5 device px round up as an unturned
+        // frame's do, where a turned quad keeps its left and top ties and leaves the right and bottom out
+        let draw = |node: serde_json::Value| {
+            let mut scene = SceneStore::default();
+            scene.apply(&json!({"viewport":{"width":1200,"height":900,"scale":1.5},"nodes":[node],"layers":[{"draw":[1]}],"fonts":[],"images":[]})).unwrap();
+            let assets = AssetStore::new(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .unwrap(),
+                true,
+            );
+            DrawPreparer::new().prepare(&scene, &assets).unwrap().texels[64]
+        };
+        let turned = draw(json!({"id":1,"rect":[611,491,70,30],"matrix":[1,0,0,1,18,-140],"bg":{"color":[1,1,1]}}));
+        let plain = draw(json!({"id":1,"rect":[629,351,70,30],"bg":{"color":[1,1,1]}}));
+        assert_eq!(plain, [944., 527., 1049., 572.]);
+        assert_eq!(turned, plain);
+    }
+    #[test]
     fn square_gradient_does_not_apply_a_corner_mask() {
         let mut scene = SceneStore::default();
         scene.apply(&json!({"viewport":{"width":8,"height":8,"scale":1},"nodes":[{"id":1,"rect":[0,0,5,5],"bg":{"color":[1,1,1]},"gradient":{"color":[[0,1,0,0],[1,0,1,0]]}}],"layers":[{"draw":[1]}],"fonts":[],"images":[]})).unwrap();
@@ -1521,11 +1542,25 @@ impl DrawPreparer {
         } else {
             radius(&node["corner"], self.scale)
         };
+        // A pure-translation matrix (a Rotation cancelled by an ancestor's) draws its fill and its image
+        // like an axis-aligned node's, on snapped edges (images::translated_image_node): an edge half way
+        // between two pixels rounds up, where a turned quad leaves its right and bottom tie out
+        // (fixtures/image-probe-translated.luau, the 90 and 180 degree cells)
+        let moved = if physical.snapped {
+            None
+        } else {
+            super::images::translated_image_node(node)
+        };
         if parts == "all" || parts == "under" {
             if !in_group {
                 self.group_shadows(ctx, node, scene, assets)?;
             }
-            self.background(ctx, node, physical, radii, in_group)?;
+            match &moved {
+                Some(moved) => {
+                    self.background(ctx, moved, physical_rect(moved, self.scale), radii, in_group)?
+                }
+                None => self.background(ctx, node, physical, radii, in_group)?,
+            }
         }
         if parts == "all" || parts == "image" {
             let image_started = Instant::now();
@@ -1533,13 +1568,6 @@ impl DrawPreparer {
             if node["image"].is_object() {
                 self.stats.images += 1;
             }
-            // A pure-translation matrix (a Rotation cancelled by an ancestor's) draws like an axis-aligned
-            // image (images::translated_image_node)
-            let moved = if physical.snapped {
-                None
-            } else {
-                super::images::translated_image_node(node)
-            };
             let (node, physical) = match &moved {
                 Some(moved) => (moved, physical_rect(moved, self.scale)),
                 None => (node, physical),
