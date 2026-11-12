@@ -444,6 +444,7 @@ pub struct GpuRenderer {
     instance_capacity: u64,
     data: Texture,
     sampler: wgpu::Sampler,
+    repeat_sampler: wgpu::Sampler,
     dummy: Texture,
     default_lut: Texture,
     textures: rustc_hash::FxHashMap<TextureId, Texture>,
@@ -571,6 +572,14 @@ impl GpuRenderer {
         texture_entries.push(wgpu::BindGroupLayoutEntry {
             binding: 12,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        });
+        // The same point sampling with repeating coordinates: a tiled Pixelated image (uber.frag.glsl
+        // hardwareTexel)
+        texture_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 13,
+            visibility: wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
             count: None,
         });
@@ -778,6 +787,15 @@ impl GpuRenderer {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
+        let repeat_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("RUR repeating point sampling"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
         let timestamps = device
             .features()
             .contains(wgpu::Features::TIMESTAMP_QUERY)
@@ -830,6 +848,7 @@ impl GpuRenderer {
             instance_capacity,
             data,
             sampler,
+            repeat_sampler,
             dummy,
             default_lut,
             textures: Default::default(),
@@ -1987,11 +2006,13 @@ impl GpuRenderer {
                 None => fallback.view.clone(),
             };
         }
-        let entries: [wgpu::BindGroupEntry<'_>; 13] =
+        let entries: [wgpu::BindGroupEntry<'_>; 14] =
             std::array::from_fn(|binding| wgpu::BindGroupEntry {
                 binding: binding as u32,
                 resource: if binding == 12 {
                     wgpu::BindingResource::Sampler(&self.sampler)
+                } else if binding == 13 {
+                    wgpu::BindingResource::Sampler(&self.repeat_sampler)
                 } else {
                     wgpu::BindingResource::TextureView(&views[binding])
                 },
@@ -2441,6 +2462,55 @@ mod tests {
             )
             .validate(&module)
             .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
+        }
+    }
+
+    /// The web build draws through the GLES backend, whose translation is stricter than Vulkan's: a texture
+    /// takes a single sampler there. RUR_WRITE_GLES=<file prefix> keeps the translated sources.
+    #[test]
+    fn calibrated_glsl_translates_for_webgl2() {
+        use wgpu::naga;
+        for (stage, name, source) in [
+            (naga::ShaderStage::Vertex, "vert", include_str!("shaders/uber.vert.glsl")),
+            (naga::ShaderStage::Fragment, "frag", include_str!("shaders/uber.frag.glsl")),
+        ] {
+            let module = naga::front::glsl::Frontend::default()
+                .parse(&naga::front::glsl::Options { stage, defines: Default::default() }, source)
+                .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
+            let info = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::empty(),
+            )
+            .validate(&module)
+            .unwrap();
+            let options = naga::back::glsl::Options {
+                version: naga::back::glsl::Version::Embedded { version: 300, is_webgl: true },
+                ..Default::default()
+            };
+            let pipeline = naga::back::glsl::PipelineOptions {
+                shader_stage: stage,
+                entry_point: "main".into(),
+                multiview: None,
+            };
+            let mut text = String::new();
+            naga::back::glsl::Writer::new(
+                &mut text,
+                &module,
+                &info,
+                &options,
+                &pipeline,
+                naga::proc::BoundsCheckPolicies::default(),
+            )
+            .and_then(|mut writer| writer.write())
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+            // A bool vector cast to an integer vector becomes mix() of integer vectors, which GLSL ES 3.00
+            // lacks: the browser rejected the whole shader for one
+            assert!(!text.contains("mix(ivec") && !text.contains("mix(uvec"), "{name}: mix() of integer vectors");
+            if let Some(prefix) = std::env::var_os("RUR_WRITE_GLES") {
+                let mut path = prefix;
+                path.push(format!(".{name}.glsl"));
+                std::fs::write(path, &text).unwrap();
+            }
         }
     }
 

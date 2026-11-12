@@ -15,6 +15,11 @@ layout(set=1,binding=0) uniform texture2D uData;
 layout(set=0,binding=0) uniform Target { vec4 uAdjust; };
 layout(location=0) flat out int vRecord;
 layout(location=1) out vec2 vGradient;
+// The texture coordinate of an image quad drawn on its own vertices (rec(2).y = the record's coordinate
+// texel): Studio's rasterizer interpolates it over the quad's two triangles and its sampler picks the texel,
+// so a pixel centre on a texel boundary falls as the hardware rounds it. The same vertices, corner order and
+// coordinates give the same texels.
+layout(location=2) out vec2 vUv;
 
 vec4 rec(int i) {
 	return texelFetch(sampler2D(uData, uPointSampler), ivec2(i & 2047, i >> 11), 0);
@@ -24,7 +29,15 @@ void main() {
 	int r = int(aRecord);
 	vec4 b = rec(r);
 	float g = rec(r + 2).w;
-	if (!(g > 0.0)) {
+	// Only an image record keeps a coordinate offset there (a rectangle keeps its hole flag)
+	vec4 head = rec(r + 2);
+	float uvAt = int(head.x) == 6 ? head.y : 0.0;
+	vUv = vec2(0.0);
+	if (uvAt > 0.0) {
+		vec4 uv = rec(r + int(uvAt));
+		b = rec(r + int(uvAt) + 1);
+		vUv = vec2(aCorner.x > 0.5 ? uv.z : uv.x, aCorner.y > 0.5 ? uv.w : uv.y);
+	} else if (!(g > 0.0)) {
 		// Skip rasterizing what the clip test would discard: the quad shrinks to the clip grown by a
 		// pixel (vertex snapping cannot lose a pixel centre the fragment clip test keeps) and never
 		// grows. Gradient quads keep their vertices: their coordinate is interpolated from them.

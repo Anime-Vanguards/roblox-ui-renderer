@@ -24,6 +24,8 @@ layout(set=1,binding=11) uniform texture2D uImage7;
 
 layout(location=0) flat in int vRecord;
 layout(location=1) in vec2 vGradient;
+layout(location=2) in vec2 vUv;
+layout(set=1,binding=13) uniform sampler uRepeatSampler;
 layout(location=0) out vec4 outColor;
 
 // HLSL (ANGLE/D3D11) rejects discard inside helper functions: helpers flag it and main discards
@@ -738,12 +740,31 @@ ivec4 bilinear(int slot, int lod, vec4 tx, vec4 ty, out bool exact) {
 }
 
 // Straight colour and alpha of an image pixel before quantization (the sampled texel, as images.rs shade takes it)
+// The texel the hardware's point sampling picks at the interpolated coordinate (uber.vert.glsl vUv)
+vec4 hardwareTexel(int slot, vec2 uv, float lod) {
+	// One sampler for every image (the GL backend takes a texture with a single sampler): it repeats, which is
+	// the tile's addressing and changes nothing else, a snapped quad's pixel centres lying half a pixel or
+	// more inside its edges
+	switch (slot) {
+		case 0: return textureLod(sampler2D(uImage0, uRepeatSampler), uv, lod);
+		case 1: return textureLod(sampler2D(uImage1, uRepeatSampler), uv, lod);
+		case 2: return textureLod(sampler2D(uImage2, uRepeatSampler), uv, lod);
+		case 3: return textureLod(sampler2D(uImage3, uRepeatSampler), uv, lod);
+	}
+	return vec4(0.0);
+}
+
 vec4 sampleImageQuad(ivec2 P, out bool ok) {
 	vec4 quad = rec(3), info = rec(5), taps = rec(6);
 	int slot = int(info.x), l0 = int(info.y), f = int(info.z), flags = int(info.w);
 	ivec2 ij = P - ivec2(quad.xy);
 	ok = true;
 	if ((flags & 1) != 0) {
+		vec4 head = rec(2);
+		if (head.y > 0.0) {
+			ivec4 k = toBytes(hardwareTexel(slot, vUv, float(l0)));
+			return vec4(byteFloat(k.r), byteFloat(k.g), byteFloat(k.b), byteFloat(k.a));
+		}
 		vec4 tx = rec(int(taps.x) + ij.x), ty = rec(int(taps.y) + ij.y);
 		ivec4 k = toBytes(imageTexel(slot, ivec2(tx.x, ty.x), l0));
 		return vec4(byteFloat(k.r), byteFloat(k.g), byteFloat(k.b), byteFloat(k.a));
@@ -1023,6 +1044,25 @@ float fringeLod(vec2 l, vec4 b, vec2 density, vec4 m) {
 	return log2(max(max(abs(across), abs(down)), 0.6875 * max(abs(across + down), abs(across - down))));
 }
 
+// A pixel centre on the mitre line of a turned quad's corner, where the anti-aliasing strips of two edges meet,
+// belongs to one of them by the rasterizer's top-left rule: to the strip of the left or right edge when, from the
+// line, that strip lies to the right on the screen, or straight below (bits 16 32 64 128: at TL, TR, BR, BL it
+// does). Measured on squares turned 45 degrees about a pixel's centre (fixtures/image-probe-rotlod.luau V_8_8_45,
+// V_5_5_45). Returns the local point moved off the line into the strip that owns the pixel.
+vec2 ownedLocal(vec2 l, vec4 b, int bits) {
+	float dx = max(b.x - l.x, l.x - b.z), dy = max(b.y - l.y, l.y - b.w);
+	if (dx > 0.0 && dy > 0.0 && abs(dx - dy) < 0.00025) {
+		bool left = b.x - l.x > 0.0, top = b.y - l.y > 0.0;
+		int bit = left ? (top ? 16 : 128) : (top ? 32 : 64);
+		if ((bits & bit) != 0) {
+			l.x += left ? -0.001 : 0.001;
+		} else {
+			l.y += top ? -0.001 : 0.001;
+		}
+	}
+	return l;
+}
+
 vec4 kindImageRotated(ivec2 P, vec2 X) {
 	vec4 m = rec(3), tr = rec(4), bounds = rec(5), screen = rec(6), info = rec(7);
 	// The quad's corners sit on the rasterizer's 1/256 px grid, so each of its two triangles has its own map
@@ -1032,6 +1072,9 @@ vec4 kindImageRotated(ivec2 P, vec2 X) {
 		tr = rec(12);
 	}
 	vec2 l = toLocal(m, tr, X);
+	if (diagonal.w > 0.0) {
+		l = ownedLocal(l, bounds, int(diagonal.w));
+	}
 	vec2 cl = clamp(l, bounds.xy, bounds.zw);
 	int slot = int(info.x), count = int(info.y), flags = int(info.z), levels = int(info.w);
 	bool pixelated = (flags & 1) != 0, quarter = (flags & 2) != 0, rounded = (flags & 4) != 0;

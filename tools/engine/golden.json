@@ -124,6 +124,10 @@
 			"digest": "284556cea8f9875e2b27524c55ec507e9384e7581c378c64d5fea07bdc3635cc",
 			"status": "ok"
 		},
+		"fast/edit/image-probe-pixgroup": {
+			"digest": "bc8392b3bf98b4c749cee6475acc42b4b854e92f54303a840d38195544da70d6",
+			"status": "ok"
+		},
 		"fast/edit/image-probe-rotlod": {
 			"digest": "34896386dbb6e26009c8d3ee962cdc32c8cbd24183160a90be4cd616113cafe2",
 			"status": "ok"
@@ -888,6 +892,10 @@
 			"digest": "4e5f562003bddccae63cc57ef0902254c68ae666146ef20dd3085843e2fd51ec",
 			"status": "ok"
 		},
+		"fixtures/edit/image-probe-pixgroup": {
+			"digest": "38d84a5e381549fbeaef17c07e74ee1c1e6f7f953ea82d8e320920b5e91e4fd6",
+			"status": "ok"
+		},
 		"fixtures/edit/image-probe-rotlod": {
 			"digest": "ce8341242e035ae671e07747e8843a055bca855302de979b2865632ab97ad6e3",
 			"status": "ok"
@@ -1638,6 +1646,10 @@
 		},
 		"fixtures/play/image-probe-min": {
 			"digest": "d123c5b65e8a1405cf92aa3c8811f0b9efc4d3a76351155c2ebf749a0d73d22e",
+			"status": "ok"
+		},
+		"fixtures/play/image-probe-pixgroup": {
+			"digest": "d8ec6d55aacd2e750f9775c92100eababe71fcf841b015dc8361d1caa1e61db2",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-rotlod": {
@@ -2509,7 +2521,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T05:21:10.874Z",
+	"recorded": "2026-11-12T06:03:47.788Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

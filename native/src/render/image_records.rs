@@ -360,6 +360,16 @@ impl DrawPreparer {
                 self.packet.texels.extend_from_slice(&taps);
             }
             self.packet.texels[start + 6] = tap_offsets;
+            // A Pixelated quad is drawn on its own vertices, corners in the strip's order, with the texture
+            // coordinate interpolated by the rasterizer and the texel picked by the sampler (uber.vert.glsl
+            // vUv): a pixel centre on a texel boundary falls as the hardware rounds it, which no formula of the
+            // quad's numbers reproduced (fixtures/image-probe-pixgroup.luau, image-tile, image-probe-mag,
+            // image-slice). Under a UICorner Studio's texels are not the interpolated ones: the taps stay.
+            if pixelated && !rounded {
+                self.packet.texels[start + 2][1] = (self.packet.texels.len() - start) as f32;
+                self.push([q.u0, q.v0, q.u1, q.v1]);
+                self.push([x0 + tx, y0 + ty, x1 + tx, y1 + ty]);
+            }
             // Straight colour and alpha, blended like Studio: round((c A + D (255 - A)) / 255), one rounding
             let mut batch = DrawBatch {
                 blend: BlendMode::Image,
@@ -526,6 +536,20 @@ impl DrawPreparer {
             self.push([q.u0, q.v0, q.u1, q.v1]);
             self.push([rho.log2(), q.wrap as u8 as f64, q.unrounded as u8 as f64, 0.]);
         }
+        // Which strip owns a pixel centre on a corner's mitre line (uber.frag.glsl ownedLocal): the left or right
+        // edge's when it lies to the right of the line on the screen, or straight below it. From the line that
+        // strip lies towards (ox, -oy) in local space, (ox, oy) the corner's outward directions
+        if !quarter && !rounded && !hard {
+            let side = |ox: f64, oy: f64| {
+                let v = [m[0] * ox - m[2] * oy, m[1] * ox - m[3] * oy];
+                v[0] > 1e-9 || (v[0].abs() <= 1e-9 && v[1] > 0.)
+            };
+            let bits = (side(-1., -1.) as u32) << 4
+                | (side(1., -1.) as u32) << 5
+                | (side(1., 1.) as u32) << 6
+                | (side(-1., 1.) as u32) << 7;
+            self.packet.texels[start + 13][3] = bits as f32;
+        }
         if let Some(g) = gradient {
             // UIGradient multipliers: the raw keypoint values, not 8-bit stops, and t over the unsnapped
             // rect; t = 0 everywhere on a zero-width or zero-height box (its first keypoint)
@@ -689,6 +713,20 @@ mod tests {
                 .iter()
                 .map(|v| v.map(f32::to_bits))
                 .collect();
+            // RUR_RECORD_GOLDEN_FIELDS, as for the turned records below
+            if let Some(out) = std::env::var_os("RUR_RECORD_GOLDEN_FIELDS") {
+                use std::io::Write;
+                let mut file =
+                    std::fs::OpenOptions::new().create(true).append(true).open(out).expect("the list");
+                writeln!(file, "s{index} {}", serde_json::to_string(&actual).unwrap()).unwrap();
+                let starts: Vec<u32> = ctx
+                    .batches
+                    .iter()
+                    .flat_map(|b| b.record_offsets.iter().map(|offset| *offset as u32 - 64))
+                    .collect();
+                writeln!(file, "i{index} {}", serde_json::to_string(&starts).unwrap()).unwrap();
+                continue;
+            }
             assert_eq!(actual, expected, "snapped record case {index}");
             let instances: Vec<_> = ctx
                 .batches
@@ -749,11 +787,17 @@ mod tests {
             let (mut draw, ctx) = snapped_fixture(c, &source);
             draw.finish_pass(ctx);
             gpu.render(&draw.packet)?;
-            assert_eq!(
-                hash(&gpu.readback_rgba()?),
-                c["pixelHash"].as_str().unwrap(),
-                "snapped GPU pixels {index}"
-            );
+            // Eleven Pixelated cases have a pixel centre on a texel boundary, where the rasterizer picks the
+            // texel: their hashes are this GPU's (notes/gpu.md, "The one hardware-sampled path")
+            let pixels = hash(&gpu.readback_rgba()?);
+            if let Some(out) = std::env::var_os("RUR_RECORD_GOLDEN_FIELDS") {
+                use std::io::Write;
+                let mut file =
+                    std::fs::OpenOptions::new().create(true).append(true).open(out).expect("the list");
+                writeln!(file, "p{index} \"{pixels}\"").unwrap();
+                continue;
+            }
+            assert_eq!(pixels, c["pixelHash"].as_str().unwrap(), "snapped GPU pixels {index}");
         }
         Ok(())
     }

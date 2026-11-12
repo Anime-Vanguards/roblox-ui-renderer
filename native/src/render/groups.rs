@@ -491,7 +491,19 @@ impl DrawPreparer {
                     self.draw_node_parts(screen, child, scene, assets, in_group, "under")?;
                 }
                 self.flush_segment(&mut segment, texture, space, &mut empty, false);
-                self.group_image(texture, child, assets, in_group, space)?;
+                // A Pixelated image in a texture on the screen's grid is the screen's quad, drawn on its own
+                // vertices (image_records.rs snapped_image_records)
+                let own_quad = !resampled
+                    && !in_group
+                    && child["image"]["resample"] == "Pixelated"
+                    && !child["gradient"].is_object()
+                    && radius(&child["corner"], 1.0).iter().all(|r| *r <= 0.0);
+                let asset = child["image"]["uri"].as_str().and_then(|uri| assets.image(uri)).filter(|_| own_quad);
+                if let Some(asset) = asset {
+                    self.snapped_image_records(texture, child, asset, physical_rect(child, self.scale), [0.0; 4])?;
+                } else {
+                    self.group_image(texture, child, assets, in_group, space)?;
+                }
                 empty = false;
                 if has_part(child, in_group, true) {
                     let screen = self.screen_segment(&mut segment, texture, space, empty)?;
