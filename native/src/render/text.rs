@@ -74,6 +74,9 @@ struct Quad {
     /// Synthetic italic (TEXT_ITALIC_SKEW): the quad's top slides right by skew x its height,
     /// pivoting on its bottom edge
     skew: f64,
+    /// How far below the quad's bottom edge the skew pivots: 0, except on a scaled quad, whose skew pivots on
+    /// the bottom edge it had before its corners were rounded to whole px (`placed_quad`)
+    pivot: f64,
     color: [f64; 3],
     alpha: f64,
     shade: Option<Shade>,
@@ -93,13 +96,13 @@ struct Quad {
 const TEXT_ITALIC_SKEW: f64 = 0.21985;
 /// Whole px a synthetic italic quad whose bottom edge is `depth` px below the baseline starts further left.
 fn italic_lean(skew: f64, depth: f64) -> f64 {
-    (skew * depth.max(0.0) + 0.5).floor()
+    (skew * depth + 0.5).floor()
 }
 impl Quad {
     /// The coverage box: the quad's box, widened on the right by ceil(skew x height)
     fn cover(&self) -> [f64; 4] {
         let [l, t, r, b] = self.bounds;
-        [l, t, r + (self.skew * (b - t)).ceil(), b]
+        [l, t, r + (self.skew * (b - t + self.pivot)).ceil().max(0.0), b]
     }
     fn resampled(&self) -> bool {
         self.scaled || self.skew != 0.0
@@ -710,9 +713,23 @@ fn placed_quad(
             corner(p.baseline + offset[1] + (h as f64 - top as f64 + 1.0) * s),
         ]
     };
-    // Synthetic italic: the quad starts whole pixels further left the deeper it reaches below the baseline
-    let lean = italic_lean(skew, bounds[3] - (p.baseline + offset[1]));
-    let (x, bounds) = (x - lean, [bounds[0] - lean, bounds[1], bounds[2] - lean, bounds[3]]);
+    // Synthetic italic: the quad starts whole pixels further left the deeper it reaches below the baseline.
+    // A scaled quad is skewed about the baseline before its corners are rounded: its left and right edges are
+    // the rounded places of the skewed bottom corners, and the skew still pivots on the unrounded bottom edge
+    // (fixtures/text-probe-synthscaled.luau, whole-pixel text: 16,808 -> 0 px; with whole lean on the rounded
+    // box the descenders were up to 1 px narrower or wider and 0.02 px off).
+    let mut pivot = 0.0;
+    let (x, bounds) = if s != 1.0 && skew != 0.0 {
+        let depth = (h as f64 - top as f64 + 1.0) * s;
+        let lean = skew * depth;
+        pivot = p.baseline + offset[1] + depth - bounds[3];
+        let l = corner(p.x + offset[0] + (left as f64 - 1.0) * s - lean);
+        let r = corner(p.x + offset[0] + (left as f64 + w as f64 + 1.0) * s - lean);
+        (l, [l, bounds[1], r, bounds[3]])
+    } else {
+        let lean = italic_lean(skew, bounds[3] - (p.baseline + offset[1]));
+        (x - lean, [bounds[0] - lean, bounds[1], bounds[2] - lean, bounds[3]])
+    };
     Quad {
         x,
         y,
@@ -722,6 +739,7 @@ fn placed_quad(
         bounds,
         scaled: s != 1.0,
         skew,
+        pivot,
         color,
         alpha,
         shade: if gradient.is_object() {
@@ -750,6 +768,7 @@ fn rect_quad(
         bounds,
         scaled: false,
         skew: 0.0,
+        pivot: 0.0,
         color,
         alpha,
         shade: if gradient.is_object() {
@@ -887,7 +906,7 @@ fn coverage_at(q: &Quad, i: usize, j: usize, width: usize, height: usize) -> f64
             q.coverage[(y as usize - 1) * q.w + x as usize - 1] as f64
         }
     };
-    let shift = q.skew * (height as f64 - (j as f64 + 0.5));
+    let shift = q.skew * (height as f64 - (j as f64 + 0.5) + q.pivot);
     let u = (i as f64 + 0.5 - shift) * ((q.w + 2) as f64 / width as f64) - 0.5;
     let v = (j as f64 + 0.5) * ((q.h + 2) as f64 / height as f64) - 0.5;
     let x = u.floor() as i64;
@@ -1084,7 +1103,7 @@ fn rotated_shaded(q: &Quad, m: [f64; 6]) -> Option<TextQuad> {
             let x = ia * px + ic * py + ie;
             let y = ib * px + id * py + jf;
             let by = y - bt;
-            let bx = x - bl - q.skew * (bh - by);
+            let bx = x - bl - q.skew * (bh - by + q.pivot);
             if by < 0.0 || by >= bh || bx < 0.0 || bx >= bw {
                 continue;
             }
@@ -1296,7 +1315,7 @@ pub fn texture_text_layers(
             let v = by * sv - 0.5;
             let ty = v.floor();
             let wb = snap((v - ty) * 256.0) / 256.0;
-            let shift = q.skew * (bh - by);
+            let shift = q.skew * (bh - by + q.pivot);
             for i in 0..w {
                 let x = l + (x0 + i as f64 + 0.5) / sx;
                 let bx = x - bl - shift;
@@ -1621,6 +1640,7 @@ fn quads_key(quads: &[Quad]) -> (u64, Vec<u64>, [f64; 2], bool) {
             (q.bounds[3] - oy).to_bits(),
             q.scaled as u64,
             q.skew.to_bits(),
+            q.pivot.to_bits(),
             q.color[0].to_bits(),
             q.color[1].to_bits(),
             q.color[2].to_bits(),
@@ -2281,8 +2301,43 @@ mod tests {
         assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, 3.0), 1.0);
         assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, 7.0), 2.0);
         assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, 12.0), 3.0);
-        assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, -20.0), 0.0);
+        // a glyph that ends above the baseline (a quote, "^") leans right
+        assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, -2.0), 0.0);
+        assert_eq!(super::italic_lean(super::TEXT_ITALIC_SKEW, -20.0), -4.0);
         assert_eq!(super::italic_lean(0.0, 12.0), 0.0);
+    }
+
+    /// A scaled quad (whole-pixel text at a size that is not whole pixels) is skewed about the baseline before
+    /// its corners are rounded (fixtures/text-probe-synthscaled.luau).
+    #[test]
+    fn a_scaled_synthetic_italic_quad_is_skewed_before_its_corners_are_rounded() {
+        let placement = |x: f64, baseline: f64, scale: f64| super::Placement {
+            font: 0,
+            glyph: 0,
+            ppem: 22.0,
+            run: None,
+            bold: 0,
+            italic: true,
+            scale,
+            unsnapped: false,
+            shown: true,
+            quarter: None,
+            x,
+            copies: None,
+            baseline,
+        };
+        let bitmap = |w: u32, h: u32, left: i32, top: i32| super::GlyphBitmap { coverage: vec![255; (w * h) as usize].into(), w, h, left, top, slanted: false, layers: Vec::new() };
+        let quad = |p: &super::Placement, b: super::GlyphBitmap| super::placed_quad(p, b, [0.0, 0.0], [255.0; 3], 255.0, &serde_json::Value::Null, [0.0; 4], 1.5);
+        // a descender: 9 padded px below the baseline, 9.2 px scaled, so 2.02 px left before rounding
+        let q = quad(&placement(100.0, 50.0, 22.5 / 22.0), bitmap(10, 18, 1, 10));
+        assert_eq!(q.bounds, [98.0, 39.0, 110.0, 59.0]);
+        assert!((q.pivot - (9.0 * 22.5 / 22.0 - 9.0)).abs() < 1e-9, "{}", q.pivot);
+        // LuckiestGuy "O" at 73.5 px ends 3 px above the baseline: its right edge 570.33 + 0.44 rounds to 571
+        let q = quad(&placement(522.0, 754.0, 73.5 / 73.0), bitmap(47, 48, 0, 51));
+        assert_eq!(q.bounds, [521.0, 702.0, 571.0, 752.0]);
+        // unscaled: whole px, pivoting on the bottom edge
+        let q = quad(&placement(100.0, 50.0, 1.0), bitmap(10, 18, 1, 10));
+        assert_eq!((q.bounds, q.pivot), ([98.0, 39.0, 110.0, 59.0], 0.0));
     }
 
     #[test]
@@ -2502,6 +2557,7 @@ mod tests {
                     bounds,
                     scaled,
                     skew: 0.0,
+                    pivot: 0.0,
                     color,
                     alpha,
                     shade,
@@ -2576,6 +2632,7 @@ mod tests {
                     bounds,
                     scaled,
                     skew: if z == 2 { TEXT_ITALIC_SKEW } else { 0.0 },
+                    pivot: 0.0,
                     color,
                     alpha,
                     shade: Some(triangles(&gradient, [0.3, 0.7, 12.25, 9.5], bounds, color, alpha)),
@@ -2613,6 +2670,7 @@ mod tests {
             bounds: [0.0, 0.0, 3.0, 3.0],
             scaled: false,
             skew: 0.0,
+            pivot: 0.0,
             color: [100.0, 200.0, 50.0],
             alpha: 128.0,
             shade: None,
@@ -2673,6 +2731,7 @@ mod tests {
             bounds: [0.0, 0.0, 10.0, 10.0],
             scaled: false,
             skew: 0.0,
+            pivot: 0.0,
             color: [255.0; 3],
             alpha: 255.0,
             shade: Some(shade),
