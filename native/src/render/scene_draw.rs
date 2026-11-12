@@ -3372,13 +3372,46 @@ impl DrawPreparer {
             return Ok(());
         }
         let [fx, fy, fw, fh] = std::array::from_fn(|i| component(&node["rect"], i, 0.));
+        // The frame's border also runs between the window and each bar: a line BorderSizePixel thick in the
+        // border's colour along the window's edge, across the whole frame (the window is that much smaller:
+        // AbsoluteWindowSize is the frame less the bar and the border). Measured, Studio 0.747
+        // (fixtures/layout-probe-scrollgap.luau: thickness 4 to 13, borders of 0, 1 and 3, a bar on the left,
+        // one bar or both): none without a border.
+        let border = number(&node["border"]["size"], 0.);
+        let window: Option<[f64; 4]> = scroll["window"].is_array().then(|| std::array::from_fn(|i| component(&scroll["window"], i, 0.)));
+        if let (true, Some([wx, wy, ww, wh]), true) = (border > 0., window, node["matrix"].is_null()) {
+            let alpha = alpha8(1. - number(&node["bg"]["transparency"], 0.));
+            let paint = solid_paint(color(&node["border"]["color"], [0.; 3]), alpha as f64 / 255.);
+            let mut lines: Vec<[f64; 4]> = Vec::new();
+            if scroll["vertical"] == true {
+                let x = if scroll["verticalPosition"] == "Left" { wx - border } else { wx + ww };
+                lines.push([x, fy, border, fh]);
+            }
+            if scroll["horizontal"] == true {
+                lines.push([fx, wy + wh, fw, border]);
+            }
+            for rect in lines {
+                let mut part = serde_json::json!({ "rect": rect });
+                part["clip"] = node["clip"].clone();
+                let p = physical_rect(&part, self.scale);
+                let m = node_transform(&part, ctx.origin, self.scale);
+                if alpha > 0 && p.snapped {
+                    self.rect(ctx, p.rect.translated(m[4], m[5]), clip_rect(&part, ctx.origin, self.scale), paint, None);
+                }
+            }
+        }
         for horizontal in [false, true] {
             if scroll[if horizontal { "horizontal" } else { "vertical" }] != true {
                 continue;
             }
             let other = scroll[if horizontal { "vertical" } else { "horizontal" }] == true;
-            let visible = if horizontal { fw } else { fh } - if other { t } else { 0. };
             let axis = if horizontal { 0 } else { 1 };
+            // The thumb runs over the window's length (the frame less the other bar and the border beside it:
+            // a bordered frame's thumb is that much shorter; the same probe)
+            let visible = match window {
+                Some(window) => window[axis + 2],
+                None => (if horizontal { fw } else { fh }) - if other { t } else { 0. },
+            };
             let canvas = component(&scroll["canvas"], axis + 2, 0.);
             // Measured, whole logical px: thumb = max(2t + 1, round(visible^2 / canvas)), offset
             // floor((visible - thumb) * CanvasPosition / (canvas - visible)) (fixtures/image-probe-scroll.luau:

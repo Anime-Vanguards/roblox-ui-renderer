@@ -196,6 +196,10 @@
 			"digest": "2a3a568f39db01c7bb24a41298cee97a31303dad51672b07f594d5150e15a2a5",
 			"status": "ok"
 		},
+		"fast/edit/layout-probe-scrollgap": {
+			"digest": "33a213e62436f9e613498c2406d62d27d1dffd2f5e5bfe3748bb87b7fe7b190b",
+			"status": "ok"
+		},
 		"fast/edit/layout-richscaled-quads": {
 			"digest": "fe76b83beba09f4b288937c0cafea2149f2602eb59e0f62abdf3d4641f4158c0",
 			"status": "ok"
@@ -940,6 +944,10 @@
 			"digest": "1ef783b6273110838daba049516ef2a2898ba9dbb2243029cb343ca2813a326c",
 			"status": "ok"
 		},
+		"fixtures/edit/layout-probe-scrollgap": {
+			"digest": "43f7b6443279fcbcf608060234c41c1f141859c8bd6f6f29800aa6eb1a3b7b60",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-richscaled-quads": {
 			"digest": "e26445d31fe9b4c9d396f41a1d60fb95552df70eb421f8af3767e39751c02037",
 			"status": "ok"
@@ -1670,6 +1678,10 @@
 		},
 		"fixtures/play/layout-list": {
 			"digest": "e72fbf20308b0e222d3791367a9ebf6112c4cb2826ab2c0e979f2a27a7f6bc1b",
+			"status": "ok"
+		},
+		"fixtures/play/layout-probe-scrollgap": {
+			"digest": "21f72d0dc7da42f1345ea920781fd2a70f196c23ad795aba075d18de8982c93c",
 			"status": "ok"
 		},
 		"fixtures/play/layout-richscaled-quads": {
