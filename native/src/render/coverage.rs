@@ -443,9 +443,10 @@ pub fn border_stroke_alpha_modes(
                 } else {
                     qx.hypot(qy)
                 };
-                let mut a = (scale * (distance - (q.r - inset) + 0.5)).clamp(0.0, 1.0);
+                // (one device pixel wide at any scale: Studio 0.747, notes/strokes.md Round 8)
+                let mut a = (distance - (q.r - inset) + 0.5).clamp(0.0, 1.0);
                 if round {
-                    a *= (scale * (q.r + d + 0.5 - distance)).clamp(0.0, 1.0);
+                    a *= (q.r + d + 0.5 - distance).clamp(0.0, 1.0);
                 }
                 ring[(j * gw + i) as usize] = 1;
                 a
@@ -752,7 +753,8 @@ mod tests {
     }
     #[test]
     fn rounded_and_stroke_masks_match_javascript_reference() {
-        // Frozen 8-bit mask hashes from cornerCoverage / SceneRenderer.borderStrokeAlpha.
+        // Frozen 8-bit mask hashes from cornerCoverage / SceneRenderer.borderStrokeAlpha; the ring strokes at
+        // scales other than 1 are this renderer's own since their ramp stopped taking the scale (Studio 0.747).
         let corners = [
             4054628274u32,
             2025123922,
@@ -781,29 +783,29 @@ mod tests {
         ];
         let strokes = [
             3433177817u32,
-            2603846614,
-            1013207955,
+            3002565937,
+            1734602426,
             3430542588,
             3047246943,
-            1108112141,
+            1339572075,
             1819584623,
-            669513204,
-            366416900,
+            53136845,
+            2115426509,
             2514612688,
-            1243351687,
-            3456211080,
+            117468618,
+            1074766995,
             2878728380,
-            2010767537,
-            3376849442,
+            2562567434,
+            1685356165,
             3606728384,
-            3899534468,
-            2259488272,
+            2668461141,
+            2982063452,
             3302788288,
-            2282291472,
-            699045250,
+            1214368773,
+            713195895,
             2377840651,
-            2550154860,
-            2550418987,
+            2905977538,
+            162110940,
         ];
         let hash = |values: Vec<f64>| {
             values.iter().fold(2166136261u32, |h, v| {
