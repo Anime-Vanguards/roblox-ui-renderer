@@ -41,10 +41,11 @@ return function(Target)
 	-- closed shapes
 	for Index, Thickness in { 1, 4, 10, 20 } do
 		local X = 20 + (Index - 1) * 120
-		-- (one vertex of the thin triangle's last corner is within a hundredth of a 1/256 pixel step of a rounding
-		-- edge, and Studio's GPU puts it on the other side: one pixel there is 3 levels off. notes/path2d.md
+		-- (the third point is at X + 36: at X + 35 a vertex of the thin triangle's last corner lies 0.0135 of a
+		-- 1/256 px step from a rounding edge, which Studio's GPU puts on either side depending on the size of
+		-- its viewport. At X + 36 no vertex of the thin triangle is within 0.05 of a step of one. notes/path2d.md
 		-- "Vertex snap")
-		Path({ { X, 360 }, { X + 70, 360 }, { X + 35, 420 } }, Thickness, { Closed = true })
+		Path({ { X, 360 }, { X + 70, 360 }, { X + 36, 420 } }, Thickness, { Closed = true })
 	end
 
 	-- a zero-length segment, a single point (no segment), two points closed
