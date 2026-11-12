@@ -185,7 +185,7 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-dynamic": {
-			"digest": "d1ace324f3bcad52c99ee765e6b5fc3e1d56481fe8aed5a40c8432b924d62f2f",
+			"digest": "1c9cbe0a92bf8d14f5da1694c969757a5394734f52348baee83d59ce99a75d4a",
 			"status": "ok"
 		},
 		"fast/edit/layout-flex": {
@@ -201,7 +201,7 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-richscaled-quads": {
-			"digest": "fe76b83beba09f4b288937c0cafea2149f2602eb59e0f62abdf3d4641f4158c0",
+			"digest": "65e49c9126f7a02381d157754c264cfab98c0a203bc57b9b193842ee4a79a0e0",
 			"status": "ok"
 		},
 		"fast/edit/layout-text-narrow": {
@@ -221,11 +221,11 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-textpen3": {
-			"digest": "761755e4876efe4ec4338d00c44d1cdd6cb3a033b1b722827311ca3d0bf8dc61",
+			"digest": "295e2d2a89bafe2a597e30582a2bb99b943d47c2d056590d7fc28d85d3319ea5",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate": {
-			"digest": "dd9a4872fe1de39638aa51ce64c0a0765d7ae67c7bfb48ace3eb7b989ff2ab3b",
+			"digest": "ef56dbc3a77cbe8d23e65fa8c1699ece1de79e1b8fa28e13819e82b3ebd92b87",
 			"status": "ok"
 		},
 		"fast/edit/layout-truncate2": {
@@ -264,8 +264,12 @@
 			"digest": "85d4113bc8ad5eea506d84c9b9e46361141549326bcb2cf3466ec433b987debf",
 			"status": "ok"
 		},
+		"fast/edit/path2d-probe-snap": {
+			"digest": "856a2cef099b4babe76f973e0e110e25763bee5bcba4bab3f7f2c7ca2cb77873",
+			"status": "ok"
+		},
 		"fast/edit/path2d-strokes": {
-			"digest": "171e0deeba740882a11bf251751e17693b7ef7ae77e390ea00adbc2ab231860a",
+			"digest": "93047a5579a191d33baf0f9af10ffb4b667e7701b0d4466b5370ff7b788eb624",
 			"status": "ok"
 		},
 		"fast/edit/path2d-thick": {
@@ -413,11 +417,11 @@
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-text": {
-			"digest": "2a68b8585b5f180e1e99f8d7c9afd9089305e670fb796fbf289b0f3a38a81e0d",
+			"digest": "860f607d8420acaef0d055b162d8fc90861dc7b30786e5a1a04670c6ea24c9b4",
 			"status": "ok"
 		},
 		"fast/edit/shadow-probe-text2": {
-			"digest": "66491c44ba02be35c0dd3130e3fb8a52e6c742f7462a86a778e8f04029d3436d",
+			"digest": "d43994baed7dd0f03fae67e8c489cc1c5f7d5613a1bdc47214840ec84630a918",
 			"status": "ok"
 		},
 		"fast/edit/shadows": {
@@ -565,7 +569,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-e": {
-			"digest": "115018c69bc01b8ee0953e53b14c997ba0ff4e2eeb8c0adda8a92fce94445bb0",
+			"digest": "53f16357304fad0ec1b148f0033353cc9fb71601d34a325221c00cc746a47a2b",
 			"status": "ok"
 		},
 		"fast/edit/stroke-text-uiscale": {
@@ -609,27 +613,31 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-case": {
-			"digest": "653996c4e062f722de652d65cd84fa6d4d33b38bc15e10faeb5c8af5dd52e4bb",
+			"digest": "dce03643d5607394b1371abe4d4b1d7d377a22f143ef43648b25b798b416f320",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor": {
-			"digest": "9a6534690a89e9fac927c4b57266d8acb8faa0d41a8199f94b64c190bc79d43e",
+			"digest": "d839b7ad80a9dff248afa2da06b6da06fda7be0ad45716d922bb7ee92d7e462c",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor2": {
-			"digest": "1db3592889926012e5f6b91c4d117bf79bf60953281e5278fea9fd90cb38d6d4",
+			"digest": "8f2c7420ff312c066e4104276e8da91e92a93c9c885c83c109f853538e993551",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-emoji": {
-			"digest": "0b65bd75818156ba7da67352a04a86dd04f71eb7aa8270cc60a61fd4eda01635",
+			"digest": "ae7558c73bde2e9c4194e71b27bf1f3e8cd9b5136f43b7442ffd7fc1d9fb5608",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-emoji-line": {
+			"digest": "07b7af5f2bd58fdb33766e369c3b35cc2fd7c873db3bee7aa7e009b85a112248",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-fracsize": {
-			"digest": "5c34bde6c0e9dd60e1be424250aba11ab580df33f86aee0f92e237c1c83c3f47",
+			"digest": "9d4beb1e4b86be9d464cb3a6a0b30444a7dfe2373c3277736f8e9ce86e2724ef",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-fracsize2": {
-			"digest": "ff1298e6bfb5b6480a23286bf161a176fd1763e166be6fd1c3b369c58b5b2a95",
+			"digest": "39cc7661105835c11d5c4a44ea91234a300c261236122d86fac110fd9c101abe",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradient": {
@@ -641,15 +649,15 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-gradstroke": {
-			"digest": "14e300ae7af368637dbdcb1df1ac2e49f4f36888ef76c266733b6d96f4b6f45f",
+			"digest": "217eae10c59e2b9b1320b197bd255dfab2c8a33912fe986be1482a491f601678",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-graphemes": {
-			"digest": "802dc44815783cfa504bfd98a412e1d3d6b58046141690e26e0cc0129e21e5d9",
+			"digest": "a40d8f4a58da03f73673637cd2cf84b1b02a0736144723bd83060253ca6e08b0",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-grouptext": {
-			"digest": "468ea0e6d6b47b5406ad6694f7437db97f036645c8c2190a24c1301b6f353bdc",
+			"digest": "492ef6597132c5aa7d4b905df7f11c4894a3eebcfda902382b355578b0e1f1b8",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-overlap": {
@@ -661,23 +669,27 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-quadties": {
-			"digest": "f2384e23e3a6d8d8bba5fbf1f095aa4b89c43cf62de28cbcd5a7390771495064",
+			"digest": "d7df35cbfaafdc7ca441d81088881b0dbe4023218b616667ae80427ca93e4bd1",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rich": {
-			"digest": "19daa08bedfa8f733149b18c03eb6f475fd6dd7d64a2351c75f2f55e1e32f97f",
+			"digest": "2494fe5785c06286543f8c0eae5d2724571a2a77e925f4389623c4731ce7d2fc",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richcap": {
-			"digest": "dcdd08854da4b1229f77c8d7a2adde83b2633f2d5be78515dd70e1b85c27cc80",
+			"digest": "281bf6f3e15829b907b425478332f6a28d555bdd04e0b1fe7568a290c79ca573",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richscaled": {
-			"digest": "4ddb0b19a61f769d7ea0da83063d2dd51d4de9784576edbb0b0b4654b4d5386f",
+			"digest": "841bcab89d8bb9ae0ebe2960cfd336d0fb97a03c87e3858bd9b172a1adcd6662",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richscaled1": {
-			"digest": "09e85defaff7d7dc4c95b86948592b7f7e3627f5b62e2dd20f9fe6a4cf5b5e08",
+			"digest": "0f4f13bb953ed53401211c350cfbca5f5c6dbd4210053714698b42315c1d2e4c",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-richtrunc": {
+			"digest": "a5fa85837af11d351f228f1cbe4d6a7df094a61715f49d370edf1bd8920c4983",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rotate": {
@@ -709,11 +721,15 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-synth": {
-			"digest": "5c915fdc765d229c9c28abce17a0abbad96f0170d3077f6fe37d76a13c312b8c",
+			"digest": "d0038986a3065c6982814da24d7570aa1435ee5bd50be49e7c4a9669e8b78085",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-tie": {
 			"digest": "ef0bb6ae5e8b8f2ab89c2ba8ffcb1b3778a5cb60c0e5e38b2cef403856a63e8f",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-tie-size": {
+			"digest": "c691bcac96178ccc916102ed111a22fc0ae91c40479728720ff2c1c82eb3e3eb",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-uiscale": {
@@ -933,7 +949,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-dynamic": {
-			"digest": "f15cc0d43ce149b896be9ad46826f81c8ac9252c8a467e53716fee5ca74253ed",
+			"digest": "afe743e2341f6603c3e28043f81d69851c58b963f5d9380bc5432f345cc58993",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-flex": {
@@ -949,7 +965,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-richscaled-quads": {
-			"digest": "e26445d31fe9b4c9d396f41a1d60fb95552df70eb421f8af3767e39751c02037",
+			"digest": "063f5e3168d74752e03ac5e832615b6fe21589b14c479d504b8f6d84ec41b9c4",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-narrow": {
@@ -969,11 +985,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen3": {
-			"digest": "809a114660f5b56a6b44588b1c057c1b014e8ee3749f1192b39b4b15fec258f0",
+			"digest": "832cd265c8ac82b92822bd94c9d988d3b47e74a922aa42641d6294982ec61bfa",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate": {
-			"digest": "ab46ee052082b0da22bd6e648bf821856be0014113b850cf010e29ff24cfb9e5",
+			"digest": "1567ac5f77805a0bd8d9153944dda624b1b1d5fc360663cb24fdc1d8d4ef92ac",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate2": {
@@ -1012,8 +1028,12 @@
 			"digest": "489e922e07b77e67023c5b55dfcae3c957cec0244e79ee5aa3d2abfc758fad7c",
 			"status": "ok"
 		},
+		"fixtures/edit/path2d-probe-snap": {
+			"digest": "2196da56ac673b65b2fbffe228f5fd614979c7e7257f2500ee76bc402815907a",
+			"status": "ok"
+		},
 		"fixtures/edit/path2d-strokes": {
-			"digest": "1a65eef23c7a0d0d56f1ff730d7df669d4844ef24f4b0926a484bc332cffb13a",
+			"digest": "aabf60284f2dcd9f53495b6cfd8948ad6a35120bbadb764906e53681bf542819",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-thick": {
@@ -1161,11 +1181,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text": {
-			"digest": "1ae40ada60b7bd5ac6c1822301bd98e669a5d32a899c150db580658e8d2a6234",
+			"digest": "b18a582941c86cce9044db5b8e354abe909a59e0e59d73ce92eeb444b9ce9250",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text2": {
-			"digest": "fe49f18033cc1827336470976886a04249c5ae53b84346825c9e0c9c8b1257d9",
+			"digest": "87ef5cee2069eafa1dc3e838e878cd608b0272228fd175e7e37bd03a86bbd459",
 			"status": "ok"
 		},
 		"fixtures/edit/shadows": {
@@ -1313,7 +1333,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-e": {
-			"digest": "f37fa1f0f99ec11f4ac8dfd413b9c1034a2b9dc611a0c10347e1801503b0ef67",
+			"digest": "63dc27f6ae21de491c2fdb40a1ca862e68664668e08badf1a3fdd2d7c25810c7",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-uiscale": {
@@ -1357,27 +1377,31 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-case": {
-			"digest": "b45180d75be60d8094d8021cff1b9b7f0800613f94ec461ba05dffae8e3bf7f0",
+			"digest": "f4c0999a1c673ed86116c1ae246347a0c66e605276caf5e9289e406da064c901",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor": {
-			"digest": "33989808b902dd7f70a88c7f96f85f6143f9711294e0369342f220369bc92d07",
+			"digest": "6a722b3151b2de6c5f251e35c7c7f1c42ea54039d35bf01a2e163961e31d584d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor2": {
-			"digest": "8e29e6279ee69b0f4ff9f137ae59bbd5d85e27030881003481b229f94e953593",
+			"digest": "9767fa59cb8f8eb0e0bfa36ed9eef41cc73bb3ba756e678a26c34ddbcafdeb86",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-emoji": {
-			"digest": "9a5a8237e89bd14e845995ebd49985942536c4d9304a78d75aeb89efa16d4d78",
+			"digest": "1e6e63d089149b8b46fbbc3f80a03ac6a5b3115d0b6a358ec986918e60c2411b",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-emoji-line": {
+			"digest": "992f3e58c94d4bbfa7d204ed554c7fcfa83451d367328f2ba17b883ebe5eeef3",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize": {
-			"digest": "039a44864ad1eadd020ff92022b114eb8e04a088a32cb0b22d860d0c868697fa",
+			"digest": "52d1bb15a9cbfb97e12eb823ca21decf5d905ebfb10c31e0c540f1cfcda5ab61",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize2": {
-			"digest": "3b3528887689bfee0db916d89c319f714d1137f4dab971f87869b5b53874343f",
+			"digest": "23a34c3144c613b05cc9a8d3e91c982f2de310cadee4aea3627324b8a274f92c",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradient": {
@@ -1389,15 +1413,15 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradstroke": {
-			"digest": "1fbf66febf9ae86d3e417277ce02554123380eddc422f32e1e7af968aa482279",
+			"digest": "822e9f405352ac109e734a01a532d74a400701fa0fe815fec29231ac481478fd",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-graphemes": {
-			"digest": "0b6b3303447a95eb88ed28ac53aba9e1aea0f521d378ecefca5317b3fcce94fb",
+			"digest": "2d43087b6541777a4f3168d33bae83bb17897ce9056f4bacf54c5aea0cd31d6a",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-grouptext": {
-			"digest": "6c8cb93b793ff4b16a807fc7769e68411ce29d96cc6037665ecf3a71117dcecc",
+			"digest": "1c6c55dfdedfbfee91e0e9efba7026202d7457044d74a8d79584aa9131c0ac5a",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-overlap": {
@@ -1409,23 +1433,27 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-quadties": {
-			"digest": "76a4108d14b134af2b2040030b7866be75bc5c4bfbf42c527a8fa8fc48e6ba96",
+			"digest": "165fe1f31c1b4dbdd05f7c59636764ad80f15a4b85204c7642e8b5e826af2e52",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rich": {
-			"digest": "771999159189d1aca16231fd069720a009500c7290c70c82c7fa03ff995edce8",
+			"digest": "e0f99d06b5d6bb99cc5b6cccb872f22a891ec5b773e0ebdf075a53e4e2f71a3b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richcap": {
-			"digest": "e9db01642d18a0a4724b4e19283e8c918d5b9bfd1857173d6bcb82e34cc2c532",
+			"digest": "8c4bcd77a9fcd1ee0d0e5f0fedc01715399a8445d0396a318614e251a9944bf4",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled": {
-			"digest": "2839d87aa429635bcb01f85dd494289bade27b9757c40aa1f050093d93d66d36",
+			"digest": "eef277491f67dbd48a0576eab95d47d970e965629ace30a11775d2af06de4f0c",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled1": {
-			"digest": "dec9343ffac9f3ea04893de8c8bba8e2530649e7015adadd7134575b4abfa7ca",
+			"digest": "d45f91b3f9dd45c5a7d1df049579e2727b7adf78cf7dbc97cd3c7ad666ffa2cf",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-richtrunc": {
+			"digest": "ceb1716c36bd75c5e1de458ca750609a328e74629ee6aee49c32b2821ee2c081",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate": {
@@ -1457,11 +1485,15 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-synth": {
-			"digest": "5493a0b0ce9b2a5eaa2dc78b1b3378163a5eb24c9b894aafdac7792dfc97ea0e",
+			"digest": "e9c37b395a21592a2e45ca065a11fe227f82bbdfc8110473c371f0e2aeab40e5",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-tie": {
 			"digest": "33abd6f0141a720763caa79bfadbdbb4766f354483f86296fd2091356f92058b",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-tie-size": {
+			"digest": "84e58cdb4cc7b42404bf3d6d185273e596275734cca795c20fc852af3c51877f",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-uiscale": {
@@ -1685,7 +1717,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-richscaled-quads": {
-			"digest": "cc850ff8ad0a91359ec1150f12fbcd6987c1d5f5d00fb47cdc97610c1eb0b9ff",
+			"digest": "ba9c7845e8fa4424e99a83d53bab530f19a9556e0531e91fdfba3bcee754aac7",
 			"status": "ok"
 		},
 		"fixtures/play/layout-text-narrow": {
@@ -1705,11 +1737,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen3": {
-			"digest": "242fc07fe0e1c82465627e13b9ab91fd2fe334d6b40fced8821d972ce4f7214f",
+			"digest": "04170a67e3e7fd2630f0b974e4860014468cfa4dfed81abb85c0a052a2feb347",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate": {
-			"digest": "f6d0ec362d7cc09a4ef72490313d08eae7ba2631283a7f98efb49fde1aa8d596",
+			"digest": "facd32ca41c3df1a5866c01a434250a398a79c39becaae9f18fdb4e6e09c4ba1",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate2": {
@@ -1748,8 +1780,12 @@
 			"digest": "3e9a03e41fe70cc279ec88cd2f733bfa624bbafa9aa5ddaa202c313b8c679db7",
 			"status": "ok"
 		},
+		"fixtures/play/path2d-probe-snap": {
+			"digest": "1cea36b901a242cfe30414496ce79c3072658e91f05dd56a4a5a79fa751a9c08",
+			"status": "ok"
+		},
 		"fixtures/play/path2d-strokes": {
-			"digest": "28c64029b742d7eb00f9c742429c6c81c08639c9143aecf6f4c1e13e21d59699",
+			"digest": "abd13ab6ed00895b5e6d5dc09f06ae1d6c792460e4b3c6632331b18e62fa7136",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-thick": {
@@ -1897,11 +1933,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text": {
-			"digest": "d5ce8bf4fa828653c22b1c5a1c1c427881248de0d3db1a937415c4a5c42de70e",
+			"digest": "a8f5e5a31fb2b0620d289379ced914aaaf253da465aba1af59db31b7d4f4f218",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text2": {
-			"digest": "a41586e89c25afd883c1db9c2ca6349ed800097465bf3e47c9c0ff72c9509bf3",
+			"digest": "460efe0becdac9b749dc1bb75d20fcd9ed13de39042e5991dac0c35bfc072a98",
 			"status": "ok"
 		},
 		"fixtures/play/shadows": {
@@ -2049,7 +2085,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-e": {
-			"digest": "3c31ded301f7690bf8d3080194ffe4b66dc1d3cbf35631ce4add1c2f671fb65e",
+			"digest": "6e1f70ce8e4e8a5e484aa1b24fc8351291c9ac2f4ec9e631285dd8f305a0e37c",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-uiscale": {
@@ -2093,27 +2129,31 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-case": {
-			"digest": "acac3f2b9ef9565e57d49f668e005e163a4e38914be0a1b32af4ed314c749a98",
+			"digest": "0c12c756ae120715dade4db8756de208077fe320ad004c91d65380c0fe69335e",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor": {
-			"digest": "ffc495d096dd97bbbcb97e61f36fbf6537a42cc8e4c4107a57363ff3f66ad157",
+			"digest": "a88a18329586359b6c7d662d62bb1f36a01ebf75a043836c4d0d0a1d73f3d779",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor2": {
-			"digest": "5a171a094bfe908560498dd4722e39772aa9d2da12d217730a51af5443bd1318",
+			"digest": "e9a1fd1b38908dc645a309b76bfcceeb562c4ffb7c023dc8eb4c9930f482d02a",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-emoji": {
-			"digest": "eaeb4a7817114ad6b9bc1a6a68fa57ddf3c1badfd31fe05a2bbd75c45642953c",
+			"digest": "df29754e65c11e5f8e699aa3b28f8dadf7aeb654957e8ffc6c74bc3f3073f86b",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-emoji-line": {
+			"digest": "6e4bbd63f5305173265e2d27ff5e6ce73d3219fbde92dd6a09a1a036752a12bd",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize": {
-			"digest": "5093e29e1273d5eedb28a33ad98857f9007bf81a6252ba4f13a6492ad46a8107",
+			"digest": "51802ff2adff574ef14a85035ce66dabb1755647ee758794c6ece908b2e720be",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize2": {
-			"digest": "ef8f36ec3508b8ea2ed756ee031911d0aa26ed7fa639bc84c3988f42f558fbb7",
+			"digest": "977587e9eec25ad1971e6603ad34e1e2dcb1f78b515a2c94e748b5b4f8a6c8bd",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradient": {
@@ -2125,15 +2165,15 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradstroke": {
-			"digest": "f7bb9bba6ef0127563b84837aee4941daac6961735e741fcc4ac2aa81e95bb29",
+			"digest": "366e0a629ec6decc66c62e82ac6fdbd924931b33a515ac55e39fb9629237427a",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-graphemes": {
-			"digest": "6ceaaae42179269d8ee5dff3db8c4fad89ec6146d7b3cc85f0a67ceb35683ce1",
+			"digest": "d3818ae4d8346b80c92fd46104c87c536b67cc0a3a70663d5e4026a118faf153",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-grouptext": {
-			"digest": "a2d976f8697c31cf0afb383908993d42537309a3321ecdfd5b05ee416b64adf9",
+			"digest": "fbcc80db0b530ebee9fc24abf92b42844bea3a09c663d5439d7f80dfa73e5d21",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-overlap": {
@@ -2145,23 +2185,27 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-quadties": {
-			"digest": "f6645ceeb0d5d9a353303cd9e21cddb3083ba2c907f80e35810960f7b45bf5b0",
+			"digest": "bcad3498a877febbac3dc132f677447e7993b357f6b90d9b9e6c69bdbcf21e07",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rich": {
-			"digest": "4a70393d0c62359ce7a74762172df9196c45ff09c985281e4c907024b4ccfdec",
+			"digest": "eff2cba7047fb50c2fa08c617886f2a1017b586f7bb26441f6b011d5508556ac",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richcap": {
-			"digest": "b6b9a91d021f6b173bbb3141f06347cae064aeee4df473d55533cd98374180ba",
+			"digest": "ac1f3e9f9dd0dd1e159977938a4d59adebb16b1959818dbb3d93d4c04cf2db24",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richscaled": {
-			"digest": "2206543211fa4b42bfed6422f8f0fa167c01111e1d6f3a9d0e337c0fe3d769e8",
+			"digest": "e7ec78b607ac92bc3dc7045c765a5c4acd611cf92d4c10d48d3136a04e635bd8",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richscaled1": {
-			"digest": "143935d958ca078fac4caee9c54b04280abac7b263936cbeba55d6e62ee5451b",
+			"digest": "6a5a7d7dabd7a43f3c90c14f56db26cb8adc9358ad87ad682b813320ad82ff53",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-richtrunc": {
+			"digest": "7e6ef5a0477f0029fa7dc4b8b49fbc78eedf6c2272d1c32fd23a66a4a3368b7d",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotate": {
@@ -2193,11 +2237,15 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-synth": {
-			"digest": "aca3c667cb860c8b6220c4403505dfc93f9469bedd6781f091432b2af939bedd",
+			"digest": "a1b07ccf776f46860a8df08f8e1487c495323d1fceedd1752163cafd82f44af7",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-tie": {
 			"digest": "2a5ffb15ae321f3d15e897b3976fb43de154a32d123c65d35c7810c41d84310e",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-tie-size": {
+			"digest": "3d91e33e8d41781284fee644c61dd6be5efee89bed6c6d81e56e1d971c762063",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-uiscale": {
@@ -2461,7 +2509,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T05:10:18.377Z",
+	"recorded": "2026-11-12T05:21:10.874Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
