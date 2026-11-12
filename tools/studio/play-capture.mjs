@@ -16,14 +16,15 @@
 // not that colour (the buttons) are left out of the comparison and counted as "masked". The session is stopped again
 // whatever happens. --reuse compares the saved captures without starting Studio.
 //
-// Use a Studio session of your own: a play session takes its window over.
+// Use a Studio session of your own (tools/studio/launch.mjs): a play session takes its window over. Starting play
+// can raise Studio's window, so the foreground is guarded for the whole session (cli/studio.mjs guardStudioFocus).
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { withStudioLock } from "../../cli/lock.mjs";
-import { captureViewport, listStudios } from "../../cli/studio.mjs";
+import { captureViewport, guardStudioFocus, listStudios } from "../../cli/studio.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const args = {};
@@ -133,6 +134,7 @@ async function capture() {
 	const studio = studios.find(entry => entry.id === args.studio) || studios.find(entry => typeof entry.name === "string" && entry.name.includes(args.studio));
 	if (!studio) throw new Error(`no Studio instance matches "${args.studio}"`);
 	return withStudioLock(`play-capture ${name}`, async () => {
+		const stopGuard = guardStudioFocus(studio.name, 300000);
 		callTool("start_stop_play", { studio_id: studio.id, is_start: true });
 		try {
 			// The client datamodel appears a moment after the session starts
@@ -192,6 +194,10 @@ return "mounted"`, studio.id);
 			return scale;
 		} finally {
 			callTool("start_stop_play", { studio_id: studio.id, is_start: false });
+			await sleep(1500);
+			const guard = await stopGuard();
+			if (/STOLEN/.test(guard)) console.error(`play-capture: Studio took the foreground during the play session and was put back:
+${guard.trim()}`);
 		}
 	});
 }

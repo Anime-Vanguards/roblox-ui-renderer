@@ -28,6 +28,30 @@ number) but not counted:
 `node tools/analysis/compare_total.mjs [name ...]` adds up the reports in `out/compare/`: a line per
 comparison, the unstable ones with their reason, and the total of what counts.
 
+## Starting Studio
+
+Start the Studio a comparison uses with the launcher, so it never takes the keyboard focus from whoever is using
+the machine:
+
+```powershell
+node tools/studio/launch.mjs --place <file.rbxl>      # prints the process id
+node tools/studio/launch.mjs --close <pid>             # when the batch is done
+```
+
+It starts Studio without activating it (`SW_SHOWNOACTIVATE`), moves its main window off the visible desktop, above
+the primary monitor, where it keeps that monitor's display scale and still renders and captures, and for
+`--guard-seconds` (45) puts back any Studio window that takes the foreground (a login or recovery dialog). It
+also moves Studio's drawn cursor out of the way: until the mouse has been over the viewport, Studio draws it at
+the viewport's centre, inside the compared area (`--park <pid>` does that again). Options: `--version` (the
+installed build, default 0.747.0.7471481) or `--exe`, `--scale 1` (draw at display scale 1 on any monitor; a
+running Studio moved to a monitor of another scale reports a wrong viewport size), `--on-screen`.
+
+Nothing in rur brings Studio to the front: captures render the same unfocused, and play-capture guards the
+foreground while its play session runs. `--focus` / `RUR_FOCUS` are ignored. Measured on Windows 11
+(2026-11-12): through a launch, eight captures, a play-capture and the close, no Studio window was ever the
+foreground. A desktop of its own (CreateDesktop) would keep Studio out of focus entirely, but Studio does not
+draw its viewport there.
+
 ## The Studio MCP bridge
 
 rur talks to Studio through an MCP server on a local TCP port: newline-delimited JSON-RPC 2.0, an
@@ -45,7 +69,6 @@ Any bridge that serves these over TCP works; the maintainers run their own. Sett
 | `RUR_STUDIO_MCP_PORT` | the bridge's port on 127.0.0.1 (required) |
 | `RUR_STUDIO` | the Studio to use: its id or part of its window title (default: the only one open; `--studio` overrides) |
 | `RUR_STUDIO_LOCK` | the lock file every Studio user takes (default `<temp>/rur/studio.lock`) |
-| `RUR_FOCUS=1` | bring Studio to the front for captures (it renders the same unfocused) |
 
 `node tools/studio-mcp.cjs list` lists the open Studios through the bridge; `node tools/studio-mcp.cjs luau
 <file.luau>` runs a probe in one.

@@ -12,7 +12,7 @@
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { withoutCookie } from "./assets.mjs";
 
@@ -154,27 +154,39 @@ export async function ensureWholeViewport({ studio = DEFAULT_STUDIO } = {}) {
 	return size;
 }
 
-// Focus: Studio renders at 60 fps in the background and 240 in front, but captures come out identical
-// once the viewport is whole (three animated stories 100% unfocused, 2026-09-30), so
-// captures leave focus alone unless asked (--focus / RUR_FOCUS=1): no pulling the user out of a game.
-// focusStudio returns the window that had focus, for restoreFocus; RUR_STUDIO_FOCUSED=1 tells a child
-// the parent already focused it.
-export function focusStudio(studioName) {
-	if (process.env.RUR_FOCUS !== "1" || process.env.RUR_STUDIO_FOCUSED === "1") return null;
-	const title = studioName.replace(/\s*\(placeId:.*$/, "").replace(/\s*-\s*Roblox Studio$/, "");
-	const script = path.join(ROOT, "tools", "wincap", "focus.ps1");
-	const result = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Title", title], { encoding: "utf8", env: withoutCookie() });
-	const previous = /previous=(\d+)/.exec(result.stdout || "");
-	if (result.status !== 0 || !/focused=True/.test(result.stdout || "")) {
-		process.stderr.write(`rur: could not focus Studio for the capture (it renders differently unfocused): ${(result.stderr || result.stdout || "").trim().split(/\r?\n/)[0]}\n`);
+// Focus: rur never takes the keyboard focus. Studio renders at 60 fps in the background and 240 in front, but
+// captures come out identical once the viewport is whole (three animated stories 100% unfocused, 2026-09-30), and
+// a Studio window brought to the front pulls the user out of what they are doing. focusStudio / restoreFocus are
+// kept for callers (--focus) and do nothing.
+export function focusStudio() {
+	if (process.env.RUR_FOCUS === "1" && !focusStudio.warned) {
+		focusStudio.warned = true;
+		process.stderr.write("rur: --focus / RUR_FOCUS is ignored: captures never bring Studio to the front (they render the same unfocused)\n");
 	}
-	return previous ? previous[1] : null;
+	return null;
 }
 
-export function restoreFocus(previous) {
-	if (!previous || previous === "0") return;
-	const script = path.join(ROOT, "tools", "wincap", "focus.ps1");
-	spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Restore", String(previous)], { encoding: "utf8", env: withoutCookie() });
+export function restoreFocus() {}
+
+// Watches the foreground while something that may raise Studio runs (a play session): a Studio window that takes
+// the foreground is put back behind and the previous window gets it again (tools/studio/StudioLaunch.cs).
+// Returns a stop function that ends the watch and resolves to its log.
+export function guardStudioFocus(studioName, ms = 120000) {
+	const title = studioName.replace(/\s*\(placeId:.*$/, "").replace(/\s*-\s*Roblox Studio$/, "");
+	const lookup = spawnSync("powershell", ["-NoProfile", "-Command", `(Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle.IndexOf('${title.replace(/'/g, "''")}', [StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -First 1).Id`], { encoding: "utf8", env: withoutCookie() });
+	const pid = Number(String(lookup.stdout || "").trim());
+	if (!pid) return async () => "no Studio process found to guard";
+	const child = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(ROOT, "tools", "studio", "launch.ps1"), "-GuardPid", String(pid), "-GuardMs", String(ms)], { env: withoutCookie(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+	let log = "";
+	child.stdout.on("data", chunk => {
+		log += chunk;
+	});
+	const done = new Promise(resolve => child.once("exit", resolve));
+	return async () => {
+		child.kill();
+		await done;
+		return log;
+	};
 }
 
 // Lossless capture of the Studio viewport (physical pixels) to `outFile`. With `scales` (display scales
