@@ -1332,7 +1332,9 @@ vec4 kindSegment(ivec2 P, vec2 X) {
 	// pixel (fixtures/group-probe-bigtex.luau Row8.Bar8: the edge 0.0014 texel right of a centre)
 	ivec2 num = (2 * P + 1) * W, den = 2 * N;
 	ivec2 at = num / den, rest = num - at * den;
-	at += ivec2(greaterThanEqual(rest * 512, 1024 * N - 2 * W));
+	// (component by component: WebGL2's GLSL has no mix() of integer vectors, which a vector cast becomes there)
+	ivec2 edge = 1024 * N - 2 * W;
+	at += ivec2(rest.x * 512 >= edge.x ? 1 : 0, rest.y * 512 >= edge.y ? 1 : 0);
 	ivec4 texel = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), min(at, W - 1), 0));
 	if (texel.a == 0) {
 		DISCARD
