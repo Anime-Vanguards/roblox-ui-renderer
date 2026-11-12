@@ -136,13 +136,24 @@ return #_G.__RUR_RESULT`;
 // projection and blurs every capture (measured 2026-09-28/30: a story 98.45% at 1965.33 x 1150, 100%
 // at 1966 x 1150, focused or not). ensureWholeViewport grows the Studio window by a physical pixel or two
 // until both are whole (tools/wincap/resize.ps1, without activating it); returns the viewport.
-export async function ensureWholeViewport({ studio = DEFAULT_STUDIO } = {}) {
+// `minimum` (logical px): a smaller viewport first grows the window by what is missing (at up to 2 physical px a
+// logical one); Windows clamps a window to its monitor's height plus its frame (2186 px on a 2160 px monitor),
+// which leaves 1160 logical px at 1.5x, against the launcher's 1110.
+export async function ensureWholeViewport({ studio = DEFAULT_STUDIO, minimum = null } = {}) {
 	const read = async () => {
 		const result = await runLuau("local V = workspace.CurrentCamera.ViewportSize return tostring(V.X) .. ',' .. tostring(V.Y)", { studio });
 		return { size: String(result.text).split(",").map(Number), name: result.studio.name };
 	};
 	const fractional = value => Math.abs(value - Math.round(value)) > 0.01;
 	let { size, name } = await read();
+	if (minimum && (size[0] < minimum[0] || size[1] < minimum[1])) {
+		const title = name.replace(/\s*\(placeId:.*$/, "").replace(/\s*-\s*Roblox Studio$/, "");
+		const script = path.join(ROOT, "tools", "wincap", "resize.ps1");
+		const grow = axis => String(Math.max(0, Math.ceil((minimum[axis] - size[axis]) * 2) + 2));
+		spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Title", title, "-DeltaWidth", size[0] < minimum[0] ? grow(0) : "0", "-DeltaHeight", size[1] < minimum[1] ? grow(1) : "0"], { encoding: "utf8", env: withoutCookie(), windowsHide: true });
+		await new Promise(resolve => setTimeout(resolve, 900));
+		({ size, name } = await read());
+	}
 	for (let attempt = 0; attempt < 4 && (fractional(size[0]) || fractional(size[1])); attempt++) {
 		const title = name.replace(/\s*\(placeId:.*$/, "").replace(/\s*-\s*Roblox Studio$/, "");
 		const script = path.join(ROOT, "tools", "wincap", "resize.ps1");

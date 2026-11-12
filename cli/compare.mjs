@@ -1045,7 +1045,8 @@ export async function compare(args) {
 		studioResult = await withStudioLock(`compare ${name}`, async () => {
 			// A fractional viewport size blurs the capture: Studio's window is nudged to a whole one first
 			// (cli/studio.mjs ensureWholeViewport); focus only with --focus (not needed once it's whole)
-			await ensureWholeViewport({ studio });
+			// (grown first when it is smaller than the compared size)
+			await ensureWholeViewport({ studio, minimum: [width, height] });
 			let previousFocus = null;
 			if (args.focus) {
 				process.env.RUR_FOCUS = "1";
