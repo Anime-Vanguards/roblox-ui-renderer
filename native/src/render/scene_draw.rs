@@ -1947,16 +1947,42 @@ impl DrawPreparer {
                 .unwrap_or_default()
         );
         let to_local = invert(m);
+        // Which part a pixel centre is in: the edge functions on the parts' grid corners (geometry.rs grid_inside)
+        let origin = ctx.origin;
+        // A border (an outer part around a later one) is four strips laid like a pinwheel, each on its own grid
+        // corners: the left one holds the top left corner, the top one the top right, the right one the bottom
+        // right, the bottom one the bottom left. A pixel centre on the seam of a strip and the part inside it can
+        // be in neither (fixtures/group-probe-border.luau Turn2Banded, Turn20Banded: Studio draws nothing there)
+        let pinwheel = |outer: Rect, inner: Rect| -> Vec<[[i64; 2]; 4]> {
+            let (x0, y0, x1, y1) = (outer.x, outer.y, outer.x + outer.w, outer.y + outer.h);
+            let (ix0, iy0, ix1, iy1) = (inner.x, inner.y, inner.x + inner.w, inner.y + inner.h);
+            [
+                Rect::new(x0, y0, ix0 - x0, iy1 - y0),
+                Rect::new(ix0, y0, x1 - ix0, iy0 - y0),
+                Rect::new(ix1, iy0, x1 - ix1, y1 - iy0),
+                Rect::new(x0, iy1, ix1 - x0, y1 - iy1),
+            ]
+            .into_iter()
+            .filter(|r| r.w > 0. && r.h > 0.)
+            .map(|r| grid_quad(m, r, origin))
+            .collect()
+        };
+        let quads: Vec<Vec<[[i64; 2]; 4]>> = parts
+            .iter()
+            .enumerate()
+            .map(|(i, (rect, _))| match parts.get(i + 1) {
+                Some((inner, _)) if i == 0 => pinwheel(*rect, *inner),
+                _ => vec![grid_quad(m, *rect, origin)],
+            })
+            .collect();
         let raster = move || {
             let mut bytes = vec![0; w as usize * h as usize * 4];
             for (k, pixel) in bytes.chunks_exact_mut(4).enumerate() {
                 let (px, py) = (x + (k % w as usize) as f64, y + (k / w as usize) as f64);
                 let [lx, ly] = apply(to_local, px + 0.5, py + 0.5);
-                // (a pixel centred on an edge belongs to the rect when the edge is its left or top one on
-                // the screen, however the frame is turned: the centre is tested a hair right of and below itself)
-                let [tx, ty] = apply(to_local, px + 0.5 + 1e-6, py + 0.5 + 1e-7);
-                let inside = |r: &Rect| tx >= r.x && tx < r.x + r.w && ty >= r.y && ty < r.y + r.h;
-                let Some((_, mesh)) = meshes.iter().rev().find(|(rect, _)| inside(rect)) else { continue };
+                let (ax, ay) = ((px + origin[0]).round() as i64, (py + origin[1]).round() as i64);
+                let Some(index) = (0..meshes.len()).rev().find(|&i| quads[i].iter().any(|q| grid_inside(q, ax, ay))) else { continue };
+                let (_, mesh) = &meshes[index];
                 let Some(mesh) = mesh else { continue };
                 let value = mesh.at_turned([lx, ly], px as i64, py as i64);
                 for c in 0..4 {
@@ -2003,17 +2029,75 @@ impl DrawPreparer {
                 | ((rounded as u8) << 1)
                 | (((matches!(paint, Paint::Gradient { .. }) && !rounded) as u8) << 2)) as f64,
         ]);
-        self.push(radii);
-        self.push(extent);
-        self.push(if hole > 0. {
-            transformed_extent(
-                m,
-                Rect::new(r.x + hole, r.y + hole, r.w - 2. * hole, r.h - 2. * hole),
-            )
+        // A turned quad as the rasterizer holds it: its corners on the 1/256 px grid, clockwise on the screen from
+        // the local top left, in 1/256 px (two texels). A pixel whose centre is within a few thousandths of a
+        // pixel of an edge is in or out by the sign of the edge function on these, top and left edges
+        // included: where the coverage has a step there (no anti-aliasing under a UIGradient; half and up
+        // inside a rounded Frame's straight edge, nothing outside), Studio's pixels follow it
+        // (tools/studio/edge-probe-*.luau: 690 of 691 pixel centres within 0.004 px of an edge).
+        let hard = matches!(paint, Paint::Gradient { .. }) && !rounded;
+        let origin = ctx.origin;
+        let grid = |x: f64, y: f64| {
+            let p = apply(m, x, y);
+            [((p[0] + origin[0]) * 256.).round() - origin[0] * 256., ((p[1] + origin[1]) * 256.).round() - origin[1] * 256.]
+        };
+        let flipped = m[0] * m[3] - m[1] * m[2] < 0.;
+        let quad = |x0: f64, y0: f64, x1: f64, y1: f64| -> Option<[[f64; 4]; 2]> {
+            let (tl, mut tr, br, mut bl) = (grid(x0, y0), grid(x1, y0), grid(x1, y1), grid(x0, y1));
+            if flipped {
+                std::mem::swap(&mut tr, &mut bl);
+            }
+            let all = [tl, tr, br, bl];
+            // The shader's integer edge function holds 20 bits a difference
+            let fits = all.iter().all(|c| c.iter().all(|v| v.abs() < 4_000_000.))
+                && all.iter().all(|c| (c[0] - tl[0]).abs() < 500_000. && (c[1] - tl[1]).abs() < 500_000.);
+            fits.then_some([[tl[0], tl[1], tr[0], tr[1]], [br[0], br[1], bl[0], bl[1]]])
+        };
+        let exact = if quarter { None } else { quad(r.x, r.y, r.x + r.w, r.y + r.h) };
+        // A hard border is four quads laid like a pinwheel, each on its own grid corners
+        let strips = if hard && hole > 0. && exact.is_some() {
+            let (x0, y0, x1, y1) = (r.x, r.y, r.x + r.w, r.y + r.h);
+            [
+                quad(x0, y0, x0 + hole, y1 - hole),
+                quad(x0 + hole, y0, x1, y0 + hole),
+                quad(x1 - hole, y0 + hole, x1, y1),
+                quad(x0, y1 - hole, x1 - hole, y1),
+            ]
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
         } else {
-            [0.; 4]
-        });
+            None
+        };
+        let radii_at = self.packet.texels.len();
+        self.push(radii);
+        match exact {
+            Some(corners) => {
+                // Flag 8: texels 7 and 8 hold the quad's grid corners
+                self.packet.texels[radii_at - 1][3] += 8.;
+                self.push(corners[0]);
+                self.push(corners[1]);
+            }
+            None => {
+                self.push(extent);
+                self.push(if hole > 0. {
+                    transformed_extent(
+                        m,
+                        Rect::new(r.x + hole, r.y + hole, r.w - 2. * hole, r.h - 2. * hole),
+                    )
+                } else {
+                    [0.; 4]
+                });
+            }
+        }
         paint.append(&mut self.packet.texels, start);
+        if let Some(strips) = strips {
+            // (a hard fill has no radii: the first holds where the strips start)
+            self.packet.texels[radii_at][0] = (self.packet.texels.len() - start) as f32;
+            for strip in strips {
+                self.push(strip[0]);
+                self.push(strip[1]);
+            }
+        }
         self.emit(ctx, start, DrawBatch::default());
     }
     fn background(

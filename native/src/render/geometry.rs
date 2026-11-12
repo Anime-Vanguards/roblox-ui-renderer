@@ -263,6 +263,33 @@ pub fn snapped_quad_maps(m: Transform, b: [f64; 4], origin: [f64; 2], anchor: [f
     let lc = -(la * (tr[0] - anchor[0]) + lb * (tr[1] - anchor[1]));
     ([invert(first), invert(second)], [la, lb, lc])
 }
+/// A turned rect as the rasterizer holds it: its corners, carried to the screen by `m` (which subtracts
+/// `origin`), on the 1/256 px grid in absolute screen coordinates, clockwise on the screen from the local top
+/// left, in 1/256 px.
+pub fn grid_quad(m: Transform, r: Rect, origin: [f64; 2]) -> [[i64; 2]; 4] {
+    let corner = |x: f64, y: f64| {
+        let p = apply(m, x, y);
+        [((p[0] + origin[0]) * 256.).round() as i64, ((p[1] + origin[1]) * 256.).round() as i64]
+    };
+    let (tl, mut tr, br, mut bl) = (corner(r.x, r.y), corner(r.x + r.w, r.y), corner(r.x + r.w, r.y + r.h), corner(r.x, r.y + r.h));
+    if m[0] * m[3] - m[1] * m[2] < 0. {
+        std::mem::swap(&mut tr, &mut bl);
+    }
+    [tl, tr, br, bl]
+}
+/// Whether the centre of the pixel at (px, py) (absolute screen px) is in a grid_quad: the sign of each edge
+/// function, exactly, a centre on an edge counting for a top or a left edge (the rasterizer's rule). Measured
+/// on Frames turned 7, 20, 30 and 45 degrees and moved by 1/2048 px (tools/studio probes in notes/images.md,
+/// "Pixel centres on a turned edge"): 690 of 691 pixel centres within 0.004 px of an edge as in Studio.
+pub fn grid_inside(q: &[[i64; 2]; 4], px: i64, py: i64) -> bool {
+    let c = [px * 256 + 128, py * 256 + 128];
+    (0..4).all(|i| {
+        let (a, b) = (q[i], q[(i + 1) % 4]);
+        let e = [b[0] - a[0], b[1] - a[1]];
+        let v = e[0] as i128 * (c[1] - a[1]) as i128 - e[1] as i128 * (c[0] - a[0]) as i128;
+        v > 0 || (v == 0 && ((e[1] == 0 && e[0] > 0) || e[1] < 0))
+    })
+}
 pub fn node_transform(node: &Value, origin: [f64; 2], scale: f64) -> Transform {
     let base = [1., 0., 0., 1., -origin[0], -origin[1]];
     if !node["matrix"].is_array() {

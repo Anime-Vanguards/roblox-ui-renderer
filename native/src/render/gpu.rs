@@ -110,6 +110,21 @@ async fn native_vulkan(options: &wgpu::RequestAdapterOptions<'_, '_>) -> Option<
     adapter
 }
 
+/// The sampler of hardware-sampled Pixelated quads (uber.frag.glsl hardwareTexel): nearest texel, repeating, so
+/// a tile's coordinate past 1 wraps. One sampler serves every image texture (the web build's GLES backend takes
+/// a texture with a single sampler).
+pub(crate) fn image_point_sampler() -> wgpu::SamplerDescriptor<'static> {
+    wgpu::SamplerDescriptor {
+        label: Some("RUR repeating point sampling"),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    }
+}
+
 impl HeadlessGpu {
     pub async fn new() -> Result<Self> {
         let options = wgpu::RequestAdapterOptions {
@@ -787,15 +802,7 @@ impl GpuRenderer {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        let repeat_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("RUR repeating point sampling"),
-            address_mode_u: wgpu::AddressMode::Repeat,
-            address_mode_v: wgpu::AddressMode::Repeat,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
+        let repeat_sampler = device.create_sampler(&image_point_sampler());
         let timestamps = device
             .features()
             .contains(wgpu::Features::TIMESTAMP_QUERY)

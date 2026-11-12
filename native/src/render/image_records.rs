@@ -365,8 +365,10 @@ impl DrawPreparer {
             // vUv): a pixel centre on a texel boundary falls as the hardware rounds it, which no formula of the
             // quad's numbers reproduced (fixtures/image-probe-pixgroup.luau, image-tile, image-probe-mag,
             // image-slice). Under a UICorner Studio's texels are not the interpolated ones: the taps stay.
-            if pixelated && !rounded {
-                self.packet.texels[start + 2][1] = (self.packet.texels.len() - start) as f32;
+            if pixelated {
+                self.packet.texels[start + 2][1] =
+                    (self.packet.texels.len() - start) as f32 + if rounded { 0.5 } else { 0. };
+                self.packet.texels[start + 2][2] = q.wrap as u8 as f32;
                 self.push([q.u0, q.v0, q.u1, q.v1]);
                 self.push([x0 + tx, y0 + ty, x1 + tx, y1 + ty]);
             }
@@ -528,6 +530,16 @@ impl DrawPreparer {
         }
         self.push([diagonal[0], diagonal[1], diagonal[2], 0.]);
         debug_assert_eq!(self.packet.texels.len() - start, 14);
+        // A hard quad (flag 16) is the pixels whose centres are in it by the edge functions on its grid corners
+        // (geometry.rs grid_quad), in texels 6 and 9 (which only a quarter turn and a UICorner read), in 1/256 px
+        // of the target, as the fragment stage's pixel coordinate counts
+        if hard && !quarter && !rounded {
+            let o = ctx.origin.map(|v| (v * 256.).round() as i64);
+            let q = grid_quad(m, Rect::new(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]), ctx.origin);
+            let rel = q.map(|c| [(c[0] - o[0]) as f32, (c[1] - o[1]) as f32]);
+            self.packet.texels[start + 6] = [rel[0][0], rel[0][1], rel[1][0], rel[1][1]];
+            self.packet.texels[start + 9] = [rel[2][0], rel[2][1], rel[3][0], rel[3][1]];
+        }
         for q in quads {
             let su = size[0] * (q.u1 - q.u0) / (q.x1 - q.x0);
             let sv = size[1] * (q.v1 - q.v0) / (q.y1 - q.y0);
@@ -784,6 +796,16 @@ mod tests {
             "../../tests/goldens/snapped-image-records.json"
         ))?;
         let mut gpu = pollster::block_on(super::super::gpu::GpuRenderer::headless())?;
+        // Local only: the hashes hold this machine's answers at texel-boundary ties, which another GPU or a
+        // software rasterizer may round the other way (hardware_sampled_quads_submit_the_measured_geometry checks
+        // the rest everywhere)
+        let hardware = gpu.adapter_info().is_some_and(|info| {
+            matches!(info.device_type, wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu)
+        });
+        if !hardware && std::env::var_os("RUR_RECORD_GOLDEN_FIELDS").is_none() {
+            eprintln!("skipped: the snapped-image pixel hashes need a hardware GPU (they record its rasterizer's ties)");
+            return Ok(());
+        }
         for (index, c) in gold["cases"].as_array().unwrap().iter().enumerate() {
             // Each fixture is a fresh CPU owner; reset GPU IDs so revisions cannot alias.
             gpu.reset_scene_resources();
@@ -803,6 +825,109 @@ mod tests {
             assert_eq!(pixels, c["pixelHash"].as_str().unwrap(), "snapped GPU pixels {index}");
         }
         Ok(())
+    }
+
+    /// The vertex stage of a hardware-sampled Pixelated quad (uber.vert.glsl, the corners buffer in gpu.rs) on the
+    /// CPU: the strip's four vertices as (screen position, texture coordinate), in the strip's order. A rounded
+    /// image's corners are turned a quarter, which moves the shared diagonal to top left - bottom right.
+    fn hardware_strip(texels: &[[f32; 4]], start: usize) -> Option<[([f64; 2], [f64; 2]); 4]> {
+        let head = texels[start + 2];
+        if head[0] != 6. || head[1] <= 0. {
+            return None;
+        }
+        let at = start + head[1] as usize;
+        let (uv, quad) = (texels[at].map(f64::from), texels[at + 1].map(f64::from));
+        Some([[0., 0.], [0., 1.], [1., 0.], [1., 1.]].map(|a: [f64; 2]| {
+            let c = if head[1].fract() > 0.25 { [1. - a[1], a[0]] } else { a };
+            (
+                [if c[0] > 0.5 { quad[2] } else { quad[0] }, if c[1] > 0.5 { quad[3] } else { quad[1] }],
+                [if c[0] > 0.5 { uv[2] } else { uv[0] }, if c[1] > 0.5 { uv[3] } else { uv[1] }],
+            )
+        }))
+    }
+
+    /// Checkable without a GPU: what a hardware-sampled Pixelated quad submits. The vertex stage source still
+    /// turns a rounded quad's corners as hardware_strip does; the strip's triangles share the measured diagonal;
+    /// the sampler is nearest with repeat addressing; and at every pixel centre that is not within 1/1000 texel
+    /// of a texel boundary the interpolated coordinate picks the texel of the record's tap tables. Only the ties
+    /// are the rasterizer's (native_snapped_image_pixels_match_canonical_canvas checks those on a hardware GPU).
+    #[test]
+    fn hardware_sampled_quads_submit_the_measured_geometry() {
+        let vert = include_str!("shaders/uber.vert.glsl");
+        assert!(vert.contains("corner = vec2(1.0 - aCorner.y, aCorner.x);"));
+        let sampler = super::super::gpu::image_point_sampler();
+        assert_eq!([sampler.address_mode_u, sampler.address_mode_v], [wgpu::AddressMode::Repeat; 2]);
+        assert_eq!([sampler.mag_filter, sampler.min_filter], [wgpu::FilterMode::Nearest; 2]);
+        let source: Value =
+            serde_json::from_str(include_str!("../../tests/goldens/image-math.json")).unwrap();
+        let gold: Value = serde_json::from_str(include_str!(
+            "../../tests/goldens/snapped-image-records.json"
+        ))
+        .unwrap();
+        let (mut quads, mut checked, mut ties) = (0, 0, 0);
+        for (index, c) in gold["cases"].as_array().unwrap().iter().enumerate() {
+            let (draw, ctx) = snapped_fixture(c, &source);
+            let texels = &draw.packet.texels;
+            let size = {
+                let src = &source["cases"][c["sourceCase"].as_u64().unwrap() as usize];
+                [src["width"].as_f64().unwrap(), src["height"].as_f64().unwrap()]
+            };
+            for batch in &ctx.batches {
+                for &offset in &batch.record_offsets {
+                    let start = offset as usize;
+                    let Some(strip) = hardware_strip(texels, start) else { continue };
+                    quads += 1;
+                    let rounded = texels[start + 2][1].fract() > 0.25;
+                    let (x0, y0) = (strip[0].0[0].min(strip[3].0[0]), strip[0].0[1].min(strip[3].0[1]));
+                    let (x1, y1) = (strip[0].0[0].max(strip[3].0[0]), strip[0].0[1].max(strip[3].0[1]));
+                    // The diagonal the two triangles (0, 1, 2) and (1, 2, 3) share
+                    let shared = (strip[1].0, strip[2].0);
+                    let expected = if rounded { ([x0, y0], [x1, y1]) } else { ([x0, y1], [x1, y0]) };
+                    assert_eq!(shared, expected, "case {index}");
+                    let level = texels[start + 5][1] as i64;
+                    let tex = [((size[0] as i64) >> level).max(1) as f64, ((size[1] as i64) >> level).max(1) as f64];
+                    let taps = texels[start + 6];
+                    let quad = texels[start + 3];
+                    for py in (y0.floor() as i64)..(y1.ceil() as i64) {
+                        for px in (x0.floor() as i64)..(x1.ceil() as i64) {
+                            let p = [px as f64 + 0.5, py as f64 + 0.5];
+                            if p[0] < x0 || p[0] >= x1 || p[1] < y0 || p[1] >= y1 {
+                                continue;
+                            }
+                            // Interpolate over the triangle that holds the centre, as the rasterizer does
+                            let bary = |t: [usize; 3]| {
+                                let [v0, v1, v2] = t.map(|i| strip[i].0);
+                                let d = (v1[0] - v0[0]) * (v2[1] - v0[1]) - (v2[0] - v0[0]) * (v1[1] - v0[1]);
+                                let l1 = ((p[0] - v0[0]) * (v2[1] - v0[1]) - (v2[0] - v0[0]) * (p[1] - v0[1])) / d;
+                                let l2 = ((v1[0] - v0[0]) * (p[1] - v0[1]) - (p[0] - v0[0]) * (v1[1] - v0[1])) / d;
+                                (1. - l1 - l2, l1, l2, t)
+                            };
+                            let (w0, w1, w2, t) = [bary([0, 1, 2]), bary([1, 2, 3])]
+                                .into_iter()
+                                .find(|b| b.0 >= -1e-9 && b.1 >= -1e-9 && b.2 >= -1e-9)
+                                .unwrap();
+                            let uv: [f64; 2] =
+                                std::array::from_fn(|k| w0 * strip[t[0]].1[k] + w1 * strip[t[1]].1[k] + w2 * strip[t[2]].1[k]);
+                            let at = [uv[0] * tex[0], uv[1] * tex[1]];
+                            if at.iter().any(|v| (v - v.round()).abs() < 1e-3) {
+                                ties += 1;
+                                continue;
+                            }
+                            let ij = [(px - quad[0] as i64) as usize, (py - quad[1] as i64) as usize];
+                            let tx = texels[start + taps[0] as usize + ij[0]][0] as i64;
+                            let ty = texels[start + taps[1] as usize + ij[1]][0] as i64;
+                            // A tile wraps; any other quad clamps to its texture (the shader's clamp before the sampler)
+                            let wrap = texels[start + 2][2] > 0.5;
+                            let pick = |v: f64, n: f64| if wrap { v.floor().rem_euclid(n) as i64 } else { v.floor().clamp(0., n - 1.) as i64 };
+                            let picked = [pick(at[0], tex[0]), pick(at[1], tex[1])];
+                            assert_eq!(picked, [tx, ty], "case {index} pixel ({px}, {py})");
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(quads > 50 && checked > 1000 && ties > 0, "{quads} quads, {checked} pixels, {ties} ties");
     }
 
     #[test]

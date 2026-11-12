@@ -33,10 +33,14 @@ void main() {
 	vec4 head = rec(r + 2);
 	float uvAt = int(head.x) == 6 ? head.y : 0.0;
 	vUv = vec2(0.0);
+	vec2 corner = aCorner;
 	if (uvAt > 0.0) {
 		vec4 uv = rec(r + int(uvAt));
 		b = rec(r + int(uvAt) + 1);
-		vUv = vec2(aCorner.x > 0.5 ? uv.z : uv.x, aCorner.y > 0.5 ? uv.w : uv.y);
+		if (fract(uvAt) > 0.25) {
+			corner = vec2(1.0 - aCorner.y, aCorner.x);
+		}
+		vUv = vec2(corner.x > 0.5 ? uv.z : uv.x, corner.y > 0.5 ? uv.w : uv.y);
 	} else if (!(g > 0.0)) {
 		// Skip rasterizing what the clip test would discard: the quad shrinks to the clip grown by a
 		// pixel (vertex snapping cannot lose a pixel centre the fragment clip test keeps) and never
@@ -47,7 +51,7 @@ void main() {
 			b = vec4(0.0);
 		}
 	}
-	vec2 p = vec2(aCorner.x > 0.5 ? b.z : b.x, aCorner.y > 0.5 ? b.w : b.y);
+	vec2 p = vec2(corner.x > 0.5 ? b.z : b.x, corner.y > 0.5 ? b.w : b.y);
 	// wgpu framebuffer and texture rows are top down: the top row maps to clip y = +1 (fragment positions stay
 	// top down)
 	gl_Position = vec4(p.x * uAdjust.x + uAdjust.y, -(p.y * uAdjust.z + uAdjust.w), 0.0, 1.0);

@@ -384,6 +384,40 @@ float turnedDistance(vec2 p, vec2 halfSize, vec4 radii) {
 	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
 }
 
+// Whether pixel P's centre is on the inner side of the edge from a to b of a quad whose corners run clockwise
+// on the screen, all in 1/256 px: the sign of the edge function, exactly (its products take 40 bits: the high
+// and low ten bits of the pixel's offset are multiplied apart), a centre on the edge counting for a top or a
+// left edge as the rasterizer counts it
+bool gridEdge(ivec2 a, ivec2 b, ivec2 c) {
+	ivec2 e = b - a, d = c - a;
+	ivec2 dh = d >> 10, dl = d & 1023;
+	int high = e.x * dh.y - e.y * dh.x, low = e.x * dl.y - e.y * dl.x;
+	high += low >> 10;
+	low &= 1023;
+	if (high != 0) {
+		return high > 0;
+	}
+	if (low != 0) {
+		return true;
+	}
+	return (e.y == 0 && e.x > 0) || e.y < 0;
+}
+
+// Whether pixel P's centre is in the quad whose grid corners are the two texels at `at` (top left and top
+// right, then bottom right and bottom left)
+bool gridCorners(vec4 top, vec4 bottom, ivec2 P) {
+	ivec2 tl = ivec2(top.xy), tr = ivec2(top.zw), br = ivec2(bottom.xy), bl = ivec2(bottom.zw);
+	ivec2 c = P * 256 + 128;
+	return gridEdge(tl, tr, c) && gridEdge(tr, br, c) && gridEdge(br, bl, c) && gridEdge(bl, tl, c);
+}
+
+bool gridQuad(int at, ivec2 P) {
+	vec4 top = rec(at), bottom = rec(at + 1);
+	ivec2 tl = ivec2(top.xy), tr = ivec2(top.zw), br = ivec2(bottom.xy), bl = ivec2(bottom.zw);
+	ivec2 c = P * 256 + 128;
+	return gridEdge(tl, tr, c) && gridEdge(tr, br, c) && gridEdge(br, bl, c) && gridEdge(bl, tl, c);
+}
+
 vec4 kindRotated(ivec2 P, vec2 X) {
 	vec4 m = rec(3), tr = rec(4), shape = rec(5);
 	vec2 p = toLocal(m, tr, X);
@@ -394,6 +428,8 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 	// Flag 4: a UIGradient's fill or border. Studio draws a turned one without anti-aliased edges: the pixels
 	// whose centre lies in the quad (fixtures/group-probe-border.luau PlainTurnBanded)
 	bool hard = (flags & 4) != 0;
+	// Flag 8: texels 7 and 8 hold the quad's corners on the 1/256 px grid (gridQuad), not the quarter turn's extents
+	bool exact = (flags & 8) != 0;
 	vec4 screen = rec(7);
 	float a;
 	if (quarter && !(X.x >= screen.x && X.x < screen.z && X.y >= screen.y && X.y < screen.w)) {
@@ -401,13 +437,13 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 	} else if (quarter && !rounded) {
 		a = 1.0;
 	} else if (hard) {
-		a = p.x >= -halfSize.x && p.x < halfSize.x && p.y >= -halfSize.y && p.y < halfSize.y ? 1.0 : 0.0;
+		a = (exact ? gridQuad(7, P) : p.x >= -halfSize.x && p.x < halfSize.x && p.y >= -halfSize.y && p.y < halfSize.y) ? 1.0 : 0.0;
 	} else if (!rounded) {
 		// Past a corner the coverage follows the nearer edge's ramp alone (a mitred corner), not the distance
 		// to the corner point
 		vec2 q = abs(p) - halfSize;
 		a = clamp(1.0 - max(q.x, q.y), 0.0, 1.0);
-	} else if (!quarter && (p.x < -halfSize.x || p.x >= halfSize.x || p.y < -halfSize.y || p.y >= halfSize.y)) {
+	} else if (!quarter && (exact ? !gridQuad(7, P) : p.x < -halfSize.x || p.x >= halfSize.x || p.y < -halfSize.y || p.y >= halfSize.y)) {
 		a = 0.0;
 	} else {
 		// The distance's change over a pixel is the GPU's coarse derivative, as under no rotation
@@ -429,9 +465,16 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 				a = 0.0;
 			}
 		} else if (hard) {
-			vec2 inner = halfSize - hole;
-			if (p.x >= -inner.x && p.x < inner.x && p.y >= -inner.y && p.y < inner.y) {
-				a = 0.0;
+			int strips = int(rec(6).x);
+			if (strips > 0) {
+				// Four quads, each on its own grid corners: a pixel centre on the seam of two of them, or of
+				// one and the fill, can be in both or in neither
+				a = gridQuad(strips, P) || gridQuad(strips + 2, P) || gridQuad(strips + 4, P) || gridQuad(strips + 6, P) ? 1.0 : 0.0;
+			} else {
+				vec2 inner = halfSize - hole;
+				if (p.x >= -inner.x && p.x < inner.x && p.y >= -inner.y && p.y < inner.y) {
+					a = 0.0;
+				}
 			}
 		} else {
 			// A border is four strips, each a turned quad with its own edge ramps, laid like a pinwheel: the
@@ -762,7 +805,13 @@ vec4 sampleImageQuad(ivec2 P, out bool ok) {
 	if ((flags & 1) != 0) {
 		vec4 head = rec(2);
 		if (head.y > 0.0) {
-			ivec4 k = toBytes(hardwareTexel(slot, vUv, float(l0)));
+			// A quad that is not a tile (head.z = 0) clamps its coordinate to the texture's last texel, as the tap
+			// tables do: a slice whose middle runs past its texture (SliceScale) would wrap under the sampler
+			vec2 uv = vUv;
+			if (head.z < 0.5) {
+				uv = clamp(uv, vec2(0.0), 1.0 - 0.5 / vec2(imageSize(slot, l0)));
+			}
+			ivec4 k = toBytes(hardwareTexel(slot, uv, float(l0)));
 			return vec4(byteFloat(k.r), byteFloat(k.g), byteFloat(k.b), byteFloat(k.a));
 		}
 		vec4 tx = rec(int(taps.x) + ij.x), ty = rec(int(taps.y) + ij.y);
@@ -1097,8 +1146,9 @@ vec4 kindImageRotated(ivec2 P, vec2 X) {
 	} else if (quarter) {
 		coverage = X.x >= screen.x && X.x < screen.z && X.y >= screen.y && X.y < screen.w ? 1.0 : 0.0;
 	} else if ((flags & 16) != 0) {
-		// Flag 16: a CanvasGroup under a UIGradient has no anti-aliased edge (groups.rs composite_turned_group)
-		coverage = l.x >= bounds.x && l.x < bounds.z && l.y >= bounds.y && l.y < bounds.w ? 1.0 : 0.0;
+		// Flag 16: a CanvasGroup under a UIGradient has no anti-aliased edge (groups.rs composite_turned_group); a
+		// pixel centre is in it by the edge functions on its grid corners (texels 6 and 9, as gridQuad reads them)
+		coverage = gridCorners(screen, rec(9), P) ? 1.0 : 0.0;
 	} else {
 		vec2 halfSize = (bounds.zw - bounds.xy) * 0.5;
 		coverage = rotatedCoverage(l - bounds.xy - halfSize, halfSize, false, vec4(0.0), m);

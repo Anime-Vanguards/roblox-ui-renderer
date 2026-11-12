@@ -1335,7 +1335,10 @@ fn geometry(ctx: &Ctx, id: InstanceId, record: &Record, matrix: &Option<Transfor
     if let Some(m) = matrix.filter(|_| placement) {
         node.insert(
             "matrix".into(),
-            numbers(&[round(m[0], 6), round(m[1], 6), round(m[2], 6), round(m[3], 6), float32(m[4]), float32(m[5])]),
+            // At full precision: six decimals of the turn moved an edge 1,000 px from the origin by 0.0007 px,
+            // and Studio decides a pixel whose centre is that near a hard edge by the sign of the edge
+            // function on vertices of the 1/256 px grid (notes/images.md, "Pixel centres on a turned edge")
+            numbers(&[round(m[0], 14), round(m[1], 14), round(m[2], 14), round(m[3], 14), m[4], m[5]]),
         );
         keys |= KEY_MATRIX;
     }
