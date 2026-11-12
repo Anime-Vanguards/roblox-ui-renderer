@@ -896,6 +896,7 @@ export function invalidateCapture(outDir, issue) {
 	}
 }
 
+
 export class CaptureNeeded extends Error {
 	constructor(reason) {
 		super(`a Studio capture is needed (${reason})`);
@@ -973,6 +974,7 @@ export async function compare(args) {
 	const roots = String(args.rootsResolved).split(";");
 	const source = args.story || args.model || args.fixture;
 	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$/, "");
+	const backend = "studio";
 	const outDir = path.resolve(args.out || path.join(OUT_DIR, "compare", name));
 	fs.mkdirSync(outDir, { recursive: true });
 	// The report is this run's result or nothing: an earlier one must not outlive a run that stops
@@ -994,10 +996,13 @@ export async function compare(args) {
 	let dpi = args.dpi ? Number(args.dpi) : undefined;
 	// A Studio the launcher started on a desktop of its own is captured through the engine (cli/studio.mjs
 	// captureEngine), whose screenshot leaves CoreGui out: the mount goes under StarterGui there, which edit mode draws
-	const captureMethod = studioCaptureMethod(studio);
+	const captureMethod = backend === "studio" ? studioCaptureMethod(studio) : "window";
 	const inContainer = luau => captureMethod === "engine" ? luau.replace('local CoreGui = game:GetService("CoreGui")', 'local CoreGui = game:GetService("StarterGui")') : luau;
 	const mountLuau = inContainer(MOUNT_LUAU({ pathParts, width, height, background, time, modelB64, fixtureSource, probes }));
-	const captureKey = sha1(JSON.stringify({ studio, dpi: dpi || "auto", mount: sha1(mountLuau) }));
+	const simConfig = null;
+	const captureKey = simConfig
+		? sha1(JSON.stringify({ backend: "sim", version: simConfig.version, dpi: simConfig.dpi, window: simConfig.window, flags: simConfig.flags, network: simConfig.network, mount: sha1(mountLuau) }))
+		: sha1(JSON.stringify({ studio, dpi: dpi || "auto", mount: sha1(mountLuau) }));
 	const reuse = args.recapture ? { reason: "--recapture" } : reusableCapture(outDir, captureKey);
 	if (!reuse.record && args["reuse-only"]) throw new CaptureNeeded(reuse.reason);
 	const dumpFile = path.join(outDir, "studio-nodes.json");
@@ -1013,7 +1018,7 @@ export async function compare(args) {
 		calibration = reuse.record.calibration || undefined;
 		colourKeyed = reuse.record.colourKeyed;
 		studioPng = readPng(studioFile);
-		process.stderr.write(`rur compare: reusing the Studio capture from ${reuse.record.capturedAt} (its inputs are unchanged; --recapture captures again)
+		process.stderr.write(`rur compare: reusing the ${backend === "sim" ? "sim" : "Studio"} capture from ${reuse.record.capturedAt} (its inputs are unchanged; --recapture captures again)
 `);
 	} else {
 		if (reuse.reason !== "no earlier capture") process.stderr.write(`rur compare: capturing in Studio: ${reuse.reason}
@@ -1146,6 +1151,8 @@ export async function compare(args) {
 	}
 	const report = {
 		source,
+		// Where the reference was captured: { backend: "studio" }, or the sim's build, scale, flags and session
+		capture: studioResult.capture || { backend: "studio" },
 		studio: { status: studioResult.status, failure: studioResult.failure, nodes: studioResult.nodes.length, viewport, placeId: studioResult.placeId, colourKeyed,
 			...(calibration ? { captureStretch: calibration } : {}),
 			...(Object.keys(probes).length ? { probes: studioResult.probes || {}, staleState: staleProbes(probes, studioResult.probes) } : {}) },
@@ -1162,7 +1169,9 @@ export async function compare(args) {
 	// What drew the rur side and in which state Studio drew its side: a report is only read with the engine that
 	// wrote it (readReport), and a capture in the other text state is refused before it gets here
 	report.engine = { ...engineIdentity(), textSubpixel: textSubpixel() };
-	report.capture = { capturedAt: reuse.record ? reuse.record.capturedAt : new Date().toISOString(), reused: Boolean(reuse.record), studioTextFlag: studioResult.textFlag || "unknown" };
+	// The text flag the reference was drawn in: read from Studio, or the one the sim session was started with
+	const textFlag = studioResult.capture && studioResult.capture.backend === "sim" ? studioResult.capture.flags.FFlagLegacyTextSubpixelRendering.toLowerCase() : studioResult.textFlag;
+	report.capture = { ...report.capture, ...(studioResult.captureMethod ? { method: studioResult.captureMethod } : {}), capturedAt: reuse.record ? reuse.record.capturedAt : new Date().toISOString(), reused: Boolean(reuse.record), studioTextFlag: textFlag || "unknown" };
 	if (!reuse.record) {
 		// What this capture depends on, for the next compare (reusableCapture)
 		const issues = [];
