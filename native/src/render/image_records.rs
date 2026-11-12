@@ -1066,6 +1066,8 @@ mod tests {
                 let mut file =
                     std::fs::OpenOptions::new().create(true).append(true).open(out).expect("the list");
                 writeln!(file, "{i} {}", serde_json::to_string(&actual).unwrap()).unwrap();
+                let mips: Vec<String> = draw.packet.textures[0].levels.iter().map(|l| hash(&l.bytes)).collect();
+                writeln!(file, "h{i} {}", serde_json::to_string(&mips).unwrap()).unwrap();
                 continue;
             }
             assert_eq!(actual, expected, "record case {i}");

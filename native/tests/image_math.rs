@@ -83,6 +83,14 @@ fn canonical_js_image_goldens() {
             source.rgba.clone(),
         );
         for (j, l) in levels.iter().enumerate() {
+            // RUR_RECORD_GOLDEN_FIELDS=<file> lists the mip hashes as they are now ("m<case>/<level> hash"), for
+            // re-recording them after the mip rule changed
+            if let Some(out) = std::env::var_os("RUR_RECORD_GOLDEN_FIELDS") {
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new().create(true).append(true).open(out).unwrap();
+                writeln!(file, "m{i}/{j} {}", hash(&l.data)).unwrap();
+                continue;
+            }
             assert_eq!(
                 hash(&l.data),
                 c["mips"][j]["hash"].as_str().unwrap(),
@@ -157,11 +165,17 @@ fn canonical_js_image_goldens() {
             SamplingGrid::pixels(9, 7),
             &mut cache.taps,
         );
-        assert_eq!(
-            float_hash(&samples),
-            c["sampleHash"].as_str().unwrap(),
-            "sample case {i}"
-        );
+        if let Some(out) = std::env::var_os("RUR_RECORD_GOLDEN_FIELDS") {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(out).unwrap();
+            writeln!(file, "q{i} \"{}\"", float_hash(&samples)).unwrap();
+        } else {
+            assert_eq!(
+                float_hash(&samples),
+                c["sampleHash"].as_str().unwrap(),
+                "sample case {i}"
+            );
+        }
         let r = &c["rect"];
         let rect = ImageRect {
             x: f(&r["x"]),

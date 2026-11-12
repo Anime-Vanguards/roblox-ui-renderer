@@ -92,9 +92,13 @@ fn halve(level: &MipLevel, horizontal: bool, round_up: u16) -> MipLevel {
                 out[o + c] = if even {
                     ((level.data[a + c] as u16 + level.data[b + c] as u16 + round_up) / 2) as u8
                 } else {
-                    (level.data[a + c] as f64
-                        + (level.data[b + c] as f64 - level.data[a + c] as f64) * f)
-                        .floor() as u8
+                    // The 2-tap weight has 8 bits, floored, and the blend is floored (measured on minified
+                    // 473 x 287 and 1920 x 1080 textures: tools/studio/corner-probe-texture.luau 16 -> 14 px,
+                    // fixtures/image-probe-snap 29 -> 6, image-probe-fit 4 -> 0; rounding the weight or the blend
+                    // is worse)
+                    let (x, y) = (level.data[a + c] as u32, level.data[b + c] as u32);
+                    let w = (f * 256.).floor() as u32;
+                    ((x * (256 - w) + y * w) >> 8) as u8
                 };
             }
         }
