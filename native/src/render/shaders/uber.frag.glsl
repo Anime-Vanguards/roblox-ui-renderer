@@ -365,6 +365,20 @@ vec2 toLocal(vec4 m, vec4 t, vec2 X) {
 	return vec2(m.x * d.x + m.z * d.y + t.x, m.y * d.x + m.w * d.y + t.y);
 }
 
+// Coverage of a turned plain quad at its centred local point p: one pixel's ramp past each edge, the nearer
+// edge's alone past a corner
+float turnedQuad(vec2 p, vec2 halfSize) {
+	vec2 q = abs(p) - halfSize;
+	return clamp(1.0 - max(q.x, q.y), 0.0, 1.0);
+}
+
+// Signed distance of the rect-centred local point p to the rounded rect (per-quadrant radius)
+float turnedDistance(vec2 p, vec2 halfSize, vec4 radii) {
+	float r = quadrantRadius(p, radii);
+	vec2 q = abs(p) - halfSize + r;
+	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
 vec4 kindRotated(ivec2 P, vec2 X) {
 	vec4 m = rec(3), tr = rec(4), shape = rec(5);
 	vec2 p = toLocal(m, tr, X);
@@ -386,21 +400,16 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 	} else if (!quarter && (p.x < -halfSize.x || p.x >= halfSize.x || p.y < -halfSize.y || p.y >= halfSize.y)) {
 		a = 0.0;
 	} else {
+		// The distance's change over a pixel is the GPU's coarse derivative, as under no rotation
+		// (cornerMask): differences within the 2x2 quad on even target coordinates, from its top-left pixel
 		vec4 radii = rec(6);
-		float r = quadrantRadius(p, radii);
-		vec2 q = abs(p) - halfSize + r;
-		float d;
-		vec2 g;
-		if (q.x > 0.0 && q.y > 0.0) {
-			float len = length(q);
-			d = len - r;
-			g = sign(p) * q / len;
-		} else {
-			d = max(q.x, q.y) - r;
-			g = q.x >= q.y ? vec2(sign(p.x), 0.0) : vec2(0.0, sign(p.y));
-		}
-		float fw = abs(g.x * m.x + g.y * m.y) + abs(g.x * m.z + g.y * m.w);
-		float t = clamp(0.5 - d / fw, 0.0, 1.0);
+		vec2 Q = X - vec2(P & 1);
+		float d = turnedDistance(p, halfSize, radii);
+		float origin = turnedDistance(toLocal(m, tr, Q), halfSize, radii);
+		float dx = turnedDistance(toLocal(m, tr, Q + vec2(1.0, 0.0)), halfSize, radii);
+		float dy = turnedDistance(toLocal(m, tr, Q + vec2(0.0, 1.0)), halfSize, radii);
+		float fw = abs(dx - origin) + abs(dy - origin);
+		float t = fw > 0.0 ? clamp(0.5 - d / fw, 0.0, 1.0) : (d < 0.0 ? 1.0 : 0.0);
 		a = t * t * (3.0 - 2.0 * t);
 	}
 	if (hole > 0.0 && !rounded && a > 0.0) {
@@ -410,7 +419,24 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 				a = 0.0;
 			}
 		} else {
-			a *= clamp(1.0 + sdBox(p, halfSize - hole), 0.0, 1.0);
+			// A border is four strips, each a turned quad with its own edge ramps, laid like a pinwheel: the
+			// left one holds the top left corner, the top one the top right, the right one the bottom right
+			// and the bottom one the bottom left. Each reaches one pixel's ramp past its edges, into the fill
+			// and into its neighbours, and what two of them cover in part is covered by both
+			// (fixtures/rotation-probe-border.luau).
+			float b = hole * 0.5;
+			vec2 across = vec2(halfSize.x - b, b), along = vec2(b, halfSize.y - b);
+			float top = turnedQuad(p - vec2(b, b - halfSize.y), across), bottom = turnedQuad(p - vec2(-b, halfSize.y - b), across);
+			float left = turnedQuad(p - vec2(b - halfSize.x, -b), along), right = turnedQuad(p - vec2(halfSize.x - b, b), along);
+			// Each strip is a layer of the border's own opacity: two of them over one another are more
+			// opaque than one (a border under BackgroundTransparency 0.5 is 0.75 where they cross)
+			float opacity = gPaint.a;
+			if (opacity > 0.0) {
+				float through = (1.0 - opacity * top) * (1.0 - opacity * bottom) * (1.0 - opacity * left) * (1.0 - opacity * right);
+				a = (1.0 - through) / opacity;
+			} else {
+				a = 0.0;
+			}
 		}
 	}
 	int mask = int(floor(a * 255.0 + 0.5));

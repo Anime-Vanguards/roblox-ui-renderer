@@ -118,8 +118,8 @@ Limitations:
   BillboardGuis in the world are not rendered.
 - A plain render captures the state after `--time`; interactive states need `--actions` or the desktop
   app's input.
-- Bit-exact Studio parity is not complete: rotated sampling, some rich text styles, synthetic italic and
-  image and group edge cases have small known differences.
+- Bit-exact Studio parity is not complete: images and CanvasGroups under a rotation, some rich text styles,
+  synthetic italic and image and group edge cases have small known differences.
 - Stories that depend on game services or Studio-only content, yield while mounting or contain source errors
   run as far as they can; the sweep reports these separately from rendering errors.
 - Features Studio gates off (UIShadow `Inset`, `ShowBehindParent`, `Mode = Text`) are ignored, as in Studio.
