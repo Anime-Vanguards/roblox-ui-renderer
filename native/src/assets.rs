@@ -1147,13 +1147,14 @@ fn encode_value(out: &mut Vec<u64>, value: Option<&Value>) {
 }
 
 /// The glyph inputs of a text node, exactly: its glyphs (font, id, size, variant), weights, bold and
-/// stroke settings, and the scale. Layout coordinates and colours cannot create a new glyph (the
-/// atlas consumes only these); the active font table is a generation boundary, not repeated per node.
-/// Encoded without building values: it runs over every text node whenever the scene changes (every
-/// frame of a scroll: the moved rows are new nodes).
+/// stroke settings, the pen's quarter-pixel phase, and the scale. Other layout coordinates and colours
+/// cannot create a new glyph (the atlas consumes only these); the active font table is a generation
+/// boundary, not repeated per node. Encoded without building values: it runs over every text node
+/// whenever the scene changes (every frame of a scroll: the moved rows are new nodes).
 fn glyph_key(node: &Value, scale: f64) -> Option<Vec<u64>> {
     let text = node.get("text")?;
     let lines = text.get("lines")?.as_array()?;
+    let rotated = node["matrix"].is_array();
     let glyphs = || {
         lines
             .iter()
@@ -1169,6 +1170,8 @@ fn glyph_key(node: &Value, scale: f64) -> Option<Vec<u64>> {
         for value in [glyph.first(), glyph.get(1), glyph.get(3), glyph.get(4)] {
             encode_value(&mut key, value);
         }
+        // Quarter-pixel text keys each glyph by its pen's phase (render/text.rs glyph_keys)
+        key.push(crate::glyphs::text_quarter(text, glyph.get(2), rotated).map_or(4, u64::from));
     }
     // Separates the glyph list from what follows (no value encoding starts with this word)
     key.push(u64::MAX);
@@ -2631,6 +2634,54 @@ process.stdin.on('data', bytes => {{
                 "partial manifest case {case} must queue missing glyphs"
             );
         }
+        std::fs::remove_file(directory.join("pixels.png")).unwrap();
+        std::fs::remove_file(directory.join("manifest.json")).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
+    #[test]
+    fn quarter_pixel_text_moved_to_a_new_phase_queues_its_glyphs() {
+        let mut node = json!({"text":{"subpixel":4,"weight":400,"lines":[{"glyphs":[[0,41,2,18]]}]}});
+        let whole = glyph_signature(&node, &json!([]), 1.5);
+        node["text"]["lines"][0]["glyphs"][0][2] = json!(7);
+        assert_eq!(whole, glyph_signature(&node, &json!([]), 1.5), "the same phase draws the same glyph");
+        node["text"]["lines"][0]["glyphs"][0][2] = json!(7.5);
+        assert_ne!(whole, glyph_signature(&node, &json!([]), 1.5), "q2 is another atlas glyph than q0");
+
+        let directory = std::env::temp_dir().join(format!(
+            "rur-native-quarter-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        image::RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255])
+            .unwrap()
+            .save(directory.join("pixels.png"))
+            .unwrap();
+        std::fs::write(
+            directory.join("manifest.json"),
+            json!({"images":{},"atlas":{"src":"pixels.png","glyphs":[{"key":[0,18,41,0,"q0"],"x":0,"y":0,"w":1,"h":1,"left":0,"top":1}]}}).to_string(),
+        )
+        .unwrap();
+        let frame = |pen: f64| {
+            json!({"viewport":{"scale":1},"fonts":[{"file":"unavailable.ttf"}],"images":[],
+                "nodes":[{"id":1,"text":{"subpixel":4,"weight":400,"lines":[{"glyphs":[[0,41,pen,18]]}]}}],"layers":[]})
+        };
+        let mut scene = SceneStore::default();
+        scene.apply(&frame(2.0)).unwrap();
+        let mut assets = AssetStore::new(directory.join("no-helper"), true);
+        assert!(assets.load_manifest(&scene, &directory));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while assets.pending_count() > 0 && Instant::now() < deadline {
+            assets.poll();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(assets.request_missing(&scene), 0, "the saved atlas covers the q0 pen");
+        // The same text moves half a pixel (a following tooltip): its q2 glyph is not in the atlas yet
+        scene.apply(&frame(2.5)).unwrap();
+        assert!(assets.request_missing(&scene) > 0, "a pen at a new quarter phase must queue its glyph");
         std::fs::remove_file(directory.join("pixels.png")).unwrap();
         std::fs::remove_file(directory.join("manifest.json")).unwrap();
         std::fs::remove_dir(directory).unwrap();
