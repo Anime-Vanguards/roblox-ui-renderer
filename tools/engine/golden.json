@@ -25,7 +25,7 @@
 			"status": "ok"
 		},
 		"fast/edit/device-probe": {
-			"digest": "8904f0389ab51590c8ef200dc1f500d3fbe2c3c36d209ce502a0a8600fc39a10",
+			"digest": "d8529161ab1300e7231f966bb0e3dcd519b1df9848477a2580f7831f4b0037d3",
 			"status": "ok"
 		},
 		"fast/edit/gradient-edges": {
@@ -321,7 +321,7 @@
 			"status": "ok"
 		},
 		"fast/edit/path2d-strokes": {
-			"digest": "93047a5579a191d33baf0f9af10ffb4b667e7701b0d4466b5370ff7b788eb624",
+			"digest": "82628dac0403de372d48a994c5122b3e10693a90c5bcd8147c636409b2da0552",
 			"status": "ok"
 		},
 		"fast/edit/path2d-thick": {
@@ -816,6 +816,14 @@
 			"digest": "81ee5faea68e1217c12e78e54eaf4f78fbf9f64942a136ad09c1edc55895bbc7",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-gapfaces": {
+			"digest": "0ecad8d731256195942a08771b460d8ea6d38ceb0ed9b1d15dd01eb2b79241da",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-gapfaces@quarter": {
+			"digest": "bb570775eac1563841541e5e15a537a474423b3792916046c4021b9fb220e4e8",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-gradient": {
 			"digest": "e74f5179c67f23affdff6a9e62ecbf45a1f5a5d5da67cc988cd8cf97c4c54987",
 			"status": "ok"
@@ -860,8 +868,32 @@
 			"digest": "8a04854c8f0da66f69b66fedcf2e42df6694f759f277acd52beb3c438d0c4f6d",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-groupturned-pos": {
+			"digest": "e8d3aeba38aa97e7744e9b23cd904739d9aca0160b07f6ca76d49a242fc136e1",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-groupturned-pos@quarter": {
+			"digest": "3d23c1ceae07de436eb4ac4b37a93960b7e9f88a5a8d824f7aa99eab2c28b86c",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-groupturned-sizes": {
+			"digest": "2d7fede76bc02cdef00be23571032272b8a893b15ea39f7de6210365a546fe75",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-groupturned-sizes@quarter": {
+			"digest": "527e250c8ea5ff48c0670af3710d8afe97bba99ac26034264566d161206341f3",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-groupturned@quarter": {
 			"digest": "f64986c453942d80659aca26c2b70e443957f1117b630554fcc77c8b20ee769e",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-kernoffset": {
+			"digest": "edcbd2316ee09df0afbb5c35ed280a23dfe11bd52815f607107a47ae79046321",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-kernoffset@quarter": {
+			"digest": "ac557d3d5f25cd7f5122e2166a6eacb5f28db4af38ded4be07bb67976aa19bac",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-overlap": {
@@ -1089,7 +1121,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/device-probe": {
-			"digest": "63b14339fa22bdd076e5f2c1fe2cb2e4aa901f3e5b1daad940d0fc0940bdb2be",
+			"digest": "2def2a64d5a8b6404340f2e996dfc62a1b72040ab6f9823d5824274eee60dc58",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-edges": {
@@ -1385,7 +1417,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-strokes": {
-			"digest": "aabf60284f2dcd9f53495b6cfd8948ad6a35120bbadb764906e53681bf542819",
+			"digest": "c7015d37eaefcf2a94ae26cb5b7e20902e3854372ec8c0e3388a3fde8dbe8e88",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-thick": {
@@ -1880,6 +1912,14 @@
 			"digest": "48fe8727895ec0c83ad5faed90042d7cc1849d60684b6cede7d5668df22bbe1a",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-gapfaces": {
+			"digest": "e69dc3f93b6fb23ba19e3dd0ba16b0c63d5c6d3e75463c1d143c24d16cc492a7",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-gapfaces@quarter": {
+			"digest": "11b72b023359004b382e7a92fbb0b7c72cb44067e6a69336d4f24801cf9cf517",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-gradient": {
 			"digest": "45bed490aad26a1dbaaacefa1812fccbdd1315885237a4a343530bc6b2aeeba3",
 			"status": "ok"
@@ -1924,8 +1964,32 @@
 			"digest": "f0ca2c3265bf5757a6a11f04efaa1b9d7915ac20773ebdcb7c740c0b35808079",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-groupturned-pos": {
+			"digest": "bb44ce6ec257139f4dc407f00b192531e1475c06eef3e506b251554c1b82792d",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-groupturned-pos@quarter": {
+			"digest": "50b60372156e15c92d9e9950fb240ef8b86d9a957b68443b4453e9c94dbe85c2",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-groupturned-sizes": {
+			"digest": "8ba421e21c958857025c4eb5a5f261949ce5b3867e2a928d97acbaeaa31c1f0b",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-groupturned-sizes@quarter": {
+			"digest": "aa0aec4f3e15d8f2ca79c5f4ca0b7489784540266d3963bc238bff0427208aaa",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-groupturned@quarter": {
 			"digest": "39645fb11e24eefc1a43b88ca8892c03f3d1a5fb74a380f8c174bdfa4a38f33b",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-kernoffset": {
+			"digest": "8fe4a5eaed281db3218ee2c12f2468c34a04892c2c8d6b3a9b8e76d81bf556f8",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-kernoffset@quarter": {
+			"digest": "3d3d43e9cbff0a8b00b117221b58fcfeb11f139370acac2a294d79180417b638",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-overlap": {
@@ -2141,7 +2205,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/device-probe": {
-			"digest": "e9b44be169763e696ba691c51a784aa1c3ad3be640d67ed1c7da5dd3e7fb536c",
+			"digest": "20c435126172094921920ce4518ecf217220974fd658198c50d1f75efcd7778d",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-edges": {
@@ -2401,7 +2465,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/path2d-strokes": {
-			"digest": "abd13ab6ed00895b5e6d5dc09f06ae1d6c792460e4b3c6632331b18e62fa7136",
+			"digest": "175f2c6b73285fa699ad3ce5e7986b66604d6c9718f20e24fdef9bdcba866a8a",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-thick": {
@@ -2812,6 +2876,10 @@
 			"digest": "634047ed397aa8a574488db8864c29db6c54cdd7c1aaff3b35b6a9e532cb24fa",
 			"status": "ok"
 		},
+		"fixtures/play/text-probe-gapfaces": {
+			"digest": "8cf532e57c0465d63805cc4e2c8fd257f2c94f48af37dd6978dfd191738eb7e5",
+			"status": "ok"
+		},
 		"fixtures/play/text-probe-gradient": {
 			"digest": "2a9f99e66f68af14e2e888409e88af9d3553e75a7def3980a6968b6804a6cdb5",
 			"status": "ok"
@@ -2834,6 +2902,18 @@
 		},
 		"fixtures/play/text-probe-groupturned": {
 			"digest": "9c23e02e9877aee77193a4eae68662ca7fe31fc1139d78cb943bce9fd7171066",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-groupturned-pos": {
+			"digest": "5556e9727a96c6ef41437c22b42c457f52c112cc7ba07fa2683c68ab502fface",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-groupturned-sizes": {
+			"digest": "e3ce3971ce5fd3965c9f5779d6045f0edbae3d676caca375aa6451832b922aa0",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-kernoffset": {
+			"digest": "9e5f1e3058fa856abe4af9384fda1ad3d528149618fba352190389c1bda64eb4",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-overlap": {
@@ -3173,7 +3253,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T21:42:26.010Z",
+	"recorded": "2026-11-12T22:39:11.797Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
