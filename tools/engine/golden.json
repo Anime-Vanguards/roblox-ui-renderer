@@ -1,7 +1,7 @@
 {
 	"entries": {
 		"fast/edit/anim-mount": {
-			"digest": "0346d2f70b41f6339dad5d0156ba06b6e072c064ef52ae8c90cad399bae7f0b2",
+			"digest": "adefaeb8299cc231bdb4346f72728babcb27a9052567058e32c4e1f9561eda0a",
 			"status": "ok"
 		},
 		"fast/edit/anim-probe-springs": {
@@ -9,7 +9,7 @@
 			"status": "ok"
 		},
 		"fast/edit/anim-tweens": {
-			"digest": "96910fac3bd52574d87d3b0db504d9281152592acb2a1ec273d6f2e41832a305",
+			"digest": "8ac726c62ff03d5fabed58da327b3d74efe7f60160f1325e0364fa67341fee21",
 			"status": "ok"
 		},
 		"fast/edit/canvasgroup": {
@@ -297,7 +297,7 @@
 			"status": "ok"
 		},
 		"fast/edit/live-stress": {
-			"digest": "de9ff53c4668c5a0f35f3fc792a1000342834405c94d2a465a5458c2f0967e4c",
+			"digest": "b90f38abfd4e00214ce8bd9f03a4b45360b4230d6142aa6d2402df080ca705f6",
 			"status": "ok"
 		},
 		"fast/edit/path2d-curves": {
@@ -349,11 +349,11 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-scheduler": {
-			"digest": "7f5494742a5321bfc1fa486d08b8b366fcac9b2f5ec1f546d64cc7232a29fdce",
+			"digest": "2364b5ff61b79cd576d7888e295f35b0a5f8a84503cb9b7bc470ce2891278977",
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
-			"digest": "c7287d4fe8fc0bc14ba0447d791bb8d5ce10c978269b1e38c3ba4e4541740280",
+			"digest": "2212f068fffceeff8d5033b1b73325729f0d341ba6f2eee45a95a15a52f72d7c",
 			"status": "ok"
 		},
 		"fast/edit/rects": {
@@ -1109,7 +1109,7 @@
 			"status": "live"
 		},
 		"fixtures/edit/anim-mount": {
-			"digest": "ca0da0ec3624dd7646c8c0378e3e0e6325307e02d31cd27afa2dce2e2751cac1",
+			"digest": "2584cd446007a3b5d84bfd897b4276df4f6e44f976827d64a1893a77becbb278",
 			"status": "ok"
 		},
 		"fixtures/edit/anim-probe-springs": {
@@ -1117,7 +1117,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/anim-tweens": {
-			"digest": "4066d303308672fb251fa8170a142040cb91cae4f0db51815cdac607deda19e6",
+			"digest": "1916be4a0b62bde4e2f45281afda3bbd840286231c8adc4a310e77b23a9bf359",
 			"status": "ok"
 		},
 		"fixtures/edit/canvasgroup": {
@@ -1405,7 +1405,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/live-stress": {
-			"digest": "4a00d3e37285b10c26946dca95306dfe432d7c6fbdd6292f4ec0f99242b66bcb",
+			"digest": "40918b0be9b46dec6062ea80d2a94ab551a8bd36f704547cf824cde18f577ffe",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-curves": {
@@ -1457,11 +1457,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-scheduler": {
-			"digest": "0cfe4ccec63c3ee740051d6fb939fa9ce6fc7f2ec6487773e01d69f287a8da9f",
+			"digest": "d17c2b0a5777e15808de3dc76ec5529127ffccdd86ad471c8e6f9486f7fc1227",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
-			"digest": "d2f8dbbd7169d375e21d5b138eef6875b3e59267aaef91879a8ad2a5cd7a81dd",
+			"digest": "a1275e8a21cea62e99239f9b399353571957a522e90ff54c74ee71b3de758a20",
 			"status": "ok"
 		},
 		"fixtures/edit/rects": {
@@ -2205,7 +2205,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/anim-mount": {
-			"digest": "421151ec15d210c625fe32e56482fbe357aa56f75f6564f2229283db2e1fc108",
+			"digest": "effcb835f2b589f1d50c304aff5bd72d5e5cda23c943df304d30b78be95813ec",
 			"status": "ok"
 		},
 		"fixtures/play/anim-probe-springs": {
@@ -2213,7 +2213,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/anim-tweens": {
-			"digest": "6e851792543ff523b5ffffef98cb0d0a5bf01c35e6800ea9edba4586dbd8b4b8",
+			"digest": "dddbfb5abcbddac26d314c4ebbd55ee53dab8686acb03cf341f7f54e66a7a64d",
 			"status": "ok"
 		},
 		"fixtures/play/canvasgroup": {
@@ -2465,7 +2465,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/live-stress": {
-			"digest": "b109b872aa97ff07095a1888f85376f206c5293c04177cec7a8827d72f9d06be",
+			"digest": "055155be0b0bee897d04e5c2131b31ff1184ff4cc69f5d51da05a717aca81592",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-curves": {
@@ -2517,11 +2517,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-scheduler": {
-			"digest": "fd8e2c982d86a514999b99b2c353c7059098a7e0983a8a521eda8041ea6e70f6",
+			"digest": "762d45d851a8cca633d66daf9744838be425dcd937268f051066c2aae17bf812",
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "9af170ce4e0c935f2f342d739951144b56877b498b1a1aacdeb1166c363ad9de",
+			"digest": "478689829f9ccc88c3a41bb2b7ecab029bf8f1cc8ffda1efe6fd20eea69da9a5",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
@@ -3217,39 +3217,39 @@
 			"status": "live"
 		},
 		"live/live-stress/120hz-click": {
-			"digest": "e6be15beae443260deef53a2b414aacf53b45f28220ffa8ddcd9f408ca42501d",
+			"digest": "39da1fe2f0beacb86359d1e6a5b000e00971d8fdb1fcbdd4a6658be4ee700c6a",
 			"status": "live"
 		},
 		"live/live-stress/120hz-default": {
-			"digest": "1772be933f4942b75effac31c21200221d230bc58b4615e5720e208e31e94617",
+			"digest": "3a7b1e37cb38f35de714e0268abbeadad94030a7f6f4e9f974eea3d0336fe99e",
 			"status": "live"
 		},
 		"live/live-stress/144hz-click": {
-			"digest": "6ab779044a8dfb567958d2178519b0f4f6a851d29ec50634ccd132de2d528329",
+			"digest": "1f5b7011a790be9305e6b7534e7e83a00eaded3402623fb86c084a2b42fc142d",
 			"status": "live"
 		},
 		"live/live-stress/144hz-default": {
-			"digest": "841751944585979335d41aeb3cbb4a7b3ae42b4d953a180630d86d330c1c1c33",
+			"digest": "735719552b5e8721644f8015d782fcf2bde24fecaa89c25a3f40e65d0f65876b",
 			"status": "live"
 		},
 		"live/live-stress/144hz-presentation": {
-			"digest": "ac84e56cd30d89f0263cace19b93c2eacc6d66739783625bb582dfb8328530f9",
+			"digest": "58419bbffa0a58891d4cdf8db1a38a9571749ff1f6ef272c096adfa5d0df3613",
 			"status": "live"
 		},
 		"live/live-stress/60hz-click": {
-			"digest": "a719c73d284e18f7e61481fb0e0dd32c4b8dd431883a9d8a3f0ea66cbf8c9f4d",
+			"digest": "8fe44959d4a65716b30ff5cba149b0d6429912cff0e62145cb015661c6db5a82",
 			"status": "live"
 		},
 		"live/live-stress/60hz-default": {
-			"digest": "d8437741388147ca1f3e2bfb7c35bab4ee398837a8dd24a2ed1821f5798bb677",
+			"digest": "97d9297de3c300a76279572d0ccafdaa34fed75d0d51a9377ca3eaaaebdaf71c",
 			"status": "live"
 		},
 		"live/live-stress/60hz-no-input": {
-			"digest": "6d38d744e8b9e18f70479d1f45e0421e42353d1a67ca0419f45148009b9aba6a",
+			"digest": "5b26e81e4991f19e749ad4639a5401f13a58092470a1bc105f1af6c6a6c3a8c9",
 			"status": "live"
 		},
 		"live/live-stress/60hz-presentation": {
-			"digest": "e5a5898da6a58017e76bedfd8a1faf592fb260ce6ebb7a423af2a2af244468f4",
+			"digest": "adac33a97310d4ac842b2a6ae6601ff2c26635e1d3c2dfba9b22c1369f6f819f",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-click": {
@@ -3289,7 +3289,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-12T23:07:18.990Z",
+	"recorded": "2026-11-13T21:43:47.099Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
