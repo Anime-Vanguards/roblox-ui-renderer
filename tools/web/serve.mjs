@@ -8,6 +8,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMain } from "../../cli/entry.mjs";
 
 const TYPES = {
 	".html": "text/html; charset=utf-8",
@@ -49,7 +50,7 @@ export function serve(root, { port = 0 } = {}) {
 	});
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	const args = process.argv.slice(2);
 	const dir = args.find(arg => !arg.startsWith("--"));
 	if (!dir) throw new Error("usage: node tools/web/serve.mjs <dir> [--port 4600]");

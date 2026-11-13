@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { isMain } from "../cli/entry.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const EMULATOR_URL = "https://github.com/Anime-Vanguards/roblox-engine-emulator";
@@ -152,7 +153,7 @@ function pin(commit) {
 	console.log(`pinned ${rev.slice(0, 12)} (was ${before.slice(0, 12)}); ${settleLock()}`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	const [command, argument] = process.argv.slice(2);
 	try {
 		if (!command || command === "status") status();

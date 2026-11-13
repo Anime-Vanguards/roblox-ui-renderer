@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { runLuau, DEFAULT_STUDIO } from "../../cli/studio.mjs";
 import { withStudioLock } from "../../cli/lock.mjs";
 import { engineBaseArgs, findEngine } from "../../cli/engine.mjs";
+import { isMain } from "../../cli/entry.mjs";
 import { placeRoots } from "../../cli/places.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -144,6 +145,6 @@ async function main() {
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	await main();
 }

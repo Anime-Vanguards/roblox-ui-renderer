@@ -7,6 +7,7 @@ import { acquireBuildLock } from "../native-host/build-lock.mjs";
 import { APP_DIRECTORY, APP_MANIFEST, SOURCE_DIRECTORY, TARGET_DIRECTORY, CRATE_DIRECTORY, appFingerprint, appSourceHashes, nativeAppStatus } from "./config.mjs";
 import { emulatorLink } from "../emulator.mjs";
 import { withoutCookie } from "../../cli/assets.mjs";
+import { isMain } from "../../cli/entry.mjs";
 
 // Cargo.lock is followed exactly, except while a local engine checkout is linked (tools/emulator.mjs):
 // cargo then rewrites the lock's emulator entry to the path package
@@ -210,7 +211,7 @@ export function webModuleStatus() {
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	const args = process.argv.slice(2);
 	if (args.some(arg => !["--debug", "--prepare", "--check", "--wasm"].includes(arg))) throw new Error("Usage: node tools/native-app/build.mjs [--debug] [--prepare | --check | --wasm]");
 	if (args.includes("--prepare") && args.includes("--check")) throw new Error("--prepare and --check are mutually exclusive");

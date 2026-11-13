@@ -431,3 +431,29 @@ console.log(JSON.stringify({ summary, contacted }));
 	fs.rmSync(dir, { recursive: true, force: true });
 	console.log("CLI profile: PASS (render --profile runs without the render service, writes <out>/profile with the layout's caches, names it in the summary; profile render draws its views)");
 }
+
+// An entry script started through a linked folder runs: Node names the module by its real path and the
+// command line's entry as written, and compared as text the two looked like different files, so the
+// script ran nothing and exited 0
+{
+	const dir = fs.mkdtempSync(path.join(root, "out", "cli-linked-"));
+	const link = path.join(dir, "linked");
+	fs.symlinkSync(path.resolve(root), link, "junction");
+	const env = { ...process.env, RUR_STATE_DIR: path.join(dir, "state") };
+	try {
+		const usage = spawnSync(process.execPath, [path.join(link, "cli", "rur.mjs")], { cwd: dir, encoding: "utf8", windowsHide: true, env });
+		assert.equal(usage.status, 0, usage.stderr);
+		assert.match(usage.stdout, /rur render --story/);
+		const unknown = spawnSync(process.execPath, [path.join(link, "cli", "rur.mjs"), "no-such-command"], { cwd: dir, encoding: "utf8", windowsHide: true, env });
+		assert.equal(unknown.status, 1, "an unknown command fails through a link too");
+		const inspect = spawnSync(process.execPath, [path.join(link, "cli", "inspect.mjs"), "tree", path.join(dir, "no-such-render")], { cwd: dir, encoding: "utf8", windowsHide: true, env });
+		assert.notEqual(inspect.status, 0, "inspect reports a missing render through a link too");
+		// --state-dir is an option of the entry scripts under the checkout, which the link's path still names
+		const stated = spawnSync(process.execPath, [path.join(link, "cli", "rur.mjs"), "--state-dir", path.join(dir, "other-state")], { cwd: dir, encoding: "utf8", windowsHide: true, env });
+		assert.equal(stated.status, 0, stated.stderr);
+		assert.match(stated.stdout, /rur render --story/);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+	console.log("CLI through a linked folder: PASS (rur and inspect run when started by a symlinked path, and take --state-dir)");
+}

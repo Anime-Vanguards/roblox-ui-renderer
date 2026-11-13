@@ -35,6 +35,7 @@ import zlib from "node:zlib";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isMain } from "../../cli/entry.mjs";
 
 import { placeOf, placeRoots, readPlaces } from "../../cli/places.mjs";
 
@@ -377,7 +378,7 @@ export async function bundle({ stories, project = defaultProject(), out, place, 
 	return summary;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	const args = parseArgs(process.argv.slice(2));
 	const summary = await bundle(args);
 	console.log(JSON.stringify(summary, null, "\t"));

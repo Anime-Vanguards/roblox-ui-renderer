@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pixelLine, readReport } from "../../cli/compare.mjs";
+import { isMain } from "../../cli/entry.mjs";
 
 // The lines and the total for reports ({ name, pixels } each; pixels as comparePngs returns them)
 export function totals(reports) {
@@ -21,7 +22,7 @@ export function totals(reports) {
 	return { lines, total, excluded };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	const argv = process.argv.slice(2);
 	const at = argv.indexOf("--dir");
 	const dir = path.resolve(at >= 0 ? argv.splice(at, 2)[1] : "out/compare");

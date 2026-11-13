@@ -26,7 +26,14 @@ export const DEFAULT_OUT_DIR = path.join(ROOT, "out");
 // does imports this one first), passed to child processes through the environment, and removed from
 // process.argv so the command's own option parsing never sees it.
 (function stateDirFlag() {
-	const main = process.argv[1] ? path.resolve(process.argv[1]) : "";
+	// The entry's real path: started through a linked folder, the path as written is not under ROOT. (Resolved
+	// here rather than through cli/entry.mjs: this module is copied on its own into test checkouts.)
+	let main = process.argv[1] ? path.resolve(process.argv[1]) : "";
+	try {
+		main = fs.realpathSync(main);
+	} catch {
+		// not a file that exists: compared as written
+	}
 	const inside = dir => main.toLowerCase().startsWith((path.join(ROOT, dir) + path.sep).toLowerCase());
 	if (!inside("cli") && !inside("tools")) return;
 	for (let i = 2; i < process.argv.length; i++) {

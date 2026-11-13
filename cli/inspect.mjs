@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { pathMatches, sceneDiagnostics } from "./diagnostics.mjs";
+import { isMain } from "./entry.mjs";
 
 function parseArgs(argv) {
 	const args = { _: [] };
@@ -341,6 +342,6 @@ export function main(argv = process.argv.slice(2)) {
 	void extra2;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	main();
 }

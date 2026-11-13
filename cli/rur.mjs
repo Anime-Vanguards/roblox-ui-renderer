@@ -82,6 +82,7 @@ import { mountArgs, rojoFileOf, runMounts } from "./rojo.mjs";
 import { readActions, UsageError } from "./actions.mjs";
 import { diagnosticLines, sceneDiagnostics } from "./diagnostics.mjs";
 import { emulatorLink, pinnedCommit } from "../tools/emulator.mjs";
+import { isMain } from "./entry.mjs";
 import { placeOf, placeRoots, readPlaces } from "./places.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1161,7 +1162,7 @@ async function main() {
 	}
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	main().catch(async error => {
 		// A bad option (e.g. --actions): the message alone, exit 64, nothing was run or written
 		if (error instanceof UsageError) {

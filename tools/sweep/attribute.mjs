@@ -45,6 +45,7 @@ import { ROOT } from "../native-app/config.mjs";
 import { renderScenes } from "../native-app/batch.mjs";
 import { engineBaseArgs, ensureEngine } from "../../cli/engine.mjs";
 import { relativePaths } from "../../cli/compare.mjs";
+import { isMain } from "../../cli/entry.mjs";
 import { placeRoots } from "../../cli/places.mjs";
 
 const PROJECT = path.resolve(process.env.RUR_PROJECT || path.join(ROOT, "examples", "project"));
@@ -990,7 +991,7 @@ export async function attribute(dirs, options = {}) {
 }
 
 // CLI
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
 	const argv = process.argv.slice(2);
 	const option = (name, fallback) => {
 		const index = argv.indexOf(`--${name}`);
