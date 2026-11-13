@@ -42,6 +42,9 @@ How rur's layout (`native/src/engine/layout/`) computes `AbsolutePosition`, `Abs
 - Text objects resolve the scale Size of their automatic axes against the parent's whole size, not its
   content box.
 - Wrapped text with AutomaticSize X wraps at the width available in the parent.
+- AutomaticSize Y text keeps only the lines that fit the height available to it (the parent's content
+  height below its position). A line fits when its bottom is within float32 rounding of that height, so a
+  label in an automatic parent keeps every line it was sized for, under any UIScale and device scale.
 - An AutomaticSize object whose centre lies outside its clip is not drawn at all, nor its subtree
   (`fixtures/stories-autosize-cull*.luau`); `summary.json` lists these as `culled`.
 

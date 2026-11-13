@@ -272,6 +272,71 @@ fn layout_api_matches_luau() {
     assert_eq!(lines, expected);
 }
 
+/// A wrapped AutomaticSize Y label in an AutomaticSize Y frame keeps every line it was measured with. The frame's
+/// height comes back from the label's bounds through float32 local units and the UIScale; the final pass lays the
+/// label out again in that height, a few float32 roundings below the line it was measured to hold (87 px of text
+/// against an 86.9999974 px box at DPI 1.3333 under UIScale 810 / 806), and the 1e-6 px slack of the line test cut
+/// the last line: the label was sized for two of its three lines while its frame kept three. Each label is
+/// checked against the same label in a fixed frame.
+#[test]
+fn an_automatic_label_keeps_the_lines_its_automatic_frame_was_sized_for() {
+    let script = r#"
+        return function(Target)
+            local function Label(Parent, Lines)
+                local Label = Instance.new("TextLabel")
+                Label.AutomaticSize = Enum.AutomaticSize.Y
+                Label.FontFace = Font.new("rbxasset://fonts/families/FredokaOne.json")
+                Label.Size = UDim2.fromOffset(179, 0)
+                Label.Text = string.rep("Line\n", Lines - 1) .. "Line"
+                Label.TextSize = 22
+                Label.TextWrapped = true
+                Label.Parent = Parent
+                return Label
+            end
+            local Cases = {}
+            local Scales = { 810 / 806 }
+            for Percent = 70, 130 do
+                table.insert(Scales, Percent / 100)
+            end
+            for Index, Value in Scales do
+                for Lines = 1, 4 do
+                    local Card = Instance.new("Frame")
+                    Card.Size = UDim2.fromOffset(400, 300)
+                    Card.Position = UDim2.fromOffset(Lines * 10, Index * 2)
+                    local Scale = Instance.new("UIScale")
+                    Scale.Scale = Value
+                    Scale.Parent = Card
+                    Card.Parent = Target
+                    local Holder = Instance.new("Frame")
+                    Holder.AutomaticSize = Enum.AutomaticSize.Y
+                    Holder.Size = UDim2.fromOffset(190, 0)
+                    Holder.Parent = Card
+                    local Fixed = Instance.new("Frame")
+                    Fixed.Position = UDim2.fromOffset(200, 0)
+                    Fixed.Size = UDim2.fromOffset(190, 300)
+                    Fixed.Parent = Card
+                    table.insert(Cases, { Value, Lines, Label(Holder, Lines), Holder, Label(Fixed, Lines) })
+                end
+            end
+            local Short = 0
+            for _, Case in Cases do
+                local Value, Lines, Inner, Holder, Reference = table.unpack(Case)
+                local Kept = math.abs(Inner.TextBounds.Y - Reference.TextBounds.Y) < 0.01
+                local Filled = math.abs(Inner.AbsoluteSize.Y - Holder.AbsoluteSize.Y) < 0.01
+                if not (Kept and Filled) then
+                    Short += 1
+                    print(`short {Value} x{Lines}: bounds {Inner.TextBounds.Y} of {Reference.TextBounds.Y}, label {Inner.AbsoluteSize.Y} in {Holder.AbsoluteSize.Y}`)
+                end
+            end
+            print(`checked {#Cases}, short {Short}`)
+        end
+    "#;
+    for pixel_scale in [1.0, 1.25, 1.3333, 1.5, 2.0] {
+        let lines = run(script, pixel_scale, 0.1);
+        assert_eq!(lines.last().map(String::as_str), Some("print: checked 248, short 0"), "DPI {pixel_scale}: {lines:#?}");
+    }
+}
+
 
 /// Per-instance storage (Slots): entries are guarded by the id's generation, and a slot far beyond
 /// the ones in use costs one chunk, not everything below it.

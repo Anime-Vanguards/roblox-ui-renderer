@@ -1141,12 +1141,17 @@ impl TextEngine {
             lines[index].top = top;
             lines[index].height = height;
         }
+        // A box a few float32 roundings short of a line still holds it. An automatic height comes back from its
+        // text's bounds through float32 local units and the UIScale, and can end up to about 3 float32 ulps
+        // under the line it was measured to hold (87 px of text against an 86.9999974 px box at DPI 1.3333 under
+        // UIScale 810 / 806); a 1e-6 px slack alone cut that line.
         let mut fit = lines.len();
         if let Some(max_height) = max_height {
             if lines.len() > 1 {
                 fit = 1;
+                let slack = lmax(1e-6, max_height * 4.0 * f64::from(f32::EPSILON));
                 for index in 1..lines.len() {
-                    if lines[index].top + lines[index].height <= max_height + 1e-6 {
+                    if lines[index].top + lines[index].height <= max_height + slack {
                         fit = index + 1;
                     } else {
                         break;
