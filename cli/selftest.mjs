@@ -17,6 +17,7 @@ export async function selftest() {
 		// The engine against its golden output (fixtures, probes and live sessions; tools/engine/golden.mjs)
 		[process.execPath, ["tools/engine/golden.mjs", "--fast"]],
 		[process.execPath, ["tools/tests/cli.mjs"]],
+		[process.execPath, ["tools/tests/packages.mjs"]],
 		[process.execPath, ["tools/tests/kept-runs.mjs"]],
 		[process.execPath, ["tools/tests/native-build-lock.mjs"]],
 		[process.execPath, ["tools/tests/native-assets.mjs"]],

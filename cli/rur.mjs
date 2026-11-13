@@ -1001,8 +1001,11 @@ async function doctor({ fix = false } = {}) {
 	const holder = studioLockHolder();
 	const rust = spawnSync("rustc", ["--version"], { encoding: "utf8", windowsHide: true });
 	const content = studioContentRoots();
+	const { missingPackages } = await import("./packages.mjs");
+	const missing = missingPackages();
 	return {
 		root: ROOT,
+		packages: missing.length ? `missing ${missing.join(", ")}: run npm install in ${ROOT}` : "installed",
 		stateDir: stateDir(),
 		outDir: OUT_DIR,
 		engine: given ? `${given} (RUR_NATIVE_ENGINE${fs.existsSync(given) ? "" : ": missing"})`

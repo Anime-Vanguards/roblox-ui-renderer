@@ -662,7 +662,18 @@ export function studioImagesEnabled(env = process.env) {
 export async function readRefusedFromStudio(results, env = process.env) {
 	const refused = [...results].filter(([uri, result]) => result.error && assetIdFromUri(uri) && !/without an image texture/.test(result.error));
 	if (!refused.length || !studioImagesEnabled(env)) return;
-	const { readStudioImages } = await import("./studio-images.mjs");
+	let readStudioImages;
+	try {
+		({ readStudioImages } = await import("./studio-images.mjs"));
+	} catch (error) {
+		// Studio's reader needs rur's npm packages: without them each image keeps asset delivery's error, with
+		// the command that installs them, rather than Node's "Cannot find package"
+		const { packageError } = await import("./packages.mjs");
+		const reason = packageError(error);
+		if (reason === error) throw error;
+		for (const [uri, result] of refused) results.set(uri, { error: `${result.error}; not read from Studio: ${reason.message}` });
+		return;
+	}
 	const { images, errors } = await readStudioImages([...new Set(refused.map(([uri]) => assetIdFromUri(uri)))], env);
 	for (const [uri, result] of refused) {
 		const id = assetIdFromUri(uri);

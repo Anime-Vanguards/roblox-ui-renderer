@@ -146,8 +146,9 @@ only the executable, so keep the zip if you need the notices or source details.
   thumbnails and the fitting scripts in `tools/analysis`; Lune 0.10.4 (`rokit`, or `RUR_LUNE`) for
   `tools/sweep/studio-assets.mjs`.
 
-`node cli/rur.mjs doctor` checks all of the above and reports the state dir, the native build, the render
-service, the Studio lock and leftovers in the state dir (`doctor --fix` removes those).
+`node cli/rur.mjs doctor` checks all of the above and reports the state dir, npm packages the
+checkout lacks (`npm install` was not run), the native build, the render service, the Studio lock and leftovers
+in the state dir (`doctor --fix` removes those).
 
 
 ## State and output
