@@ -97,7 +97,8 @@ clean target with no build cache. The cargo step sets `RUR_RELEASE_BUILD=1`. The
 time, so a release binary always uses standalone defaults, even when it runs inside the checkout it was built
 in. Cargo rebuilds when the variable changes. Windows links the C runtime in with
 `-C target-feature=+crt-static`. Pushes to main that touch release files, and manual runs, build the zips
-without publishing.
+without publishing (a dry run). A tag publishes the zips of the dry run that passed on main at the tagged
+commit, or, when there is none, builds and tests them itself first.
 
 The release workflow builds and smoke-tests Windows x86_64, Linux x86_64 (Ubuntu 22.04) and macOS
 arm64. A release is published only after every platform passes. The maintainers develop on Windows.

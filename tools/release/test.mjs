@@ -11,6 +11,8 @@ import { crc32, inspect, packageRelease } from "./package.mjs";
 import { legalFiles, licenses, normalPackages } from "./licenses.mjs";
 import { notes } from "./notes.mjs";
 import { fileStates, outsideFileStates } from "./file-states.mjs";
+// The choice of the dry run a tag publishes from has tests of its own, run with these
+import "./dry-run.test.mjs";
 
 // Runs `run` with an empty temporary folder and removes it afterwards
 function temporary(run) {

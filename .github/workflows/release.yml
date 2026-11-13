@@ -1,6 +1,8 @@
-# Prebuilt rur-native releases. A version tag publishes a GitHub release; a push to main that touches
-# release files, or a manual run, does everything except publish, as a dry run that leaves the
-# built zips as workflow artifacts.
+# Prebuilt rur-native releases. A push to main that touches release files, or a manual run, is a
+# dry run: it builds, tests and smoke-tests every platform and leaves the zips as workflow artifacts.
+# A version tag publishes a GitHub release: the zips of the dry run that passed on main at the tagged
+# commit when there is one (tools/release/dry-run.mjs; the release command tags only such a commit),
+# so the same source is not built twice; otherwise the tag run does everything a dry run does first.
 #
 # Jobs: version (check the version), windows-build (the two Windows builds, one runner each),
 # windows-validation (the Windows installed tests, on a fresh runner), build (Linux and macOS, one
@@ -39,17 +41,24 @@ on:
 permissions:
   contents: read
 
-# One run per ref. A newer push to main may cancel an older dry run; a tag run is never cancelled.
+# No release run is ever cancelled by another. Pushes to main share one group without cancelling: a
+# dry run that has started always finishes (the release command may be waiting on it), and a newer
+# push only replaces a dry run still waiting for it. A tag or a manual run is a group of its own.
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  group: release-${{ github.event_name == 'push' && github.ref_type == 'branch' && github.ref || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   version:
     if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read # to find the dry run of the tagged commit
     outputs:
       version: ${{ steps.version.outputs.version }}
+      # The dry run whose zips a tag publishes; empty when this run builds them
+      dry-run: ${{ steps.dry-run.outputs.run-id }}
     steps:
       # Full history, for the check that a tag is on main
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,22 +83,32 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Release script self-checks
         run: node --test tools/release/test.mjs
+      # A tag publishes the zips (and the FreeType source) of the passing dry run of the same
+      # commit, which built, tested and smoke-tested every platform; the build and test jobs below
+      # then have nothing to do. Without one they run.
+      - name: Find the passing dry run of the tagged commit
+        id: dry-run
+        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release/dry-run.mjs --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --artifacts binary-windows-x86_64,binary-linux-x86_64,binary-macos-aarch64,freetype-source >> "$GITHUB_OUTPUT"
 
-  # Windows takes about twelve minutes per profile, so the two builds each get their own runner
-  # instead of running one after the other:
-  #   dist     the binary that ships, marked as a release build. It is packaged and uploaded as the zip.
-  #   release  the ordinary build the installed tests compare it with, and the test program itself.
+  # Windows takes about ten minutes per build, so the two builds each get their own runner instead
+  # of running one after the other:
+  #   dist   the binary that ships, marked as a release build. It is packaged and uploaded as the zip.
+  #   tests  the unmarked build the installed tests compare it with, and the test program itself,
+  #          both with the same dist profile as the shipped binary.
   # windows-validation then runs the installed tests on a fresh runner. Linux and macOS keep one
   # build job each: a second macOS job would only add another wait for a scarce macOS runner.
   windows-build:
-    if: ${{ !github.event.repository.private }}
+    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' }}
     needs: version
     runs-on: windows-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        profile: [dist, release]
+        profile: [dist, tests]
     env:
       RELEASE_OS: windows
       RELEASE_ARCH: x86_64
@@ -127,8 +146,9 @@ jobs:
             # Builds the unmarked rur-native the comparison tests start as the checkout binary, and
             # the standalone test program, without running anything. Cargo writes the absolute path
             # of that rur-native into the test program, so the program has to be run from where it
-            # was built (see windows-validation).
-            cargo test --release --locked --test standalone --target "$RELEASE_TARGET" --no-run
+            # was built (see windows-validation). The dist profile, as the shipped binary: a clean
+            # build of it is also faster here than one of the release profile, which is incremental.
+            cargo test --profile dist --locked --test standalone --target "$RELEASE_TARGET" --no-run
           fi
       # The parser inventory (path_contract) is an ordinary test, which the --ignored run in
       # windows-validation does not include. It runs here, with the cargo command Linux and macOS
@@ -137,44 +157,44 @@ jobs:
       # the release build until the path check covers it. The build step has built everything this
       # command needs, so it compiles nothing and runs the test program that is uploaded below.
       - name: Parser inventory
-        if: matrix.profile == 'release'
+        if: matrix.profile == 'tests'
         working-directory: native
         shell: bash
         run: |
           set -euo pipefail
           # Nothing here may mark the comparison binary
           unset RUR_RELEASE_BUILD
-          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" path_contract::
+          cargo test --profile dist --locked --test standalone --target "$RELEASE_TARGET" path_contract::
       # The test program is named standalone-<hash>.exe and the hash is not known here, so the
       # pattern must match exactly one file. The program has the path of this checkout compiled
       # in (CARGO_MANIFEST_DIR), so record that path for windows-validation to compare.
       - name: Check the harness and record its workspace
-        if: matrix.profile == 'release'
+        if: matrix.profile == 'tests'
         shell: bash
         run: |
           set -euo pipefail
-          TEST_BINARIES=(native/target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe)
+          TEST_BINARIES=(native/target/x86_64-pc-windows-msvc/dist/deps/standalone-*.exe)
           [ "${#TEST_BINARIES[@]}" = 1 ]
           [ -f "${TEST_BINARIES[0]}" ]
           node -e "require('node:fs').writeFileSync(
-            'native/target/x86_64-pc-windows-msvc/release/workspace.txt',
+            'native/target/x86_64-pc-windows-msvc/dist/workspace.txt',
             require('node:fs').realpathSync('.')
           )"
       # The validation runner needs only these three files from this job: the unmarked comparison
-      # binary, the test program and the recorded path. They are stored relative to the release
+      # binary, the test program and the recorded path. They are stored relative to the dist
       # folder and the validation job downloads them back into the same folder, so each lands at
       # the path Cargo compiled into the test program. deps/ stays in the pattern for that reason.
       # It keeps the default retention, so re-running only the failed jobs of a run days later still
       # finds it.
       - name: Upload the unmarked comparison binary and standalone harness
-        if: matrix.profile == 'release'
+        if: matrix.profile == 'tests'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-validation-binaries
           path: |
-            native/target/x86_64-pc-windows-msvc/release/rur-native.exe
-            native/target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe
-            native/target/x86_64-pc-windows-msvc/release/workspace.txt
+            native/target/x86_64-pc-windows-msvc/dist/rur-native.exe
+            native/target/x86_64-pc-windows-msvc/dist/deps/standalone-*.exe
+            native/target/x86_64-pc-windows-msvc/dist/workspace.txt
           if-no-files-found: error
       - name: Generate licenses and package
         if: matrix.profile == 'dist'
@@ -204,7 +224,7 @@ jobs:
   # zip that smoke tests and publish ships, not against the build job's own output. Nothing is
   # compiled here: the unmarked binary and the test program come from windows-build.
   windows-validation:
-    if: ${{ !github.event.repository.private }}
+    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' }}
     needs: [version, windows-build]
     runs-on: windows-latest
     timeout-minutes: 15
@@ -229,7 +249,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-validation-binaries
-          path: native/target/x86_64-pc-windows-msvc/release
+          path: native/target/x86_64-pc-windows-msvc/dist
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-windows-x86_64
@@ -252,12 +272,12 @@ jobs:
           node -e "
             const fs = require('node:fs');
             require('node:assert/strict').equal(
-              fs.readFileSync('target/x86_64-pc-windows-msvc/release/workspace.txt', 'utf8'),
+              fs.readFileSync('target/x86_64-pc-windows-msvc/dist/workspace.txt', 'utf8'),
               fs.realpathSync('..')
             )
           "
           # Exactly one test program must have arrived; a missing or doubled one fails the job
-          TEST_BINARIES=(target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe)
+          TEST_BINARIES=(target/x86_64-pc-windows-msvc/dist/deps/standalone-*.exe)
           [ "${#TEST_BINARIES[@]}" = 1 ]
           [ -f "${TEST_BINARIES[0]}" ]
           # --ignored runs only the ignored tests, which are the installed_* ones: the tests the
@@ -274,9 +294,10 @@ jobs:
             --skip installed_headless_selects_its_place_through_a_linked_root \
             --skip installed_service_standbys_keep_the_selected_place_for_sequence
 
-  # Linux and macOS build both profiles, run the installed tests and package in one job each
+  # Linux and macOS build the marked binary and package it, then build the unmarked one and the test
+  # program, and run the installed tests against the binary in the zip, in one job each
   build:
-    if: ${{ !github.event.repository.private }}
+    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' }}
     needs: version
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -289,6 +310,7 @@ jobs:
           - { runner: ubuntu-22.04, os: linux, arch: x86_64, target: x86_64-unknown-linux-gnu, suffix: '' }
           - { runner: macos-15, os: macos, arch: aarch64, target: aarch64-apple-darwin, suffix: '' }
     env:
+      VERSION: ${{ needs.version.outputs.version }}
       RELEASE_OS: ${{ matrix.os }}
       RELEASE_ARCH: ${{ matrix.arch }}
       RELEASE_TARGET: ${{ matrix.target }}
@@ -327,33 +349,43 @@ jobs:
           # checkout it was built in (native/src/paths.rs). Read at compile time.
           RUR_RELEASE_BUILD: '1'
         run: cargo build --profile dist --locked --bin rur-native --target "$RELEASE_TARGET"
-      # The `installed_*` tests in native/tests/standalone.rs are ignored in ordinary `cargo test`
-      # runs because they need a binary built with RUR_RELEASE_BUILD=1. This is where they run: against
-      # the marked binary built above, before it is packaged.
-      - name: Installed release validation
-        working-directory: native
-        shell: bash
-        env:
-          RUR_TEST_STANDALONE_BINARY: ${{ github.workspace }}/native/target/${{ matrix.target }}/dist/rur-native${{ matrix.suffix }}
-        run: |
-          set -euo pipefail
-          # The project comparison tests also run a checkout binary, which cargo builds for the tests.
-          # It has to be unmarked: if it were marked, both binaries would be standalone and the
-          # comparison would prove nothing. The `release` profile builds it away from the marked
-          # `dist` binary, which stays untouched for packaging.
-          unset RUR_RELEASE_BUILD
-          # The parser inventory is an ordinary test, which the --ignored run below does not
-          # include. Run it here so that a new path option, positional input or request field fails
-          # the release build until the path check covers it.
-          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" path_contract::
-          # --ignored runs only the ignored tests, which are the installed_* ones
-          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" -- --ignored
+      # Packaged right after the build: the test build below writes an unmarked rur-native over
+      # the marked one in target/.
       - name: Generate licenses and package
         shell: bash
         run: |
           set -euo pipefail
           node tools/release/licenses.mjs --target "$RELEASE_TARGET" --out release/THIRD_PARTY_LICENSES.txt --freetype "$RUR_FREETYPE_SRC"
           node tools/release/package.mjs --binary "native/target/$RELEASE_TARGET/dist/rur-native$EXE_SUFFIX" --os "$RELEASE_OS" --arch "$RELEASE_ARCH" --licenses release/THIRD_PARTY_LICENSES.txt --out release --commit "$GITHUB_SHA"
+      # The installed tests run against the binary in the zip that smoke tests and publish ships,
+      # as on Windows. unzip keeps the Unix mode the package step stored.
+      - name: Extract the binary from the zip that will be published
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q "release/rur-native-$VERSION-$RELEASE_OS-$RELEASE_ARCH.zip" -d installed
+          test -x "installed/rur-native$EXE_SUFFIX"
+      # The `installed_*` tests in native/tests/standalone.rs are ignored in ordinary `cargo test`
+      # runs because they need a binary built with RUR_RELEASE_BUILD=1. This is where they run:
+      # against the marked binary from the zip.
+      - name: Installed release validation against the packaged binary
+        working-directory: native
+        shell: bash
+        env:
+          RUR_TEST_STANDALONE_BINARY: ${{ github.workspace }}/installed/rur-native${{ matrix.suffix }}
+        run: |
+          set -euo pipefail
+          # The project comparison tests also run a checkout binary, which cargo builds for the tests.
+          # It has to be unmarked: if it were marked, both binaries would be standalone and the
+          # comparison would prove nothing. It is built with the dist profile too, so of the whole
+          # build only rur-native itself compiles again (the mark is read at compile time).
+          unset RUR_RELEASE_BUILD
+          # The parser inventory is an ordinary test, which the --ignored run below does not
+          # include. Run it here so that a new path option, positional input or request field fails
+          # the release build until the path check covers it.
+          cargo test --profile dist --locked --test standalone --target "$RELEASE_TARGET" path_contract::
+          # --ignored runs only the ignored tests, which are the installed_* ones
+          cargo test --profile dist --locked --test standalone --target "$RELEASE_TARGET" -- --ignored
       - name: Upload the zip
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -362,7 +394,7 @@ jobs:
           if-no-files-found: error
 
   smoke:
-    if: ${{ !github.event.repository.private }}
+    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' }}
     # windows-validation: the Windows zip is smoke-tested only after its installed tests passed
     needs: [version, build, windows-validation]
     runs-on: ${{ matrix.runner }}
@@ -420,8 +452,10 @@ jobs:
           name: release-notes
           path: release-notes.md
 
+  # Runs after this run's builds, tests and smoke tests passed, or, when they were skipped, on the
+  # dry run's zips and FreeType source.
   publish:
-    if: ${{ !github.event.repository.private && github.event_name == 'push' && github.ref_type == 'tag' }}
+    if: ${{ !cancelled() && !github.event.repository.private && github.event_name == 'push' && github.ref_type == 'tag' && needs.version.result == 'success' && needs.notes.result == 'success' && (needs.version.outputs.dry-run != '' || (needs.build.result == 'success' && needs.windows-validation.result == 'success' && needs.smoke.result == 'success')) }}
     needs: [version, build, windows-validation, smoke, notes]
     runs-on: ubuntu-22.04
     # The only job that can write
@@ -429,20 +463,49 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      actions: read # to download the dry run's artifacts
     steps:
       # No checkout, repository scripts, or build tools in this job: it only handles the artifacts
-      # the earlier jobs made.
+      # the earlier jobs (or the dry run's) made.
+      - name: Say which run built the zips
+        env:
+          DRY_RUN: ${{ needs.version.outputs.dry-run }}
+        run: |
+          if [ -n "$DRY_RUN" ]; then
+            echo "Publishing the zips that dry run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$DRY_RUN built and tested at $GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Publishing the zips this run built and tested" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Download the zips
+        if: ${{ needs.version.outputs.dry-run == '' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: binary-*
           merge-multiple: true
           path: assets
       - name: Download the FreeType source archive
+        if: ${{ needs.version.outputs.dry-run == '' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: freetype-source
           path: assets
+      - name: Download the zips the dry run of this commit built and tested
+        if: ${{ needs.version.outputs.dry-run != '' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: assets
+          run-id: ${{ needs.version.outputs.dry-run }}
+          github-token: ${{ github.token }}
+      - name: Download the dry run's FreeType source archive
+        if: ${{ needs.version.outputs.dry-run != '' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: freetype-source
+          path: assets
+          run-id: ${{ needs.version.outputs.dry-run }}
+          github-token: ${{ github.token }}
       - name: Download the release notes
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
