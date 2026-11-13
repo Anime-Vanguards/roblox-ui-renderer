@@ -142,7 +142,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/serve.rs",
         "pub fn cli(",
-        0xe9cede2cfe5e04f5,
+        0x6fbded127a6d931e,
     ),
     (
         Crate::Native,

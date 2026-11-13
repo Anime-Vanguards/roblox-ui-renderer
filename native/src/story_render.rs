@@ -55,6 +55,8 @@ pub struct StoryRenderer {
     /// Created on the first scene with text (FreeType, the faces and a bitmap cache)
     glyphs: Option<crate::glyphs::Rasterizer>,
     draw: Option<Draw>,
+    /// The GPU device being started on a thread of its own ([`Self::start_gpu`]), which the first draw waits for
+    gpu_start: Option<thread::JoinHandle<Result<GpuRenderer>>>,
     /// The render being written draws placeholders for missing images (RenderOptions::placeholders)
     placeholders: bool,
 }
@@ -68,7 +70,7 @@ struct Draw {
 impl StoryRenderer {
     pub fn new(repo: impl Into<PathBuf>) -> Self {
         let repo = repo.into();
-        Self { resolver: Resolver::new(repo.clone(), false), glyphs: None, draw: None, placeholders: false, repo }
+        Self { resolver: Resolver::new(repo.clone(), false), glyphs: None, draw: None, gpu_start: None, placeholders: false, repo }
     }
 
     /// What this renderer keeps between renders, in bytes (the render service's /memory)
@@ -106,10 +108,25 @@ impl StoryRenderer {
         crate::assets::clear_decoded_images();
     }
 
-    /// Creates the GPU device ahead of the first PNG (the service does it while idle).
-    pub fn warm_gpu(&mut self) -> Result<()> {
-        self.draw()?;
-        Ok(())
+    /// Starts the GPU device ahead of the first PNG (`start`: [`headless_gpu`]; the service does it at startup) on a
+    /// thread of its own, and returns at once: renders that draw no PNG go on while it starts, which takes tens of
+    /// seconds on a machine without a GPU, and the first draw waits for this device instead of starting another.
+    /// `failed` hears of a start that failed; the first draw then reports its error, and the next one starts again.
+    pub fn start_gpu(
+        &mut self,
+        start: impl FnOnce() -> Result<GpuRenderer> + Send + 'static,
+        failed: impl FnOnce(&anyhow::Error) + Send + 'static,
+    ) {
+        if self.draw.is_some() || self.gpu_start.is_some() {
+            return;
+        }
+        self.gpu_start = Some(thread::spawn(move || {
+            let gpu = start();
+            if let Err(error) = &gpu {
+                failed(error);
+            }
+            gpu
+        }));
     }
 
     /// A sequence (sequence.rs) written into `out`: `start` starts its engine half for `args` (a standby
@@ -129,8 +146,8 @@ impl StoryRenderer {
         let started = Instant::now();
         std::fs::create_dir_all(out).with_context(|| format!("Creating {}", out.display()))?;
         self.resolver.set_offline(options.offline);
-        // A process of its own starts its GPU device while the story mounts (the service's is warm)
-        let gpu = self.draw.is_none().then(|| thread::spawn(|| pollster::block_on(GpuRenderer::headless())));
+        // A process of its own starts its GPU device while the story mounts (the service's is warm, or starting)
+        self.start_gpu(headless_gpu, |_| {});
         let first = |frames: &std::sync::mpsc::Receiver<SequenceMessage>| match frames.recv() {
             Ok(SequenceMessage::Frame(frame)) => Ok(frame),
             Ok(SequenceMessage::End(Err(error))) => Err(anyhow!("runtime failed: {error}")),
@@ -156,10 +173,7 @@ impl StoryRenderer {
             frames = start(args).map_err(|error| anyhow!("runtime failed: {error}"))?;
             frame = first(&frames)?;
         }
-        if let Some(gpu) = gpu {
-            let gpu = gpu.join().map_err(|_| anyhow!("GPU start panicked"))??;
-            self.draw = Some(Draw { gpu, preparer: DrawPreparer::new(), assets: AssetStore::new(self.repo.clone(), true) });
-        }
+        self.draw()?;
         let Self { draw, resolver, .. } = self;
         let draw = draw.as_mut().expect("the GPU device was started above");
         crate::sequence::draw_frames(&mut draw.gpu, &mut draw.preparer, &mut draw.assets, resolver, frame, &frames, out, options, started)
@@ -167,7 +181,10 @@ impl StoryRenderer {
 
     fn draw(&mut self) -> Result<&mut Draw> {
         if self.draw.is_none() {
-            let gpu = pollster::block_on(GpuRenderer::headless())?;
+            let gpu = match self.gpu_start.take() {
+                Some(start) => start.join().map_err(|_| anyhow!("GPU start panicked"))??,
+                None => headless_gpu()?,
+            };
             self.draw = Some(Draw { gpu, preparer: DrawPreparer::new(), assets: AssetStore::new(self.repo.clone(), true) });
         }
         Ok(self.draw.as_mut().unwrap())
@@ -354,6 +371,11 @@ impl StoryRenderer {
         steps.insert("encode".into(), json!((clock.elapsed().as_secs_f64() * 10000.0).round() / 10.0));
         Ok((Value::Object(steps), None))
     }
+}
+
+/// A headless GPU device with the renderer's pipelines (what [`StoryRenderer::start_gpu`] starts)
+pub fn headless_gpu() -> Result<GpuRenderer> {
+    pollster::block_on(GpuRenderer::headless())
 }
 
 /// What cli/rur.mjs's summary reports of a render, for a client that takes its pixels and reads no

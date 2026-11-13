@@ -288,34 +288,9 @@ pub fn cli(argv: &[String]) -> i32 {
     // from render to render
     crate::engine::lua::modules::reuse_compiled_modules();
     crate::assets::reuse_decoded_images(1 << 30);
-    let service = Arc::new(Service {
-        renderer: Mutex::new(StoryRenderer::new(repo.clone())),
-        state_dir,
-        port,
-        code: option("--code").unwrap_or_default(),
-        standbys: Mutex::new(Vec::new()),
-        kept: Mutex::new(None),
-        stories: Mutex::new(None),
-        font_generation: AtomicU64::new(0),
-        active: AtomicUsize::new(0),
-        renders: AtomicU64::new(0),
-        last_render: Mutex::new(Instant::now()),
-        log: Mutex::new(None),
-        env: engine_env(),
-        repo,
-    });
-    let _ = std::fs::create_dir_all(&service.state_dir);
-    let _ = std::fs::write(service.log_file(), "");
+    let service = Arc::new(Service::new(repo, state_dir, port, option("--code").unwrap_or_default()));
     service.log(&format!("listening on 127.0.0.1:{port} (pid {})", std::process::id()));
-    // The GPU device and the renderer's pipelines start before the first request needs them
-    {
-        let service = service.clone();
-        thread::spawn(move || {
-            if let Err(error) = service.renderer.lock().unwrap().warm_gpu() {
-                service.log(&format!("GPU start failed: {error:#}"));
-            }
-        });
-    }
+    service.start_gpu(crate::story_render::headless_gpu);
     {
         let service = service.clone();
         thread::spawn(move || {
@@ -455,6 +430,38 @@ fn url_decode(text: &str) -> String {
 }
 
 impl Service {
+    /// A service with nothing loaded, its state directory made and serve.log emptied
+    fn new(repo: PathBuf, state_dir: PathBuf, port: u16, code: String) -> Service {
+        let service = Service {
+            renderer: Mutex::new(StoryRenderer::new(repo.clone())),
+            state_dir,
+            port,
+            code,
+            standbys: Mutex::new(Vec::new()),
+            kept: Mutex::new(None),
+            stories: Mutex::new(None),
+            font_generation: AtomicU64::new(0),
+            active: AtomicUsize::new(0),
+            renders: AtomicU64::new(0),
+            last_render: Mutex::new(Instant::now()),
+            log: Mutex::new(None),
+            env: engine_env(),
+            repo,
+        };
+        let _ = std::fs::create_dir_all(&service.state_dir);
+        let _ = std::fs::write(service.log_file(), "");
+        service
+    }
+
+    /// Starts the GPU device and the renderer's pipelines (`start`) before the first PNG needs them, on a thread of
+    /// their own: the renderer is held only to note the start, so a render without a PNG never waits for it. Without
+    /// a GPU (Windows CI runners) the device takes tens of seconds to start in software or to fail, and every render
+    /// waited behind it while the start held the renderer.
+    fn start_gpu(self: &Arc<Self>, start: impl FnOnce() -> anyhow::Result<crate::render::gpu::GpuRenderer> + Send + 'static) {
+        let service = self.clone();
+        self.renderer.lock().unwrap().start_gpu(start, move |error| service.log(&format!("GPU start failed: {error:#}")));
+    }
+
     fn log_file(&self) -> PathBuf {
         self.state_dir.join("serve.log")
     }
@@ -1058,6 +1065,54 @@ mod tests {
         assert_eq!(story_slug("src/ReplicatedStorage/Stories/Button.story.luau"), "src.ReplicatedStorage.Stories.Button");
         assert_eq!(story_slug("C:/a/b/c.story.lua"), "a.b.c");
         assert_eq!(url_decode("C%3A%5Cx+y"), "C:\\x y");
+    }
+
+    /// Without a GPU the device takes tens of seconds to start in software or to fail (Windows CI runners). The
+    /// service starts it on a thread of its own: a render without a PNG goes on while it starts, and the first PNG
+    /// waits for that start, reporting its error, instead of starting another device.
+    #[test]
+    fn renders_without_png_do_not_wait_for_the_gpu_start() {
+        let repo = crate::engine::default_repo();
+        let dir = std::env::temp_dir().join(format!("rur-serve-gpu-start-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("frame.luau");
+        std::fs::write(&fixture, "return function(Target) local f = Instance.new('Frame'); f.Name = 'Probe'; f.Parent = Target end").unwrap();
+        let service = Arc::new(Service::new(repo.clone(), dir.join("state"), 0, String::new()));
+
+        // A start that lasts until the test lets it go, then fails as one without a GPU does
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = starts.clone();
+        service.start_gpu(move || {
+            counted.fetch_add(1, Ordering::AcqRel);
+            let _ = held.recv();
+            Err(anyhow::anyhow!("test GPU start failed"))
+        });
+
+        let render = |name: &str, png: bool| {
+            let input = json!({
+                "argv": ["--roots", repo.join("tools/tests/oracle-root"), "--fixture", fixture, "--viewport", "64x64", "--time", "0", "--no-snapshots"],
+                "out": dir.join(name), "png": png, "offline": true, "env": service.env,
+            });
+            let (answer, answered) = std::sync::mpsc::channel();
+            let service = service.clone();
+            thread::spawn(move || answer.send(service.render(&input)));
+            answered
+        };
+        let answer = render("no-png", false).recv_timeout(Duration::from_secs(120)).expect("a render without PNG waited for the GPU start");
+        let (result, pixels) = answer.unwrap().unwrap();
+        assert_eq!(result["status"], "ok", "{result}");
+        assert!(pixels.is_none() && result["renderErrors"] == json!([]), "{result}");
+        assert!(dir.join("no-png/scene.json").is_file());
+
+        release.send(()).unwrap();
+        let (result, _) = render("png", true).recv_timeout(Duration::from_secs(120)).unwrap().unwrap().unwrap();
+        assert!(result["renderErrors"].to_string().contains("test GPU start failed"), "{result}");
+        assert_eq!(starts.load(Ordering::Acquire), 1);
+        let log = std::fs::read_to_string(dir.join("state/serve.log")).unwrap();
+        assert!(log.contains("GPU start failed: test GPU start failed"), "{log}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
