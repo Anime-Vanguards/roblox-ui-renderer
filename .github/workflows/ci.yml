@@ -44,18 +44,26 @@ jobs:
         run: npm ci
       - name: Download FreeType
         run: node tools/native-app/build.mjs --prepare
-      - name: Build
-        working-directory: native
-        run: cargo build --release --locked
       # text_studio, text_hinted and the TextBox editing test measure text with Studio's fonts; three
       # render tests draw with the GPU, and the runner has none (they crashed the test process).
       # native_snapped_image_pixels_match_canonical_canvas records a hardware GPU's answers at texel ties; its
       # geometry is checked here by render::image_records::tests::hardware_sampled_quads_submit_the_measured_geometry
       # (in --lib, not skipped): keep that one running when editing this list.
+      #
+      # This one cargo command also builds the library and rur-native (cargo builds a package's
+      # binaries for its integration tests), so the library and its test binary compile side by side
+      # instead of one after the other.
       - name: Rust tests
         working-directory: native
         run: cargo test --release --locked --lib --test image_math --test paint --test text_corpus -- --skip engine::input::tests::textbox_focus_caret_and_editing --skip render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph --skip render::gpu::tests::partial_redraws_match_whole_frames --skip render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas
+      # The plain release build of the default features. The test step built all of it already, so
+      # this finds it fresh; it still builds whatever a failed test step left out.
+      - name: Build
+        if: ${{ !cancelled() }}
+        working-directory: native
+        run: cargo build --release --locked
       - name: Node checks
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -e
