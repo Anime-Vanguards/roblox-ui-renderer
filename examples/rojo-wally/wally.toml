@@ -1,0 +1,8 @@
+[package]
+name = "example/rojo-wally"
+version = "0.1.0"
+realm = "shared"
+registry = "https://github.com/UpliftGames/wally-index"
+
+[dependencies]
+TinyFusion = "example/tinyfusion@0.1.0"

@@ -63,17 +63,52 @@ And this one for the whole project:
 
 ## Rojo projects and explicit mounts
 
-`--rojo <file.project.json>` (or a `--project` ending in `.project.json`) mounts what the Rojo project
-describes instead (`cli/rojo.mjs`): a `DataModel` tree mounts each `$path` at its instance path
-(directories as Rojo does, `$className` nodes without a `$path` as instances of that class,
-`{ "optional": ... }` paths skipped when missing); any other tree mounts at
-`ReplicatedStorage/<project name>` (`--rojo-at Service/Name` moves it). `--mount Service/Name=<dir|file>`
-(repeatable) adds a mount of its own. With a Rojo project or mounts and no `--roots`, no project roots are
-mounted.
+A Rojo project (`*.project.json`) can stand in for the project's places. Name it with `--rojo <file>` or
+`--project <file.project.json>`, and its tree becomes the run's mounts:
+
+- A `DataModel` tree mounts each `$path` at its instance path (directories as Rojo does), so a Wally
+  `Packages` folder mapped to `ReplicatedStorage.Packages` is `require`-able as in the game.
+- `$className` nodes without a `$path` become instances of that class; `{ "optional": ... }` paths are
+  skipped when missing; a `$path` to another `*.project.json` nests that project.
+- Any other tree (a plugin or model) mounts at `ReplicatedStorage/<project name>`; `--rojo-at Service/Name`
+  moves it.
+
+`--mount Service/Name=<dir|file>` (repeatable) adds a mount of its own, after the project's. With a Rojo project
+or mounts and no `--roots`, no project roots are mounted. The render prints which project it mounted where:
+
+```
+rur: Rojo project C:\game\default.project.json: mounted ReplicatedStorage/Packages, ReplicatedStorage/Shared
+```
+
+**Found by itself.** With no project options at all (`--rojo`, `--project`, `--roots`, `--mount`, `--place`,
+`RUR_PROJECT`), a `--story` or `--module` run mounts the `default.project.json` nearest the story (its folder or
+a parent), else the current directory's. Run from a Rojo project, a story needs no flags:
+
+```powershell
+cd my-game        # default.project.json, Packages/ (Wally), src/
+rur-native render --story src/shared/Stories/Button.story.luau --viewport 800x450 --dir out/Button
+rur-native                     # the storybook on the same project (a release build; else --project default.project.json)
+```
+
+Detection stays out of the way of a project rur already knows: a release build keeps a current directory whose
+`rur.json` declares places, and a checkout build keeps its default project for the stories inside it. Any project
+option turns it off.
+
+The native commands (`render`, `sequence`, `engine`, `record` and the storybook) and the Node CLI read Rojo
+projects the same way: [native/src/rojo.rs](../native/src/rojo.rs) and [cli/rojo.mjs](../cli/rojo.mjs), which
+`rur-native rojo-mounts <file>` and the CLI test compare. [examples/rojo-wally](../examples/rojo-wally) is a
+small Rojo + Wally project whose story requires a package through `ReplicatedStorage.Packages`.
 
 ```powershell
 node cli/rur.mjs render --rojo ../my-plugin/default.project.json --story ../my-plugin/stories/App.story.luau --plugin
 ```
+
+**When a require fails.** A story that reads a service's missing child (`Packages is not a valid member of
+ReplicatedStorage "ReplicatedStorage"`) gets a hint in `scene.json` (`diagnostics.hint`) and on stderr: what the
+run mounted, and the `--rojo` or `--mount` that would mount the rest.
+
+**Options are checked.** `rur-native render`, `sequence` and `engine` stop with `unknown option --x` (exit 2) on
+an option they don't know, rather than skipping it with its value.
 
 ## Studio snapshots
 

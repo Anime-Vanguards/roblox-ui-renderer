@@ -736,6 +736,7 @@ UpdateAll()
         mount_time: 0.0,
         started: std::time::Instant::now(),
         plugin_widgets: None,
+        sources: Vec::new(),
     };
     let story = crate::engine::story::Story::empty(&lua).unwrap();
     let mut session = Session::new(&engine, project, story, [0.18, 0.18, 0.18], true);

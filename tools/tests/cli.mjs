@@ -95,6 +95,18 @@ end
 		{ kind: "instance", path: "StarterGui/Hud", value: "ScreenGui" },
 	]);
 
+	// native/src/rojo.rs gives the same mounts as cli/rojo.mjs (`rur-native rojo-mounts`), in the same order
+	{
+		const { ensureEngine } = await import("../../cli/engine.mjs");
+		const engine = await ensureEngine();
+		const example = path.join(root, "examples", "rojo-wally", "default.project.json");
+		for (const [file, at] of [[path.join(dir, "plugin.project.json")], [path.join(dir, "plugin.project.json"), "ServerStorage/P"], [path.join(dir, "game.project.json")], [example]]) {
+			const result = spawnSync(engine, ["rojo-mounts", file, ...(at ? ["--rojo-at", at] : [])], { encoding: "utf8", windowsHide: true });
+			assert.equal(result.status, 0, result.stderr);
+			assert.deepEqual(JSON.parse(result.stdout), rojoMounts(file, { at }), `${path.basename(file)} ${at || ""}`);
+		}
+	}
+
 	// `rur render --json`: stdout is exactly one JSON document
 	const render = (...extra) => {
 		const result = spawnSync(process.execPath, ["cli/rur.mjs", "render", "--rojo", path.join(dir, "plugin.project.json"), "--viewport", "600x450@physical", "--no-png", "--offline", "--json", ...extra],
@@ -128,7 +140,7 @@ end
 		assert.match(git("status", "--short", "--untracked-files=no").stdout, /^ M stories\/App\.story\.luau\s*$/);
 	}
 	fs.rmSync(dir, { recursive: true, force: true });
-	console.log("CLI project options: PASS (rojo, outside stories, fixture controls, @physical, --json, --git-ref, --plugin, tree ancestry)");
+	console.log("CLI project options: PASS (rojo, native rojo parity, outside stories, fixture controls, @physical, --json, --git-ref, --plugin, tree ancestry)");
 }
 
 // Render diagnostics (cli/diagnostics.mjs): AutomaticSize-culled rows, wrapped lines a short box drops,

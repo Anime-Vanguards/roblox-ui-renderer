@@ -20,7 +20,9 @@ and no Roblox fonts or textures ship.
 `rur-native` opens the desktop storybook on the current project. The project is `--project <dir>`, else
 `RUR_PROJECT`, else the current directory. Relative project and explicit output paths are relative to the
 current directory. The desktop Open field resolves relative paths in the selected project. A project's
-`rur.json` declares its places, as for the Node CLI.
+`rur.json` declares its places, as for the Node CLI. A Rojo project works too: `--rojo <file.project.json>`,
+`--project <file.project.json>`, or a `default.project.json` in the project folder or above the story when no
+project option is given ([projects](projects.md#rojo-projects-and-explicit-mounts)).
 
 The native `engine`, `render`, `sequence`, `serve`, `record` and `profile` commands work on local inputs you
 name. `render` and `sequence` need `--dir <output>`. Sequence videos also need ffmpeg.

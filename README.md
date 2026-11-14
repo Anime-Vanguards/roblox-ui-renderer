@@ -59,7 +59,9 @@ rur-native = "Anime-Vanguards/roblox-ui-renderer@0.1.0"
 
 Run `rur-native --version` to check the install. `rur-native --project <your-project>` opens the
 storybook, and `rur-native render --story <story.luau> --project <your-project> --dir out/render`
-renders headless. The storybook and PNG renders need a graphics driver, and fonts and textures come from
+renders headless. In a Rojo project (Wally packages included) run it from the project folder and no
+project flag is needed: `default.project.json` is found and mounted, or name one with `--rojo <file>`
+([projects](docs/projects.md#rojo-projects-and-explicit-mounts)). The storybook and PNG renders need a graphics driver, and fonts and textures come from
 your Roblox Studio install. A release binary works on local content only: downloading assets needs the
 Node CLI below. On Linux and macOS use rokit 1.0 or later, since 0.2.x cannot select an executable whose
 name differs from this repository's. [Setup](docs/setup.md#release-binaries) covers the platforms, where

@@ -66,6 +66,8 @@ pub struct RuntimeOptions {
     pub margin: u32,
     pub controls: Value,
     pub roots: Option<String>,
+    /// A Rojo project whose mounts replace the project's places (NativeOptions::rojo)
+    pub rojo: Option<PathBuf>,
     pub snapshot_dir: Option<PathBuf>,
     pub no_snapshots: bool,
     pub offline: bool,
@@ -85,6 +87,7 @@ impl RuntimeOptions {
                 .unwrap_or(if options.headless { 0 } else { 48 }),
             controls: options.controls.clone(),
             roots: options.roots.clone(),
+            rojo: options.rojo.clone(),
             snapshot_dir: options.snapshot_dir.clone(),
             no_snapshots: options.no_snapshots,
             offline: options.offline,
@@ -120,7 +123,12 @@ impl RuntimeOptions {
         // (`paths::selected_place`, which compares canonical paths), so a story reached through a
         // linked root runs in the same place as in a render. The place name goes into the launch
         // arguments below, which keeps a standby VM tied to that place.
-        let selected_place = if crate::paths::is_standalone() && self.roots.is_none() {
+        // A Rojo project (without --roots): its mounts and no roots (rojo.rs; the app said which project it mounted)
+        let rojo_mounts = match (&self.rojo, &self.roots) {
+            (Some(file), None) => Some(crate::rojo::mounts(file, None, &mut Vec::new())?),
+            _ => None,
+        };
+        let selected_place = if crate::paths::is_standalone() && self.roots.is_none() && rojo_mounts.is_none() {
             Some(crate::paths::selected_place(&project, None, Some(&story))?)
         } else {
             None
@@ -128,6 +136,7 @@ impl RuntimeOptions {
         let roots = self
             .roots
             .clone()
+            .or_else(|| rojo_mounts.as_ref().map(|_| String::new()))
             .or_else(|| selected_place.as_ref().map(crate::places::joined));
         // Without --roots: the roots of the project's place that holds the story (src/places.rs)
         let roots = roots.unwrap_or_else(|| crate::places::joined(&crate::places::place_of(&project, &story)));
@@ -148,6 +157,9 @@ impl RuntimeOptions {
         }
         if let Some(selected) = selected_place {
             place.extend(["--place".into(), selected.name]);
+        }
+        for mount in rojo_mounts.iter().flatten() {
+            place.extend(mount.arguments());
         }
         if self.margin > 0 {
             place.extend(["--margin".into(), self.margin.to_string()]);
@@ -516,6 +528,7 @@ fn requires_list(options: &RuntimeOptions) -> Option<PathBuf> {
     options.story.hash(&mut hash);
     options.project.hash(&mut hash);
     options.roots.hash(&mut hash);
+    options.rojo.hash(&mut hash);
     let cache = if crate::paths::is_standalone() {
         crate::state_dir(&options.repo)
     } else {
@@ -656,6 +669,7 @@ mod tests {
             project: repo.clone(),
             repo,
             roots: Some(roots.to_string_lossy().into_owned()),
+            rojo: None,
             viewport: [640, 480],
             scale: 1.0,
             time: 0.0,
@@ -779,6 +793,7 @@ mod tests {
             project: std::env::var_os("RUR_PROJECT").map(PathBuf::from).unwrap_or_else(|| repo.join("examples/project")),
             repo,
             roots: None,
+            rojo: None,
             viewport: [1200, 900],
             scale: 1.5,
             time: 1.0,

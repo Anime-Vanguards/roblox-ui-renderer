@@ -89,7 +89,8 @@ are the engine's own frames and frame `i` is pixel for pixel what `rur render --
 ## Rojo projects and explicit mounts
 
 `--rojo <file.project.json>` and `--mount Service/Name=<dir|file>` mount sources without a project's
-roots: [projects.md](projects.md#rojo-projects-and-explicit-mounts).
+roots, and a story with no project options mounts the `default.project.json` beside it:
+[projects.md](projects.md#rojo-projects-and-explicit-mounts).
 
 ## Before and after (`--git-ref`)
 

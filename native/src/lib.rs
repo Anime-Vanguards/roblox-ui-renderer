@@ -22,6 +22,7 @@ pub mod microprofiler_ui;
 #[cfg(feature = "desktop")]
 pub mod placeholder;
 pub mod places;
+pub mod rojo;
 pub mod paths;
 pub mod presentation;
 #[cfg(feature = "desktop")]
@@ -102,6 +103,11 @@ pub struct NativeOptions {
     pub offline: bool,
     #[arg(long)]
     pub roots: Option<String>,
+    /// A Rojo project (`*.project.json`) whose mounts the stories run with instead of the project's places; also
+    /// `--project <file.project.json>`, and in a release build a project folder with a default.project.json and no
+    /// rur.json places
+    #[arg(long, conflicts_with = "roots")]
+    pub rojo: Option<PathBuf>,
     #[arg(long)]
     pub snapshot_dir: Option<PathBuf>,
     #[arg(long)]
@@ -137,6 +143,27 @@ impl NativeOptions {
                 .collect::<Vec<_>>()
                 .join(";")
         });
+        self.rojo = self.rojo.map(|path| absolute(&cwd, &path));
+        // A Rojo project: `--project <file.project.json>`, or (release builds) a project folder holding a
+        // default.project.json and no rur.json places (rojo.rs)
+        if self.rojo.is_none() && rojo::is_project_file(&self.project.to_string_lossy()) {
+            self.rojo = Some(self.project.clone());
+            self.project = self.project.parent().map(Path::to_path_buf).unwrap_or_default();
+        } else if self.rojo.is_none() && self.roots.is_none() && paths::is_standalone() {
+            let found = self.project.join(rojo::DEFAULT_PROJECT_FILE);
+            if found.is_file() && !rojo::declares_places(&self.project) {
+                self.rojo = Some(found);
+            }
+        }
+        if let (Some(file), None) = (&self.rojo, &self.roots) {
+            let mut warnings = Vec::new();
+            let mounts = rojo::mounts(file, None, &mut warnings).map_err(anyhow::Error::msg)?;
+            for warning in warnings {
+                eprintln!("{warning}");
+            }
+            let listed: Vec<&str> = mounts.iter().map(|mount| mount.path.as_str()).collect();
+            eprintln!("rur: Rojo project {}: mounted {}", file.display(), if listed.is_empty() { "nothing".to_string() } else { listed.join(", ") });
+        }
         self.headless |= self.benchmark.is_some() || self.batch.is_some();
         if self.headless && self.story.is_none() && self.scene.is_none() && self.batch.is_none() {
             bail!("--headless requires --story, --scene, or --batch");

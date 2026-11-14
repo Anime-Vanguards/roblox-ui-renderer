@@ -92,6 +92,10 @@ pub struct Args {
     pub topbar_inset: f64,
     /// `--device desktop|touch|gamepad`: the input hardware UserInputService reports (Options::device)
     pub device: Option<String>,
+    /// The first argument [`parse`] did not know (a misspelt option, or a value with no option); the
+    /// commands people type refuse it ([`parse_command`]), the service and batch requests the CLI
+    /// builds skip it
+    pub unknown: Option<String>,
 }
 
 impl Deref for Args {
@@ -121,7 +125,7 @@ pub fn dispatch() -> Option<i32> {
     if args.get(1).map(String::as_str) != Some("engine") {
         return None;
     }
-    let parsed = match parse(&args[2..]) {
+    let parsed = match with_rojo_project(&args[2..]).and_then(|args| parse_command(&args)) {
         Ok(parsed) => parsed,
         Err(error) => {
             eprintln!("rur-native engine: {error}");
@@ -192,14 +196,41 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
                 result.device = Some(device);
             }
+            // (the Node CLI's engine arguments start with the command's name: cli/engine.mjs engineBaseArgs)
+            "engine" if index == 0 => {}
             _ => {
+                result.unknown.get_or_insert_with(|| key.to_string());
                 index += 1;
                 continue;
             }
         }
-        index += if matches!(key, "--headless" | "--no-png") { 1 } else { 2 };
+        index += if matches!(key, "--headless" | "--no-png" | "engine") { 1 } else { 2 };
     }
     Ok(result)
+}
+
+/// [`parse`] for a command line someone typed (`rur-native engine`, `render`, `sequence`): an argument it does not
+/// know is an error, not skipped
+pub fn parse_command(args: &[String]) -> Result<Args, String> {
+    let result = parse(args)?;
+    match &result.unknown {
+        Some(key) if key.starts_with('-') => Err(format!("unknown option {key}")),
+        Some(key) => Err(format!("unexpected argument {key:?}: every option takes at most one value (quote a value with spaces)")),
+        None => Ok(result),
+    }
+}
+
+/// The command line of a native story command with its Rojo project resolved ([`crate::rojo::resolve_arguments`]):
+/// a project given or found becomes mounts, and a line on stderr says which project was mounted where
+pub fn with_rojo_project(args: &[String]) -> Result<Vec<String>, String> {
+    let resolved = crate::rojo::resolve_arguments(args)?;
+    for warning in &resolved.warnings {
+        eprintln!("{warning}");
+    }
+    if let Some(note) = resolved.note() {
+        eprintln!("{note}");
+    }
+    Ok(resolved.arguments)
 }
 
 use launch::absolute;

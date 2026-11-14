@@ -621,6 +621,8 @@ function normalizeScene(scene) {
 	const copy = nameEditableImages(normalizeValue(scene));
 	if (copy.diagnostics) {
 		delete copy.diagnostics.timings;
+		// (advice on what to mount, made from the failure the output already records: native/src/rojo.rs)
+		delete copy.diagnostics.hint;
 		for (const key of ["fonts", "missingFontAssets"]) {
 			if (Array.isArray(copy.diagnostics[key])) copy.diagnostics[key] = [...copy.diagnostics[key]].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 		}

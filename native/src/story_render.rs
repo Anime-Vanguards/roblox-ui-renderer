@@ -544,6 +544,13 @@ fn pretty(value: &Value) -> Vec<u8> {
 /// engine half in a fresh VM (profiled on its thread: [`crate::sequence::start_fresh_profiled`]). Prints the result as
 /// one JSON line on stdout; returns the exit code.
 pub fn sequence_cli(argv: &[String]) -> i32 {
+    let argv = match crate::engine::cli::with_rojo_project(argv) {
+        Ok(argv) => argv,
+        Err(error) => {
+            eprintln!("rur-native sequence: {error}");
+            return 2;
+        }
+    };
     let mut out = None;
     let mut options = serde_json::Map::new();
     let mut offline = false;
@@ -584,7 +591,7 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
     };
     let out = std::path::absolute(&out).unwrap_or_else(|_| PathBuf::from(&out));
     let parsed = profile_options(&engine_args, &out).and_then(|(profile, engine_args)| {
-        let args = crate::engine::cli::parse(&engine_args)?;
+        let args = crate::engine::cli::parse_command(&engine_args)?;
         crate::sequence::parse_options(&Value::Object(options), offline).map(|(spec, output)| (profile, args, spec, output))
     });
     let (profile, args, spec, output) = match parsed {
@@ -631,6 +638,13 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
 /// one render in this process. Prints the result as one JSON line on stdout (with `profile`, the profile's directory,
 /// default `<out>/profile`, whose summary goes to stderr: [`profile_options`]); returns the exit code.
 pub fn cli(argv: &[String]) -> i32 {
+    let argv = match crate::engine::cli::with_rojo_project(argv) {
+        Ok(argv) => argv,
+        Err(error) => {
+            eprintln!("rur-native render: {error}");
+            return 2;
+        }
+    };
     let mut out = None;
     let mut saved = None;
     let mut options = RenderOptions { png: true, ..Default::default() };
@@ -660,7 +674,7 @@ pub fn cli(argv: &[String]) -> i32 {
         return 2;
     };
     let out = std::path::absolute(&out).unwrap_or_else(|_| PathBuf::from(&out));
-    let parsed = profile_options(&engine_args, &out).and_then(|(profile, engine_args)| Ok((profile, crate::engine::cli::parse(&engine_args)?)));
+    let parsed = profile_options(&engine_args, &out).and_then(|(profile, engine_args)| Ok((profile, crate::engine::cli::parse_command(&engine_args)?)));
     let (profile, args) = match parsed {
         Ok(parsed) => parsed,
         Err(error) => {
@@ -703,6 +717,10 @@ pub fn cli(argv: &[String]) -> i32 {
         ),
     };
     let result = result.and_then(|(mut result, scene, _)| {
+        // What to mount for a failure on a service's missing child (rojo.rs missing_child_hint), said again on stderr
+        if let Some(hint) = scene.pointer("/diagnostics/hint").and_then(Value::as_str) {
+            eprintln!("rur: hint: {hint}");
+        }
         if let Some(gpu) = gpu {
             let gpu = gpu.join().map_err(|_| anyhow!("GPU start panicked"))??;
             renderer.draw = Some(Draw { gpu, preparer: DrawPreparer::new(), assets: AssetStore::new(renderer.repo.clone(), true) });

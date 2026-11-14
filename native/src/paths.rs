@@ -212,6 +212,7 @@ const PATH_OPTIONS: &[&str] = &[
     "--frame-times",
     "--roots",
     "--mount",
+    "--rojo",
     "--instance",
 ];
 

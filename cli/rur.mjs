@@ -78,7 +78,7 @@ import { fileURLToPath } from "node:url";
 import { OUT_DIR, sharedStatePath, stateDir } from "./paths.mjs";
 import { hasCookie, studioContentRoots, CACHE_DIR } from "./assets.mjs";
 import { engineBaseArgs, ensureEngine } from "./engine.mjs";
-import { mountArgs, rojoFileOf, runMounts } from "./rojo.mjs";
+import { detectRojoProject, mountArgs, rojoFileOf, runMounts } from "./rojo.mjs";
 import { readActions, UsageError } from "./actions.mjs";
 import { diagnosticLines, sceneDiagnostics } from "./diagnostics.mjs";
 import { emulatorLink, pinnedCommit } from "../tools/emulator.mjs";
@@ -399,6 +399,8 @@ export async function render(args, { service = false, env = process.env } = {}) 
 	const summary = {
 		status: scene.status,
 		failure: scene.failure || null,
+		// What to mount when the failure reads a missing child of a service (native/src/rojo.rs missing_child_hint)
+		...(scene.diagnostics && scene.diagnostics.hint ? { hint: scene.diagnostics.hint } : {}),
 		out: outDir,
 		png: args["no-png"] ? null : path.join(outDir, "render.png"),
 		nodes: asArray(scene.nodes).length,
@@ -1074,6 +1076,12 @@ async function beforeAfter(args) {
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
 	const command = args._[0];
+	// A story beside a Rojo project (default.project.json) and no project options: that project is the run's
+	if (["render", "sequence", "diff", "compare", "record"].includes(command)) {
+		const note = detectRojoProject(args, DEFAULT_PROJECT);
+		if (note) process.stderr.write(`${note}
+`);
+	}
 	if (command === "render") {
 		const summary = await jsonResult(args, async () => {
 			// Through the render service unless --isolated / --no-service (cli/client.mjs)

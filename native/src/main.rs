@@ -48,6 +48,8 @@ fn main() -> anyhow::Result<()> {
     let argv: Vec<String> = std::env::args().collect();
     match argv.get(1).map(String::as_str) {
         Some("render") => std::process::exit(rur_native::story_render::cli(&argv[2..])),
+        // `rur-native rojo-mounts <file.project.json>`: the mounts a Rojo project gives a run (rojo.rs)
+        Some("rojo-mounts") => std::process::exit(rur_native::rojo::mounts_cli(&argv[2..])),
         // `rur-native sequence ...`: a story captured frame by frame (sequence.rs)
         Some("sequence") => std::process::exit(rur_native::story_render::sequence_cli(&argv[2..])),
         // `rur-native serve ...`: the render service cli/client.mjs starts (serve.rs)
@@ -55,7 +57,7 @@ fn main() -> anyhow::Result<()> {
         // `rur-native record ...`: a harness run recorded as a 3D scene and a playback: the emulator's
         // recorder (`ree record`) with rur's engines (the GUI layer installed)
         Some("record") => {
-            let args = rur_native::paths::record_arguments(&argv[2..]).map_err(anyhow::Error::msg)?;
+            let args = rur_native::engine::cli::with_rojo_project(&argv[2..]).and_then(|args| rur_native::paths::record_arguments(&args)).map_err(anyhow::Error::msg)?;
             std::process::exit(rur_native::engine::record::run::cli(&args, &rur_native::engine::host(), true));
         }
         // `rur-native profile diff <before> <after> | report <dir> | view <dir> [<dir2>] | render ...`: the emulator's

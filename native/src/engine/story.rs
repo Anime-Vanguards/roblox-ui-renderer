@@ -54,6 +54,8 @@ pub struct Project {
     pub started: Instant,
     /// `--plugin`: the dock widgets the plugin stand-in created (exported after the story gui)
     pub plugin_widgets: Option<LuaTable>,
+    /// The roots and mounts the project came from, as a failure's hint lists them (crate::rojo::describe_sources)
+    pub sources: Vec<String>,
 }
 
 /// Where the project comes from.
@@ -130,7 +132,8 @@ pub fn mount_project(lua: &Lua, engine: &Rc<Engine>, spec: &ProjectSpec, started
     }
 
     let core = mounting.finish(engine, &core)?;
-    Ok(Project { host, hierarchy: core.hierarchy, mount_time: core.mount_time, started: core.started, plugin_widgets })
+    let sources = crate::rojo::describe_sources(&spec.roots, &spec.mounts);
+    Ok(Project { host, hierarchy: core.hierarchy, mount_time: core.mount_time, started: core.started, plugin_widgets, sources })
 }
 
 /// `--plugin`: the `plugin` global (story/plugin.luau) in the shared environment. Its dock widgets are
@@ -739,6 +742,11 @@ pub fn diagnostics(engine: &Rc<Engine>, project: &Project, story: &Story, run_ti
     });
     if let Some(order) = &story.order {
         result["order"] = order.clone();
+    }
+    // A failure on a service's missing child (a Packages folder no project mounted): what was mounted, and how to mount it
+    let errors = state.output.entries.iter().filter(|entry| entry.kind == "error").map(|entry| entry.message.as_str());
+    if let Some(hint) = story.failure.as_deref().into_iter().chain(errors).find_map(|message| crate::rojo::missing_child_hint(message, &project.sources)) {
+        result["hint"] = json!(hint);
     }
     result
 }
