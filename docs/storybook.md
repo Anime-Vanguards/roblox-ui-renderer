@@ -6,6 +6,10 @@ npm run native -- --project path/to/project
 npm run native -- --story path/to/Button.story.luau
 ```
 
+A release binary takes the project folder on its own: `rur-native path/to/project` opens it as running `rur-native`
+inside it does, Rojo project included ([projects](projects.md#rojo-projects-and-explicit-mounts)). If the catalog
+cannot finish looking for stories (a folder far larger than a project), it says so in the Stories panel.
+
 On Windows, `start.cmd` installs the npm dependencies when missing and launches the storybook. Stories run
 on the engine in process and draw on the window's GPU surface. Pick a story in the searchable catalog (every
 place of the project) or enter a path. The preview takes pointer, wheel, keyboard and text input; story

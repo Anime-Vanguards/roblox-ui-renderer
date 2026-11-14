@@ -276,6 +276,27 @@ pub(crate) fn validate_arguments(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// The commands `main` dispatches before the storybook's own parser (NativeOptions) sees the arguments
+const COMMANDS: &[&str] = &["engine", "engine-batch", "render", "rojo-mounts", "sequence", "serve", "record", "profile"];
+
+/// Refuses an empty project folder given to the storybook without an option name (`rur-native ""`), which would
+/// otherwise open the current folder. A blank word can only be that positional: a blank value of a path option is
+/// refused by [`validate_arguments`] (`--roots` takes an empty list), and any other option fails to parse one.
+pub(crate) fn validate_storybook_project(argv: &[String]) -> Result<(), String> {
+    let command = argv.get(1).map(String::as_str).unwrap_or_default();
+    if COMMANDS.contains(&command) || command == crate::engine::cli::BATCH_JOB_COMMAND {
+        return Ok(());
+    }
+    let argv = crate::engine::launch::split_equals(argv);
+    let blank = argv.iter().enumerate().skip(1).any(|(index, word)| {
+        word.trim().is_empty() && argv[index - 1] != "--roots"
+    });
+    if blank {
+        return Err("PROJECT needs a nonempty value".into());
+    }
+    Ok(())
+}
+
 /// `RUR_*` variables by name, as a batch runner has them or a batch job asks for them.
 pub(crate) type RurVariables = BTreeMap<OsString, OsString>;
 
@@ -341,6 +362,9 @@ pub unsafe fn initialize() -> anyhow::Result<()> {
                 .map_err(anyhow::Error::msg)?;
         }
     }
+    // The storybook's project folder is a positional path too (`rur-native <project folder>`)
+    #[cfg(feature = "desktop")]
+    validate_storybook_project(&argv).map_err(anyhow::Error::msg)?;
     let is_batch_runner = argv.get(1).is_some_and(|arg| arg == "engine-batch");
     let startup_variables = is_batch_runner.then(rur_variables);
     let state = match standalone_state() {
@@ -618,6 +642,20 @@ pub fn has_asset_helper(repo: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "desktop")]
+    #[test]
+    fn an_empty_storybook_project_is_refused() {
+        let argv = |words: &[&str]| words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+        assert!(validate_storybook_project(&argv(&["rur-native", ""])).is_err());
+        assert!(validate_storybook_project(&argv(&["rur-native", "--vsync", " "])).is_err());
+        assert!(validate_storybook_project(&argv(&["rur-native", "."])).is_ok());
+        assert!(validate_storybook_project(&argv(&["rur-native", "--roots", ""])).is_ok());
+        assert!(validate_storybook_project(&argv(&["rur-native", "--roots="])).is_ok());
+        assert!(validate_storybook_project(&argv(&["rur-native"])).is_ok());
+        // Another command's arguments are its own parser's
+        assert!(validate_storybook_project(&argv(&["rur-native", "render", "--roots", "", ""])).is_ok());
+    }
 
     #[test]
     fn desktop_open_uses_the_selected_project_only_in_standalone_mode() {

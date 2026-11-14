@@ -54,6 +54,10 @@ pub mod web;
     about = "Render Roblox UI natively: the desktop storybook, headless captures, rur render and its service"
 )]
 pub struct NativeOptions {
+    /// The project to open, as the folder you would run rur-native from (`rur-native ../my-game`, `.` for the
+    /// current one) or a Rojo project file; relative to the current directory. It replaces `--project`.
+    #[arg(value_name = "PROJECT", conflicts_with_all = ["rojo", "roots"])]
+    pub path: Option<PathBuf>,
     #[arg(long, default_value_os_t = paths::default_repo())]
     pub repo: PathBuf,
     // The project whose places the storybook lists and runs (src/places.rs). The default is a path
@@ -125,6 +129,14 @@ impl NativeOptions {
         // Relative --project and --out follow the checkout in checkout mode, else the current directory
         let base = if paths::is_standalone() { &cwd } else { &self.repo };
         self.project = absolute(base, &self.project);
+        // The positional project: a folder or a *.project.json, from the current directory in either mode
+        let named = self.path.take().map(|path| absolute(&cwd, &path));
+        if let Some(path) = &named {
+            if !path.is_dir() && !(path.is_file() && rojo::is_project_file(&path.to_string_lossy())) {
+                bail!("{} is not a project folder or a *.project.json file", path.display());
+            }
+            self.project = path.clone();
+        }
         self.out = absolute(base, &self.out);
         self.story = self.story.map(|path| absolute(&cwd, &path));
         self.scene = self.scene.map(|path| absolute(&cwd, &path));
@@ -149,11 +161,20 @@ impl NativeOptions {
         if self.rojo.is_none() && rojo::is_project_file(&self.project.to_string_lossy()) {
             self.rojo = Some(self.project.clone());
             self.project = self.project.parent().map(Path::to_path_buf).unwrap_or_default();
-        } else if self.rojo.is_none() && self.roots.is_none() && paths::is_standalone() {
+        } else if self.rojo.is_none() && self.roots.is_none() && (paths::is_standalone() || named.is_some()) {
             let found = self.project.join(rojo::DEFAULT_PROJECT_FILE);
             if found.is_file() && !rojo::declares_places(&self.project) {
                 self.rojo = Some(found);
             }
+        }
+        // A project at a drive or filesystem root (`rur-native /`, `--project \`) would make the whole drive its
+        // root: the storybook would look for stories on all of it and never finish
+        let full = std::path::absolute(&self.project).unwrap_or_else(|_| self.project.clone());
+        if self.roots.is_none() && full.parent().is_none() && !rojo::declares_places(&full) {
+            bail!(
+                "{} is the root of the drive, not a project folder. Run rur-native from the project folder, or name the folder: rur-native <project folder> (rur-native . for the current one)",
+                full.display()
+            );
         }
         if let (Some(file), None) = (&self.rojo, &self.roots) {
             let mut warnings = Vec::new();
@@ -279,6 +300,29 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_project_folder_named_on_its_own_opens_like_running_from_it() {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("examples/rojo-wally");
+        let options = NativeOptions::try_parse_from(["rur-native".as_ref(), example.as_os_str()]).unwrap().resolve().unwrap();
+        assert_eq!(options.project, example);
+        assert_eq!(options.rojo, Some(example.join("default.project.json")));
+        // A Rojo project file names its folder as the project
+        let file = example.join("default.project.json");
+        let options = NativeOptions::try_parse_from(["rur-native".as_ref(), file.as_os_str()]).unwrap().resolve().unwrap();
+        assert_eq!((options.project, options.rojo), (example.clone(), Some(file)));
+        assert!(NativeOptions::try_parse_from(["rur-native".as_ref(), example.as_os_str(), "--rojo".as_ref(), "x.project.json".as_ref()]).is_err());
+        let missing = NativeOptions::try_parse_from(["rur-native".as_ref(), example.join("missing").as_os_str()]).unwrap().resolve().unwrap_err();
+        assert!(missing.to_string().contains("is not a project folder"), "{missing}");
+    }
+
+    #[test]
+    fn a_drive_root_is_refused_rather_than_searched_for_stories() {
+        for args in [&["rur-native", "/"][..], &["rur-native", "--project", "/"]] {
+            let error = NativeOptions::try_parse_from(args).unwrap().resolve().unwrap_err();
+            assert!(error.to_string().contains("is the root of the drive, not a project folder"), "{error}");
+        }
     }
 
     #[test]

@@ -57,7 +57,7 @@ and extract it, or add this to `rokit.toml`:
 rur-native = "Anime-Vanguards/roblox-ui-renderer@0.1.0"
 ```
 
-Run `rur-native --version` to check the install. `rur-native --project <your-project>` opens the
+Run `rur-native --version` to check the install. `rur-native <your-project-folder>` opens the
 storybook, and `rur-native render --story <story.luau> --project <your-project> --dir out/render`
 renders headless. In a Rojo project (Wally packages included) run it from the project folder and no
 project flag is needed: `default.project.json` is found and mounted, or name one with `--rojo <file>`

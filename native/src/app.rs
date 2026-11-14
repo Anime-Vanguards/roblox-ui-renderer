@@ -890,7 +890,11 @@ impl NativeApp {
                     }
                 });
                 if self.catalog.loading {
-                    ui.spinner();
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        let folders = self.catalog.folders.load(std::sync::atomic::Ordering::Relaxed);
+                        ui.label(format!("Looking for stories ({folders} folders)"));
+                    });
                 }
                 if let Some(error) = &self.catalog.error {
                     ui.colored_label(Color32::LIGHT_RED, error);

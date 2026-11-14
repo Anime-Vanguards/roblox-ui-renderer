@@ -244,16 +244,15 @@ fn assert_profile_commands_are_the_positional_paths() {
 }
 
 /// The desktop command line is parsed by Clap, which generates its positionals from the
-/// declaration. It has none; a new one needs a path check.
-fn assert_clap_declares_no_positionals() {
+/// declaration. Its one positional is the project folder, which startup checks
+/// (`validate_storybook_project`); a new one needs a path check.
+fn assert_clap_declares_only_the_project_positional() {
     use clap::CommandFactory;
-    assert!(
-        rur_native::NativeOptions::command()
-            .get_positionals()
-            .next()
-            .is_none(),
-        "classify new desktop positional arguments"
-    );
+    let command = rur_native::NativeOptions::command();
+    let positionals: Vec<&str> = command.get_positionals().map(|arg| arg.get_id().as_str()).collect();
+    assert_eq!(positionals, ["path"], "classify new desktop positional arguments");
+    let startup = include_str!("../../src/paths.rs");
+    assert!(startup.contains("validate_storybook_project(&argv).map_err(anyhow::Error::msg)?;"));
 }
 
 /// Every reviewed parser still has the body that was reviewed.
@@ -285,7 +284,7 @@ fn every_parser_positional_has_a_path_classification() {
     // The profile paths are the only positional paths. Every other reviewed parser ignores
     // unknown words, rejects them (Clap), or passes them to one of the inventoried parsers.
     assert_profile_commands_are_the_positional_paths();
-    assert_clap_declares_no_positionals();
+    assert_clap_declares_only_the_project_positional();
     assert_reviewed_parsers_are_unchanged();
     assert_startup_checks_the_profile_commands();
 }

@@ -90,6 +90,20 @@ rur-native render --story src/shared/Stories/Button.story.luau --viewport 800x45
 rur-native                     # the storybook on the same project (a release build; else --project default.project.json)
 ```
 
+**Naming the project folder.** `rur-native <project folder>` opens the storybook as running `rur-native` inside that
+folder does: it mounts the folder's `default.project.json` (when its `rur.json` declares no places) and lists the same
+stories, in any build. The path is relative to the current directory (`rur-native .` for the current folder,
+`rur-native ../my-game` for another); a `*.project.json` file works too, as `--rojo` does. It replaces `--project`.
+
+```powershell
+rur-native C:\games\my-game    # the same as: cd C:\games\my-game; rur-native
+```
+
+`/` is not shorthand for the project folder: it names the root of the drive (`C:\` on Windows), and rur-native refuses
+a drive root as a project rather than search the whole drive for stories. The storybook's story search skips dot
+folders (`.git`) and `node_modules`, and stops with an error in the Stories panel after 100,000 folders or 30 seconds,
+since a project that large is almost always the wrong folder.
+
 Detection stays out of the way of a project rur already knows: a release build keeps a current directory whose
 `rur.json` declares places, and a checkout build keeps its default project for the stories inside it. Any project
 option turns it off.
