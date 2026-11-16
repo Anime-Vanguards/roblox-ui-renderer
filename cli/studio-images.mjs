@@ -2,14 +2,19 @@
 // game's creator, with no cookie or another account's) are read from an open Studio, which has the
 // owner's access, through a Studio MCP bridge. Studio decodes each image (AssetService
 // CreateEditableImageAsync) and hands back its pixels; rur stores them as a PNG in the asset cache
-// (cli/assets.mjs storeStudioImage), recorded as read from Studio. No credential is involved and
-// nothing leaves the machine: the bridge is on 127.0.0.1, and the Luau only reads (the EditableImage
-// is destroyed, nothing is mounted or saved).
+// (cli/assets.mjs storeStudioImage), recorded as read from Studio. Nothing leaves the machine: an HTTP
+// bridge must be on it (127.0.0.0/8, ::1 or localhost; any other host is refused before a request) and a
+// redirect is refused, never followed. The Luau only reads (the EditableImage is destroyed, nothing is
+// mounted or saved). No Roblox credential is involved; robloxstudio-mcp 3 takes a token of its own,
+// RUR_STUDIO_MCP_TOKEN: read only from the environment, sent only to that bridge in the header it
+// expects, and never printed or written anywhere (error text that could quote it has it taken out).
 //
 // Bridges (docs/assets.md):
 //   RUR_STUDIO_MCP_PORT   the TCP bridge `rur compare` uses (cli/studio.mjs, docs/studio.md)
-//   RUR_STUDIO_MCP_URL    an HTTP bridge with GET /instances and POST /mcp/execute_luau (robloxstudio-mcp
-//                         --http-only, e.g. http://127.0.0.1:58741)
+//   RUR_STUDIO_MCP_URL    an HTTP bridge on this machine, e.g. http://127.0.0.1:58741. Its GET /health picks
+//                         the API: robloxstudio-mcp 3 or later (v3Bridge), else GET /instances and POST
+//                         /mcp/execute_luau (robloxstudio-mcp --http-only)
+//   RUR_STUDIO_MCP_TOKEN  robloxstudio-mcp 3's auth token
 // RUR_STUDIO picks the Studio (an id or part of its name; default: every edit session, in order).
 // RUR_STUDIO_IMAGES=0 turns this off with a bridge configured (cli/assets.mjs studioImagesEnabled).
 
@@ -93,16 +98,96 @@ return HttpService:JSONEncode(Results)
 `;
 }
 
-// HTTP bridge: each edit session (RUR_STUDIO narrows them), and a call that runs Luau in one
-async function httpBridge(url, wanted) {
-	const base = url.replace(/\/+$/, "");
+// The HTTP bridge's address, refused unless it is on this machine: 127.0.0.0/8, ::1 or localhost. The URL
+// parser has normalized the host (127.1, 0x7f.0.0.1 and 2130706433 are all 127.0.0.1).
+function loopbackBridge(url) {
+	let parsed = null;
+	try {
+		parsed = new URL(url);
+	} catch {
+		// refused below
+	}
+	const host = parsed?.hostname;
+	if (!parsed || !/^https?:$/.test(parsed.protocol) || !(host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host))) {
+		throw new Error(`RUR_STUDIO_MCP_URL must be an http:// or https:// address on this machine (127.0.0.1, ::1 or localhost)${parsed ? `, not ${parsed.protocol}//${parsed.host}` : ""}`);
+	}
+	return url.replace(/\/+$/, "");
+}
+
+// One request to the HTTP bridge. A redirect is refused, not followed: it could lead off the machine.
+async function bridgeRequest(base, route, body, headers = {}) {
+	const response = await fetch(`${base}${route}`, {
+		method: body === undefined ? "GET" : "POST",
+		headers: { "Content-Type": "application/json", ...headers },
+		body: body === undefined ? undefined : JSON.stringify(body),
+		redirect: "manual",
+		signal: AbortSignal.timeout(TIMEOUT_MS),
+	});
+	if ((response.status >= 300 && response.status < 400) || response.type === "opaqueredirect") {
+		throw Object.assign(new Error(`Studio bridge ${route} answered with a redirect (HTTP ${response.status}), which is not followed`), { redirect: true });
+	}
+	return response;
+}
+
+// The version the bridge reports on its unauthenticated GET /health, or "" when it reports none (an older
+// bridge, or nothing listening: the older API then reports the failure)
+async function bridgeVersion(base) {
+	try {
+		const response = await bridgeRequest(base, "/health");
+		if (!response.ok) return "";
+		const health = await response.json();
+		return String(health?.version ?? health?.serverVersion ?? "").slice(0, 40);
+	} catch (error) {
+		if (error.redirect) throw error;
+		return "";
+	}
+}
+
+// HTTP bridge: robloxstudio-mcp 3 or later by its /health, else the older API
+async function httpBridge(url, wanted, token) {
+	const base = loopbackBridge(url);
+	const version = await bridgeVersion(base);
+	return Number(/^v?(\d+)(?:\.|$)/.exec(version)?.[1] || 0) >= 3 ? v3Bridge(base, wanted, token, version) : legacyBridge(base, wanted);
+}
+
+// robloxstudio-mcp 3's API, as read at v3.5.0 (github.com/chrrxs/robloxstudio-mcp, commit dd73269): each tool
+// is POST /mcp/<tool>, answered with the tool's result, and needs the server's token in X-MCP-Auth (401
+// without it). get_connected_instances lists the sessions, { instances: [{ id, placeName, peers: { edit, ... }
+// }] } (3.0: [{ id, name, roles }]); execute_luau { code, instance_id, target } runs Luau in one and answers
+// { success, returnValue, error }. Server text in an error has the token taken out.
+async function v3Bridge(base, wanted, token, version) {
+	if (!token) throw new Error(`the Studio bridge is robloxstudio-mcp ${version}, which needs its auth token: set RUR_STUDIO_MCP_TOKEN`);
+	// What a header can carry (fetch's own error would quote the value)
+	if (!/^[\x21-\x7e]+$/.test(token)) throw new Error("RUR_STUDIO_MCP_TOKEN holds characters an HTTP header cannot carry");
+	const hide = text => String(text).split(token).join("<RUR_STUDIO_MCP_TOKEN>");
+	const call = async (tool, body) => {
+		const response = await bridgeRequest(base, `/mcp/${tool}`, body, { "X-MCP-Auth": token });
+		if (response.status === 401) throw new Error(`the Studio bridge refused RUR_STUDIO_MCP_TOKEN (HTTP 401): set it to robloxstudio-mcp's token`);
+		const reply = await response.json().catch(() => null);
+		if (!response.ok) {
+			const detail = reply?.message || reply?.error;
+			throw new Error(`Studio bridge /mcp/${tool}: HTTP ${response.status}${detail ? ` (${hide(detail).slice(0, 200)})` : ""}`);
+		}
+		return reply?.structuredContent ?? reply ?? {};
+	};
+	const { instances = [] } = await call("get_connected_instances", {});
+	const sessions = instances.filter(instance => instance.peers?.edit || instance.roles?.includes("edit"))
+		.filter(instance => !wanted || instance.id === wanted || String(instance.placeName ?? instance.name ?? "").includes(wanted));
+	return sessions.map(session => ({
+		name: session.placeName || session.name || session.id,
+		run: async code => {
+			const reply = await call("execute_luau", { code, instance_id: session.id, target: "edit" });
+			if (!reply.success) throw new Error(hide(reply.error || "the Luau failed").slice(0, 300));
+			return String(reply.returnValue ?? "");
+		},
+	}));
+}
+
+// The older API (robloxstudio-mcp --http-only): each edit session (RUR_STUDIO narrows them), and a call that
+// runs Luau in one
+async function legacyBridge(base, wanted) {
 	const call = async (route, body) => {
-		const response = await fetch(`${base}${route}`, {
-			method: body === undefined ? "GET" : "POST",
-			headers: { "Content-Type": "application/json" },
-			body: body === undefined ? undefined : JSON.stringify(body),
-			signal: AbortSignal.timeout(TIMEOUT_MS),
-		});
+		const response = await bridgeRequest(base, route, body);
 		if (!response.ok) throw new Error(`Studio bridge ${route}: HTTP ${response.status}`);
 		return response.json();
 	};
@@ -127,7 +212,7 @@ async function tcpBridge() {
 }
 
 async function studios(env) {
-	if (env.RUR_STUDIO_MCP_URL) return httpBridge(env.RUR_STUDIO_MCP_URL, env.RUR_STUDIO || "");
+	if (env.RUR_STUDIO_MCP_URL) return httpBridge(env.RUR_STUDIO_MCP_URL, env.RUR_STUDIO || "", (env.RUR_STUDIO_MCP_TOKEN || "").trim());
 	return tcpBridge();
 }
 

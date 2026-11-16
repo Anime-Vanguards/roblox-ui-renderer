@@ -26,6 +26,7 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/asset_records.mjs"]],
 		[process.execPath, ["tools/tests/asset_batch.mjs"]],
 		[process.execPath, ["tools/tests/asset_studio.mjs"]],
+		[process.execPath, ["tools/tests/asset_studio_bridge.mjs"]],
 		[process.execPath, ["tools/tests/placeholders.mjs"]],
 		[process.execPath, ["tools/tests/web-bundle-directories.mjs"]],
 		[process.execPath, ["tools/tests/places.mjs"]],

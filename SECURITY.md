@@ -26,4 +26,6 @@ Out of scope: the Roblox platform, Roblox accounts, any Roblox game or experienc
 
 rur can use a Roblox account cookie (`.ROBLOSECURITY`) to download assets that Roblox's public asset delivery refuses. It reads the cookie only from this checkout's `.env`, the `ROBLOX_ASSET_DELIVERY_COOKIE` or `ROBLOSECURITY` environment variables, or the file `RUR_COOKIE_ENV` names, sends it only to `https://assetdelivery.roblox.com`, never prints, logs or caches it, and keeps it out of child processes that download nothing (builds, git, PowerShell, ffmpeg, browsers). Use the cookie of an account made for this, not your main account.
 
+To read images from Roblox Studio through a robloxstudio-mcp 3 bridge, rur takes that server's local auth token from the `RUR_STUDIO_MCP_TOKEN` environment variable only, sends it only to the bridge `RUR_STUDIO_MCP_URL` names, which must be on this machine, and never prints, logs or caches it ([docs/assets.md](docs/assets.md#images-from-studio)).
+
 Never paste a cookie, token or key into an issue, PR or log. If you posted one by accident, treat it as stolen: for a Roblox cookie, sign out of all sessions in your Roblox account settings, which invalidates it, then tell us so we can delete the post.

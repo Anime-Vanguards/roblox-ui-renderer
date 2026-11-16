@@ -51,6 +51,11 @@ const bridge = http.createServer((request, response) => {
 	request.on("data", chunk => body += chunk);
 	request.on("end", () => {
 		const reply = value => response.end(JSON.stringify(value));
+		// An older bridge, with no /health (robloxstudio-mcp 3 is tools/tests/asset_studio_bridge.mjs)
+		if (request.method === "GET" && request.url === "/health") {
+			response.statusCode = 404;
+			return response.end();
+		}
 		if (request.method === "GET" && request.url === "/instances") {
 			return reply({ instances: [{ instanceId: "edit-1", role: "edit", placeName: "Test Place" }, { instanceId: "play-1", role: "server", placeName: "Test Place" }] });
 		}

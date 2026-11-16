@@ -22,13 +22,16 @@ from Studio (`cli/studio-images.mjs`): Studio opens each one as an `EditableImag
 (`AssetService:CreateEditableImageAsync`) and returns its pixels, and rur stores them losslessly as
 `assets/<id>.png`, recorded with `"source": "studio"`. One call reads many images: Studio loads 12 at a
 time and returns their pixels zstd-compressed, up to about 2 MB per call. Later renders use the cache and
-don't ask Studio again. `--offline` never asks Studio. The bridge is on 127.0.0.1; the Luau only reads (nothing is mounted,
-edited or saved), and no credential is used.
+don't ask Studio again. `--offline` never asks Studio. The bridge is on this machine: a `RUR_STUDIO_MCP_URL`
+whose host isn't `127.0.0.0/8`, `::1` or `localhost` is refused before any request, and a redirect is refused,
+not followed. The Luau only reads (nothing is mounted, edited or saved). No Roblox credential is used;
+robloxstudio-mcp 3 needs a token of its own, below.
 
 | Variable | Meaning |
 |---|---|
 | `RUR_STUDIO_MCP_PORT` | the TCP bridge `rur compare` uses ([studio.md](studio.md)) |
-| `RUR_STUDIO_MCP_URL` | or an HTTP bridge with `GET /instances` and `POST /mcp/execute_luau` (for example `robloxstudio-mcp --http-only`, `http://127.0.0.1:58741`) |
+| `RUR_STUDIO_MCP_URL` | or an HTTP bridge on this machine, for example `http://127.0.0.1:58741`. Its `GET /health` picks the API: robloxstudio-mcp 3 or later uses its own, with `RUR_STUDIO_MCP_TOKEN`; any other answer, or none, uses `GET /instances` and `POST /mcp/execute_luau` (`robloxstudio-mcp --http-only`) |
+| `RUR_STUDIO_MCP_TOKEN` | robloxstudio-mcp 3's auth token: the server's `ROBLOX_STUDIO_AUTH_TOKEN`, or the contents of its token file. Read only from this variable, sent only to that bridge (in `X-MCP-Auth`), and never printed, cached or written anywhere |
 | `RUR_STUDIO` | the Studio to read from: its id or part of its name (default: each edit session in turn) |
 | `RUR_STUDIO_IMAGES=0` | don't read images from Studio, even with a bridge set |
 
