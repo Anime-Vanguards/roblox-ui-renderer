@@ -9,6 +9,8 @@ node tools/release/version.mjs --tag v0.1.0     # also fails unless the tag is v
 node tools/release/licenses.mjs --target x86_64-pc-windows-msvc --freetype .cache/native-app/source/freetype-2.14.2 --out release/THIRD_PARTY_LICENSES.txt
 node tools/release/package.mjs --binary native/target/x86_64-pc-windows-msvc/dist/rur-native.exe --os windows --arch x86_64 --licenses release/THIRD_PARTY_LICENSES.txt --out release
 node tools/release/notes.mjs --tag v0.1.0 --out release-notes.md
+node tools/release/notes.mjs --tag canary --run <run id> --run-date <run start time> --out release-notes.md
+node tools/release/dry-run.mjs --repository <owner/name> --sha <commit> --artifacts <name,...> [--required]
 node --test tools/release/test.mjs
 ```
 
@@ -16,7 +18,30 @@ node --test tools/release/test.mjs
 - `licenses.mjs` writes the license texts of the crates the target compiles in, with the vendored C and
   C++ notices, the embedded fonts and FreeType.
 - `package.mjs` writes `SOURCE.md` and the zip.
-- `notes.mjs` writes the release notes.
+- `notes.mjs` writes the release notes, or the canary's.
+- `dry-run.mjs` finds the passing dry run of a commit whose zips a tag publishes (see below).
+
+## Dry runs, the nightly build and the canary
+
+A push to main that touches the release files, a manual run and the nightly run (scheduled for 01:51
+UTC; GitHub may start it later) are dry runs: they build, test and smoke-test every platform and keep the zips and the FreeType source as
+workflow artifacts. The nightly run first asks `dry-run.mjs` whether main's head already has a passing
+dry run that kept its artifacts; if it has, the nightly run builds nothing.
+
+A version tag (`vMAJOR.MINOR.PATCH`) publishes a release from the passing dry run of its commit, or
+builds first when there is none. The `canary` tag, moved by the export to the newest commit of main
+with a passing run, refreshes the
+[canary prerelease](https://github.com/Anime-Vanguards/roblox-ui-renderer/releases/tag/canary): a
+build of main between releases, never marked latest. A canary run never builds. `dry-run.mjs
+--required` fails it when the commit has no passing dry run whose artifacts are still kept, and the
+release then stays as it was until the tag moves again.
+
+The canary's assets keep their names, so links to them never change: `rur-native-canary-<os>-<arch>.zip`
+for each platform (the dry run's zips, renamed), `freetype-2.14.2.tar.gz` and `SHA256SUMS`. The `canary`
+job uploads them over the old ones first and only then deletes assets the new set no longer has. It
+creates the release for the existing tag when there is none, and otherwise edits its title
+(`Canary (main <commit>)`) and notes: the commit, when the zips were built, and the commits since the
+latest version release. Version releases, their notes and the version check skip the `canary` tag.
 
 For `linux x86_64` or `macos aarch64`, use that platform's target triple and binary path. `package.mjs`
 checks that the binary is the first entry with mode 0755 and that no other file is executable, because

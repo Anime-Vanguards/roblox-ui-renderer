@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { ROOT, isMain, version } from "./version.mjs";
 import { crc32, inspect, packageRelease } from "./package.mjs";
 import { legalFiles, licenses, normalPackages } from "./licenses.mjs";
-import { notes } from "./notes.mjs";
+import { canaryNotes, notes } from "./notes.mjs";
 import { fileStates, outsideFileStates } from "./file-states.mjs";
 // The choice of the dry run a tag publishes from has tests of its own, run with these
 import "./dry-run.test.mjs";
@@ -383,7 +383,109 @@ test("release notes use literal public subjects since the previous tag", () => t
 	assert.match(output, /Literal \$\(never-run\) `text`/);
 	assert.doesNotMatch(output, /First public change/);
 	assert.match(output, /gh attestation verify/);
+
+	// The canary tag on a later commit is never taken for the previous release
+	git(["tag", "canary"]);
+	git(["commit", "-q", "--allow-empty", "-m", "After the canary"]);
+	assert.match(notes(dir, "v0.1.0"), /\n- After the canary\n- Literal \$\(never-run\) `text`\n\n/);
 }));
+
+test("canary notes link the commit and the comparison with the latest version release", () => temporary(dir => {
+	writeManifests(dir);
+	const git = args => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+	git(["init", "-q"]);
+	git(["config", "user.name", "Release Test"]);
+	git(["config", "user.email", "release-test"]);
+	git(["add", "."]);
+	git(["commit", "-q", "-m", "Before any release"]);
+	const built = { runId: "123", runDate: "2026-11-15T01:51:09Z" };
+
+	// No version release yet: every commit is listed, with no comparison
+	let output = canaryNotes(dir, built);
+	assert.match(output, /1 commit, before the first version release:\n\n- Before any release\n/);
+	assert.doesNotMatch(output, /compare/);
+
+	// The newest version tag the commit contains is the latest release; the canary tag and a
+	// later or non-version tag are not
+	git(["tag", "v0.0.9"]);
+	git(["commit", "-q", "--allow-empty", "-m", "Released"]);
+	git(["tag", "v0.1.0"]);
+	git(["commit", "-q", "--allow-empty", "-m", "First change on main"]);
+	git(["tag", "v0.2.0-rc1"]);
+	git(["commit", "-q", "--allow-empty", "-m", "Literal $(never-run) `text`"]);
+	git(["tag", "canary"]);
+	const commit = git(["rev-parse", "HEAD"]);
+	output = canaryNotes(dir, built);
+	const repository = "https://github.com/Anime-Vanguards/roblox-ui-renderer";
+	assert.match(output, new RegExp(`^This is a build of main, not a release, and it may break: for a release, see \\[Releases\\]\\(${repository}/releases\\)\\.$`, "m"));
+	assert.ok(output.includes(`Commit: [${commit.slice(0, 10)}](${repository}/commit/${commit}) on main`));
+	assert.ok(output.includes(`Built: 2026-11-15 01:51 UTC, by [release run 123](${repository}/actions/runs/123)`));
+	assert.ok(output.includes(`2 commits since v0.1.0 ([compare](${repository}/compare/v0.1.0...${commit})):\n\n- Literal $(never-run) \`text\`\n- First change on main\n`));
+	assert.doesNotMatch(output, /Released|Before any release/);
+	assert.match(output, /releases\/download\/canary\/rur-native-canary-windows-x86_64\.zip/);
+	assert.match(output, /freetype-2\.14\.2\.tar\.gz/);
+
+	// On the released commit itself there is nothing to compare
+	git(["checkout", "-q", "v0.1.0"]);
+	assert.match(canaryNotes(dir, built), /No commits since v0\.1\.0: this is the commit it was released from\./);
+
+	// Without the run that built the zips there are no notes
+	assert.throws(() => canaryNotes(dir, { runId: "", runDate: built.runDate }), /--run/);
+	assert.throws(() => canaryNotes(dir, { runId: "123", runDate: "" }), /--run-date/);
+}));
+
+test("canary notes list at most 100 subjects and count the rest", () => temporary(dir => {
+	writeManifests(dir);
+	const git = args => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+	git(["init", "-q"]);
+	git(["config", "user.name", "Release Test"]);
+	git(["config", "user.email", "release-test"]);
+	git(["add", "."]);
+	git(["commit", "-q", "-m", "Released"]);
+	git(["tag", "v0.1.0"]);
+	for (let i = 1; i <= 103; i++) git(["commit", "-q", "--allow-empty", "-m", `Change ${i}`]);
+	const output = canaryNotes(dir, { runId: "1", runDate: "2026-11-15T01:51:09Z" });
+	assert.match(output, /103 commits since v0\.1\.0/);
+	assert.match(output, /- Change 103\n/);
+	assert.doesNotMatch(output, /- Change 3\n/);
+	assert.match(output, /- Change 4\n- and 3 more\n/);
+}));
+
+test("the canary tag publishes the passing run's zips under fixed names and never builds or moves a tag", () => {
+	const workflow = fs.readFileSync(path.join(ROOT, ".github/workflows/release.yml"), "utf8").replace(/\r\n/g, "\n");
+	const job = name => workflow.split(new RegExp(`^  ${name}:\\n`, "m"))[1].split(/^  \S/m)[0];
+	// Triggers: the canary tag besides version tags, and the nightly run
+	assert.match(workflow, /^    tags: \['v\[0-9\]\+\.\[0-9\]\+\.\[0-9\]\+', canary\]$/m);
+	assert.match(workflow, /^  schedule:\n    - cron: "51 1 \* \* \*"$/m);
+	// Nightly and canary runs have groups of their own, and nothing cancels a run in progress
+	assert.match(workflow, /^  group: release-\$\{\{ github.event_name == 'schedule' && 'nightly' \|\| github.event_name == 'push' && github.ref == 'refs\/tags\/canary' && 'canary' \|\| github.event_name == 'push' && github.ref_type == 'branch' && github.ref \|\| github.run_id \}\}\n  cancel-in-progress: false$/m);
+	// The version check of a tag skips the canary, which is not a version
+	assert.match(job("version"), /if \[ "\$GITHUB_REF_NAME" = canary \]; then\n\s+# [^\n]+\n\s+VERSION=\$\(node tools\/release\/version.mjs\)\n\s+else\n\s+# [^\n]+\n\s+VERSION=\$\(node tools\/release\/version.mjs --tag "\$GITHUB_REF_NAME"\)/);
+	// A version release is never published for the canary tag
+	assert.match(job("publish"), /^    if: \$\{\{ !cancelled\(\) && !github.event.repository.private && github.event_name == 'push' && github.ref_type == 'tag' && github.ref != 'refs\/tags\/canary' && /);
+
+	const canary = job("canary");
+	assert.match(canary, /^    if: \$\{\{ [^\n]*github.ref == 'refs\/tags\/canary' && needs.version.result == 'success' && needs.notes.result == 'success' && needs.version.outputs.dry-run != '' \}\}$/m);
+	assert.match(canary, /^    needs: \[version, notes\]$/m);
+	assert.match(canary, /^    permissions:\n      contents: write\n      actions: read[^\n]*\n    env:/m);
+	// Nothing from the repository runs there, and every zip comes from the passing run
+	assert.doesNotMatch(canary, /actions\/checkout|node |tools\/|npm |cargo /);
+	assert.equal(canary.match(/run-id: \$\{\{ needs.version.outputs.dry-run \}\}/g).length, 2);
+	assert.doesNotMatch(canary, /upload-artifact/);
+	// Fixed asset names
+	assert.match(canary, /for platform in windows-x86_64 linux-x86_64 macos-aarch64; do\n\s+mv -- "built\/rur-native-\$VERSION-\$platform.zip" "assets\/rur-native-canary-\$platform.zip"/);
+	assert.match(canary, /mv -- built\/freetype-2\.14\.2\.tar\.gz assets\/\n\s+rmdir built\n/);
+	// A prerelease, never latest, created only for the existing tag; never a target or a tag change
+	assert.match(canary, /gh release create canary -R "\$GITHUB_REPOSITORY" --verify-tag --prerelease --latest=false --title "\$title"/);
+	assert.match(canary, /gh release edit canary -R "\$GITHUB_REPOSITORY" --prerelease --latest=false --title "\$title"/);
+	assert.match(canary, /title="Canary \(main \$\{GITHUB_SHA:0:10\}\)"/);
+	assert.doesNotMatch(canary, /--target|--tag |git push|git tag|refs\/tags\/canary"? -/);
+	// Upload first, then delete what the new set no longer has, then the title and notes
+	const order = ["gh release upload canary -R \"$GITHUB_REPOSITORY\" --clobber assets/*", "gh release delete-asset", "gh release edit"].map(text => canary.indexOf(text));
+	assert.ok(order.every(index => index > 0) && order[0] < order[1] && order[1] < order[2], order.join());
+	// The workflow itself never writes a ref (cargo's --target, a platform, is not a release target)
+	assert.doesNotMatch(workflow, /git push|git tag |git\/refs|target_commitish|gh release [^\n]*--target/);
+});
 
 test("license graph follows only enabled optional normal dependencies", () => {
 	// rur-native declares seven dependencies; its default feature switches on some of the optional ones:
