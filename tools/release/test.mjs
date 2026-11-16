@@ -467,7 +467,9 @@ test("the canary tag publishes the passing run's zips under fixed names and neve
 	const canary = job("canary");
 	assert.match(canary, /^    if: \$\{\{ [^\n]*github.ref == 'refs\/tags\/canary' && needs.version.result == 'success' && needs.notes.result == 'success' && needs.version.outputs.dry-run != '' \}\}$/m);
 	assert.match(canary, /^    needs: \[version, notes\]$/m);
-	assert.match(canary, /^    permissions:\n      contents: write\n      actions: read[^\n]*\n    env:/m);
+	assert.match(canary, /^    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n      actions: read[^\n]*\n    env:/m);
+	// The zips are attested, as publish does
+	assert.match(canary, /uses: actions\/attest-build-provenance@[0-9a-f]{40} [^\n]*\n        with:\n          subject-path: assets\/\*\.zip$/m);
 	// Nothing from the repository runs there, and every zip comes from the passing run
 	assert.doesNotMatch(canary, /actions\/checkout|node |tools\/|npm |cargo /);
 	assert.equal(canary.match(/run-id: \$\{\{ needs.version.outputs.dry-run \}\}/g).length, 2);

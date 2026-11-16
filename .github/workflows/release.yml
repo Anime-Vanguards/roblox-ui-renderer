@@ -573,6 +573,8 @@ jobs:
     # With publish, the only job that can write
     permissions:
       contents: write
+      id-token: write
+      attestations: write
       actions: read # to download the passing run's artifacts
     env:
       DRY_RUN: ${{ needs.version.outputs.dry-run }}
@@ -614,6 +616,10 @@ jobs:
           mv -- built/freetype-2.14.2.tar.gz assets/
           rmdir built
           (cd assets && sha256sum -- *.zip *.tar.gz) > assets/SHA256SUMS
+      - name: Attest the build provenance of the canary zips
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: assets/*.zip
       # The release is made for the existing tag with no target, so this never creates or moves a
       # tag (--verify-tag: gh refuses when the tag is gone). A prerelease, never marked latest. The
       # new assets replace the old ones of the same names first; only then are the assets the new
