@@ -10,10 +10,36 @@
   `ROBLOX_ASSET_DELIVERY_COOKIE` to a `.ROBLOSECURITY` value (or set it, or `ROBLOSECURITY`, in the
   environment, or name another file with `RUR_COOKIE_ENV`). The cookie is only sent to
   `assetdelivery.roblox.com`, never printed or written anywhere, and kept out of child processes that
-  download nothing. Use an account made for this. See [SECURITY.md](../SECURITY.md).
+  download nothing. Use an account made for this. See [SECURITY.md](../SECURITY.md). A team can use
+  [an account broker](#an-account-broker-instead-of-the-cookie) instead, so nobody holds the cookie.
 - An image asset delivery refuses (private to the game's creator) can be read from an open Roblox Studio
   instead, with no cookie: see [Images from Studio](#images-from-studio).
 - `rbxthumb://` thumbnails come from the thumbnail service (its WebP rendition, as Studio draws).
+
+## An account broker instead of the cookie
+
+A team that shares one asset account can keep its cookie off everyone's machine: an account broker is a
+small service that holds the Roblox session and forwards asset delivery's routes for personal tokens.
+With broker credentials rur sends no cookie at all, even when one is configured: each request that would
+have carried it goes to the broker instead.
+
+| Source, in this order | Meaning |
+|---|---|
+| `ROBLOX_BROKER_URL` and `ROBLOX_BROKER_TOKEN` | the broker's address and your token, both in the environment |
+| `ROBLOX_BROKER_CREDENTIALS` | or a JSON file `{ "url": "https://...", "token": "..." }` (other keys are ignored) |
+| `~/.config/roblox-broker/credentials.json` | or that file under your user folder, when no other is named |
+
+- A request for `https://assetdelivery.roblox.com/<route>` goes to `<url>/rbx/assetdelivery.roblox.com/<route>`
+  with `Authorization: Bearer <token>`: the lookup of one asset (`GET /v1/assetId/<id>`) and of many
+  (`POST /v1/assets/batch`). The broker adds the cookie and answers Roblox's CSRF challenge itself.
+- The public first attempt, the CDN downloads and thumbnails go straight to Roblox as before, without the
+  token. The token is sent only to the broker, never across a redirect, never printed or written anywhere,
+  and kept out of child processes that download nothing.
+- The address must be `https`; plain `http` is accepted only for `127.0.0.1` or `localhost` (a tunnel). Any
+  other address is refused, and rur does not fall back to the cookie.
+- When the broker itself refuses (an `X-Broker-Error` answer with a JSON `message`: the account is signed
+  out, the token is unknown, too many requests), the asset's error carries that message.
+- `rur doctor` reports under `assetCookie` whether a broker, a cookie or neither is in use.
 
 ## Images from Studio
 

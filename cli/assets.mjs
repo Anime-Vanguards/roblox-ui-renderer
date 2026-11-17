@@ -9,10 +9,16 @@
 // names (ROBLOX_ASSET_DELIVERY_COOKIE or ROBLOSECURITY), in that order. It is only
 // ever placed in the Cookie header of requests to https://assetdelivery.roblox.com and is never
 // printed, logged, cached or written to disk. CDN downloads are fetched without it.
+//
+// An account broker (a service that holds the Roblox session and forwards asset delivery's routes for a
+// personal token) replaces the cookie when one is configured: ROBLOX_BROKER_URL with ROBLOX_BROKER_TOKEN,
+// else the JSON file ROBLOX_BROKER_CREDENTIALS names, else ~/.config/roblox-broker/credentials.json. The
+// token is only ever placed in the Authorization header of requests to that broker.
 
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import http from "node:http";
 import https from "node:https";
 import zlib from "node:zlib";
 import { spawnSync } from "node:child_process";
@@ -75,26 +81,70 @@ function loadCookie() {
 	return cookieCache;
 }
 
-export function hasCookie() {
-	return Boolean(loadCookie());
+let brokerCache;
+
+// The token is the whole credential, so it only goes out over TLS (or to this machine, for a tunnel)
+function brokerAddress(raw) {
+	let url;
+	try {
+		url = new URL(raw);
+	} catch {
+		return { error: "the account broker's address is not a URL" };
+	}
+	const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+	if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return { error: `the account broker's address must be https (http only for 127.0.0.1 or localhost), not ${url.protocol}//${url.host}` };
+	return { url: `${url.origin}${url.pathname.replace(/\/+$/, "")}` };
 }
 
-// The environment without the asset cookie variables (any case), for child processes that never download
-// assets: cargo and its build scripts, git, PowerShell, browsers. The render service and the asset helper
-// still inherit it, because they download.
+// The account broker to use instead of the cookie: { url, token }, { error } for an address that is
+// refused, or null when none is configured
+function loadBroker() {
+	if (brokerCache !== undefined) return brokerCache;
+	let url = (process.env.ROBLOX_BROKER_URL || "").trim();
+	let token = (process.env.ROBLOX_BROKER_TOKEN || "").trim();
+	if (!url || !token) {
+		url = token = "";
+		try {
+			const saved = JSON.parse(fs.readFileSync(process.env.ROBLOX_BROKER_CREDENTIALS || path.join(os.homedir(), ".config", "roblox-broker", "credentials.json"), "utf8"));
+			if (saved && typeof saved.url === "string" && typeof saved.token === "string") [url, token] = [saved.url.trim(), saved.token.trim()];
+		} catch {}
+	}
+	if (!url || !token) return brokerCache = null;
+	const address = brokerAddress(url);
+	return brokerCache = address.error ? address : { url: address.url, token };
+}
+
+// Whether private assets can be asked for: through an account broker, or with a cookie
+export function hasCookie() {
+	return accountAccess() !== null;
+}
+
+// How the account is reached: "broker" (which comes before any cookie), "cookie", or null
+export function accountAccess() {
+	const broker = loadBroker();
+	if (broker) return broker.error ? null : "broker";
+	return loadCookie() ? "cookie" : null;
+}
+
+// The environment without the asset cookie variables and the broker token (any case), for child processes
+// that never download assets: cargo and its build scripts, git, PowerShell, browsers. The render service
+// and the asset helper still inherit them, because they download.
 export function withoutCookie(env = process.env) {
 	const copy = { ...env };
-	for (const key of Object.keys(copy)) if (/^(?:ROBLOX_ASSET_DELIVERY_COOKIE|ROBLOSECURITY)$/i.test(key)) delete copy[key];
+	for (const key of Object.keys(copy)) if (/^(?:ROBLOX_ASSET_DELIVERY_COOKIE|ROBLOSECURITY|ROBLOX_BROKER_TOKEN)$/i.test(key)) delete copy[key];
 	return copy;
 }
 
-function request(url, headers = {}, redirects = 5) {
+// Plain http is only ever a broker on this machine (brokerAddress); everything else is https
+const transport = target => target.broker && target.url.startsWith("http:") ? http : https;
+
+function request(url, headers = {}, redirects = 5, client = https) {
 	return new Promise((resolve, reject) => {
-		const req = https.get(url, { headers: { "User-Agent": USER_AGENT, ...headers }, timeout: 30000 }, response => {
+		const req = client.get(url, { headers: { "User-Agent": USER_AGENT, ...headers }, timeout: 30000 }, response => {
 			const status = response.statusCode || 0;
 			if (status >= 300 && status < 400 && response.headers.location && redirects > 0) {
 				response.resume();
-				// Never forward headers (and so never the cookie) across a redirect.
+				// Never forward headers (and so never the cookie or the broker token) across a redirect.
 				resolve(request(new URL(response.headers.location, url).toString(), {}, redirects - 1));
 				return;
 			}
@@ -108,10 +158,31 @@ function request(url, headers = {}, redirects = 5) {
 	});
 }
 
-function deliveryHeaders(withCookie) {
-	if (!withCookie) return {};
+// Where an asset delivery request goes and what it carries. Without the account: asset delivery itself,
+// bare. With it: the same route behind the account broker's /rbx/<host> with the token (the broker adds
+// the cookie and answers the CSRF challenge), else asset delivery with the cookie, else null. Throws for
+// a broker address that is refused.
+function deliveryTarget(route, withAccount) {
+	const url = `https://${DELIVERY_HOST}${route}`;
+	if (!withAccount) return { url, headers: {} };
+	const broker = loadBroker();
+	if (broker?.error) throw new Error(broker.error);
+	if (broker) return { url: `${broker.url}/rbx/${DELIVERY_HOST}${route}`, headers: { Authorization: `Bearer ${broker.token}` }, broker: true };
 	const cookie = loadCookie();
-	return cookie ? { Cookie: `.ROBLOSECURITY=${cookie}` } : null;
+	return cookie ? { url, headers: { Cookie: `.ROBLOSECURITY=${cookie}` } } : null;
+}
+
+// Why the broker itself refused (an X-Broker-Error answer: signed out, token invalid, rate limited...), in
+// its own words, or null for Roblox's answer passed through
+function brokerRefusal(response) {
+	const code = response.headers["x-broker-error"];
+	if (!code) return null;
+	let message;
+	try {
+		message = JSON.parse(response.body.toString("utf8")).message;
+	} catch {}
+	const text = typeof message === "string" && message ? message : `${code} (HTTP ${response.status})`;
+	return `the account broker refused: ${text.split(loadBroker().token).join("<token>")}`;
 }
 
 async function deliveryLocation(assetId) {
@@ -119,20 +190,28 @@ async function deliveryLocation(assetId) {
 	let lastStatus = 0;
 	let lastError = null;
 	let cookieTried = false;
+	let refusal = null;
 	for (const withCookie of routes) {
-		const headers = deliveryHeaders(withCookie);
-		if (headers === null) continue;
+		let target;
+		try {
+			target = deliveryTarget(`/v1/assetId/${assetId}`, withCookie);
+		} catch (error) {
+			refusal = error.message;
+			break;
+		}
+		if (target === null) continue;
 		if (withCookie) cookieTried = true;
 		lastError = null;
-		const url = `https://${DELIVERY_HOST}/v1/assetId/${assetId}`;
 		let response;
 		try {
-			response = await request(url, headers, 0);
+			response = await request(target.url, target.headers, 0, transport(target));
 		} catch (error) {
 			lastStatus = -1;
+			if (target.broker) refusal = `the account broker did not answer${error && error.code ? ` (${error.code})` : ""}`;
 			continue;
 		}
 		lastStatus = response.status;
+		if (target.broker && (refusal = brokerRefusal(response))) break;
 		try {
 			const payload = JSON.parse(response.body.toString("utf8"));
 			if (response.status >= 200 && response.status < 300 && payload && typeof payload.location === "string") return payload.location;
@@ -140,6 +219,7 @@ async function deliveryLocation(assetId) {
 			if (first && typeof first === "object") lastError = first;
 		} catch {}
 	}
+	if (refusal) throw new Error(`asset ${assetId} unavailable from asset delivery (${refusal})`);
 	if (lastError) {
 		const detail = [lastError.code, lastError.message].filter(part => part !== undefined && part !== "").join(": ");
 		const hint = (lastError.code === 401 || lastError.code === 403) && !cookieTried ? "; private asset, no asset cookie is configured" : "";
@@ -148,10 +228,10 @@ async function deliveryLocation(assetId) {
 	throw new Error(`asset ${assetId} unavailable from asset delivery (HTTP ${lastStatus})`);
 }
 
-function post(url, body, headers) {
+function post(url, body, headers, client = https) {
 	return new Promise((resolve, reject) => {
 		const data = Buffer.from(body);
-		const req = https.request(url, { method: "POST", headers: { "User-Agent": USER_AGENT, "Content-Type": "application/json", "Content-Length": data.length, ...headers }, timeout: 30000 }, response => {
+		const req = client.request(url, { method: "POST", headers: { "User-Agent": USER_AGENT, "Content-Type": "application/json", "Content-Length": data.length, ...headers }, timeout: 30000 }, response => {
 			const chunks = [];
 			response.on("data", chunk => chunks.push(chunk));
 			response.on("end", () => resolve({ status: response.statusCode || 0, headers: response.headers, body: Buffer.concat(chunks) }));
@@ -163,23 +243,28 @@ function post(url, body, headers) {
 	});
 }
 
-// Where many assets are, from asset delivery's batch endpoint: up to 100 per request, with the cookie
-// when there is one (so a private asset costs no second trip). Through deliveryLocation each asset costs
+// Where many assets are, from asset delivery's batch endpoint: up to 100 per request, through the account
+// broker or with the cookie when there is one (so a private asset costs no second trip). Through deliveryLocation each asset costs
 // a round trip (two for a private one) before its download, so a UI of many images waited on lookups.
 // An id it does not place is left out; its download asks deliveryLocation, which reports why.
 async function deliveryLocations(ids) {
 	const locations = new Map();
-	const headers = deliveryHeaders(true) || {};
+	let target;
+	try {
+		target = deliveryTarget("/v1/assets/batch", true) || deliveryTarget("/v1/assets/batch", false);
+	} catch {
+		return locations;
+	}
+	const { url, headers } = target;
 	const chunks = [];
 	for (let index = 0; index < ids.length; index += 100) chunks.push(ids.slice(index, index + 100));
 	await Promise.all(chunks.map(async chunk => {
 		// assetId as written: ids are digit strings, and some are past a double's integers
 		const body = `[${chunk.map((id, index) => `{"requestId":"${index}","assetId":${id}}`).join(",")}]`;
-		const url = `https://${DELIVERY_HOST}/v1/assets/batch`;
 		try {
-			let response = await post(url, body, headers);
-			// A request with the cookie is answered once with the CSRF token it must carry
-			const token = response.headers["x-csrf-token"];
+			let response = await post(url, body, headers, transport(target));
+			// A request with the cookie is answered once with the CSRF token it must carry (the broker answers its own)
+			const token = !target.broker && response.headers["x-csrf-token"];
 			if (response.status === 403 && token) response = await post(url, body, { ...headers, "X-CSRF-TOKEN": token });
 			if (response.status !== 200) return;
 			const replies = JSON.parse(response.body.toString("utf8"));

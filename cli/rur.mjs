@@ -76,7 +76,7 @@ import { fileURLToPath } from "node:url";
 
 // First: applies the global --state-dir flag before anything resolves a path (cli/paths.mjs)
 import { OUT_DIR, sharedStatePath, stateDir } from "./paths.mjs";
-import { hasCookie, studioContentRoots, CACHE_DIR } from "./assets.mjs";
+import { accountAccess, studioContentRoots, CACHE_DIR } from "./assets.mjs";
 import { engineBaseArgs, ensureEngine } from "./engine.mjs";
 import { detectRojoProject, mountArgs, rojoFileOf, runMounts } from "./rojo.mjs";
 import { readActions, UsageError } from "./actions.mjs";
@@ -1031,7 +1031,7 @@ async function doctor({ fix = false } = {}) {
 		rust: rust.status === 0 ? rust.stdout.trim() : "missing: the engine is native (install Rust: https://rustup.rs)",
 		freetype: "2.14.2, compiled into the engine (native/build.rs; the release Studio's glyphs match it)",
 		studioInstall: content[0] || "missing (fonts/textures need a local Roblox Studio install)",
-		assetCookie: hasCookie() ? "available (never printed)" : "not configured (public assets only)",
+		assetCookie: { broker: "an account broker is used instead (its token is never printed)", cookie: "available (never printed)" }[accountAccess()] || "not configured (public assets only)",
 		cache: CACHE_DIR,
 		defaultProject: fs.existsSync(DEFAULT_PROJECT) ? DEFAULT_PROJECT : "not found",
 	};

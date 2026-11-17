@@ -492,9 +492,10 @@ impl Video {
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
-            // ffmpeg downloads nothing: it does not get the asset cookie (cli/assets.mjs withoutCookie)
+            // ffmpeg downloads nothing: it gets neither the asset cookie nor the broker token (cli/assets.mjs withoutCookie)
             .env_remove("ROBLOX_ASSET_DELIVERY_COOKIE")
-            .env_remove("ROBLOSECURITY");
+            .env_remove("ROBLOSECURITY")
+            .env_remove("ROBLOX_BROKER_TOKEN");
         hide_console(&mut command);
         let mut child = command.spawn().map_err(|error| format!("no video: could not start {} ({error}); set RUR_FFMPEG to an ffmpeg", ffmpeg.display()))?;
         let stdin: ChildStdin = child.stdin.take().ok_or("ffmpeg's stdin")?;

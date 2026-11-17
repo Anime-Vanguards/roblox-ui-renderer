@@ -53,6 +53,9 @@ try {
 	for (const name of names) delete process.env[name];
 	process.env.RUR_STATE_DIR = path.join(temporary, "state");
 	process.env.RUR_COOKIE_ENV = path.join(temporary, "absent.env");
+	// No account broker either, whatever this machine has configured (tools/tests/asset_broker.mjs covers it)
+	delete process.env.ROBLOX_BROKER_TOKEN;
+	process.env.ROBLOX_BROKER_CREDENTIALS = path.join(temporary, "absent.json");
 	process.env.RUR_PROJECT = path.join(temporary, "no-project");
 	const { resolveUri } = await import(pathToFileURL(path.join(repo, "cli", "assets.mjs")).href);
 	const resolve = async (id, options) => {

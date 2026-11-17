@@ -23,6 +23,7 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/native-assets.mjs"]],
 		[process.execPath, ["tools/analysis/image_assets_test.mjs"]],
 		[process.execPath, ["tools/tests/asset_cookie.mjs"]],
+		[process.execPath, ["tools/tests/asset_broker.mjs"]],
 		[process.execPath, ["tools/tests/asset_records.mjs"]],
 		[process.execPath, ["tools/tests/asset_batch.mjs"]],
 		[process.execPath, ["tools/tests/asset_studio.mjs"]],

@@ -67,7 +67,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          for check in tools/tests/asset_cookie.mjs tools/tests/asset_records.mjs tools/tests/asset_batch.mjs \
+          for check in tools/tests/asset_cookie.mjs tools/tests/asset_broker.mjs tools/tests/asset_records.mjs tools/tests/asset_batch.mjs \
             tools/tests/native-assets.mjs tools/tests/native-build-lock.mjs tools/tests/places.mjs \
             tools/tests/web-bundle-directories.mjs tools/analysis/image_assets_test.mjs; do
             echo "== $check"

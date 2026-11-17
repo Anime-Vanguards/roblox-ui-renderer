@@ -28,6 +28,9 @@ function write(file, value) {
 async function load({ env = {}, local, override, legacy, sibling } = {}) {
 	for (const name of names) delete process.env[name];
 	process.env.RUR_CACHE_DIR = cache;
+	// No account broker, whatever this machine has configured (tools/tests/asset_broker.mjs covers it)
+	delete process.env.ROBLOX_BROKER_TOKEN;
+	process.env.ROBLOX_BROKER_CREDENTIALS = path.join(temporary, "absent.json");
 	Object.assign(process.env, env);
 	for (const [file, content] of [[localEnv, local], [overrideEnv, override]]) {
 		if (content === undefined) fs.rmSync(file, { force: true });
