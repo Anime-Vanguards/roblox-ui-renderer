@@ -196,7 +196,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Engine,
         "src/launch.rs",
         "pub fn accept(",
-        0xe6c9d18304265f16,
+        0xbd977de6f2ba707f,
     ),
     (
         Crate::Engine,
@@ -418,6 +418,8 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--help",
     "--idle",
     "--keys",
+    "--load-module",
+    "--load-string",
     "--margin",
     "--max-script-timeouts",
     "--max-wall-seconds",
