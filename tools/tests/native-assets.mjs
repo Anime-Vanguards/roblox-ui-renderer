@@ -1,79 +1,86 @@
-// All credentials are synthetic; missing offline assets must never make an HTTP request.
+// The CLI's side of assets, which the engine downloads (native/src/download.rs, whose own checks are
+// `cargo test --release download::`): `rur-native assets` answers the CLI (offline here, so no request goes
+// out) and reports the account without its secret; child processes that download nothing get no
+// credentials. All credentials are synthetic.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
-import readline from "node:readline";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { NativeAssetWorker } from "../../cli/native-assets.mjs";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { withoutCookie } from "../../cli/assets.mjs";
+import { ensureEngine } from "../../cli/engine.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "rur-native-assets-test-"));
 const cache = path.join(directory, "assets");
-fs.mkdirSync(cache);
+fs.mkdirSync(path.join(cache, "downloaded"), { recursive: true });
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==", "base64");
 fs.writeFileSync(path.join(cache, "123.png"), png);
 fs.writeFileSync(path.join(cache, "thumb-AvatarHeadShot-42-150x150-webp.png"), png);
-fs.writeFileSync(path.join(cache, "999.rbxmx"), '<roblox><url>rbxassetid://124</url></roblox>');
-const preload = path.join(directory, "offline-guard.mjs");
-fs.writeFileSync(preload, 'import https from "node:https"; https.get = () => { throw new Error("NETWORK WAS ATTEMPTED"); };');
-const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, path.join(root, "cli/native-assets.mjs"), "--offline"], {
-	cwd: root, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
-	env: { ...process.env, RUR_CACHE_DIR: directory, ROBLOX_ASSET_DELIVERY_COOKIE: "dummy-native-assets", ROBLOSECURITY: "dummy-native-assets", RUR_COOKIE_ENV: path.join(directory, "absent.env"), ROBLOX_BROKER_URL: "https://broker.invalid", ROBLOX_BROKER_TOKEN: "dummy-native-assets",RUR_STUDIO_IMAGES: "0" },
-});
-const lines = readline.createInterface({ input: child.stdout });
-const iterator = lines[Symbol.asyncIterator]();
-let stderr = "";
-child.stderr.on("data", chunk => { stderr += chunk; });
-let id = 0;
-const request = async payload => {
-	child.stdin.write(JSON.stringify({ id: ++id, ...payload }) + "\n");
-	const { value, done } = await iterator.next();
-	assert.ok(!done, `asset helper exited: ${stderr}`);
-	assert.ok(!value.includes("dummy-native-assets"), "credentials never enter the response");
-	const result = JSON.parse(value);
-	assert.equal(result.id, id);
-	assert.equal(result.error, undefined);
-	return result;
+fs.writeFileSync(path.join(cache, "999.rbxmx"), "<roblox><url>rbxassetid://124</url></roblox>");
+fs.writeFileSync(path.join(cache, "77.ttf"), Buffer.from([0, 1, 0, 0, 1, 2, 3]));
+const local = path.join(directory, "local image.png");
+fs.writeFileSync(local, png);
+const SECRETS = ["dummy-native-assets", "dummy-broker-token", "dummy-env-cookie", "dummy-file-cookie"];
+const noSecret = (text, what) => {
+	for (const secret of SECRETS) assert.ok(!text.includes(secret), `${what} must not contain a credential`);
 };
-const timer = setTimeout(() => child.kill(), 30000);
-try {
-	const link = path.join(directory, "linked");
-	fs.symlinkSync(root, link, process.platform === "win32" ? "junction" : "dir");
-	const linked = spawnSync(process.execPath, [path.join(link, "cli/native-assets.mjs"), "--offline"], {
-		cwd: directory, windowsHide: true, encoding: "utf8", timeout: 10000,
-		env: { ...process.env, RUR_STATE_DIR: directory },
-		input: '{"id":1,"images":[]}\n{"command":"quit"}\n',
+
+// The engine for `rur-native assets` (RUR_NATIVE_ENGINE, as selftest sets it, else the current build)
+const engine = await ensureEngine();
+
+// `rur-native assets` with this environment only (no account variable or file of this machine's) over
+// `repo`, a stand-in checkout whose .env a checkout build reads
+const home = path.join(directory, "home");
+const repo = path.join(directory, "checkout", "renderer");
+fs.mkdirSync(home, { recursive: true });
+fs.mkdirSync(repo, { recursive: true });
+function assets(args, { env = {}, input = "" } = {}) {
+	const clean = withoutCookie(process.env);
+	for (const name of Object.keys(clean)) if (/^(?:ROBLOX_BROKER_|RUR_COOKIE_ENV$|RUR_PROJECT$|RUR_STATE_DIR$|RUR_CACHE_DIR$|RUR_STUDIO)/i.test(name)) delete clean[name];
+	const result = spawnSync(engine, ["assets", ...args, "--repo", repo], {
+		cwd: directory, encoding: "utf8", windowsHide: true, input, timeout: 60000,
+		env: { ...clean, RUR_STATE_DIR: directory, USERPROFILE: home, HOME: home, ROBLOX_BROKER_CREDENTIALS: path.join(directory, "absent.json"), RUR_COOKIE_ENV: path.join(directory, "absent.env"), RUR_PROJECT: path.join(directory, "no-project"), RUR_STUDIO_IMAGES: "0", ...env },
 	});
-	assert.equal(linked.status, 0, linked.stderr);
-	assert.deepEqual(JSON.parse(linked.stdout), { id: 1, images: [] }, "the helper starts through a linked folder");
-	const worker = new NativeAssetWorker({ offline: true });
-	const direct = await worker.prepare({ id: 7, images: [], scene: { nodes: [{ text: { lines: [{ glyphs: [[0, 41, 0, 18]] }] } }] } });
-	assert.deepEqual(direct, { id: 7, images: [] }, "the helper answers images only (glyphs are rasterized natively)");
-	const result = await request({ images: ["rbxassetid://123", "rbxassetid://123", "rbxthumb://type=AvatarHeadShot&id=42&w=150&h=150", "rbxassetid://999", "rbxassetid://404"], scene: {} });
-	assert.equal(result.images.length, 4, "duplicate image requirements are resolved once");
-	assert.deepEqual(fs.readFileSync(result.images.find(row => row.uri === "rbxassetid://123").file), png);
-	assert.ok(result.images.find(row => row.uri.startsWith("rbxthumb:")).file, "cached thumbnails work offline");
-	assert.match(result.images.find(row => row.uri === "rbxassetid://999").error, /offline/, "nested decal images preserve offline mode");
-	assert.match(result.images.find(row => row.uri === "rbxassetid://404").error, /offline/);
-	assert.ok(!JSON.stringify(result).includes("NETWORK WAS ATTEMPTED"));
-	const fontsOffline = await request({ command: "fonts", diagnostics: { missingFontAssets: [12345] } });
-	assert.equal(fontsOffline.fontsChanged, false, "offline font jobs never fetch");
-	const scene = { fonts: [{ file: path.join(directory, "missing-font.ttf"), weight: 400 }], viewport: { scale: 1 }, nodes: [{ text: { weight: 400, lines: [{ glyphs: [[0, 41, 0, 18]] }] } }] };
-	const ignored = await request({ images: [], scene });
-	assert.deepEqual(ignored.images, []);
-	assert.equal(ignored.glyphError, undefined, "scenes sent by older callers are ignored, not rasterized");
-	assert.equal(ignored.pages, undefined);
-	child.stdin.end('{"command":"quit"}\n');
-	await new Promise(resolve => child.once("close", resolve));
-	assert.equal(child.exitCode, 0);
-	assert.equal(stderr, "");
-	console.log("Native assets: cached images/thumbnails, offline decal isolation, deduplication and offline font checks passed (glyph pages: cargo test assets::tests).");
+	assert.ok(result.status === 0 || result.status === 1, `rur-native assets ${args.join(" ")}: exit ${result.status} ${result.stderr}`);
+	noSecret(result.stdout + result.stderr, "rur-native assets' output");
+	return result;
+}
+
+try {
+	// The account rur-native reports: which, never its value
+	const access = env => JSON.parse(assets(["account", "--json"], { env }).stdout).access;
+	assert.equal(access({}), null);
+	assert.equal(access({ ROBLOX_ASSET_DELIVERY_COOKIE: "dummy-env-cookie" }), "cookie");
+	fs.writeFileSync(path.join(repo, ".env"), "ROBLOSECURITY=dummy-file-cookie\n");
+	assert.equal(access({}), "cookie", "a checkout build reads its checkout's .env");
+	fs.rmSync(path.join(repo, ".env"));
+	const broker = { ROBLOX_BROKER_URL: "https://broker.example", ROBLOX_BROKER_TOKEN: "dummy-broker-token" };
+	assert.equal(access({ ...broker, ROBLOX_ASSET_DELIVERY_COOKIE: "dummy-env-cookie" }), "broker", "a broker comes before the cookie");
+	assert.equal(access({ ...broker, ROBLOX_BROKER_URL: "http://broker.example", ROBLOX_ASSET_DELIVERY_COOKIE: "dummy-env-cookie" }), null, "a refused broker address does not fall back to the cookie");
+	assert.equal(assets(["account"], { env: broker }).stdout.trim(), "broker");
+
+	// Offline resolution, as a render does it: the cache, thumbnails, local files, decals; no request
+	const uris = ["rbxassetid://123", "rbxassetid://404", pathToFileURL(local).href, "rbxthumb://type=AvatarHeadShot&id=42&w=150&h=150", "rbxassetid://999"];
+	const fetched = assets(["fetch", "--offline", "--json", "--stdin", uris[0]], { env: broker, input: uris.slice(1).join("\n") });
+	assert.equal(fetched.status, 1, "some did not resolve");
+	const rows = new Map(JSON.parse(fetched.stdout).map(({ uri, ...row }) => [uri, row]));
+	assert.deepEqual([...rows.keys()], uris);
+	const cached = rows.get("rbxassetid://123");
+	assert.deepEqual([path.basename(cached.file), cached.kind, cached.mime, fs.readFileSync(cached.file).equals(png)], ["123.png", "image", "image/png", true]);
+	assert.match(rows.get("rbxassetid://404").error, /offline and not cached/);
+	assert.equal(path.resolve(rows.get(uris[2]).file), path.resolve(local));
+	assert.equal(path.basename(rows.get(uris[3]).file), "thumb-AvatarHeadShot-42-150x150-webp.png", "cached thumbnails work offline");
+	assert.match(rows.get("rbxassetid://999").error, /offline/, "nested decal images preserve offline mode");
+	const fonts = assets(["fetch", "--offline", "--fonts", "--json", "77", "78"]);
+	assert.deepEqual(JSON.parse(fonts.stdout).map(row => row.kind ?? "error"), ["font", "error"]);
+	assert.ok(fs.readFileSync(path.join(cache, "fonts.json"), "utf8").includes("77.ttf"), "a cached font is listed in fonts.json");
+	assert.match(assets(["fetch", "--offline", "rbxassetid://123"]).stdout, /^rbxassetid:\/\/123\t.*123\.png\r?\n$/);
+
+	// Child processes that download nothing get neither the cookie nor the token
+	assert.deepEqual(withoutCookie({ ROBLOX_BROKER_TOKEN: "a", Roblox_Broker_Token: "b", ROBLOSECURITY: "c", ROBLOX_BROKER_URL: "https://env.example", PATH: "kept" }), { ROBLOX_BROKER_URL: "https://env.example", PATH: "kept" });
+	console.log("Native assets: rur-native assets reports the account without it and resolves offline (cache, thumbnails, files, decals, fonts) without a request; child environments carry no credential.");
 } finally {
-	clearTimeout(timer);
-	child.kill();
-	lines.close();
 	assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
 	assert.ok(path.basename(directory).startsWith("rur-native-assets-test-"));
 	fs.rmSync(directory, { recursive: true, force: true });

@@ -31,6 +31,7 @@ fn installed(exe: &Path, cwd: &Path, cache: &Path) -> Command {
         .env_remove("RUR_PROJECT")
         .env_remove("RUR_REPO")
         .env_remove("RUR_ASSET_REPO")
+        .env_remove("RUR_VIEWPORT_WORKER")
         .env("HOME", cache)
         .env("LOCALAPPDATA", cache)
         .env("XDG_CACHE_HOME", cache)
@@ -763,90 +764,47 @@ const LOADER_DEFAULTS: [(&str, &str); 2] = [
     ("VK_LOADER_DRIVERS_DISABLE", "*dzn*"),
 ];
 
-/// Stands in for `cli/native-assets.mjs`: leaves a `used` file beside itself, writes the loader settings
-/// it was started with to `loader.json` (in the order of `LOADER_SETTINGS`) and refuses every image.
+/// Stands in for ror's `viewport-worker` (started as `node viewport-worker`, this file under that name in
+/// the working folder): leaves a `used` file beside itself, writes the loader settings it was started with
+/// to `loader.json` (in the order of `LOADER_SETTINGS`) and refuses every picture.
 /// `LOADER_SETTINGS_JSON` is replaced by the settings' names.
-const ASSET_HELPER_STUB: &str = r#"
-import fs from 'node:fs';
-import readline from 'node:readline';
+const VIEWPORT_WORKER_STUB: &str = r#"
+const fs = require('node:fs');
+const path = require('node:path');
 const loaderSettings = LOADER_SETTINGS_JSON;
-for await (const line of readline.createInterface({ input: process.stdin })) {
-  const request = JSON.parse(line);
-  if (request.command === 'quit') break;
-  fs.writeFileSync(new URL('used', import.meta.url), 'yes');
-  const loader = loaderSettings.map(name => process.env[name] ?? null);
-  fs.writeFileSync(new URL('loader.json', import.meta.url), JSON.stringify(loader));
-  const images = request.images?.map(uri => ({ uri, error: 'test refusal' })) ?? [];
-  console.log(JSON.stringify({ id: request.id, images }));
-}
+require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+  JSON.parse(line);
+  fs.writeFileSync(path.join(__dirname, 'used'), 'yes');
+  fs.writeFileSync(path.join(__dirname, 'loader.json'), JSON.stringify(loaderSettings.map(name => process.env[name] ?? null)));
+  console.log(JSON.stringify({ error: 'test refusal' }));
+});
 "#;
 
+/// An installed binary starts the worker RUR_VIEWPORT_WORKER names (a program on the PATH) itself, for a
+/// story's ViewportFrame, and hands it the startup defaults: a caller's loader setting, even an empty
+/// one, suppresses both defaults, as it does for a checkout build's Vulkan probe.
 #[test]
 #[ignore = "requires RUR_TEST_STANDALONE_BINARY from a marked release build"]
-fn installed_binary_runs_the_real_helper_through_a_link() {
-    let install = Installation::new("linked-asset-helper");
-    let alias = install.dir.join("helper-link");
-    link_directory(build_checkout(), &alias);
-    let story = install.project.join("story.luau");
-    std::fs::write(
-        &story,
-        "return function(target) local image=Instance.new('ImageLabel'); image.Image='rur-viewport://missing'; image.Parent=target end",
-    )
-    .unwrap();
-    // A viewport image that has no snapshot is answered by the helper alone (no download), so a
-    // matching error shows the helper really started, by its real path and through the link.
-    for (name, helper) in [("real", build_checkout()), ("linked", alias.as_path())] {
-        let mut command = install.command();
-        command
-            .env("RUR_ASSET_REPO", helper)
-            .env("RUR_NODE", "node");
-        let out = install.dir.join(name);
-        let scene = render(command, &story, &out, &["--offline"]);
-        assert_eq!(scene["status"], "ok", "{scene}");
-        let manifest: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(out.join("manifest.json")).unwrap()).unwrap();
-        assert_eq!(
-            manifest["images"]["rur-viewport://missing"]["error"], "Missing ViewportFrame snapshot",
-            "{name}: {manifest}"
-        );
-    }
-}
-
-#[test]
-#[ignore = "requires RUR_TEST_STANDALONE_BINARY from a marked release build"]
-fn installed_binary_runs_the_helper_named_by_rur_asset_repo() {
-    let install = Installation::new("asset-helper");
-    let helper_repo = install.dir.join("helper");
-    let helper_dir = helper_repo.join("cli");
-    std::fs::create_dir_all(&helper_dir).unwrap();
+fn installed_binary_starts_the_viewport_worker_with_the_startup_defaults() {
+    let install = Installation::new("viewport-worker");
     let loader_names = serde_json::to_string(&LOADER_SETTINGS).unwrap();
-    std::fs::write(
-        helper_dir.join("native-assets.mjs"),
-        ASSET_HELPER_STUB.replace("LOADER_SETTINGS_JSON", &loader_names),
-    )
-    .unwrap();
-    // An image that is not cached makes the story ask the helper for a download
+    std::fs::write(install.project.join("viewport-worker"), VIEWPORT_WORKER_STUB.replace("LOADER_SETTINGS_JSON", &loader_names)).unwrap();
     let story_path = install.project.join("story.luau");
     let story = std::fs::read_to_string(&story_path).unwrap();
-    let with_image = story.replace(
+    let with_frame = story.replace(
         "f.Name = 'Installed'",
-        "local image = Instance.new('ImageLabel'); image.Image = 'rbxassetid://123456789'; image.Parent = f; f.Name = 'Installed'",
+        "local v = Instance.new('ViewportFrame'); v.Size = UDim2.fromOffset(40, 40); Instance.new('Part').Parent = v; v.Parent = f; f.Name = 'Installed'",
     );
-    std::fs::write(&story_path, with_image).unwrap();
-
-    // The startup defaults reach the helper even though this story draws nothing on a GPU. A
-    // caller's setting, even an empty one, suppresses both defaults, as it does for a checkout
-    // build's Vulkan probe. Run once with no setting, then once with each setting empty.
+    std::fs::write(&story_path, with_frame).unwrap();
+    // Run once with no setting, then once with each setting empty
     let cases = std::iter::once(None).chain((0..LOADER_SETTINGS.len()).map(Some));
     for chosen in cases {
         let mut command = install.command();
-        command
-            .env("RUR_ASSET_REPO", &helper_repo)
-            .env("RUR_NODE", "node");
+        command.env("RUR_VIEWPORT_WORKER", "node");
         for setting in LOADER_SETTINGS {
             command.env_remove(setting);
         }
-        // What the helper should see for each setting, in the order of `LOADER_SETTINGS`
+        // What the worker should see for each setting, in the order of `LOADER_SETTINGS`
         let mut expected = vec![serde_json::Value::Null; LOADER_SETTINGS.len()];
         match chosen {
             Some(index) => {
@@ -861,21 +819,18 @@ fn installed_binary_runs_the_helper_named_by_rur_asset_repo() {
             }
         }
         let out_name = chosen.map_or("no-setting", |index| LOADER_SETTINGS[index]);
-        let scene = render(
-            command,
-            Path::new("story.luau"),
-            &install.dir.join(out_name),
-            &[],
-        );
+        let out = install.dir.join(out_name);
+        let scene = render(command, Path::new("story.luau"), &out, &[]);
         assert_story_ran(&scene);
-        let loader = std::fs::read(helper_dir.join("loader.json")).unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(out.join("manifest.json")).unwrap()).unwrap();
+        let refused = manifest["images"].as_object().into_iter().flatten().filter(|(uri, _)| uri.starts_with("rur-viewport://")).count();
+        assert_eq!(refused, 1, "the frame's picture was asked for: {manifest}");
+        assert!(manifest.to_string().contains("test refusal"), "the worker answered: {manifest}");
+        let loader = std::fs::read(install.project.join("loader.json")).unwrap();
         let actual: Vec<serde_json::Value> = serde_json::from_slice(&loader).unwrap();
         assert_eq!(actual, expected, "{out_name}");
     }
-    assert!(
-        helper_dir.join("used").is_file(),
-        "the helper in RUR_ASSET_REPO was not called"
-    );
+    assert!(install.project.join("used").is_file(), "the worker RUR_VIEWPORT_WORKER names was not started");
 }
 
 #[test]

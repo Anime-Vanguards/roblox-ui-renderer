@@ -106,12 +106,12 @@ impl GuiEngine for Engine {
     }
 }
 
-/// An engine as rur runs it: with the GUI layer and (on the desktop) manifest bundles through the
-/// asset helper (cli/native-assets.mjs and its 3D model worker, as for images and ViewportFrames).
+/// An engine as rur runs it: with the GUI layer and (on the desktop) manifest bundles from the 3D
+/// worker that draws ViewportFrames (viewports.rs).
 pub fn new_engine(options: Options) -> Result<Rc<Engine>, String> {
     let engine = Engine::with_layers(options, vec![Rc::new(GuiLayer)])?;
     #[cfg(feature = "desktop")]
-    engine.set_bundle_source(Box::new(AssetHelperBundles(crate::resolve::Resolver::new(&engine.options.repo, engine.options.offline))));
+    engine.set_bundle_source(Box::new(WorkerBundles(crate::viewports::ViewportWorker::new(&engine.options.repo, engine.options.offline))));
     Ok(engine)
 }
 
@@ -120,15 +120,15 @@ pub fn host() -> launch::Host {
     launch::Host { name: "rur", repo: default_repo(), new_engine: Rc::new(new_engine) }
 }
 
-/// Manifest bundles through the asset helper's model worker (resolve.rs `model` requests).
+/// Manifest bundles from the 3D worker (viewports.rs `model` requests).
 #[cfg(feature = "desktop")]
-struct AssetHelperBundles(crate::resolve::Resolver);
+struct WorkerBundles(crate::viewports::ViewportWorker);
 
 #[cfg(feature = "desktop")]
-impl project::model_assets::BundleSource for AssetHelperBundles {
+impl project::model_assets::BundleSource for WorkerBundles {
     /// The manifest's bundle keys, kept by the process while the manifest module's text is the same:
-    /// every engine mounts the catalog, and asking for it started the asset helper and its model worker
-    /// for each one (a render service makes an engine per render; 150 ms and two processes each)
+    /// every engine mounts the catalog, and asking for it started the worker for each one (a render
+    /// service makes an engine per render; 150 ms each)
     fn catalog(&mut self, av: &Path) -> Result<Vec<String>, String> {
         use std::hash::Hasher;
         type Catalogs = std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, (u64, Vec<String>)>>;
@@ -164,24 +164,26 @@ impl project::model_assets::BundleSource for AssetHelperBundles {
 mod bundle_tests {
     use super::*;
 
-    /// Manifest bundles reach the engine through the asset helper (here a stand-in
-    /// cli/native-assets.mjs answering the catalog and every bundle with one model file).
+    /// Manifest bundles reach the engine from the 3D worker (here a stand-in answering the catalog and
+    /// every bundle with one model file, written where the worker is told)
     #[test]
-    fn manifest_bundles_come_through_the_asset_helper() {
+    fn manifest_bundles_come_from_the_worker() {
         use project::model_assets::BundleSource;
         use rbx_dom_weak::{InstanceBuilder, WeakDom, types::Vector3};
         let directory = std::env::temp_dir().join(format!("rur-model-mount-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        std::fs::create_dir_all(directory.join("cli")).unwrap();
+        std::fs::create_dir_all(&directory).unwrap();
         let model_file = directory.join("model.rbxm");
         let dom = WeakDom::new(InstanceBuilder::new("DataModel").with_child(InstanceBuilder::new("Part").with_name("RealPart").with_property("Size", Vector3::new(2., 3., 4.))));
         let mut bytes = Vec::new();
         rbx_binary::to_writer(&mut bytes, &dom, dom.root().children()).unwrap();
         std::fs::write(&model_file, bytes).unwrap();
-        let script = format!("import readline from 'node:readline'; for await (const line of readline.createInterface({{input:process.stdin}})) {{ const request=JSON.parse(line); if(request.command==='quit') break; const reply = request.model.command==='catalog' ? {{bundles:['Models/Thing']}} : {{file:{}}}; process.stdout.write(JSON.stringify({{id:request.id,...reply}})+'\\n'); }}", serde_json::to_string(&model_file).unwrap());
-        std::fs::write(directory.join("cli/native-assets.mjs"), script).unwrap();
-        let mut source = AssetHelperBundles(crate::resolve::Resolver::new(&directory, true));
+        let script = format!("const fs=require('fs');require('readline').createInterface({{input:process.stdin}}).on('line',line=>{{const request=JSON.parse(line);const reply=request.command==='catalog'?{{bundles:['Models/Thing']}}:(fs.copyFileSync({model},request.out),{{file:request.out}});process.stdout.write(JSON.stringify(reply)+'\\n');}});", model = serde_json::to_string(&model_file).unwrap());
+        let node = std::env::var_os("RUR_NODE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("node"));
+        let mut source = WorkerBundles(crate::viewports::ViewportWorker::with_command(&directory, node, vec!["-e".into(), script]));
         assert_eq!(source.catalog(&directory).unwrap(), vec!["Models/Thing".to_string()]);
-        assert_eq!(source.bundle(&directory, "Models/Thing").unwrap(), model_file);
+        let bundle = source.bundle(&directory, "Models/Thing").unwrap();
+        assert!(bundle.starts_with(directory.join("model-bundles")));
+        assert_eq!(std::fs::read(&bundle).unwrap(), std::fs::read(&model_file).unwrap());
         drop(source);
         std::fs::remove_dir_all(directory).unwrap();
     }

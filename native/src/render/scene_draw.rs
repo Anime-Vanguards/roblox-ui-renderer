@@ -249,8 +249,8 @@ mod tests {
 /// cleared to its background and draws that target as the frame's image, so ImageColor3, ImageTransparency,
 /// a UIGradient, a UICorner and Rotation apply to the fill and the picture as one layer, the picture replacing
 /// the fill where it covers it; the border is drawn apart, untinted and unfaded (Studio 0.747,
-/// fixtures/viewport-probe-fade.luau and viewport-probe-layer.luau). The client lays the picture over the
-/// snapshot's `background` (cli/viewports.mjs); without a picture the fill is drawn as a Frame's.
+/// fixtures/viewport-probe-fade.luau and viewport-probe-layer.luau). The 3D worker draws the picture over
+/// the snapshot's `background` (viewports.rs); without a picture the fill is drawn as a Frame's.
 pub(crate) fn viewport_layer(node: &Value, assets: &crate::assets::AssetStore) -> bool {
     node["viewport"]["background"].is_object()
         && node["image"]["uri"]

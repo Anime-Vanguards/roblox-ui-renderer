@@ -76,7 +76,10 @@ async function buildOnce({ profile, prepareOnly, verifyOnly, stdio, log }) {
 		const profileArgs = profile === "debug" ? [] : ["--release"];
 		if (verifyOnly) {
 			runNativeCommand("cargo", ["test", ...locked()], CRATE_DIRECTORY, env);
-			runNativeCommand(process.execPath, [path.join(CRATE_DIRECTORY, "../tools/tests/native-assets.mjs")], CRATE_DIRECTORY, env);
+			// The binary `cargo test` built for its integration tests: the check runs `rur-native assets`, and
+			// asking cli/engine.mjs for a build would wait on this build's own lock
+			const tested = path.join(TARGET_DIRECTORY, "debug", process.platform === "win32" ? "rur-native.exe" : "rur-native");
+			runNativeCommand(process.execPath, [path.join(CRATE_DIRECTORY, "../tools/tests/native-assets.mjs")], CRATE_DIRECTORY, { ...env, RUR_NATIVE_ENGINE: tested });
 			if (appFingerprint(profile) !== fingerprint) throw new SourcesChanged("native sources changed during the tests");
 			return null;
 		}

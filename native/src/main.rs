@@ -48,6 +48,10 @@ fn main() -> anyhow::Result<()> {
     let argv: Vec<String> = std::env::args().collect();
     match argv.get(1).map(String::as_str) {
         Some("render") => std::process::exit(rur_native::story_render::cli(&argv[2..])),
+        // `rur-native assets fetch <uri>... | account`: the asset cache and downloads, for the Node CLI (download.rs)
+        Some("assets") => std::process::exit(rur_native::download::cli(&argv[2..])),
+        // `rur-native doctor [--json]`: what this install uses and is missing, with how to fix it (doctor.rs)
+        Some("doctor") => std::process::exit(rur_native::doctor::cli(&argv[2..])),
         // `rur-native rojo-mounts <file.project.json>`: the mounts a Rojo project gives a run (rojo.rs)
         Some("rojo-mounts") => std::process::exit(rur_native::rojo::mounts_cli(&argv[2..])),
         // `rur-native sequence ...`: a story captured frame by frame (sequence.rs)

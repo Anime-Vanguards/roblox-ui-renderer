@@ -15,7 +15,18 @@ fn quoted(source: &str) -> impl Iterator<Item = &str> {
 
 /// The text of a source file before its unit tests, which spell options that no parser accepts.
 fn without_tests(source: &str) -> &str {
-    source.split("#[cfg(test)]").next().unwrap()
+    // The unit tests' module ends the production source; a `#[cfg(test)]` on one item (a helper the
+    // tests use) does not, or a parser below it would go unchecked
+    let mut searched = 0;
+    while let Some(found) = source[searched..].find("#[cfg(test)]") {
+        let at = searched + found;
+        let after = source[at + "#[cfg(test)]".len()..].trim_start();
+        if ["mod ", "pub mod ", "pub(crate) mod "].iter().any(|start| after.starts_with(start)) {
+            return &source[..at];
+        }
+        searched = at + "#[cfg(test)]".len();
+    }
+    source
 }
 
 /// The production table of path options, read from the source that checks them.
@@ -124,7 +135,23 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/main.rs",
         "fn main()",
-        0x64cb40c68fb7b00b,
+        0xcdb8e95a33b5078c,
+    ),
+    // `rur-native assets`: its positionals are content URIs, read and never written; it writes only into
+    // the state directory, and its one path option, `--repo`, is in PATH_OPTIONS
+    (
+        Crate::Native,
+        "src/download.rs",
+        "pub fn cli(",
+        0x2a7ff91c1c8b442e,
+    ),
+    // `rur-native doctor`: no positionals and no path options; it reads the state directory, the Studio
+    // install and the worker it finds, and writes nothing
+    (
+        Crate::Native,
+        "src/doctor.rs",
+        "pub fn cli(",
+        0x28fa199d1d5edf89,
     ),
     (
         Crate::Native,
@@ -409,6 +436,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--device",
     "--dt",
     "--duration",
+    "--fonts",
     "--format",
     "--fps",
     "--frame-hashes",
@@ -417,6 +445,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--headless",
     "--help",
     "--idle",
+    "--json",
     "--keys",
     "--load-module",
     "--load-string",
@@ -428,6 +457,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--no-parent-watch",
     "--no-png",
     "--no-snapshots",
+    "--no-studio",
     "--no-video",
     "--offline",
     "--pad",
@@ -451,6 +481,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--select",
     "--session",
     "--size",
+    "--stdin",
     "--streaming",
     "--strict-assets",
     "--studio",

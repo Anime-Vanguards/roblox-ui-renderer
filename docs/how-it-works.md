@@ -29,11 +29,12 @@ options, projects, git refs, Studio comparisons, asset downloads, inspection and
   with Studio's snapping and blending rules; `shaders/uber.*.glsl` evaluate them; `coverage.rs`,
   `geometry.rs`, `sampling.rs`, `images.rs`, `groups.rs` and `text.rs` hold the measured raster rules.
 - `native/src/glyphs.rs`: glyph atlases and hinted metrics with the compiled-in FreeType; `assets.rs`:
-  decoded textures and glyph pages ([native/ASSETS.md](../native/ASSETS.md)); `resolve.rs`: content URIs to files.
+  decoded textures and glyph pages ([native/ASSETS.md](../native/ASSETS.md)); `resolve.rs`: content URIs to files;
+  `download.rs`: asset downloads, the account and `rur-native assets`.
 - `native/src/story_render.rs`, `serve.rs`: `rur render`'s output and the render service; `headless.rs`:
   captures, benchmarks and batches; `app.rs`: the desktop storybook; `places.rs`: projects and places.
 - `cli/`: the command line (`rur.mjs`), compare (`compare.mjs`, `studio.mjs`, `clock.mjs`), inspection,
-  assets (`assets.mjs`, `native-assets.mjs`), projects (`places.mjs`, `rojo.mjs`, `gitref.mjs`).
+  assets (`assets.mjs`: the native downloader's CLI side and Studio reads), projects (`places.mjs`, `rojo.mjs`, `gitref.mjs`).
 - `fixtures/`: the measurement scenes; `tools/analysis`: the fitting scripts behind the rules;
   `tools/studio`, `tools/interaction`: Studio probes and input experiments; `data/studio`: frozen Studio
   measurements the tests compare with.

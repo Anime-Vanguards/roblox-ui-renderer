@@ -41,16 +41,17 @@ OFL-1.1 AND Ubuntu-font-1.0`. The license files are in that crate's source packa
 ### Rust crates
 
 The crates in `native/Cargo.lock` are listed below as each crate's `Cargo.toml` declares them (generated
-from `native/Cargo.lock` on 2026-11-07; the git packages are the engine's, above). Which of them a build
-links depends on the platform. A release's `THIRD_PARTY_LICENSES.txt` is made for its platform: it holds the
+from `native/Cargo.lock` on 2026-11-07, the asset downloader's crates added on 2026-11-18; the git packages
+are the engine's, above). Which of them a build links depends on the platform. A release's `THIRD_PARTY_LICENSES.txt` is made for its platform: it holds the
 license texts of the crates that platform links, the notices of the embedded fonts and the vendored C and
 C++ code, and FreeType's licenses. Each crate's license text is also in its source package on crates.io.
 Where a crate offers a choice of licenses we use it under MIT when offered, else under the first option
 compatible with the GPL.
 
 Licenses other than MIT and Apache-2.0 among them: Unicode-3.0 (ICU4X data crates), Zlib, BSD-2-Clause,
-BSD-3-Clause (including zstd through `zstd-sys`), BSL-1.0, ISC, CC0-1.0, BSD-2-Clause-Patent and MPL-2.0
-(`roblox_install`, `option-ext`; used unmodified).
+BSD-3-Clause (including zstd through `zstd-sys`), BSL-1.0, ISC (including `ring` and `rustls-webpki`, the
+asset downloader's TLS), CC0-1.0, BSD-2-Clause-Patent, CDLA-Permissive-2.0 (`webpki-roots`, the TLS root
+certificates) and MPL-2.0 (`roblox_install`, `option-ext`; used unmodified).
 
 ## Distributing a binary
 
@@ -105,6 +106,7 @@ font files are included.
 | autocfg | 1.5.1 | Apache-2.0 OR MIT |
 | base64 | 0.13.1 | MIT/Apache-2.0 |
 | base64 | 0.22.1 | MIT OR Apache-2.0 |
+| base64 | 0.23.1 | MIT OR Apache-2.0 |
 | bit-set | 0.8.0 | Apache-2.0 OR MIT |
 | bit-vec | 0.8.0 | Apache-2.0 OR MIT |
 | bitflags | 1.3.2 | MIT/Apache-2.0 |
@@ -243,6 +245,8 @@ font files are included.
 | heck | 0.5.0 | MIT OR Apache-2.0 |
 | hermit-abi | 0.5.3 | MIT OR Apache-2.0 |
 | hexf-parse | 0.2.1 | CC0-1.0 |
+| http | 1.5.0 | MIT OR Apache-2.0 |
+| httparse | 1.10.1 | MIT OR Apache-2.0 |
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 |
 | iana-time-zone-haiku | 0.1.2 | MIT OR Apache-2.0 |
 | icu_collections | 2.3.0 | Unicode-3.0 |
@@ -291,6 +295,7 @@ font files are included.
 | lru | 0.18.5 | MIT |
 | lz4_flex | 0.11.6 | MIT |
 | malloc_buf | 0.0.6 | MIT |
+| md-5 | 0.10.6 | MIT OR Apache-2.0 |
 | memchr | 2.8.3 | Unlicense OR MIT |
 | memmap2 | 0.9.11 | MIT OR Apache-2.0 |
 | memoffset | 0.9.1 | MIT |
@@ -405,6 +410,7 @@ font files are included.
 | renderdoc-sys | 1.1.0 | MIT OR Apache-2.0 |
 | resvg | 0.45.1 | Apache-2.0 OR MIT |
 | rgb | 0.8.53 | MIT |
+| ring | 0.17.14 | Apache-2.0 AND ISC |
 | rmp | 0.8.15 | MIT |
 | rmp-serde | 1.3.1 | MIT |
 | roblox_install | 1.2.0 | MPL-2.0 |
@@ -414,6 +420,9 @@ font files are included.
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 |
 | rustix | 0.38.44 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT |
+| rustls-pki-types | 1.16.0 | MIT OR Apache-2.0 |
+| rustls-webpki | 0.103.17 | ISC |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |
 | rustybuzz | 0.20.1 | MIT |
 | ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 |
@@ -450,6 +459,7 @@ font files are included.
 | strsim | 0.11.1 | MIT |
 | strum | 0.28.0 | MIT |
 | strum_macros | 0.28.0 | MIT |
+| subtle | 2.6.1 | BSD-3-Clause |
 | svgtypes | 0.15.3 | Apache-2.0 OR MIT |
 | syn | 2.0.119 | MIT OR Apache-2.0 |
 | syn | 3.0.6 | MIT OR Apache-2.0 |
@@ -488,9 +498,13 @@ font files are included.
 | unicode-vo | 0.1.0 | MIT/Apache-2.0 |
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |
 | unicode-xid | 0.2.6 | MIT OR Apache-2.0 |
+| untrusted | 0.9.0 | ISC |
+| ureq | 3.4.2 | MIT OR Apache-2.0 |
+| ureq-proto | 0.6.5 | MIT OR Apache-2.0 |
 | url | 2.5.8 | MIT OR Apache-2.0 |
 | ustr | 1.1.0 | BSD-2-Clause-Patent |
 | usvg | 0.45.1 | Apache-2.0 OR MIT |
+| utf8-zero | 0.8.1 | MIT OR Apache-2.0 |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT |
 | utf8parse | 0.2.2 | Apache-2.0 OR MIT |
 | version_check | 0.9.5 | MIT/Apache-2.0 |
@@ -516,6 +530,7 @@ font files are included.
 | web-sys | 0.3.106 | MIT OR Apache-2.0 |
 | web-time | 1.1.0 | MIT OR Apache-2.0 |
 | webbrowser | 1.2.4 | MIT OR Apache-2.0 |
+| webpki-roots | 1.0.12 | CDLA-Permissive-2.0 |
 | weezl | 0.1.12 | MIT OR Apache-2.0 |
 | wgpu | 27.0.1 | MIT OR Apache-2.0 |
 | wgpu-core | 27.0.3 | MIT OR Apache-2.0 |

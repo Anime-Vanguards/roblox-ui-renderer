@@ -68,7 +68,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_STATE_DIR, sharedStatePath } from "../../cli/paths.mjs";
-import { fetchAssetId, studioContentRoots } from "../../cli/assets.mjs";
+import { resolveAll, studioContentRoots } from "../../cli/assets.mjs";
 
 import { engineBaseArgs, ensureEngine } from "../../cli/engine.mjs";
 import { placeOf, placeRoots, readPlaces } from "../../cli/places.mjs";
@@ -270,20 +270,27 @@ function addFrozenFont(file) {
 const fontFailures = new Map();
 let fontFetches = Promise.resolve();
 
-// One download at a time: job slots ask for the same fonts. Whether any arrived.
+// One download at a time: job slots ask for the same fonts (`rur-native assets fetch --fonts`, the engine's
+// downloader). Whether any arrived.
 function fetchFonts(ids) {
 	fontFetches = fontFetches.then(async () => {
 		let arrived = false;
+		let results;
+		try {
+			results = await resolveAll(ids.map(String), { fonts: true, engine: ENGINE });
+		} catch (error) {
+			for (const id of ids) fontFailures.set(id, error.message);
+			return false;
+		}
 		for (const id of ids) {
-			try {
-				const { kind, file } = await fetchAssetId(id, { allowDecal: false });
-				if (kind !== "font" && kind !== "json") throw new Error(`asset ${id} is a ${kind}, not a font`);
-				if (FROZEN_FONTS && !FROZEN_FONTS.files[path.posix.join("assets", path.basename(file))]) addFrozenFont(file);
-				fontFailures.delete(id);
-				arrived = true;
-			} catch (error) {
-				fontFailures.set(id, error.message);
+			const { kind, file, error } = results.get(String(id)) ?? { error: "unresolved" };
+			if (error || (kind !== "font" && kind !== "json")) {
+				fontFailures.set(id, error || `asset ${id} is a ${kind}, not a font`);
+				continue;
 			}
+			if (FROZEN_FONTS && !FROZEN_FONTS.files[path.posix.join("assets", path.basename(file))]) addFrozenFont(file);
+			fontFailures.delete(id);
+			arrived = true;
 		}
 		return arrived;
 	});

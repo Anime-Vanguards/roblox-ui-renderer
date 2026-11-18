@@ -277,7 +277,7 @@ pub(crate) fn validate_arguments(argv: &[String]) -> Result<(), String> {
 }
 
 /// The commands `main` dispatches before the storybook's own parser (NativeOptions) sees the arguments
-const COMMANDS: &[&str] = &["engine", "engine-batch", "render", "rojo-mounts", "sequence", "serve", "record", "profile"];
+const COMMANDS: &[&str] = &["engine", "engine-batch", "render", "rojo-mounts", "sequence", "serve", "record", "profile", "assets", "doctor"];
 
 /// Refuses an empty project folder given to the storybook without an option name (`rur-native ""`), which would
 /// otherwise open the current folder. A blank word can only be that positional: a blank value of a path option is
@@ -610,33 +610,23 @@ fn record_profile_directory(argv: &[String]) -> PathBuf {
     recording_output.join("profile")
 }
 
-/// Said wherever an asset needs a download and there is no Node helper to do it.
+/// Said when an image only an open Studio could give (reading it needs the rur CLI's Studio bridge) is
+/// asked for and there is no checkout to run the CLI from.
 pub const HELPER_REQUIRED: &str =
     "needs the rur CLI from a checkout with Node.js; set RUR_ASSET_REPO to that checkout";
 
-/// The Node helper that downloads assets, or the reason there is none. Checkout mode always uses
-/// `repo`'s helper. Standalone mode looks in `RUR_ASSET_REPO`, else `repo`, and needs the file to
-/// exist. Any folder holding `cli/native-assets.mjs` works, which lets the asset tests point
-/// `repo` at a stand-in.
-pub fn asset_helper(repo: &Path) -> Result<PathBuf, String> {
-    if !is_standalone() {
-        return Ok(repo.join("cli/native-assets.mjs"));
-    }
-    let repo = env_path("RUR_ASSET_REPO").unwrap_or_else(|| repo.to_path_buf());
-    let helper = repo.join("cli/native-assets.mjs");
-    if !helper.is_file() {
+/// A script of the rur CLI (`relative`, e.g. `cli/studio-images.mjs`), or HELPER_REQUIRED when there is
+/// no checkout to run it from: `repo`'s in checkout mode; in standalone mode `RUR_ASSET_REPO`'s, else
+/// `repo`'s. The file must exist. Its real path: Node resolves the links in a script's path but reports
+/// the command-line path as written, and a relative `RUR_ASSET_REPO` must not depend on the working
+/// directory.
+pub fn checkout_script(repo: &Path, relative: &str) -> Result<PathBuf, String> {
+    let repo = if is_standalone() { env_path("RUR_ASSET_REPO").unwrap_or_else(|| repo.to_path_buf()) } else { repo.to_path_buf() };
+    let script = repo.join(relative);
+    if !script.is_file() {
         return Err(HELPER_REQUIRED.into());
     }
-    // Node resolves the links in a script's path but reports the command-line path as written, and
-    // the helper only starts when the two name the same file. The real path also makes a relative
-    // `RUR_ASSET_REPO` independent of the working directory.
-    canonical_path(&helper).map_err(|error| error.to_string())
-}
-
-/// True when downloads are possible. A standalone build without the helper works on local content
-/// only.
-pub fn has_asset_helper(repo: &Path) -> bool {
-    asset_helper(repo).is_ok()
+    canonical_path(&script).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

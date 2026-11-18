@@ -6,15 +6,20 @@
   the state dir as `assets/<id>.<ext>`, each with a record of the bytes rur downloaded: a cache file without a
   matching record is downloaded again before it is drawn. `--offline` uses the cache as it is. Never put
   stand-ins into the cache; draw a local image through a `file://` URI instead.
-- For assets the public route refuses, copy [`.env.example`](../.env.example) to `.env` and set
+- `rur-native` downloads by itself (`native/src/download.rs`), in a release binary too: renders, the desktop
+  app and the Node CLI all use it. `rur-native assets fetch <uri>...` resolves URIs as a render does
+  (`--offline`, `--json`), and `rur-native assets account` says whether a broker, a cookie or neither is used.
+- For assets the public route refuses, copy [`.env.example`](../.env.example) to `.env` in a checkout and set
   `ROBLOX_ASSET_DELIVERY_COOKIE` to a `.ROBLOSECURITY` value (or set it, or `ROBLOSECURITY`, in the
-  environment, or name another file with `RUR_COOKIE_ENV`). The cookie is only sent to
-  `assetdelivery.roblox.com`, never printed or written anywhere, and kept out of child processes that
-  download nothing. Use an account made for this. See [SECURITY.md](../SECURITY.md). A team can use
-  [an account broker](#an-account-broker-instead-of-the-cookie) instead, so nobody holds the cookie.
+  environment, or name another file with `RUR_COOKIE_ENV`). A release binary reads no `.env`, only the
+  environment and `RUR_COOKIE_ENV`. The cookie is only sent to `assetdelivery.roblox.com`, never printed or
+  written anywhere, and kept out of child processes that download nothing. Use an account made for this. See
+  [SECURITY.md](../SECURITY.md). A team can use [an account broker](#an-account-broker-instead-of-the-cookie)
+  instead, so nobody holds the cookie.
 - An image asset delivery refuses (private to the game's creator) can be read from an open Roblox Studio
   instead, with no cookie: see [Images from Studio](#images-from-studio).
-- `rbxthumb://` thumbnails come from the thumbnail service (its WebP rendition, as Studio draws).
+- `rbxthumb://` thumbnails come from the thumbnail service: its WebP rendition, as Studio draws, decoded and
+  cached as PNG.
 
 ## An account broker instead of the cookie
 
@@ -44,7 +49,9 @@ have carried it goes to the broker instead.
 ## Images from Studio
 
 With a Studio MCP bridge configured, a render's `rbxassetid://` images that asset delivery refuses are read
-from Studio (`cli/studio-images.mjs`): Studio opens each one as an `EditableImage`
+from Studio (`cli/studio-images.mjs`, which `rur-native` runs as `node cli/studio-images.mjs store` from the
+checkout; a release binary needs `RUR_ASSET_REPO` for it, else the refusal stays, with a hint). Studio opens
+each one as an `EditableImage`
 (`AssetService:CreateEditableImageAsync`) and returns its pixels, and rur stores them losslessly as
 `assets/<id>.png`, recorded with `"source": "studio"`. One call reads many images: Studio loads 12 at a
 time and returns their pixels zstd-compressed, up to about 2 MB per call. Later renders use the cache and

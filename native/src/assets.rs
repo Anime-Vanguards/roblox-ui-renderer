@@ -1,9 +1,7 @@
 //! Incremental assets. The render thread only discovers requirements and polls completions;
 //! resolution, glyph rasterization, file IO and image decoding belong to the worker.
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -100,12 +98,11 @@ enum Completion {
 
 pub struct AssetStore {
     requests: Option<mpsc::SyncSender<Job>>,
-    /// The glyph worker's queue (glyph pages, reloads): apart from the helper's downloads
+    /// The glyph worker's queue (glyph pages, reloads): apart from the image worker's downloads
     glyph_requests: Option<mpsc::SyncSender<Job>>,
     /// Glyph-worker jobs in flight (their ids; `jobs` counts both workers')
     glyph_jobs: HashSet<u64>,
     completed: mpsc::Receiver<Completion>,
-    child: Arc<Mutex<Option<Child>>>,
     textures: HashMap<AssetId, Resident>,
     files: HashMap<AssetId, PathBuf>,
     glyphs: HashMap<GlyphKey, Glyph>,
@@ -180,12 +177,10 @@ impl AssetStore {
         response_timeout: Duration,
     ) -> Self {
         let (send, receive) = mpsc::sync_channel(4);
-        let child = Arc::new(Mutex::new(None));
-        let control = child.clone();
         let active_generation = Arc::new(AtomicU64::new(0));
         let worker_generation = active_generation.clone();
         let repo = repo.into();
-        // Glyphs are rasterized on a worker of their own (it never starts the helper): a glyph job queued
+        // Glyphs are rasterized on a worker of their own (it never downloads): a glyph job queued
         // behind an image download kept the display thread in wait_for_glyphs for 50 ms a frame until the
         // download finished
         let (glyph_send, glyph_receive) = mpsc::sync_channel::<Job>(4);
@@ -203,7 +198,6 @@ impl AssetStore {
                             byte_limit.min(256 * 1024 * 1024),
                             glyph_receive,
                             done,
-                            Arc::new(Mutex::new(None)),
                             generation,
                             response_timeout,
                         );
@@ -219,7 +213,6 @@ impl AssetStore {
                         byte_limit.min(256 * 1024 * 1024),
                         receive,
                         done,
-                        control,
                         worker_generation,
                         response_timeout,
                     );
@@ -234,7 +227,7 @@ impl AssetStore {
             drop(receive);
             drop(glyph_receive);
             let (done, completed) = mpsc::channel();
-            let worker = Worker::new(repo, offline, byte_limit.min(256 * 1024 * 1024), control, worker_generation, response_timeout);
+            let worker = Worker::new(repo, offline, byte_limit.min(256 * 1024 * 1024), worker_generation, response_timeout);
             (Some((worker, done)), completed)
         };
         Self {
@@ -244,7 +237,6 @@ impl AssetStore {
             glyph_requests: Some(glyph_send),
             glyph_jobs: HashSet::new(),
             completed,
-            child,
             textures: HashMap::new(),
             files: HashMap::new(),
             glyphs: HashMap::new(),
@@ -364,7 +356,7 @@ impl AssetStore {
                 }
             }
         }
-        if self.manifest_job.is_some() || (self.glyph_jobs.len() >= 4 && self.helper_jobs() >= 4) {
+        if self.manifest_job.is_some() || (self.glyph_jobs.len() >= 4 && self.image_jobs() >= 4) {
             return 0;
         }
         let viewport = scene.viewport();
@@ -451,7 +443,7 @@ impl AssetStore {
                 reload.push((id, file.clone()));
             } else {
                 // Coalesce moving viewports while the prior ROR job finishes.
-                if viewport_slot(uri).is_none() || self.helper_jobs() == 0 {
+                if viewport_slot(uri).is_none() || self.image_jobs() == 0 {
                     images.push(uri.clone());
                 }
             }
@@ -474,7 +466,7 @@ impl AssetStore {
             return 0;
         }
         // Glyphs (and reloads) go in a job of their own to the glyph worker, new images in a second one to
-        // the helper's: text must not wait for an image download. Images draw nothing until they arrive,
+        // the image worker: text must not wait for an image download. Images draw nothing until they arrive,
         // as in Roblox.
         let mut count = 0;
         if (!nodes.is_empty() || !reload.is_empty()) && self.glyph_jobs.len() < 4 {
@@ -496,7 +488,7 @@ impl AssetStore {
             self.pending_reloads
                 .extend(reload.into_iter().map(|(id, _)| id));
         }
-        if !images.is_empty() && self.helper_jobs() < 4 {
+        if !images.is_empty() && self.image_jobs() < 4 {
             let job = Job {
                 id: self.next_job,
                 images: images.clone(),
@@ -516,7 +508,7 @@ impl AssetStore {
         count
     }
 
-    /// Glyph and reload jobs go to the glyph worker, image downloads to the helper's worker: a glyph job
+    /// Glyph and reload jobs go to the glyph worker, image downloads to the image worker: a glyph job
     /// never waits behind a download (the display thread waits for glyphs: wait_for_glyphs)
     fn send_job(&mut self, job: Job) -> bool {
         #[cfg(feature = "web")]
@@ -557,8 +549,8 @@ impl AssetStore {
         self.signature_ids.insert(key, id.clone());
         Some(id)
     }
-    /// Jobs in flight on the helper's worker (images, fonts, manifests)
-    fn helper_jobs(&self) -> usize {
+    /// Jobs in flight on the image worker (images, fonts, manifests)
+    fn image_jobs(&self) -> usize {
         self.jobs.saturating_sub(self.glyph_jobs.len())
     }
 
@@ -591,6 +583,10 @@ impl AssetStore {
         self.active_fonts = Value::Null;
         self.activate_fonts(scene.fonts());
         self.diagnostics.clear();
+        // A ViewportFrame's picture failed for a reason a reload may have fixed (ror installed, a worker
+        // that crashed or hung): it is asked for again. Other images keep their failure.
+        self.failed_images.retain(|uri| viewport_slot(uri).is_none());
+        self.image_errors.retain(|uri, _| viewport_slot(uri).is_none());
         self.active_images = image_requirements(scene);
         for uri in &self.active_images {
             if let Some(error) = self.image_errors.get(uri) {
@@ -602,8 +598,8 @@ impl AssetStore {
     }
 
     /// Images the caller resolved itself (a render service sequence: its Resolver answers cached and
-    /// local files in process and downloads the rest, so this store, offline there, never starts the
-    /// Node helper): a file is decoded as its URI's texture when a scene shows it (the reload path), an
+    /// local files in process and downloads the rest, so this store, offline there, downloads nothing):
+    /// a file is decoded as its URI's texture when a scene shows it (the reload path), an
     /// error is that URI's failure.
     pub fn provide_images(&mut self, resolved: impl IntoIterator<Item = (String, Result<PathBuf, String>)>) {
         for (uri, resolution) in resolved {
@@ -986,7 +982,7 @@ impl AssetStore {
                     }
                 }
                 // Discovery state is bounded independently of decoded pixels. Clearing causes a
-                // later cache lookup in the helper, not duplicate glyph rasterization.
+                // later cache lookup in the image worker, not duplicate glyph rasterization.
                 if self.signatures.len() > 16_384 {
                     self.signatures.clear();
                 }
@@ -1054,11 +1050,6 @@ impl Drop for AssetStore {
         self.requests.take();
         self.glyph_requests.take();
         self.active_generation.store(u64::MAX, Ordering::Release);
-        if let Ok(mut child) = self.child.lock() {
-            if let Some(child) = child.as_mut() {
-                stop_child(child);
-            }
-        }
     }
 }
 
@@ -1215,10 +1206,10 @@ fn signature_text(key: &[u64]) -> String {
     text
 }
 
-/// Glyph atlas pages of one asset worker, rasterized in process (crate::glyphs; cli/native-assets.mjs
-/// did this with the Python rasterizer before). Pages hold at most `PAGE_GLYPHS` glyphs; at most
-/// `MAX_PAGES` pages are kept. A page's pixels are rebuilt from the rasterizer's bitmap cache when it
-/// is sent again (or reloaded after an eviction), so the worker keeps no page pixels of its own.
+/// Glyph atlas pages of one asset worker, rasterized in process (crate::glyphs). Pages hold at most
+/// `PAGE_GLYPHS` glyphs; at most `MAX_PAGES` pages are kept. A page's pixels are rebuilt from the
+/// rasterizer's bitmap cache when it is sent again (or reloaded after an eviction), so the worker keeps
+/// no page pixels of its own.
 struct GlyphPages {
     rasterizer: Option<crate::glyphs::Rasterizer>,
     worker: u64,
@@ -1324,7 +1315,7 @@ impl GlyphPages {
         json!({"id":id.0,"file":id.0,"width":page.width,"height":page.height,"freetype":page.freetype,"glyphs":glyphs})
     }
 
-    /// cli/native-assets.mjs' glyph step: rasterizes the scene's glyphs that no page holds yet (pages of
+    /// The glyph step: rasterizes the scene's glyphs that no page holds yet (pages of
     /// up to 512) and returns every page the scene's glyphs are on, each listing the glyphs it owns,
     /// plus the error that stopped rasterization, if any.
     fn prepare(&mut self, scene: &Value) -> (Vec<PreparedPage>, Option<String>) {
@@ -1427,80 +1418,8 @@ fn glyph_key_string(key: &Value) -> String {
         .join("|")
 }
 
-fn start_helper(
-    repo: &Path,
-    offline: bool,
-    control: &Arc<Mutex<Option<Child>>>,
-) -> Result<
-    (
-        mpsc::SyncSender<Value>,
-        mpsc::Receiver<Result<String, String>>,
-    ),
-    String,
-> {
-    let mut command = Command::new(std::env::var_os("RUR_NODE").unwrap_or_else(|| "node".into()));
-    command
-        .arg(crate::paths::asset_helper(repo)?)
-        .current_dir(&repo)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    if offline {
-        command.arg("--offline");
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command
-        .spawn()
-        .map_err(|_| "Native assets need Node.js on PATH (or RUR_NODE)")?;
-    let mut input = child.stdin.take().unwrap();
-    let mut output = BufReader::new(child.stdout.take().unwrap());
-    if let Ok(mut slot) = control.lock() {
-        *slot = Some(child);
-    }
-    let (send, requests) = mpsc::sync_channel::<Value>(1);
-    let (responses, receive) = mpsc::sync_channel(1);
-    std::thread::Builder::new()
-        .name("rur-asset-pipe".into())
-        .spawn(move || {
-            for request in requests {
-                let response = (|| -> Result<String, String> {
-                    serde_json::to_writer(&mut input, &request)
-                        .map_err(|_| "Writing asset request")?;
-                    input
-                        .write_all(b"\n")
-                        .and_then(|_| input.flush())
-                        .map_err(|_| "Asset helper closed")?;
-                    let mut line = String::new();
-                    if output
-                        .read_line(&mut line)
-                        .map_err(|_| "Reading asset response")?
-                        == 0
-                    {
-                        return Err("Asset helper exited".into());
-                    }
-                    Ok(line)
-                })();
-                let failed = response.is_err();
-                if responses.send(response).is_err() || failed {
-                    break;
-                }
-            }
-        })
-        .map_err(|_| "Starting asset pipe worker")?;
-    Ok((send, receive))
-}
-
 /// The web build's image map: RUR_WEB_IMAGES names a JSON file of {uri: file | {"error": text}}
-/// (tools/web/bundle.mjs writes the Node asset helper's answers for every image the page can show)
+/// (tools/web/bundle.mjs writes `rur-native assets fetch --offline`'s answers for every image the page can show)
 #[cfg(feature = "web")]
 fn web_images() -> &'static serde_json::Map<String, Value> {
     static IMAGES: std::sync::OnceLock<serde_json::Map<String, Value>> = std::sync::OnceLock::new();
@@ -1528,75 +1447,41 @@ fn worker(
     byte_limit: usize,
     receive: mpsc::Receiver<Job>,
     done: Done,
-    control: Arc<Mutex<Option<Child>>>,
     active_generation: Arc<AtomicU64>,
     response_timeout: Duration,
 ) {
-    let mut worker = Worker::new(repo, offline, byte_limit, control, active_generation, response_timeout);
+    let mut worker = Worker::new(repo, offline, byte_limit, active_generation, response_timeout);
     for job in receive {
         if !worker.run(job, &done) {
             break;
         }
     }
-    worker.stop();
 }
 
-/// What the asset worker keeps between jobs: the glyph pages it rasterized and the Node helper
-/// (the web build: a local resolver over the page's bundled files instead of the helper)
+/// What the asset worker keeps between jobs: the glyph pages it rasterized, and the resolver that finds
+/// and downloads images and cloud fonts and has ViewportFrames drawn by the 3D worker (the web build: a
+/// local resolver over the page's bundled files)
 struct Worker {
-    repo: PathBuf,
-    offline: bool,
     byte_limit: usize,
-    control: Arc<Mutex<Option<Child>>>,
     active_generation: Arc<AtomicU64>,
-    response_timeout: Duration,
-    helper: Option<(mpsc::SyncSender<Value>, mpsc::Receiver<Result<String, String>>)>,
     glyphs: GlyphPages,
     resolver: crate::resolve::Resolver,
 }
 
 impl Worker {
-    fn new(
-        repo: PathBuf,
-        offline: bool,
-        byte_limit: usize,
-        control: Arc<Mutex<Option<Child>>>,
-        active_generation: Arc<AtomicU64>,
-        response_timeout: Duration,
-    ) -> Self {
-        Self {
-            // The web build has no helper and never downloads, so its resolver is always offline
-            resolver: crate::resolve::Resolver::new(repo.clone(), cfg!(feature = "web") || offline),
-            repo,
-            offline,
-            byte_limit,
-            control,
-            active_generation,
-            response_timeout,
-            helper: None,
-            glyphs: GlyphPages::new(),
-        }
-    }
-
-    #[cfg(not(feature = "web"))]
-    fn stop(&mut self) {
-        drop(self.helper.take());
-        if let Ok(mut child) = self.control.lock() {
-            if let Some(child) = child.as_mut() {
-                stop_child(child);
-            }
-        }
+    fn new(repo: PathBuf, offline: bool, byte_limit: usize, active_generation: Arc<AtomicU64>, response_timeout: Duration) -> Self {
+        // The web build never downloads, so its resolver is always offline
+        let mut resolver = crate::resolve::Resolver::new(repo, cfg!(feature = "web") || offline);
+        // the app's ViewportFrames change as it runs: drawn anew, none kept for later processes
+        resolver.draw_viewports_live();
+        resolver.set_viewport_timeout(response_timeout);
+        Self { byte_limit, active_generation, glyphs: GlyphPages::new(), resolver }
     }
 
     /// Runs one job, sending its completions; false when the asset store is gone
     fn run(&mut self, job: Job, done: &Done) -> bool {
-        let Worker { repo, offline, byte_limit, control, active_generation, response_timeout, helper, glyphs, .. } = self;
-        let (repo, offline, byte_limit, response_timeout) = (&*repo, *offline, *byte_limit, *response_timeout);
-        let resolver = &mut self.resolver;
-        // Set while the Node helper owns the job: its failures restart the helper, glyph failures do not
-        let mut helper_fault = false;
-        // (the web build returns before the helper part)
-        #[cfg_attr(feature = "web", allow(unreachable_code))]
+        let Worker { byte_limit, active_generation, glyphs, resolver } = self;
+        let byte_limit = *byte_limit;
         let result = (|| -> Result<Vec<AssetId>, String> {
             if job.generation != active_generation.load(Ordering::Acquire) {
                 return Err("Asset job cancelled by scene change".into());
@@ -1641,159 +1526,64 @@ impl Worker {
                     pages.push(id);
                 }
             }
-            if job.images.is_empty() && job.diagnostics.is_none() {
-                return match glyph_error {
-                    Some(error) => Err(error),
-                    None => Ok(pages),
-                };
-            }
-            // Without the Node helper (the web build, or a binary outside a checkout) images are files
-            // at their local paths (the asset cache, the Studio install), resolved here. The web
-            // build's cloud fonts come with its bundle; a binary outside a checkout only reports the
-            // fonts it is missing.
-            if cfg!(feature = "web") || !crate::paths::has_asset_helper(repo) {
-                if let Some(diagnostics) = job.diagnostics.as_ref().filter(|_| !cfg!(feature = "web")) {
-                    let _ = resolver.fetch_fonts(diagnostics);
-                }
-                if job.diagnostics.is_none() {
-                    // The bundle's answers (RUR_WEB_IMAGES: {uri: file | {error}}, what the Node
-                    // helper answered when the page was bundled), else the local rules
-                    #[cfg(feature = "web")]
-                    let bundled = web_images();
-                    #[cfg(not(feature = "web"))]
-                    let bundled = Value::Null;
-                    let mut resolved = resolver.resolve_all(&job.images.iter().filter(|uri| bundled.get(uri.as_str()).is_none()).cloned().collect::<Vec<_>>());
-                    for uri in &job.images {
-                        match bundled.get(uri.as_str()) {
-                            Some(Value::String(file)) => {
-                                resolved.insert(uri.clone(), Ok(PathBuf::from(file)));
-                            }
-                            Some(entry) => {
-                                resolved.insert(uri.clone(), Err(entry["error"].as_str().unwrap_or("unavailable").to_owned()));
-                            }
-                            None => {}
-                        }
-                    }
-                    for uri in &job.images {
-                        let id = AssetId(uri.clone());
-                        let completion = match resolved.get(uri) {
-                            Some(Ok(file)) => match decode_texture(id.clone(), file, byte_limit) {
-                                Ok(texture) => Completion::Texture(texture, file.clone(), job.generation),
-                                Err(error) => Completion::Failed(Some(id), error, job.generation),
-                            },
-                            Some(Err(error)) => Completion::Failed(Some(id), format!("Missing image {uri}: {error}"), job.generation),
-                            None => Completion::Failed(Some(id), format!("Missing image {uri}: unresolved"), job.generation),
-                        };
-                        done.send(completion).map_err(|_| "Asset store closed")?;
-                    }
-                }
-                return match glyph_error {
-                    Some(error) => Err(error),
-                    None => Ok(pages),
-                };
-            }
-            // Images and cloud fonts: the Node helper (cli/native-assets.mjs)
-            helper_fault = true;
-            let request = if let Some(diagnostics) = &job.diagnostics {
-                json!({"id":job.id,"command":"fonts","diagnostics":diagnostics})
-            } else {
-                json!({"id":job.id,"images":job.images,"viewports":job.scene["viewports"],"viewportSlots":job.scene["viewportSlots"]})
-            };
-            if helper.is_some() {
-                let exited = control
-                    .lock()
-                    .map(|mut slot| {
-                        slot.as_mut()
-                            .is_none_or(|child| !matches!(child.try_wait(), Ok(None)))
-                    })
-                    .unwrap_or(true);
-                if exited {
-                    *helper = None;
-                }
-            }
-            if helper.is_none() {
-                *helper = Some(start_helper(repo, offline, control)?);
-            }
-            let (input, output) = helper.as_mut().unwrap();
-            input
-                .try_send(request)
-                .map_err(|_| "Asset helper request channel closed")?;
-            let deadline = Instant::now() + response_timeout;
-            let line = loop {
-                if job.generation != active_generation.load(Ordering::Acquire) {
-                    return Err("Asset job cancelled by scene change".into());
-                }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
-                    return Err("Asset helper timed out".into());
-                }
-                match output.recv_timeout(remaining.min(Duration::from_millis(50))) {
-                    Ok(line) => break line?,
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        return Err("Asset helper exited".into());
-                    }
-                }
-            };
-            let response: Value =
-                serde_json::from_str(&line).map_err(|_| "Invalid asset helper response")?;
-            if let Some(error) = response["error"].as_str() {
-                return Err(error.to_owned());
-            }
-            if response["id"].as_u64() != Some(job.id) {
-                return Err("Asset response order mismatch".into());
-            }
-            if response["fontsChanged"] == true {
-                done.send(Completion::FontsChanged)
-                    .map_err(|_| "Asset store closed")?;
-            }
-            for image in response["images"].as_array().into_iter().flatten() {
-                for warning in image["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-                    done.send(Completion::Failed(None, format!("ViewportFrame: {warning}"), job.generation))
-                        .map_err(|_| "Asset store closed")?;
-                }
-                let Some(uri) = image["uri"].as_str() else {
-                    continue;
-                };
-                let id = AssetId(uri.into());
-                if let Some(file) = image["file"].as_str() {
-                    match decode_texture(id.clone(), Path::new(file), byte_limit) {
-                        Ok(texture) => {
-                            done.send(Completion::Texture(texture, file.into(), job.generation))
-                                .map_err(|_| "Asset store closed")?;
-                        }
-                        Err(error) => {
-                            done.send(Completion::Failed(Some(id), error, job.generation))
-                                .map_err(|_| "Asset store closed")?;
-                        }
-                    }
-                } else {
-                    done.send(Completion::Failed(
-                        Some(id),
-                        format!(
-                            "Missing image {uri}: {}",
-                            image["error"].as_str().unwrap_or("unavailable")
-                        ),
-                        job.generation,
-                    ))
-                    .map_err(|_| "Asset store closed")?;
-                }
-            }
-            helper_fault = false;
-            match glyph_error {
+            let finished = |glyph_error: Option<String>, pages: Vec<AssetId>| match glyph_error {
                 Some(error) => Err(error),
                 None => Ok(pages),
+            };
+            if job.images.is_empty() && job.diagnostics.is_none() {
+                return finished(glyph_error, pages);
             }
-        })();
-        let success = result.is_ok();
-        if helper_fault && job.manifest.is_none() {
-            *helper = None;
-            if let Ok(mut slot) = control.lock() {
-                if let Some(mut child) = slot.take() {
-                    stop_child(&mut child);
+            // Cloud fonts: downloaded by the resolver (download.rs). The web build's come with its bundle.
+            if let Some(diagnostics) = &job.diagnostics {
+                if resolver.fetch_fonts(diagnostics).unwrap_or(false) {
+                    done.send(Completion::FontsChanged).map_err(|_| "Asset store closed")?;
+                }
+                return finished(glyph_error, pages);
+            }
+            // Images: local files, the asset cache, downloads and the ViewportFrames' 3D worker, through
+            // the resolver. The job carries the frames' snapshots and the slots the scene still shows.
+            resolver.set_viewport_snapshots(job.scene["viewports"].clone());
+            if let Some(slots) = job.scene["viewportSlots"].as_array() {
+                resolver.retain_viewports(&slots.iter().filter_map(|slot| slot.as_str().and_then(|slot| slot.parse().ok()).or_else(|| slot.as_u64())).collect::<Vec<u64>>());
+            }
+            let images = &job.images;
+            // The web build: the bundle's answers (RUR_WEB_IMAGES: {uri: file | {error}}, what the asset
+            // resolver answered when the page was bundled), else the local rules
+            #[cfg(feature = "web")]
+            let bundled = web_images();
+            #[cfg(not(feature = "web"))]
+            let bundled = Value::Null;
+            let mut resolved = resolver.resolve_all(&images.iter().filter(|uri| bundled.get(uri.as_str()).is_none()).cloned().collect::<Vec<_>>());
+            resolver.set_viewport_snapshots(Value::Null);
+            for uri in images {
+                match bundled.get(uri.as_str()) {
+                    Some(Value::String(file)) => {
+                        resolved.insert(uri.clone(), Ok(PathBuf::from(file)));
+                    }
+                    Some(entry) => {
+                        resolved.insert(uri.clone(), Err(entry["error"].as_str().unwrap_or("unavailable").to_owned()));
+                    }
+                    None => {}
                 }
             }
-        }
+            for uri in images {
+                let id = AssetId(uri.clone());
+                let completion = match resolved.get(uri) {
+                    Some(Ok(file)) => match decode_texture(id.clone(), file, byte_limit) {
+                        Ok(texture) => Completion::Texture(texture, file.clone(), job.generation),
+                        Err(error) => Completion::Failed(Some(id), error, job.generation),
+                    },
+                    Some(Err(error)) => Completion::Failed(Some(id), missing_image(uri, error), job.generation),
+                    None => Completion::Failed(Some(id), missing_image(uri, "unresolved"), job.generation),
+                };
+                done.send(completion).map_err(|_| "Asset store closed")?;
+            }
+            for warning in resolver.take_viewport_warnings() {
+                done.send(Completion::Failed(None, format!("ViewportFrame: {warning}"), job.generation)).map_err(|_| "Asset store closed")?;
+            }
+            finished(glyph_error, pages)
+        })();
+        let success = result.is_ok();
         if let Err(error) = result {
             let _ = done.send(Completion::Failed(None, error, job.generation));
         }
@@ -1819,30 +1609,14 @@ impl Worker {
     }
 }
 
-fn stop_child(child: &mut Child) {
-    if matches!(child.try_wait(), Ok(Some(_))) {
-        return;
+/// The diagnostic for an image that could not be had. A ViewportFrame's says why without its URI, so
+/// the frames that fail for one reason (ror not installed) show it once.
+fn missing_image(uri: &str, error: &str) -> String {
+    if crate::resolve::is_viewport(uri) {
+        format!("ViewportFrames: {error}")
+    } else {
+        format!("Missing image {uri}: {error}")
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = Command::new("taskkill")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .creation_flags(0x08000000)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    #[cfg(unix)]
-    {
-        let _ = Command::new("kill")
-            .args(["-KILL", "--", &format!("-{}", child.id())])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 fn load_manifest(
@@ -2155,7 +1929,7 @@ mod tests {
         page.atlas["glyphs"].as_array().unwrap().iter().map(|glyph| glyph["key"].clone()).collect()
     }
 
-    /// The glyph step of the former cli/native-assets.mjs (tools/tests/native-assets.mjs' glyph checks)
+    /// The glyph step: pages, fills and strokes rasterized in process
     #[test]
     fn glyph_pages_rasterize_incrementally_and_keep_current_bindings() {
         let mut pages = GlyphPages::new();
@@ -2294,7 +2068,6 @@ mod tests {
             (fill.x..fill.x + fill.w).any(|x| page.rgba[(y * page.width + x) as usize * 4 + 3] > 0)
         });
         assert!(fill.w > 0 && covered, "the glyph has coverage");
-        assert!(assets.child.lock().unwrap().is_none(), "glyphs do not start Node or Python");
         assert_eq!(assets.request_missing(&scene), 0);
     }
 
@@ -2376,10 +2149,6 @@ mod tests {
         );
         assert!(assets.glyph_for(0, 18.0, 41, 0.0, None).is_some());
         assert_eq!(assets.request_missing(&scene), 0);
-        assert!(
-            assets.child.lock().unwrap().is_none(),
-            "saved manifests do not start Node or Python"
-        );
 
         let old_generation = assets.generation;
         let (inject, completed) = mpsc::sync_channel(8);
@@ -2471,43 +2240,54 @@ mod tests {
         std::fs::remove_dir(directory).unwrap();
     }
 
+    /// Registers a stand-in 3D worker (Node, `script` run with -e) for the asset store of `directory`;
+    /// the registration goes when the returned guard does
+    fn stand_in_worker(directory: &Path, script: String) -> impl Drop {
+        struct Registered(PathBuf);
+        impl Drop for Registered {
+            fn drop(&mut self) {
+                crate::viewports::STAND_INS.lock().unwrap().retain(|(state, ..)| *state != self.0);
+            }
+        }
+        let state = crate::state_dir(directory);
+        let node = std::env::var_os("RUR_NODE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("node"));
+        // `--` ends Node's options: what follows (the worker's `--offline`) goes to the script
+        crate::viewports::STAND_INS.lock().unwrap().push((state.clone(), node, vec!["-e".into(), script, "--".into()]));
+        Registered(state)
+    }
+
+    fn unique_directory(name: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "rur-native-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    const VIEWPORT: &str = "rur-viewport://1/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// A 3D worker that exits, or hangs past the store's timeout, fails that request only: the next
+    /// scene's request starts a new worker, which draws the frame
     #[test]
-    fn failed_or_hung_helper_restarts_after_scene_reload() {
+    fn failed_or_hung_worker_restarts_after_scene_reload() {
         for hang in [false, true] {
-            let directory = std::env::temp_dir().join(format!(
-                "rur-native-helper-test-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            std::fs::create_dir(&directory).unwrap();
-            std::fs::create_dir(directory.join("cli")).unwrap();
+            let directory = unique_directory("worker-restart");
             let png = directory.join("image.png");
-            image::RgbaImage::from_raw(1, 1, vec![1, 2, 3, 255])
-                .unwrap()
-                .save(&png)
-                .unwrap();
-            let helper = directory.join("cli/native-assets.mjs");
+            image::RgbaImage::from_raw(1, 1, vec![1, 2, 3, 255]).unwrap().save(&png).unwrap();
+            let attempted = directory.join("attempted");
             let script = format!(
-                r#"import fs from 'node:fs';
-process.stdin.on('data', bytes => {{
- const request = JSON.parse(bytes.toString());
- if (!fs.existsSync('attempted')) {{
-  fs.writeFileSync('attempted','yes');
-  if ({hang}) setInterval(() => {{}},1000); else process.exit(3);
- }} else process.stdout.write(JSON.stringify({{id:request.id,images:[{{uri:'rbxassetid://123',file:{png}}}],pages:[]}})+'\n');
-}});
-"#,
-                hang = hang,
-                png = serde_json::to_string(&png.to_string_lossy()).unwrap()
+                "const fs=require('fs');require('readline').createInterface({{input:process.stdin}}).on('line',line=>{{const r=JSON.parse(line);\
+                 if(!fs.existsSync({attempted})){{fs.writeFileSync({attempted},'yes');if({hang})setInterval(()=>{{}},1000);else process.exit(3);}}\
+                 else{{fs.copyFileSync({png},r.out);process.stdout.write(JSON.stringify({{file:r.out,background:true}})+'\\n');}}}});",
+                attempted = serde_json::to_string(&attempted).unwrap(),
+                png = serde_json::to_string(&png).unwrap()
             );
-            std::fs::write(&helper, script).unwrap();
+            let registered = stand_in_worker(&directory, script);
             let mut scene = SceneStore::default();
-            scene.apply(&json!({"viewport":{},"nodes":[{"id":1,"image":{"uri":"rbxassetid://123"}}],"fonts":[],"images":["rbxassetid://123"],"layers":[]})).unwrap();
-            let mut assets =
-                AssetStore::with_timeout(&directory, true, 1024 * 1024, Duration::from_secs(2));
+            scene.apply(&json!({"viewport":{},"nodes":[{"id":1,"image":{"uri":VIEWPORT},"viewport":{"version":1}}],"fonts":[],"images":[VIEWPORT],"layers":[]})).unwrap();
+            let mut assets = AssetStore::with_timeout(&directory, true, 1024 * 1024, Duration::from_secs(2));
             for attempt in 0..2 {
                 assets.begin_scene(&scene);
                 assert_eq!(assets.request_missing(&scene), 1);
@@ -2516,31 +2296,18 @@ process.stdin.on('data', bytes => {{
                     assets.poll();
                     std::thread::sleep(Duration::from_millis(2));
                 }
-                assert_eq!(
-                    assets.pending_count(),
-                    0,
-                    "worker deadline must release failed jobs"
-                );
+                assert_eq!(assets.pending_count(), 0, "the worker's deadline releases failed jobs");
                 if attempt == 0 {
                     assert!(!assets.diagnostics().is_empty());
                 } else {
-                    assert_eq!(
-                        &*assets.image("rbxassetid://123").unwrap().rgba,
-                        &[1, 2, 3, 255]
-                    );
-                    assert!(assets.diagnostics().is_empty());
+                    let image = assets.image(VIEWPORT).unwrap_or_else(|| panic!("hang {hang}: no picture: {:?}", assets.diagnostics()));
+                    assert_eq!(&*image.rgba, &[1, 2, 3, 255]);
+                    assert!(assets.diagnostics().is_empty(), "{:?}", assets.diagnostics());
                 }
             }
-            let child = assets.child.clone();
             drop(assets);
-            if let Some(child) = child.lock().unwrap().as_mut() {
-                let _ = child.wait();
-            }
-            std::fs::remove_file(png).unwrap();
-            std::fs::remove_file(helper).unwrap();
-            std::fs::remove_file(directory.join("attempted")).unwrap();
-            std::fs::remove_dir(directory.join("cli")).unwrap();
-            std::fs::remove_dir(directory).unwrap();
+            drop(registered);
+            let _ = std::fs::remove_dir_all(directory);
         }
     }
 
@@ -2549,43 +2316,53 @@ process.stdin.on('data', bytes => {{
     /// the download took (the ~60 ms frames of a scroll into new rows)
     #[test]
     fn glyph_jobs_do_not_wait_for_a_slow_image_download() {
-        let directory = std::env::temp_dir().join(format!(
-            "rur-native-slow-helper-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(directory.join("cli")).unwrap();
-        // A helper that never answers (a download that takes long)
-        std::fs::write(
-            directory.join("cli/native-assets.mjs"),
-            "process.stdin.on('data', () => {}); setInterval(() => {}, 1000);\n",
-        )
-        .unwrap();
+        let directory = unique_directory("slow-worker");
+        // A 3D worker that never answers (a ViewportFrame render that takes long)
+        let registered = stand_in_worker(&directory, "require('readline').createInterface({input:process.stdin}).on('line',()=>{});".into());
         let mut assets = AssetStore::with_timeout(&directory, true, 1024 * 1024, Duration::from_secs(20));
         let mut scene = SceneStore::default();
-        scene.apply(&json!({"viewport":{"scale":1.5},"nodes":[{"id":1,"image":{"uri":"rbxassetid://123"}}],"fonts":[{"weight":400}],"images":["rbxassetid://123"],"layers":[]})).unwrap();
+        scene.apply(&json!({"viewport":{"scale":1.5},"nodes":[{"id":1,"image":{"uri":VIEWPORT},"viewport":{"version":1}}],"fonts":[{"weight":400}],"images":[VIEWPORT],"layers":[]})).unwrap();
         assets.begin_scene(&scene);
         assert_eq!(assets.request_missing(&scene), 1);
-        // New text scrolls in while the image is downloading
-        scene.apply(&json!({"viewport":{"scale":1.5},"nodes":[{"id":1,"image":{"uri":"rbxassetid://123"}},
-            {"id":2,"text":{"weight":400,"lines":[{"glyphs":[[0,41,0,18]]}]}}],"fonts":[{"weight":400}],"images":["rbxassetid://123"],"layers":[]})).unwrap();
+        // New text scrolls in while the frame is drawn
+        scene.apply(&json!({"viewport":{"scale":1.5},"nodes":[{"id":1,"image":{"uri":VIEWPORT},"viewport":{"version":1}},
+            {"id":2,"text":{"weight":400,"lines":[{"glyphs":[[0,41,0,18]]}]}}],"fonts":[{"weight":400}],"images":[VIEWPORT],"layers":[]})).unwrap();
         assets.request_missing(&scene);
         assert!(!assets.pending_signatures.is_empty());
         let started = Instant::now();
         while !assets.pending_signatures.is_empty() && started.elapsed() < Duration::from_secs(5) {
             assets.wait_for_glyphs(Duration::from_millis(50));
         }
-        assert!(assets.pending_signatures.is_empty(), "the glyph job waited for the download");
+        assert!(assets.pending_signatures.is_empty(), "the glyph job waited for the image");
         assert!(started.elapsed() < Duration::from_secs(2));
-        assert_eq!(assets.helper_jobs(), 1, "the download is still in flight");
-        let child = assets.child.clone();
+        assert_eq!(assets.image_jobs(), 1, "the render is still in flight");
         drop(assets);
-        if let Some(child) = child.lock().unwrap().as_mut() {
-            let _ = child.wait();
+        drop(registered);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    /// Images that are not ViewportFrames, and cloud fonts, are found and downloaded natively (resolve.rs,
+    /// download.rs): they never start the 3D worker
+    #[test]
+    fn ordinary_images_and_fonts_never_start_the_3d_worker() {
+        let directory = unique_directory("no-worker-images");
+        let started = directory.join("started");
+        let registered = stand_in_worker(&directory, format!("require('fs').writeFileSync({},'yes');", serde_json::to_string(&started).unwrap()));
+        let mut assets = AssetStore::with_timeout(&directory, true, 1024 * 1024, Duration::from_secs(5));
+        let mut scene = SceneStore::default();
+        scene.apply(&json!({"viewport":{},"nodes":[{"id":1,"image":{"uri":"rbxassetid://987654321987654321"}}],"fonts":[],"images":["rbxassetid://987654321987654321"],"layers":[]})).unwrap();
+        assets.begin_scene(&scene);
+        assert_eq!(assets.request_missing(&scene), 1);
+        assert!(assets.request_fonts(&json!({"missingFontAssets": ["rbxassetid://6"]})));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while (assets.pending_count() > 0 || assets.jobs > 0) && Instant::now() < deadline {
+            assets.poll();
+            std::thread::sleep(Duration::from_millis(2));
         }
+        assert_eq!(assets.diagnostics(), ["Missing image rbxassetid://987654321987654321: offline and not cached"]);
+        drop(assets);
+        drop(registered);
+        assert!(!started.exists(), "no 3D worker was started");
         let _ = std::fs::remove_dir_all(directory);
     }
 

@@ -661,8 +661,8 @@ pub fn draw_frames(
             presentation.update(&scene, None);
             ready = reply;
         }
-        // Images the scene shows for the first time: resolved here (cached and local files in process,
-        // downloads through the helper only when online), decoded by the store
+        // Images the scene shows for the first time: resolved here (cached and local files, downloads when
+        // online, ViewportFrames through the helper), decoded by the store
         let fresh: Vec<String> = scene.images().iter().filter_map(Value::as_str).filter(|uri| !resolved.contains(*uri)).map(str::to_string).collect();
         if !fresh.is_empty() {
             let answers = resolver.resolve_scene(&scene.to_value(), &fresh);

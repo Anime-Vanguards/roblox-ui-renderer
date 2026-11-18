@@ -112,8 +112,8 @@ pub(super) fn export(ctx: &Ctx, _out: &Export, id: InstanceId, record: &Record, 
         "version":1, "width":dimension(record.w), "height":dimension(record.h),
         "camera":{"mode":"cFrame","components":components,"fov":camera.and_then(|c| get(c,"FieldOfView")).or_else(|| get(id,"CameraFieldOfView")).and_then(Value::as_number).unwrap_or(70.0)},
         "instances":instances,
-        // The frame's fill, which the picture is laid over: Studio draws the world into a target cleared to it
-        // (cli/viewports.mjs layViewportBackground; the renderer then draws only the frame's border)
+        // The frame's fill, which the worker draws the world over: Studio draws it into a target cleared to it
+        // (viewports.rs; the renderer then draws only the frame's border)
         "background":node.get("bg").cloned().unwrap_or(Json::Null),
     });
     let digest = Sha256::digest(serde_json::to_vec(&descriptor).unwrap());

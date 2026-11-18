@@ -66,10 +66,10 @@ storybook, and `rur-native render --story <story.luau> --project <your-project> 
 renders headless. In a Rojo project (Wally packages included) run it from the project folder and no
 project flag is needed: `default.project.json` is found and mounted, or name one with `--rojo <file>`
 ([projects](docs/projects.md#rojo-projects-and-explicit-mounts)). The storybook and PNG renders need a graphics driver, and fonts and textures come from
-your Roblox Studio install. A release binary works on local content only: downloading assets needs the
-Node CLI below. On Linux and macOS use rokit 1.0 or later, since 0.2.x cannot select an executable whose
-name differs from this repository's. [Setup](docs/setup.md#release-binaries) covers the platforms, where
-the state goes and how to verify a download.
+your Roblox Studio install. A release binary downloads the assets and cloud fonts a story uses by itself,
+and draws ViewportFrames' 3D content with [ror](docs/viewports.md) when ror is installed. On Linux and macOS use rokit 1.0 or later, since 0.2.x
+cannot select an executable whose name differs from this repository's. [Setup](docs/setup.md#release-binaries)
+covers the platforms, where the state goes and how to verify a download.
 
 To use the Node CLI or work on rur, build from a checkout. You need Rust 1.90+ with a C++ build
 toolchain, Node 18+ and a Roblox Studio install, whose fonts and `rbxasset://` textures rur reads (it
@@ -120,8 +120,8 @@ nodes were laid out at the same rect.
 
 Limitations:
 
-- ViewportFrames draw their 3D content through ror's viewport worker: build ror beside this checkout or
-  set `RUR_VIEWPORT_WORKER` ([docs/viewports.md](docs/viewports.md)). SurfaceGuis and BillboardGuis in
+- ViewportFrames draw their 3D content with ror, installed beside rur ([docs/viewports.md](docs/viewports.md)).
+  SurfaceGuis and BillboardGuis in
   the world are not rendered.
 - A plain render captures the state after `--time`; interactive states need `--actions` or the desktop
   app's input.

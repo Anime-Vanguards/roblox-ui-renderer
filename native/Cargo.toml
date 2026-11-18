@@ -31,7 +31,7 @@ required-features = ["web"]
 default = ["desktop"]
 # The egui desktop app, headless captures, the render service, the runtime worker thread, the Luau
 # JIT and the native GPU backends
-desktop = ["dep:eframe", "dep:egui", "dep:egui-wgpu", "dep:tokio", "dep:ree-profile-view", "mlua/luau-jit", "roblox-engine-emulator/jit", "roblox-engine-emulator/bundles", "wgpu/dx12", "wgpu/vulkan", "wgpu/metal"]
+desktop = ["dep:eframe", "dep:egui", "dep:egui-wgpu", "dep:tokio", "dep:ree-profile-view", "dep:ureq", "dep:flate2", "dep:md-5", "mlua/luau-jit", "roblox-engine-emulator/jit", "roblox-engine-emulator/bundles", "wgpu/dx12", "wgpu/vulkan", "wgpu/metal"]
 # The engine and renderer in a browser: WebGL2 through wgpu's GLES backend, single-threaded, files
 # from the page's bundle (src/web.rs)
 web = []
@@ -71,6 +71,13 @@ resvg = "=0.45.1"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = { version = "=1.0.145", features = ["float_roundtrip"] }
 tokio = { version = "=1.48.0", features = ["rt", "sync", "time"], optional = true }
+# Asset downloads (src/download.rs, desktop only): HTTPS through rustls with its bundled root certificates,
+# no OpenSSL or system TLS library, the same client roblox-object-renderer downloads with
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "gzip"], optional = true }
+# Bodies asset delivery sends gzip-wrapped without a Content-Encoding header (src/download.rs unwrap)
+flate2 = { version = "=1.1.10", optional = true }
+# Roblox's HTTP cache names its entries by MD5: Studio's Blocked-thumbnail placeholders (src/download.rs)
+md-5 = { version = "=0.10.6", optional = true }
 wgpu = { version = "=27.0.1", default-features = false, features = ["std", "parking_lot", "gles", "wgsl", "glsl"] }
 
 # The web build's canvas surface (wgpu's GLES backend presents to Emscripten's WebGL2 canvas)

@@ -54,8 +54,8 @@ every time:
   story, runs its virtual time, lays out and exports. Module sources and bytecode are kept between VMs;
 - the headless **GPU device** with the renderer's pipelines, the **glyph rasterizer** (fonts) and decoded
   images;
-- the **image resolver** (local files, cached assets and thumbnails; a Node helper, `cli/native-assets.mjs`,
-  starts only for downloads and cloud fonts).
+- the **image resolver** (local files, the asset cache, downloads and cloud fonts, and ViewportFrames
+  drawn by ror's worker, which starts on the first one).
 
 So a render of a known project costs the story's own Luau plus a draw. A standby is used only while what it
 read at load is unchanged (the renderer's `data/`, the project's directory structure and the files read at

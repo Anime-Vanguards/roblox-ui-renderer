@@ -1,23 +1,21 @@
-//! Content URI -> local file, for `rur render` output directories (story_render.rs).
+//! Content URI -> local file, for `rur render` output directories (story_render.rs), the desktop app's
+//! asset worker (assets.rs) and the Node CLI (`rur-native assets fetch`, download.rs).
 //!
-//! The rules are cli/assets.mjs resolveUri's: `rbxasset://` from the local Studio install,
-//! `rbxassetid://N` (and `roblox.com/asset/?id=N`, bare ids) from the asset cache
-//! (`<state dir>/assets/<id>.<ext>` when its download record matches it, offline any such file; a
-//! cached decal / texture model resolves to the image it references), `rbxthumb://` from its cached
-//! WebP rendition, `file://` from its file (the PNG snapshot the engine emulator writes of an
-//! EditableImage a script shows). Everything this module answers is local and needs no helper; a URI
-//! that needs a download (a cache file rur did not download included, or a cache entry only Node
-//! migrates) goes to cli/native-assets.mjs, which owns authentication, downloads and the cache
-//! layout. The error texts are resolveUri's, so a render's `missingImages` read the same either way.
+//! `rbxasset://` comes from the local Studio install, `rbxassetid://N` (and `roblox.com/asset/?id=N`,
+//! bare ids) from the asset cache (`<state dir>/assets/<id>.<ext>` when its download record matches
+//! it, offline any such file; a cached decal / texture model resolves to the image it references),
+//! `rbxthumb://` from its cached WebP rendition, `file://` from its file (the PNG snapshot the engine
+//! emulator writes of an EditableImage a script shows). What is not local is downloaded (download.rs,
+//! the desktop build; the web build only has its bundle). ViewportFrame images (`rur-viewport://`)
+//! come from the 3D worker (viewports.rs, the desktop build).
 use std::{
-    collections::{BTreeMap, HashMap},
-    io::{BufRead, BufReader, Write},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    sync::{Mutex, OnceLock},
     time::SystemTime,
 };
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 /// A resolved URI: the local file, or why there is none.
 pub type Resolution = Result<PathBuf, String>;
@@ -26,52 +24,22 @@ pub struct Resolver {
     repo: PathBuf,
     assets: PathBuf,
     offline: bool,
-    /// No Node helper (a binary outside a checkout): only local content resolves, and what needs a
-    /// download is reported as needing the rur CLI from a checkout
-    local_only: bool,
-    helper: Option<Helper>,
     content_roots: Option<Vec<PathBuf>>,
+    /// The snapshots of the ViewportFrame images being resolved, by URI
     viewports: Value,
-    /// Missing cloud fonts already reported when `local_only`, so each is printed once
-    reported_fonts: std::collections::HashSet<String>,
-    /// Cache files that matched their download record, by the length and modification time they had then
-    verified: HashMap<PathBuf, (u64, Option<SystemTime>)>,
+    /// Whether ViewportFrame pictures are kept for later processes (one-shot renders); the desktop app
+    /// draws them anew as they change and keeps none
+    persist_viewports: bool,
+    /// The 3D worker that draws ViewportFrames (viewports.rs)
+    #[cfg(feature = "desktop")]
+    worker: crate::viewports::ViewportWorker,
+    /// Downloads, the account and the studio read (download.rs)
+    #[cfg(feature = "desktop")]
+    downloads: crate::download::Downloader,
 }
 
-struct Helper {
-    child: Child,
-    input: ChildStdin,
-    output: BufReader<ChildStdout>,
-    next: u64,
-}
-
-/// Adds why an uncached asset can't be downloaded here to the "offline and not cached" error.
-fn with_helper_hint(error: String) -> String {
-    if error == "offline and not cached" {
-        format!("{error}; {}", crate::paths::HELPER_REQUIRED)
-    } else {
-        error
-    }
-}
-
-impl Drop for Helper {
-    /// Asks the helper to quit and gives it a moment; a helper that does not exit is killed
-    fn drop(&mut self) {
-        let _ = writeln!(self.input, "{}", json!({"command":"quit"}));
-        let _ = self.input.flush();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while std::time::Instant::now() < deadline {
-            if matches!(self.child.try_wait(), Ok(Some(_))) {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-const EXTENSIONS: [&str; 12] = [
+/// The extensions a cache entry can have, in the order cli/assets.mjs cachedFile looked for them
+pub(crate) const EXTENSIONS: [&str; 12] = [
     ".png", ".jpg", ".gif", ".webp", ".bmp", ".ttf", ".otf", ".ttc", ".json", ".rbxm", ".rbxmx", ".bin",
 ];
 
@@ -79,49 +47,83 @@ impl Resolver {
     pub fn new(repo: impl Into<PathBuf>, offline: bool) -> Self {
         let repo = repo.into();
         let assets = crate::state_dir(&repo).join("assets");
-        let local_only = !crate::paths::has_asset_helper(&repo);
-        Self { repo, assets, offline, local_only, helper: None, content_roots: None, viewports: Value::Null, reported_fonts: Default::default(), verified: HashMap::new() }
+        Self {
+            #[cfg(feature = "desktop")]
+            downloads: crate::download::Downloader::new(&repo),
+            #[cfg(feature = "desktop")]
+            worker: crate::viewports::ViewportWorker::new(&repo, offline),
+            repo,
+            assets,
+            offline,
+            content_roots: None,
+            viewports: Value::Null,
+            persist_viewports: true,
+        }
     }
 
     pub fn set_offline(&mut self, offline: bool) {
-        if self.offline != offline {
-            self.helper = None;
-        }
+        #[cfg(feature = "desktop")]
+        self.worker.set_offline(offline);
         self.offline = offline;
     }
 
-    /// Resolves every URI (in order, duplicates once): local answers first, the rest through the
-    /// helper in one request.
+    /// The desktop app's ViewportFrames: drawn anew as they change, kept by no later process
+    pub fn draw_viewports_live(&mut self) {
+        self.persist_viewports = false;
+    }
+
+    /// Forgets the ViewportFrame pictures of the slots no longer shown (the desktop app)
+    pub fn retain_viewports(&mut self, slots: &[u64]) {
+        #[cfg(feature = "desktop")]
+        self.worker.retain(slots);
+        #[cfg(not(feature = "desktop"))]
+        let _ = slots;
+    }
+
+    /// The snapshots `uris`' ViewportFrame images are drawn from (the desktop app's job carries them)
+    pub fn set_viewport_snapshots(&mut self, snapshots: Value) {
+        self.viewports = snapshots;
+    }
+
+    /// How long one ViewportFrame picture may take before the 3D worker is stopped
+    pub fn set_viewport_timeout(&mut self, timeout: std::time::Duration) {
+        #[cfg(feature = "desktop")]
+        self.worker.set_timeout(timeout);
+        #[cfg(not(feature = "desktop"))]
+        let _ = timeout;
+    }
+
+    /// The 3D worker's warnings since the last call (what it drew, but not as Studio would)
+    pub fn take_viewport_warnings(&mut self) -> Vec<String> {
+        #[cfg(feature = "desktop")]
+        return self.worker.take_warnings();
+        #[cfg(not(feature = "desktop"))]
+        Vec::new()
+    }
+
+    /// Resolves every URI (in order, duplicates once): local answers first, then the downloads, then
+    /// the ViewportFrame images from the 3D worker.
     pub fn resolve_all(&mut self, uris: &[String]) -> BTreeMap<String, Resolution> {
         let mut results = BTreeMap::new();
-        let mut remote = Vec::new();
+        let mut seen = HashSet::new();
+        let (mut remote, mut viewports) = (Vec::new(), Vec::new());
         for uri in uris {
-            if results.contains_key(uri) || remote.contains(uri) {
+            if !seen.insert(uri.as_str()) {
+                continue;
+            }
+            if is_viewport(uri) {
+                viewports.push(uri.clone());
                 continue;
             }
             match self.local(uri) {
                 Some(result) => {
-                    let result = if self.local_only { result.map_err(with_helper_hint) } else { result };
                     results.insert(uri.clone(), result);
                 }
                 None => remote.push(uri.clone()),
             }
         }
-        if !remote.is_empty() {
-            match self.helper_images(&remote) {
-                Ok(answers) => {
-                    for uri in remote {
-                        let answer = answers.get(&uri).cloned().unwrap_or_else(|| Err("unresolved".into()));
-                        results.insert(uri, answer);
-                    }
-                }
-                Err(error) => {
-                    for uri in remote {
-                        results.insert(uri, Err(error.clone()));
-                    }
-                }
-            }
-        }
+        results.extend(self.download(&remote));
+        results.extend(self.viewport_images(&viewports));
         results
     }
 
@@ -132,31 +134,81 @@ impl Resolver {
         result
     }
 
-    pub fn model(&mut self, request: Value) -> Result<Value, String> {
-        self.helper_call(json!({"command":"model","model":request}))
-    }
-
     /// Downloads the cloud fonts a run reported missing (scene.diagnostics); true when any arrived,
-    /// so the run is repeated with them (cli/rur.mjs fetchMissingFonts).
+    /// so the run is repeated with them. Offline, and in the web build, nothing is downloaded.
     pub fn fetch_fonts(&mut self, diagnostics: &Value) -> Result<bool, String> {
-        if self.local_only {
-            // Nothing to download with: say once per font that the helper is needed
-            for font in diagnostics["missingFontAssets"].as_array().into_iter().flatten() {
-                let key = font.to_string();
-                if self.reported_fonts.insert(key.clone()) {
-                    eprintln!("Missing font {key}: {}", crate::paths::HELPER_REQUIRED);
-                }
-            }
-            return Ok(false);
-        }
         if self.offline {
             return Ok(false);
         }
-        let reply = self.helper_call(json!({"command":"fonts","diagnostics":diagnostics}))?;
-        Ok(reply["fontsChanged"].as_bool().unwrap_or(false))
+        #[cfg(feature = "desktop")]
+        {
+            Ok(self.downloads.fetch_fonts(diagnostics))
+        }
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = diagnostics;
+            Ok(false)
+        }
     }
 
-    /// The local answer for `uri`, or None when only the helper can answer it.
+    /// Whether private assets can be asked for, and how: "broker", "cookie", or None (public assets only)
+    #[cfg(feature = "desktop")]
+    pub fn account_access(&self) -> Option<&'static str> {
+        self.downloads.account_access()
+    }
+
+    /// The downloader, for the `assets` command (`--no-studio`)
+    #[cfg(feature = "desktop")]
+    pub(crate) fn downloads_mut(&mut self) -> &mut crate::download::Downloader {
+        &mut self.downloads
+    }
+
+    /// The URIs `local` could not answer: downloaded (download.rs), or, without a downloader (the web
+    /// build, which never downloads), not cached
+    fn download(&mut self, uris: &[String]) -> BTreeMap<String, Resolution> {
+        if uris.is_empty() {
+            return BTreeMap::new();
+        }
+        #[cfg(feature = "desktop")]
+        {
+            self.downloads.resolve_all(uris, self.offline).into_iter().map(|(uri, result)| (uri, result.map(|fetched| fetched.file))).collect()
+        }
+        #[cfg(not(feature = "desktop"))]
+        {
+            uris.iter().map(|uri| (uri.clone(), Err("offline and not cached".to_string()))).collect()
+        }
+    }
+
+    /// ViewportFrame images (`rur-viewport://`), drawn by the 3D worker from their snapshots. A worker
+    /// that can't be had fails every frame with the same reason, found once.
+    fn viewport_images(&mut self, uris: &[String]) -> BTreeMap<String, Resolution> {
+        let mut results = BTreeMap::new();
+        #[cfg(feature = "desktop")]
+        {
+            let mut unavailable: Option<String> = None;
+            for uri in uris {
+                if let Some(reason) = &unavailable {
+                    results.insert(uri.clone(), Err(reason.clone()));
+                    continue;
+                }
+                let snapshot = self.viewports.get(uri.as_str()).cloned().unwrap_or(Value::Null);
+                let result = self.worker.render(uri, &snapshot, self.persist_viewports);
+                if let Err(error) = &result {
+                    if crate::viewports::is_unavailable(error) {
+                        unavailable = Some(error.clone());
+                    }
+                }
+                results.insert(uri.clone(), result);
+            }
+        }
+        #[cfg(not(feature = "desktop"))]
+        for uri in uris {
+            results.insert(uri.clone(), Err("ViewportFrames are not drawn in the browser build".into()));
+        }
+        results
+    }
+
+    /// The local answer for `uri`, or None when it needs a download (or the 3D worker).
     fn local(&mut self, uri: &str) -> Option<Resolution> {
         let trimmed = uri.trim();
         let lower = trimmed.to_ascii_lowercase();
@@ -172,10 +224,10 @@ impl Resolver {
             return Some(if path.is_file() { Ok(path) } else { Err(format!("no such file: {uri}")) });
         }
         if lower.starts_with("rbxthumb://") {
-            let key = thumbnail_key(&trimmed["rbxthumb://".len()..]);
-            return match self.cached(&key) {
+            let key = ThumbnailQuery::parse(&trimmed["rbxthumb://".len()..]).key();
+            return match cached_file(&self.assets, &key) {
                 // A cache entry holding the UnapprovedImage icon (a Blocked thumbnail cached before the placeholder
-                // rule) is left to the helper, which draws Studio's placeholder (cli/assets.mjs fetchThumbnail)
+                // rule) is left to the downloader, which draws Studio's placeholder (download.rs fetch_thumbnail)
                 Some(file) if unapproved_icon(&file) => None,
                 Some(file) if !file.to_string_lossy().ends_with(".bin") => Some(Ok(file)),
                 Some(_) => None,
@@ -189,22 +241,22 @@ impl Resolver {
         }
     }
 
-    /// A cached asset id (fetchAssetId without the network): a model resolves to the texture it names.
+    /// A cached asset id (fetch_asset_id without the network): a model resolves to the texture it names.
     fn asset(&mut self, id: &str, allow_decal: bool) -> Option<Resolution> {
-        let Some(file) = self.cached(id) else {
+        let Some(file) = cached_file(&self.assets, id) else {
             return self.offline.then(|| Err("offline and not cached".into()));
         };
-        // A pre-unwrap .bin entry is migrated by the helper; a font is recorded in the font index there
+        // A pre-unwrap .bin entry is migrated by the downloader; a font is recorded in the font index there
         let name = file.to_string_lossy().to_ascii_lowercase();
         if name.ends_with(".bin") || [".ttf", ".otf", ".ttc"].iter().any(|ext| name.ends_with(ext)) {
             return None;
         }
         let bytes = std::fs::read(&file).ok()?;
-        // A file rur did not download under this name is downloaded again by the helper
-        if !self.offline && !self.local_only && !self.downloaded(&file, &bytes) {
+        // A file rur did not download under this name is downloaded again
+        if !self.offline && !downloaded(&file, &bytes) {
             return None;
         }
-        if allow_decal && is_model(&bytes) {
+        if allow_decal && sniff(&bytes).kind == "model" {
             let text: String = bytes.iter().map(|&byte| byte as char).collect();
             let Some(inner) = model_texture(&text) else {
                 return Some(Err(format!("asset {id} is a model without an image texture")));
@@ -215,30 +267,6 @@ impl Resolver {
             return self.asset(&inner, false);
         }
         Some(Ok(file))
-    }
-
-    fn cached(&self, key: &str) -> Option<PathBuf> {
-        EXTENSIONS.iter().map(|ext| self.assets.join(format!("{key}{ext}"))).find(|file| file.is_file())
-    }
-
-    /// cli/assets.mjs downloaded: whether `file` holds what rur downloaded under its name, its sha256
-    /// and size in `assets/downloaded/<file name>.json`. Hashed once per file length and modification time.
-    fn downloaded(&mut self, file: &Path, bytes: &[u8]) -> bool {
-        let stamp = std::fs::metadata(file).map(|metadata| (metadata.len(), metadata.modified().ok())).ok();
-        if stamp.is_some() && self.verified.get(file) == stamp.as_ref() {
-            return true;
-        }
-        let Some(name) = file.file_name() else { return false };
-        let record = self.assets.join("downloaded").join(format!("{}.json", name.to_string_lossy()));
-        let Some(record) = std::fs::read(record).ok().and_then(|text| serde_json::from_slice::<Value>(&text).ok()) else {
-            return false;
-        };
-        let matches = record["size"].as_u64() == Some(bytes.len() as u64)
-            && record["sha256"].as_str() == Some(crate::engine::text::hinted::sha256_hex(bytes).as_str());
-        if let (true, Some(stamp)) = (matches, stamp) {
-            self.verified.insert(file.to_path_buf(), stamp);
-        }
-        matches
     }
 
     /// cli/assets.mjs resolveRbxasset: content/, ExtraContent/, PlatformContent/pc/ of the newest
@@ -255,74 +283,52 @@ impl Resolver {
         }
         None
     }
+}
 
-    fn helper_images(&mut self, uris: &[String]) -> Result<BTreeMap<String, Resolution>, String> {
-        // persistViewports: one-shot renders reuse a snapshot's image across processes (cli/viewports.mjs)
-        let reply = self.helper_call(json!({"images": uris, "viewports": self.viewports, "viewportSlots": uris.iter().filter_map(|uri| crate::assets::viewport_slot(uri)).collect::<Vec<_>>(), "persistViewports": true}))?;
-        let mut answers = BTreeMap::new();
-        for entry in reply["images"].as_array().into_iter().flatten() {
-            let Some(uri) = entry["uri"].as_str() else { continue };
-            let answer = match (entry["file"].as_str(), entry["error"].as_str()) {
-                (Some(file), _) => Ok(PathBuf::from(file)),
-                (None, Some(error)) => Err(error.to_string()),
-                _ => Err("unresolved".into()),
-            };
-            answers.insert(uri.to_string(), answer);
-        }
-        Ok(answers)
-    }
+/// A ViewportFrame image (`rur-viewport://<slot>/<snapshot digest>`), drawn by the 3D worker
+pub(crate) fn is_viewport(uri: &str) -> bool {
+    uri.starts_with("rur-viewport://")
+}
 
-    fn helper_call(&mut self, mut request: Value) -> Result<Value, String> {
-        if self.local_only {
-            return Err(crate::paths::HELPER_REQUIRED.into());
-        }
-        if self.helper.is_none() {
-            self.helper = Some(self.start_helper()?);
-        }
-        let helper = self.helper.as_mut().unwrap();
-        helper.next += 1;
-        request["id"] = json!(helper.next);
-        let result = (|| {
-            writeln!(helper.input, "{request}").map_err(|error| error.to_string())?;
-            helper.input.flush().map_err(|error| error.to_string())?;
-            let mut line = String::new();
-            if helper.output.read_line(&mut line).map_err(|error| error.to_string())? == 0 {
-                return Err("the asset helper exited".to_string());
-            }
-            serde_json::from_str::<Value>(&line).map_err(|error| error.to_string())
-        })();
-        match result {
-            Ok(reply) if reply["error"].is_string() => Err(reply["error"].as_str().unwrap().to_string()),
-            Ok(reply) => Ok(reply),
-            Err(error) => {
-                self.helper = None;
-                Err(format!("asset helper: {error}"))
-            }
-        }
-    }
+/// The cache file of `key` (an asset id or a thumbnail key) in `assets`, by cli/assets.mjs's extension order
+pub(crate) fn cached_file(assets: &Path, key: &str) -> Option<PathBuf> {
+    EXTENSIONS.iter().map(|ext| assets.join(format!("{key}{ext}"))).find(|file| file.is_file())
+}
 
-    fn start_helper(&self) -> Result<Helper, String> {
-        let node = std::env::var_os("RUR_NODE").unwrap_or_else(|| "node".into());
-        let mut command = Command::new(node);
-        command
-            .arg(crate::paths::asset_helper(&self.repo)?)
-            .current_dir(&self.repo)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        if self.offline {
-            command.arg("--offline");
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
-        let mut child = command.spawn().map_err(|error| format!("starting node for cli/native-assets.mjs: {error}"))?;
-        let input = child.stdin.take().ok_or("asset helper has no stdin")?;
-        let output = BufReader::new(child.stdout.take().ok_or("asset helper has no stdout")?);
-        Ok(Helper { child, input, output, next: 0 })
+/// The download record of a cache file: `assets/downloaded/<file name>.json`
+pub(crate) fn record_file(file: &Path) -> PathBuf {
+    let name = file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    file.parent().unwrap_or(Path::new(".")).join("downloaded").join(format!("{name}.json"))
+}
+
+/// Whether `file` holds what rur downloaded under its name: its sha256 and size in
+/// `assets/downloaded/<file name>.json`. A file is hashed once per length and modification time (per
+/// process: every resolver and download thread shares the answers).
+///
+/// What rur downloaded under each cache name is recorded because a file under an asset's name is not
+/// that asset because it is there: the cache is a plain folder, and on 2026-09-30 agents filled it with
+/// stand-ins for assets this renderer could not download (thumbnails.roblox.com 700 x 700 and 420 x 420
+/// renditions cropped to their alpha bounds, and render directories' copies of them), which every later
+/// render drew as the asset (a header plate 7% narrower for its height, its art out of place). A cached
+/// file without a matching record is downloaded again before it is used and replaced when its bytes
+/// differ; offline it is used as it is.
+pub(crate) fn downloaded(file: &Path, bytes: &[u8]) -> bool {
+    type Stamp = (u64, Option<SystemTime>);
+    static VERIFIED: OnceLock<Mutex<HashMap<PathBuf, Stamp>>> = OnceLock::new();
+    let verified = VERIFIED.get_or_init(Default::default);
+    let stamp = std::fs::metadata(file).map(|metadata| (metadata.len(), metadata.modified().ok())).ok();
+    if stamp.is_some() && verified.lock().ok().and_then(|map| map.get(file).cloned()) == stamp {
+        return true;
     }
+    let Some(record) = std::fs::read(record_file(file)).ok().and_then(|text| serde_json::from_slice::<Value>(&text).ok()) else {
+        return false;
+    };
+    let matches = record["size"].as_u64() == Some(bytes.len() as u64)
+        && record["sha256"].as_str() == Some(crate::engine::text::hinted::sha256_hex(bytes).as_str());
+    if let (true, Some(stamp), Ok(mut map)) = (matches, stamp, verified.lock()) {
+        map.insert(file.to_path_buf(), stamp);
+    }
+    matches
 }
 
 /// cli/assets.mjs filePathFromUri: a `file://` URI's path (`file:///C:/x` and `file://C:/x`, `%xx`
@@ -336,7 +342,8 @@ fn file_path(uri: &str) -> PathBuf {
 }
 
 /// cli/assets.mjs assetIdFromUri
-fn asset_id(uri: &str) -> Option<String> {
+pub(crate) fn asset_id(uri: &str) -> Option<String> {
+    let uri = uri.trim();
     let lower = uri.to_ascii_lowercase();
     let digits = |text: &str| -> Option<String> {
         let id: String = text.chars().take_while(char::is_ascii_digit).collect();
@@ -367,10 +374,8 @@ fn asset_id(uri: &str) -> Option<String> {
     (!uri.is_empty() && uri.bytes().all(|byte| byte.is_ascii_digit())).then(|| uri.to_string())
 }
 
-/// cli/assets.mjs fetchThumbnail's cache key: `thumb-<type>-<id>-<w>x<h>-webp`, non-word characters
-/// as `_`
 /// The UnapprovedImage icon's bytes (4,085, sha256 below): what the thumbnail service served for a Blocked
-/// thumbnail before cli/assets.mjs drew Studio's placeholder in its place
+/// thumbnail before rur drew Studio's placeholder in its place
 fn unapproved_icon(file: &Path) -> bool {
     use sha2::{Digest, Sha256};
     const SHA256: &str = "6eb7d741e290870a88e2cbbe6aaa55c0e6ff638de4daa01244dc2863ddfacbbf";
@@ -382,16 +387,34 @@ fn unapproved_icon(file: &Path) -> bool {
     })
 }
 
-fn thumbnail_key(query: &str) -> String {
-    let mut params: BTreeMap<String, String> = BTreeMap::new();
-    for pair in query.split('&') {
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        let decode = |text: &str| percent_decode(&text.replace('+', " "));
-        params.entry(decode(key)).or_insert_with(|| decode(value));
+/// An `rbxthumb://` query (URLSearchParams rules: `&`-separated, `+` and `%xx` decoded, the first value
+/// of a name counts): `type` (default Asset), `id`, `w` and `h` (default 150)
+pub(crate) struct ThumbnailQuery {
+    pub kind: String,
+    /// "null" when the URI names none, as cli/assets.mjs wrote it
+    pub id: String,
+    pub w: String,
+    pub h: String,
+}
+
+impl ThumbnailQuery {
+    pub fn parse(query: &str) -> Self {
+        let mut params: BTreeMap<String, String> = BTreeMap::new();
+        for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            let decode = |text: &str| percent_decode(&text.replace('+', " "));
+            params.entry(decode(key)).or_insert_with(|| decode(value));
+        }
+        let get = |key: &str, fallback: &str| params.get(key).filter(|value| !value.is_empty()).cloned().unwrap_or_else(|| fallback.to_string());
+        Self { kind: get("type", "Asset"), id: params.get("id").cloned().unwrap_or_else(|| "null".into()), w: get("w", "150"), h: get("h", "150") }
     }
-    let get = |key: &str, fallback: &str| params.get(key).cloned().unwrap_or_else(|| fallback.to_string());
-    let key = format!("thumb-{}-{}-{}x{}-webp", get("type", "Asset"), params.get("id").cloned().unwrap_or_else(|| "null".into()), get("w", "150"), get("h", "150"));
-    key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+
+    /// The cache key: `thumb-<type>-<id>-<w>x<h>-webp`, non-word characters as `_` (the WebP rendition,
+    /// stored as PNG; older PNG-rendition files under keys without `-webp` stay unused)
+    pub fn key(&self) -> String {
+        let key = format!("thumb-{}-{}-{}x{}-webp", self.kind, self.id, self.w, self.h);
+        key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+    }
 }
 
 fn percent_decode(text: &str) -> String {
@@ -413,15 +436,56 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// cli/assets.mjs sniff: an rbxm / rbxmx model
-fn is_model(bytes: &[u8]) -> bool {
+/// What a file's bytes are (cli/assets.mjs sniff): its cache extension, kind and MIME type
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sniffed {
+    pub ext: &'static str,
+    pub kind: &'static str,
+    pub mime: &'static str,
+}
+
+pub fn sniff(bytes: &[u8]) -> Sniffed {
+    let is = |ext, kind, mime| Sniffed { ext, kind, mime };
+    if bytes.len() >= 8 && bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return is(".png", "image", "image/png");
+    }
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return is(".jpg", "image", "image/jpeg");
+    }
+    if bytes.len() >= 6 && bytes.starts_with(b"GIF8") {
+        return is(".gif", "image", "image/gif");
+    }
+    if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return is(".webp", "image", "image/webp");
+    }
+    if bytes.starts_with(b"BM") {
+        return is(".bmp", "image", "image/bmp");
+    }
+    if bytes.len() >= 4 {
+        match &bytes[..4] {
+            [0, 1, 0, 0] | b"true" => return is(".ttf", "font", "font/ttf"),
+            b"OTTO" => return is(".otf", "font", "font/otf"),
+            b"ttcf" => return is(".ttc", "font", "font/collection"),
+            _ => {}
+        }
+    }
     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(64)]);
-    let head = head.trim_start();
-    head.starts_with("<roblox") || head.starts_with("<?xml")
+    // (JavaScript's trimStart: white space and the byte order mark)
+    let head = head.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    if head.starts_with('{') || head.starts_with('[') {
+        return is(".json", "json", "application/json");
+    }
+    if head.starts_with("<roblox!") {
+        return is(".rbxm", "model", "application/octet-stream");
+    }
+    if head.starts_with("<roblox") || head.starts_with("<?xml") {
+        return is(".rbxmx", "model", "application/xml");
+    }
+    is(".bin", "unknown", "application/octet-stream")
 }
 
 /// cli/assets.mjs resolveModelTexture: /(?:rbxassetid:\/\/|[?&]id=)(\d+)/i
-fn model_texture(text: &str) -> Option<String> {
+pub(crate) fn model_texture(text: &str) -> Option<String> {
     let lower = text.to_ascii_lowercase();
     let mut best: Option<(usize, String)> = None;
     for pattern in ["rbxassetid://", "?id=", "&id="] {
@@ -439,6 +503,11 @@ fn model_texture(text: &str) -> Option<String> {
         }
     }
     best.map(|(_, id)| id)
+}
+
+/// The Studio install fonts and built-in textures come from (the best of [`content_roots`])
+pub fn studio_content() -> Option<PathBuf> {
+    content_roots().into_iter().next()
 }
 
 /// cli/assets.mjs studioContentRoots
@@ -500,8 +569,24 @@ fn content_roots_with(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use serde_json::json;
+
+    /// A resolver over `assets` (its own state dir); desktop builds download through `transport`
+    #[cfg(feature = "desktop")]
+    pub(crate) fn resolver_with(assets: &Path, offline: bool, transport: std::sync::Arc<dyn crate::download::Transport>) -> Resolver {
+        Resolver {
+            downloads: crate::download::Downloader::for_tests(assets, transport),
+            repo: assets.to_path_buf(),
+            assets: assets.to_path_buf(),
+            worker: crate::viewports::ViewportWorker::new(assets, offline),
+            offline,
+            content_roots: None,
+            viewports: Value::Null,
+            persist_viewports: true,
+        }
+    }
 
     #[test]
     fn standalone_images_use_the_studio_locator_after_explicit_content() {
@@ -532,42 +617,68 @@ mod tests {
         assert_eq!(asset_id("https://www.roblox.com/asset?version=1&id=789"), Some("789".into()));
         assert_eq!(asset_id("321"), Some("321".into()));
         assert_eq!(asset_id("rbxgameasset://x"), None);
-        assert_eq!(thumbnail_key("type=AvatarHeadShot&id=1&w=60&h=60"), "thumb-AvatarHeadShot-1-60x60-webp");
-        assert_eq!(thumbnail_key("id=5"), "thumb-Asset-5-150x150-webp");
+        let key = |query: &str| ThumbnailQuery::parse(query).key();
+        assert_eq!(key("type=AvatarHeadShot&id=1&w=60&h=60"), "thumb-AvatarHeadShot-1-60x60-webp");
+        assert_eq!(key("id=5"), "thumb-Asset-5-150x150-webp");
+        // An empty value takes the default, as `params.get(name) || default` did; no id is "null"
+        assert_eq!(key("type=&w=&id=5"), "thumb-Asset-5-150x150-webp");
+        assert_eq!(key("type=Avatar"), "thumb-Avatar-null-150x150-webp");
         assert_eq!(model_texture("<roblox> <url>http://www.roblox.com/asset/?id=42</url>"), Some("42".into()));
         assert_eq!(model_texture("x rbxassetid://7 y ?id=3"), Some("7".into()));
     }
 
     #[test]
+    fn sniff_follows_cli_assets() {
+        let kinds = |bytes: &[u8]| (sniff(bytes).ext, sniff(bytes).kind);
+        assert_eq!(kinds(&[0x89, b'P', b'N', b'G', 13, 10, 26, 10]), (".png", "image"));
+        assert_eq!(kinds(&[0x89, b'P', b'N', b'G']), (".bin", "unknown"), "a PNG needs its 8-byte signature");
+        assert_eq!(kinds(&[0xff, 0xd8, 0xff, 0]), (".jpg", "image"));
+        assert_eq!(kinds(b"GIF89a"), (".gif", "image"));
+        assert_eq!(kinds(b"RIFF\0\0\0\0WEBPVP8 "), (".webp", "image"));
+        assert_eq!(kinds(b"BM.."), (".bmp", "image"));
+        assert_eq!(kinds(&[0, 1, 0, 0, 0]), (".ttf", "font"));
+        assert_eq!(kinds(b"OTTO"), (".otf", "font"));
+        assert_eq!(kinds(b"ttcf"), (".ttc", "font"));
+        assert_eq!(kinds(b"\xef\xbb\xbf  {\"faces\":[]}"), (".json", "json"));
+        assert_eq!(kinds(b"<roblox!\x89\xff"), (".rbxm", "model"));
+        assert_eq!(kinds(b"<roblox version=\"4\">"), (".rbxmx", "model"));
+        assert_eq!(kinds(b"<?xml version"), (".rbxmx", "model"));
+        assert_eq!(kinds(b"plain"), (".bin", "unknown"));
+    }
+
+    /// The same checks with any download answered by a transport that fails: no network either way
+    #[cfg(feature = "desktop")]
+    #[test]
     fn cached_assets_resolve_locally_only_as_rur_downloaded_them() {
+        use crate::download::tests::Fake;
         let assets = std::env::temp_dir().join(format!("rur-asset-records-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&assets);
         std::fs::create_dir_all(assets.join("downloaded")).unwrap();
-        let resolver = |offline| Resolver { repo: assets.clone(), assets: assets.clone(), offline, local_only: false, helper: None, content_roots: None, viewports: Value::Null, reported_fonts: Default::default(), verified: HashMap::new() };
-        let (mut online, mut offline) = (resolver(false), resolver(true));
+        let fake = Fake::new(|_| Err("no network in this test".into()));
+        let (mut online, mut offline) = (resolver_with(&assets, false, fake.clone()), resolver_with(&assets, true, fake.clone()));
         let file = assets.join("123.png");
         let real = [137u8, 80, 78, 71, 1];
         let record = json!({"sha256": crate::engine::text::hinted::sha256_hex(&real), "size": real.len()});
-        // A file another tool wrote: the helper downloads it again; offline it is used
+        // A file another tool wrote: downloaded again; offline it is used
         std::fs::write(&file, real).unwrap();
         assert_eq!(online.local("rbxassetid://123"), None);
-        let mut standalone = resolver(false);
-        standalone.local_only = true;
-        assert_eq!(standalone.local("rbxassetid://123"), Some(Ok(file.clone())));
-        let missing = standalone.resolve_all(&["rbxassetid://456".into(), "rbxassetid://456".into(), "rur-viewport://1".into()]);
-        assert_eq!(missing.len(), 2);
-        assert!(missing.values().all(|result| result.as_ref().unwrap_err().contains(crate::paths::HELPER_REQUIRED)));
-        let fonts = json!({"missingFontAssets": ["rbxassetid://789", "rbxassetid://789"]});
-        assert!(!standalone.fetch_fonts(&fonts).unwrap());
-        assert!(!standalone.fetch_fonts(&fonts).unwrap());
-        assert_eq!(standalone.reported_fonts.len(), 1);
         assert_eq!(offline.local("rbxassetid://123"), Some(Ok(file.clone())));
+        // Downloads are native; a ViewportFrame image without its snapshot has nothing to draw (no worker starts)
+        let missing = online.resolve_all(&["rbxassetid://456".into(), "rbxassetid://456".into(), "rur-viewport://1/x".into()]);
+        assert_eq!(missing.len(), 2);
+        assert_eq!(missing["rur-viewport://1/x"].as_ref().unwrap_err(), "Missing ViewportFrame snapshot");
+        assert!(missing["rbxassetid://456"].is_err());
+        assert_eq!(fake.urls(), ["https://assetdelivery.roblox.com/v1/assetId/456"], "the one missing id was asked for, once");
         // rur's download (its record matches)
         std::fs::write(assets.join("downloaded").join("123.png.json"), record.to_string()).unwrap();
         assert_eq!(online.local("rbxassetid://123"), Some(Ok(file.clone())));
         // Changed since: other bytes under the name
         std::fs::write(&file, [137u8, 80, 78, 71, 2, 2]).unwrap();
         assert_eq!(online.local("rbxassetid://123"), None);
+        // Offline: no font is fetched and nothing is asked
+        let fonts = json!({"missingFontAssets": ["rbxassetid://789"]});
+        assert!(!offline.fetch_fonts(&fonts).unwrap());
+        assert_eq!(fake.urls().len(), 1);
         let _ = std::fs::remove_dir_all(&assets);
     }
 

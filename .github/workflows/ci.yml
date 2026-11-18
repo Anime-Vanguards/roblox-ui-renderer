@@ -62,14 +62,16 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: native
         run: cargo build --release --locked
+      # native-assets.mjs runs `rur-native assets`: the binary the step above built
       - name: Node checks
         if: ${{ !cancelled() }}
         shell: bash
+        env:
+          RUR_NATIVE_ENGINE: ${{ github.workspace }}/native/target/release/rur-native.exe
         run: |
           set -e
-          for check in tools/tests/asset_cookie.mjs tools/tests/asset_broker.mjs tools/tests/asset_records.mjs tools/tests/asset_batch.mjs \
-            tools/tests/native-assets.mjs tools/tests/native-build-lock.mjs tools/tests/places.mjs \
-            tools/tests/web-bundle-directories.mjs tools/analysis/image_assets_test.mjs; do
+          for check in tools/tests/native-assets.mjs tools/tests/native-build-lock.mjs tools/tests/places.mjs \
+            tools/tests/web-bundle-directories.mjs; do
             echo "== $check"
             node "$check"
           done

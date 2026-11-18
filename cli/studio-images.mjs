@@ -17,9 +17,17 @@
 //   RUR_STUDIO_MCP_TOKEN  robloxstudio-mcp 3's auth token
 // RUR_STUDIO picks the Studio (an id or part of its name; default: every edit session, in order).
 // RUR_STUDIO_IMAGES=0 turns this off with a bridge configured (cli/assets.mjs studioImagesEnabled).
+//
+// `node cli/studio-images.mjs store [<id>...]` (more ids on stdin, one per line) reads the ids and stores the
+// images in the asset cache: the native resolver runs it for the images asset delivery refused
+// (native/src/download.rs), and it prints {"stored": [id...], "errors": {id: reason}}.
 
 import zlib from "node:zlib";
-import { PNG } from "pngjs";
+import { isMain } from "./entry.mjs";
+
+// pngjs, loaded when a read needs it: without rur's npm packages `store` still answers, with the command
+// that installs them (cli/assets.mjs storeFromStudio)
+let PNG = null;
 
 const TIMEOUT_MS = 120000;
 // Base64 characters one call returns at most (the image that crosses it is the call's last); the rest
@@ -236,6 +244,7 @@ export async function readStudioImages(ids, env = process.env) {
 		for (const id of ids) errors.set(id, reason);
 		return { images, errors };
 	}
+	PNG ??= (await import("pngjs")).PNG;
 	// Each session reads what the ones before it could not, as few calls as the budget allows
 	let pending = [...ids];
 	for (const session of sessions) {
@@ -320,4 +329,26 @@ export async function studioImageIds(env = process.env) {
 	const ids = new Set();
 	for (const session of sessions) for (const id of JSON.parse(await session.run(SCAN_LUAU))) ids.add(String(id));
 	return { ids: [...ids], studios: sessions.map(session => session.name) };
+}
+
+// `store`: the ids from the arguments and stdin, read and stored; the answer on stdout
+async function store(args) {
+	let input = "";
+	if (!process.stdin.isTTY) for await (const chunk of process.stdin) input += chunk;
+	const ids = [...new Set([...args, ...input.split(/\s+/)].map(id => id.replace(/\D/g, "")).filter(Boolean))];
+	const { storeFromStudio } = await import("./assets.mjs");
+	const { files, errors } = await storeFromStudio(ids);
+	process.stdout.write(`${JSON.stringify({ stored: [...files.keys()], errors: Object.fromEntries(errors) })}\n`);
+}
+
+if (isMain(import.meta.url)) {
+	if (process.argv[2] !== "store") {
+		console.error("usage: node cli/studio-images.mjs store [<id>...]  (more ids on stdin)");
+		process.exitCode = 2;
+	} else {
+		store(process.argv.slice(3)).then(() => process.exit(0), error => {
+			console.error(`cli/studio-images.mjs: ${String(error?.message || error)}`);
+			process.exit(1);
+		});
+	}
 }

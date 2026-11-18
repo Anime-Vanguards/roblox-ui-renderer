@@ -65,12 +65,16 @@ to the current directory. In a checkout build, `profile diff` accepts `--out` an
 the second input's directory. `profile report` has no output option: it writes `report.html` next to
 the `profile.json` it reads.
 
-Images from Studio's content folder, cached assets and `file://` files resolve locally. An uncached asset ID,
-a cloud font or a ViewportFrame model needs the rur CLI from a checkout, with Node and its npm packages
-installed. Each missing image is reported in the render diagnostics, and each missing cloud font is reported
-once per asset. Set `RUR_ASSET_REPO` to that checkout to use its helper; `--repo <checkout>` works too.
-Neither changes the project or the state directory. Studio comparison, asset downloads, build tools,
-fixture collections and the other Node CLI commands need the checkout.
+Images from Studio's content folder, cached assets and `file://` files resolve locally. The binary downloads
+uncached asset IDs, thumbnails and cloud fonts itself into the state directory's asset cache, and `--offline`
+uses the cache as it is. A release binary reads no `.env`: give it the account through the environment
+([assets.md](assets.md)). Each missing image is reported in the render diagnostics.
+
+ViewportFrames' 3D content is drawn by ror, which the binary starts itself when it is installed
+([viewports.md](viewports.md)). A private image read from an open Studio needs the rur CLI from a checkout,
+with Node and its npm packages installed. Set `RUR_ASSET_REPO` to that checkout to use it; `--repo <checkout>`
+works too. Neither changes the project or the state directory. Studio comparison, build tools, fixture
+collections and the other Node CLI commands need the checkout.
 
 ### State directory
 
@@ -144,8 +148,8 @@ only the executable, so keep the zip if you need the notices or source details.
   `RUR_ROBLOX_CONTENT` can point at a copy of Studio's `content` folder instead (for example on Linux or
   macOS).
 - Optional: a Roblox account cookie for `rbxassetid://` images that Roblox's public asset delivery refuses
-  ([assets.md](assets.md)); ffmpeg for `rur sequence` videos (`RUR_FFMPEG`); Python 3 with Pillow for WebP
-  thumbnails and the fitting scripts in `tools/analysis`; Lune 0.10.4 (`rokit`, or `RUR_LUNE`) for
+  ([assets.md](assets.md)); ffmpeg for `rur sequence` videos (`RUR_FFMPEG`); Python 3 with Pillow for the
+  fitting scripts in `tools/analysis`; Lune 0.10.4 (`rokit`, or `RUR_LUNE`) for
   `tools/sweep/studio-assets.mjs`.
 
 `node cli/rur.mjs doctor` checks all of the above and reports the state dir, npm packages the

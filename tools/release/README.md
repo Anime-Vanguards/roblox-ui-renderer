@@ -213,9 +213,8 @@ one test program. `smoke` and `publish` wait for it.
 
 `windows-validation` installs neither Rust nor npm packages. None of the installed tests runs Cargo;
 only the inventory does, to find the pinned engine's sources through `cargo metadata`. One test
-starts the checkout's asset helper (`cli/native-assets.mjs`) with the runner's Node, and what it
-asks of the helper takes Node's standard library only; another starts Node on a stub helper it
-writes itself.
+starts the runner's Node as a stand-in ViewportFrame worker it writes itself, which takes Node's
+standard library only.
 
 The project comparison tests also run a checkout binary, which `cargo test --release` builds for the
 target without `RUR_RELEASE_BUILD`. It has to be unmarked: if both binaries were standalone, the

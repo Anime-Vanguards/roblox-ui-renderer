@@ -14,8 +14,8 @@
 // models, project files, snapshots, data/) are included whole. Fonts: every Studio font, the cloud
 // fonts the scenes use and the cloud fallback, with the hinted-metric cache entries of all of them.
 // Images: the scenes', plus every rbxassetid / rbxasset literal of the required sources (what other
-// tabs and states show), resolved offline as the native app's asset helper resolves them
-// (cli/assets.mjs), recorded in an image map the module reads (RUR_WEB_IMAGES).
+// tabs and states show), resolved offline as the native app resolves them (`rur-native assets fetch
+// --offline`, cli/assets.mjs resolveAll), recorded in an image map the module reads (RUR_WEB_IMAGES).
 //
 // The bundle holds Roblox Studio's installed fonts, which belong to Roblox or its licensors: a bundle
 // is for your own machine and must never be committed, published or shared.
@@ -302,7 +302,8 @@ export async function bundle({ stories, project = defaultProject(), out, place, 
 		for (const match of text.matchAll(/rbxassetid:\/\/\d+|rbxasset:\/\/[\w\-./@]+\.(?:png|jpg|jpeg)/gi)) uris.add(match[0]);
 		for (const match of text.matchAll(/"(\d{8,})"|\b(\d{9,})\b/g)) uris.add(`rbxassetid://${match[1] || match[2]}`);
 	}
-	const resolved = await resolveAll([...uris], { offline: true });
+	// The engine's own resolver (`rur-native assets fetch --offline`): the cache and local files, as a render finds them
+	const resolved = await resolveAll([...uris], { offline: true, engine });
 	const imageMap = {};
 	const sceneMissing = [];
 	for (const [uri, result] of resolved) {

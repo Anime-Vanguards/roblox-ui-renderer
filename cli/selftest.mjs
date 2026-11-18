@@ -20,12 +20,8 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/packages.mjs"]],
 		[process.execPath, ["tools/tests/kept-runs.mjs"]],
 		[process.execPath, ["tools/tests/native-build-lock.mjs"]],
+		// Downloads, the account and the cache rules are the engine's own tests (cargo test download::)
 		[process.execPath, ["tools/tests/native-assets.mjs"]],
-		[process.execPath, ["tools/analysis/image_assets_test.mjs"]],
-		[process.execPath, ["tools/tests/asset_cookie.mjs"]],
-		[process.execPath, ["tools/tests/asset_broker.mjs"]],
-		[process.execPath, ["tools/tests/asset_records.mjs"]],
-		[process.execPath, ["tools/tests/asset_batch.mjs"]],
 		[process.execPath, ["tools/tests/asset_studio.mjs"]],
 		[process.execPath, ["tools/tests/asset_studio_bridge.mjs"]],
 		[process.execPath, ["tools/tests/placeholders.mjs"]],
@@ -33,7 +29,6 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/places.mjs"]],
 		[process.execPath, ["tools/tests/compare_unstable.mjs"]],
 		[process.execPath, ["tools/tests/compare_reports.mjs"]],
-		[process.execPath, ["tools/tests/viewport_layer.mjs"]],
 		[process.execPath, ["tools/tests/examples.mjs"]],
 	];
 	// The checks are independent (each writes its own out/ directory): they run concurrently and each

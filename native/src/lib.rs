@@ -9,6 +9,11 @@ pub mod app;
 pub mod assets;
 #[cfg(feature = "desktop")]
 pub mod catalog;
+/// Asset downloads, the account and Studio reads (`rur-native assets`); the web build only draws its bundle
+#[cfg(feature = "desktop")]
+pub mod download;
+#[cfg(feature = "desktop")]
+pub mod doctor;
 pub mod engine;
 pub mod glyphs;
 #[cfg(feature = "desktop")]
@@ -40,6 +45,8 @@ pub mod sequence;
 pub mod serve;
 #[cfg(feature = "desktop")]
 pub mod story_render;
+#[cfg(feature = "desktop")]
+pub mod viewports;
 #[cfg(feature = "desktop")]
 pub mod watch;
 /// The browser host (wasm32-unknown-emscripten): one story, driven frame by frame from JavaScript

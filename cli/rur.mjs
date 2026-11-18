@@ -1005,6 +1005,16 @@ async function doctor({ fix = false } = {}) {
 	const content = studioContentRoots();
 	const { missingPackages } = await import("./packages.mjs");
 	const missing = missingPackages();
+	// The engine's downloader reads the cookie or the broker; it says only which (never a value)
+	const access = await accountAccess();
+	// ror, which draws ViewportFrames: as the engine finds it (`rur-native doctor`)
+	const { findEngine } = await import("./engine.mjs");
+	const engine = findEngine();
+	let viewports = "unknown until the native engine is built";
+	if (engine) {
+		const native = spawnSync(engine, ["doctor", "--json"], { cwd: ROOT, encoding: "utf8", windowsHide: true });
+		try { viewports = JSON.parse(native.stdout).viewports ?? viewports; } catch { /* an engine from before the doctor command */ }
+	}
 	return {
 		root: ROOT,
 		packages: missing.length ? `missing ${missing.join(", ")}: run npm install in ${ROOT}` : "installed",
@@ -1031,7 +1041,9 @@ async function doctor({ fix = false } = {}) {
 		rust: rust.status === 0 ? rust.stdout.trim() : "missing: the engine is native (install Rust: https://rustup.rs)",
 		freetype: "2.14.2, compiled into the engine (native/build.rs; the release Studio's glyphs match it)",
 		studioInstall: content[0] || "missing (fonts/textures need a local Roblox Studio install)",
-		assetCookie: { broker: "an account broker is used instead (its token is never printed)", cookie: "available (never printed)" }[accountAccess()] || "not configured (public assets only)",
+		assetCookie: { broker: "an account broker is used instead (its token is never printed)", cookie: "available (never printed)" }[access]
+			|| (access === undefined ? "unknown until the native engine is built (it reads the cookie)" : "not configured (public assets only)"),
+		viewports,
 		cache: CACHE_DIR,
 		defaultProject: fs.existsSync(DEFAULT_PROJECT) ? DEFAULT_PROJECT : "not found",
 	};

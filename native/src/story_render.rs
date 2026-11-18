@@ -155,10 +155,6 @@ impl StoryRenderer {
         };
         let mut frames = start(args).map_err(|error| anyhow!("runtime failed: {error}"))?;
         let mut frame = first(&frames)?;
-        // Without the Node helper the fonts can't be fetched: report the missing ones once
-        if !crate::paths::has_asset_helper(&self.repo) {
-            let _ = self.resolver.fetch_fonts(&frame.reply["diagnostics"]);
-        }
         for _ in 0..3 {
             let diagnostics = &frame.reply["diagnostics"];
             if options.offline || !diagnostics["missingFontAssets"].as_array().is_some_and(|fonts| !fonts.is_empty()) {
@@ -243,10 +239,6 @@ impl StoryRenderer {
         };
 
         let mut output = first(&args).map_err(|error| anyhow!("runtime failed: {error}"))?;
-        // Without the Node helper the fonts can't be fetched: report the missing ones once
-        if !crate::paths::has_asset_helper(&self.repo) {
-            let _ = self.resolver.fetch_fonts(&output.scene["diagnostics"]);
-        }
         // Cloud fonts the UI uses that are not cached yet: fetched, then the run repeats with them
         // (a family's JSON first, then its faces), as the text is laid out with the real faces
         for _ in 0..3 {

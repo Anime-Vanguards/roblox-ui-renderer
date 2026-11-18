@@ -15,10 +15,11 @@ right in Studio. Refactors of the renderer must keep 0 mismatches in the regress
 | `cargo test --release` (unit tests in `native/src`, `native/tests/image_math.rs`, `paint.rs`) | nothing beyond the build, except `engine::input::tests::textbox_focus_caret_and_editing`, which needs Studio's fonts, and three that draw with the GPU (`render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph`, `render::gpu::tests::partial_redraws_match_whole_frames`, `render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas`); glyph tests use `RUR_TEST_FONT` or a system font and skip without one |
 | `native/tests/text_studio.rs`, `text_hinted.rs` | Studio's fonts (they fail without them) |
 | `native/tests/text_corpus.rs` | `out/golden/text-corpus.json` and `text-corpus.whole.json`, local artifacts; skips the one that is missing (see "Text corpus") |
-| `tools/tests/asset_*.mjs`, `native-assets.mjs`, `native-build-lock.mjs`, `places.mjs`, `web-bundle-directories.mjs`, `tools/analysis/image_assets_test.mjs` | Node only (HTTP is mocked) |
+| `tools/tests/asset_studio*.mjs`, `native-build-lock.mjs`, `places.mjs`, `web-bundle-directories.mjs` | Node only (Studio's bridge is mocked) |
+| `tools/tests/native-assets.mjs` | the built engine (`rur-native assets`, offline) |
 | `tools/engine/golden.mjs --fast` | the built engine and Studio's fonts; the network for cloud fonts a fixture uses |
 | `tools/tests/cli.mjs`, `kept-runs.mjs`, `examples.mjs` | the built engine and Studio's fonts; `kept-runs` also a GPU (it renders through the render service) |
-| `tools/tests/viewports.mjs` | a viewport worker ([viewports.md](viewports.md)) |
+| `tools/tests/viewports.mjs` | ror installed ([viewports.md](viewports.md)) |
 | `tools/regress/renderer.mjs` | saved scenes in `out/regress/` (local artifacts) and a GPU |
 | `rur compare`, `tools/interaction/*`, `tools/studio/*` | Windows, a running Studio and a Studio MCP bridge ([studio.md](studio.md)) |
 

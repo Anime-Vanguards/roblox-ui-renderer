@@ -15,8 +15,8 @@
 // One service per renderer checkout and state dir (cli/paths.mjs): its port is derived from both
 // (servicePorts: 4180-4579, a few candidates in case one is taken), and a service is used only when
 // its /health names the same root and state dir, so two checkouts never share code or caches. A service
-// of another engine build, or started with other asset helper code (cli/assets.mjs,
-// cli/native-assets.mjs), is replaced. RUR_SERVE_PORT=<port> pins the port. RUR_ISOLATED=1 /
+// of another engine build, or started with other Node code (cli/studio-images.mjs and cli/assets.mjs,
+// which read images from Studio), is replaced. RUR_SERVE_PORT=<port> pins the port. RUR_ISOLATED=1 /
 // RUR_NO_SERVICE=1 (in `env` or this process; `--isolated` / `--no-service`) turn it off.
 
 import fs from "node:fs";
@@ -55,9 +55,9 @@ export function servicePorts(env = process.env) {
 	return Array.from({ length: CANDIDATES }, (_, i) => BASE_PORT + ((hash + i * 97) % PORT_SPAN));
 }
 
-// The Node code the service runs (its asset helper): a service started with other code is replaced
+// The Node code the service runs (its Studio image reads): a service started with other code is replaced
 function codeStamp() {
-	return createHash("sha256").update(["assets.mjs", "native-assets.mjs", "viewports.mjs", "paths.mjs"].map(name => {
+	return createHash("sha256").update(["assets.mjs", "studio-images.mjs", "paths.mjs"].map(name => {
 		try {
 			const stat = fs.statSync(path.join(ROOT, "cli", name));
 			return `${name}:${stat.size}:${stat.mtimeMs}`;
