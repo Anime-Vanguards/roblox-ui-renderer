@@ -13,7 +13,21 @@ function executable() {
 	if (process.env.RUR_VIEWPORT_WORKER) return path.resolve(process.env.RUR_VIEWPORT_WORKER);
 	const sibling = path.resolve(ROOT, "../roblox-object-renderer/target/release", process.platform === "win32" ? "ror.exe" : "ror");
 	if (fs.existsSync(sibling)) return sibling;
-	throw new Error("ViewportFrames need a 3D viewport worker: set RUR_VIEWPORT_WORKER to an executable with a viewport-worker command (docs/viewports.md), or build the roblox-object-renderer checkout beside this one.");
+	const installed = onPath(process.platform === "win32" ? "ror.exe" : "ror");
+	if (installed) return installed;
+	throw new Error("ViewportFrames need ror's viewport worker (roblox-object-renderer 0.5.0 or later): build the roblox-object-renderer checkout beside this one, set RUR_VIEWPORT_WORKER to a ror executable, or put ror on the PATH (docs/viewports.md).");
+}
+
+// The first file called `name` in a folder of the PATH
+export function onPath(name, env = process.env) {
+	for (const folder of (env.PATH ?? env.Path ?? "").split(path.delimiter)) {
+		if (!folder) continue;
+		const file = path.join(folder, name);
+		try {
+			if (fs.statSync(file).isFile()) return file;
+		} catch { /* not there */ }
+	}
+	return null;
 }
 
 // Studio draws a ViewportFrame's world into a target cleared to the frame's background and draws that target

@@ -19,7 +19,7 @@ does, a quick start and the status.
 | [interaction.md](interaction.md) | Input: hover, clicks, keys, the wheel spring, scrolling, TextBox, drag |
 | [live-preview.md](live-preview.md) | How a render runs (the render service, kept runs), the live session protocol and the service's HTTP API |
 | [studio.md](studio.md) | `rur compare`: comparing with Roblox Studio through a Studio MCP bridge |
-| [viewports.md](viewports.md) | ViewportFrames: the 3D viewport worker protocol |
+| [viewports.md](viewports.md) | ViewportFrames: drawing their 3D content with ror, the viewport worker protocol |
 | [testing.md](testing.md) | The checks, and what each one needs (Studio, a GPU, the network) |
 
 ## How the rules were found

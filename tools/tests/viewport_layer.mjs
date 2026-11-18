@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PNG } from "pngjs";
-import { layViewportBackground, viewportBackground } from "../../cli/viewports.mjs";
+import { layViewportBackground, onPath, viewportBackground } from "../../cli/viewports.mjs";
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "rur-viewport-layer-"));
 try {
@@ -30,7 +30,15 @@ try {
 	fs.writeFileSync(file, PNG.sync.write(png));
 	layViewportBackground(file, clear);
 	assert.deepEqual([...PNG.sync.read(fs.readFileSync(file)).data.subarray(4, 8)], [64, 64, 64, 64], "a dark fringe at BackgroundTransparency 1");
-	console.log("Viewport layer: fill, edges at the mean, covered texels and a clear fill's fringe passed.");
+	// the worker on the PATH: the first folder holding a file of that name, folders and gaps passed over
+	const first = path.join(directory, "first"), second = path.join(directory, "second");
+	fs.mkdirSync(path.join(first, "ror"), { recursive: true });
+	fs.mkdirSync(second);
+	fs.writeFileSync(path.join(second, "ror"), "");
+	const folders = ["", path.join(directory, "missing"), first, second].join(path.delimiter);
+	assert.equal(onPath("ror", { PATH: folders }), path.join(second, "ror"));
+	assert.equal(onPath("ror", { PATH: "" }), null);
+	console.log("Viewport layer: fill, edges at the mean, covered texels, a clear fill's fringe and the worker on the PATH passed.");
 } finally {
 	fs.rmSync(directory, { recursive: true, force: true });
 }

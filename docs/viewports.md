@@ -29,9 +29,17 @@ viewport) and the summary says why.
 
 ## The viewport worker
 
+[roblox-object-renderer](https://github.com/Anime-Vanguards/roblox-object-renderer) (ror, 0.5.0 or later)
+is the worker: `ror viewport-worker` draws Roblox models the way Studio does. To use it, do one of:
+
+- build ror in a checkout beside this one (`cargo build --release` in `../roblox-object-renderer`);
+- set `RUR_VIEWPORT_WORKER` to a `ror` executable, such as one from ror's releases;
+- put `ror` on your `PATH` (a toolchain manager's install works).
+
 `cli/viewports.mjs` starts the worker as `<executable> viewport-worker [--offline]` and keeps it running.
 The executable is `RUR_VIEWPORT_WORKER`, else `../roblox-object-renderer/target/release/ror(.exe)` beside
-this checkout. The protocol is one JSON request per stdin line and one JSON reply per stdout line, one
+this checkout, else `ror` on the `PATH`. Any other program that answers the requests below works too. The
+protocol is one JSON request per stdin line and one JSON reply per stdout line, one
 request at a time:
 
 | Request | Reply |
@@ -54,14 +62,12 @@ One-shot renders keep each snapshot's image in `<state dir>/viewports-persisted/
 the snapshot and the worker build, so a restarted render service doesn't start the worker for images it
 drew before.
 
-[roblox-object-renderer](https://github.com/Anime-Vanguards/roblox-object-renderer) draws Roblox models
-the way Studio does. The maintainers' worker is built on it and is not published, and roblox-object-renderer
-does not have the `viewport-worker` command yet, so for now a worker is something you bring: any program
-that answers the requests above works. Model bundles are optional: `RUR_BUNDLE_MANIFEST` names the manifest
-module whose text keys the cached catalog.
+ror's worker answers the `viewport` requests (and an `asset` command, ror's docs/viewport-worker.md); it has
+no model bundles, which are optional: a worker with them lets a project mount models lazily, and
+`RUR_BUNDLE_MANIFEST` names the manifest module whose text keys the cached catalog.
 
 
-Smoke test, with a worker built:
+Smoke test, with ror built beside this checkout (or `RUR_VIEWPORT_WORKER` set):
 
 ```powershell
 node cli/rur.mjs render --fixture fixtures/viewport-models.luau --viewport 820x360 --scale 1 --out out/viewport-models --no-service

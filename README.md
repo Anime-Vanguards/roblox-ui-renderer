@@ -120,8 +120,9 @@ nodes were laid out at the same rect.
 
 Limitations:
 
-- 3D content needs a viewport worker ([docs/viewports.md](docs/viewports.md)); SurfaceGuis and
-  BillboardGuis in the world are not rendered.
+- ViewportFrames draw their 3D content through ror's viewport worker: build ror beside this checkout or
+  set `RUR_VIEWPORT_WORKER` ([docs/viewports.md](docs/viewports.md)). SurfaceGuis and BillboardGuis in
+  the world are not rendered.
 - A plain render captures the state after `--time`; interactive states need `--actions` or the desktop
   app's input.
 - Bit-exact Studio parity is not complete: the edges of colour emoji and one pixel of a thin path corner have
