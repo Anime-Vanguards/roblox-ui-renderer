@@ -3,8 +3,8 @@
 // engine's (native/src/engine/input/actions.rs, which checks it again); docs/stories.md "Timed input".
 //
 //   {t?, type:"move", x, y}   {t?, type:"down"|"up", x?, y?, button?: 1|2|3}   {t?, type:"leave"}
-//   {t?, type:"wheel", x?, y?, notches | dy, dx?}   {t?, type:"key", key, down?, shift?, ctrl?, alt?}
-//   {t?, type:"text"|"paste", text}
+//   {t?, type:"wheel", x?, y? (or a node <point>), notches | dy, dx?}
+//   {t?, type:"key", key, down?, shift?, ctrl?, alt?}   {t?, type:"text"|"paste", text}
 //   {t?, type:"click", <point>, button?, hold?}
 //   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?, steps?, duration?}
 //   <point>: node | target (an `inspect` path or a suffix of one) [+ anchor {x, y}, offset {x, y}], or x, y
@@ -114,6 +114,8 @@ function check(action) {
 			if (action.type === "move" && (x === undefined || y === undefined)) throw new Error("move: needs x and y");
 			if (action.type === "down" || action.type === "up") checkButton(action);
 			if (action.type === "wheel") {
+				// A wheel at a node: the point fields of a click (moved there first when it runs)
+				if (["node", "target", "anchor", "offset"].some(name => name in action)) pointFields(action, "wheel");
 				const notches = optionalNumber(action, "notches");
 				const dy = optionalNumber(action, "dy");
 				optionalNumber(action, "dx");

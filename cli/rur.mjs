@@ -41,7 +41,7 @@
 // --no-service (RUR_NO_SERVICE=1), debugging the service itself, or a story that must be killable on its
 // own (the sweep's children, tests that need a state dir of their own).
 // --actions '<JSON list>' | <file>: timed input (move, down, up, wheel, leave, key, text, paste, and
-// click / drag by coordinates or node path), checked first: a bad list exits 64 (cli/actions.mjs).
+// click / drag / wheel by coordinates or node path), checked first: a bad list exits 64 (cli/actions.mjs).
 // --profile <kinds> [--profile-out <dir>] (render, sequence, record): the engine's profiling suite (work, caches,
 // alloc, heap, timeline, cpu, phases, time, boundary or all: roblox-engine-emulator's docs/cli.md "Profiles and
 // caches"), with the layout's and text's caches among the caches, written to <out>/profile: summary.txt (printed on

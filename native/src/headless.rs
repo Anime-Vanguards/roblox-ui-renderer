@@ -675,7 +675,7 @@ impl Replay {
             }
             // Located against the layout when a timeline reaches them (engine/input/actions.rs)
             if crate::engine::input::actions::is_compound(event) {
-                bail!("click / drag actions run in `rur render --actions` timelines; a native replay takes move, down and up events");
+                bail!("click / drag actions and a wheel at a node run in `rur render --actions` timelines; a native replay takes move, down, up and wheel events by x, y");
             }
             let time = event.get("t").and_then(Value::as_f64).unwrap_or(0.0);
             if !time.is_finite() || time < 0.0 || time > 3600.0 {

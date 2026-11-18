@@ -852,6 +852,80 @@ assert(Target.Handle.Position.X.Offset > 540 and Target.Handle.Position.Y.Offset
     );
 }
 
+/// --actions wheel at a node (input/actions.rs): the point is the node's (with `anchor` / `offset`)
+/// when the timeline reaches it, the pointer moves there first as for a click, and the ScrollingFrame
+/// there scrolls as one does under a wheel by x, y, wherever the pointer was before. A wheel by x, y
+/// is dispatched as it is (the hover state does not follow it).
+#[test]
+fn wheel_actions_target_nodes() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r#"
+local Root = Instance.new("ScreenGui")
+Root.Name = "RURStory"
+Root.IgnoreGuiInset = true
+Root.Parent = game:GetService("CoreGui")
+local Target = Instance.new("Frame")
+Target.Name = "StoryTarget"
+Target.Size = UDim2.fromScale(1, 1)
+Target.Parent = Root
+local function Scroller(Name, Parent, X, Y)
+	local Scroll = Instance.new("ScrollingFrame")
+	Scroll.Name = Name
+	Scroll.Position = UDim2.fromOffset(X, Y)
+	Scroll.Size = UDim2.fromOffset(200, 150)
+	Scroll.CanvasSize = UDim2.fromOffset(0, 2000)
+	Scroll.Parent = Parent
+	Scroll.MouseWheelBackward:Connect(function() Scroll:SetAttribute("Backward", (Scroll:GetAttribute("Backward") or 0) + 1) end)
+	Scroll.MouseEnter:Connect(function() Scroll:SetAttribute("Entered", true) end)
+end
+Scroller("ByXY", Target, 50, 50)
+Scroller("ByNode", Target, 300, 50)
+local Strip = Instance.new("Frame")
+Strip.Name = "Strip"
+Strip.Position = UDim2.fromOffset(50, 350)
+Strip.Size = UDim2.fromOffset(400, 150)
+Strip.Parent = Target
+Scroller("Left", Strip, 0, 0)
+Scroller("Right", Strip, 200, 0)
+"#,
+    );
+    let actions = crate::engine::story::load_actions(
+        &lua,
+        r#"[
+            {"t": 0.05, "type": "move", "x": 700, "y": 550},
+            {"t": 0.1, "type": "wheel", "x": 150, "y": 125, "notches": -1},
+            {"t": 0.15, "type": "move", "x": 700, "y": 550},
+            {"t": 0.2, "type": "wheel", "node": "StoryTarget.ByNode", "notches": -1},
+            {"t": 0.3, "type": "wheel", "target": "Strip", "anchor": {"x": 0.75}, "offset": {"x": -10, "y": 0}, "dy": 200},
+            {"t": 0.4, "type": "wheel", "node": "Missing", "notches": -1}
+        ]"#,
+    )
+    .unwrap();
+    let result = crate::engine::story::run_timeline(&lua, &engine, &actions, 1.5, &mut crate::engine::story::input_dispatch);
+    run(
+        &lua,
+        &engine,
+        r#"
+local Target = game:GetService("CoreGui").RURStory.StoryTarget
+local function Check(Scroll, Y, Backward, Entered)
+	assert(Scroll.CanvasPosition.Y == Y, `{Scroll.Name}: CanvasPosition {Scroll.CanvasPosition}, expected Y {Y}`)
+	assert(Scroll:GetAttribute("Backward") == Backward, `{Scroll.Name}: MouseWheelBackward {Scroll:GetAttribute("Backward")}`)
+	assert(Scroll:GetAttribute("Entered") == Entered, `{Scroll.Name}: entered {Scroll:GetAttribute("Entered")}`)
+end
+Check(Target.ByXY, 100, 1, nil)
+Check(Target.ByNode, 100, 1, true)
+Check(Target.Strip.Right, 200, 2, true)
+Check(Target.Strip.Left, 0, nil, nil)
+"#,
+    );
+    assert_eq!(super::get(&engine).unwrap().mouse_location(), (50.0 + 300.0 - 10.0, 350.0 + 75.0), "the pointer moved to the last wheel's point");
+    let error = result.unwrap_err().to_string();
+    assert!(error.contains("--actions[5] (wheel at t=0.4): no GUI node matches \"Missing\""), "{error}");
+}
+
 /// A bad list is refused before it runs, naming the action
 #[test]
 fn bad_action_lists_are_refused() {

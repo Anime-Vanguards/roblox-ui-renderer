@@ -533,8 +533,8 @@ pub fn read_actions(spec: &str) -> Result<Vec<Json>, String> {
 
 /// Session.LoadActions: a JSON list of {"t": seconds, ...event} (inline JSON or a file), in time
 /// order. The sort runs in Luau (table.sort with main.luau's comparator: equal times keep the
-/// order Luau's sort leaves them in). Click / drag actions get their list index (`_index`) for
-/// their error messages.
+/// order Luau's sort leaves them in). Click / drag actions and wheels at a node get their list
+/// index (`_index`) for their error messages.
 pub fn load_actions(lua: &Lua, spec: &str) -> Result<Vec<Json>, String> {
     let mut items = read_actions(spec)?;
     for (index, action) in items.iter_mut().enumerate() {
@@ -567,10 +567,10 @@ pub fn load_actions(lua: &Lua, spec: &str) -> Result<Vec<Json>, String> {
 }
 
 /// Session.RunTimeline: runs virtual time to `until`, dispatching each action when the clock
-/// reaches its time. A click / drag (input/actions.rs) is located against the layout of that
-/// moment and becomes timed move / down / up events, dispatched as the clock reaches them (before
-/// a later action of the same time); one whose node is not found is skipped, and the run fails at
-/// the end with every such error.
+/// reaches its time. A click / drag / wheel at a node (input/actions.rs) is located against the
+/// layout of that moment and becomes timed move / down / up / wheel events, dispatched as the
+/// clock reaches them (before a later action of the same time); one whose node is not found is
+/// skipped, and the run fails at the end with every such error.
 pub fn run_timeline(lua: &Lua, engine: &Rc<Engine>, actions: &[Json], until: f64, dispatch: Dispatch) -> LuaResult<()> {
     let mut timeline = Timeline::new(actions.to_vec());
     timeline.advance(lua, engine, until, true, dispatch, &mut |lua, engine, at| scheduler::run_until(lua, engine, at))?;

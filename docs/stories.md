@@ -62,7 +62,7 @@ A JSON list of actions, each at `t` seconds of virtual time (default 0), checked
 | `down`, `up` | `x`, `y` (default: the pointer), `button` 1 / 2 / 3 (default 1) |
 | `click` | a point, `button`, `hold` (seconds between down and up) |
 | `drag` | `from` and `to` points, `button`, `steps` (default 10), `duration` (default 0.25 s) |
-| `wheel` | `x`, `y`, `notches` (+1 = one notch away from the user) or `dy` (px, 100 per notch) |
+| `wheel` | `x`, `y` (default: the pointer) or a `node` point, `notches` (+1 = one notch away from the user) or `dy` (px, 100 per notch) |
 | `leave` | the pointer leaves the viewport |
 | `key` | `key` (an `Enum.KeyCode` name), `down` (default true), `shift`, `ctrl`, `alt` |
 | `text`, `paste` | `text`, typed or pasted into the focused TextBox |
@@ -70,8 +70,8 @@ A JSON list of actions, each at `t` seconds of virtual time (default 0), checked
 A point is a `node` path (as `node cli/inspect.mjs tree` prints it, or any suffix of it that starts at a
 name) with optional `anchor` `{x, y}` (fractions of its size, default the centre) and `offset` `{x, y}`
 (px), or `x`, `y` in logical viewport px. A node is located when the timeline reaches the action, from
-its current position. A fixture with a sibling `<name>.actions.json` gets those actions in the golden
-corpus.
+its current position. A click, a drag and a wheel at a node move the pointer to their point first. A
+fixture with a sibling `<name>.actions.json` gets those actions in the golden corpus.
 
 ## Writing a fixture
 

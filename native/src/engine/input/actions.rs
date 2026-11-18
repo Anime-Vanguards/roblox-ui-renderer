@@ -1,12 +1,13 @@
 //! `--actions` timelines (story.rs `run_timeline`): the schema of an action list, checked before
-//! anything runs, and the compound actions `click` and `drag`, which target a point or a GUI node by
-//! path and become move / down / up events when the timeline reaches them. A node is located then,
-//! against the current layout (its AbsolutePosition / AbsoluteSize), so a layout change does not
-//! move the click off its target. cli/actions.mjs checks the same schema in the JS CLI.
+//! anything runs, and the compound actions `click`, `drag` and a `wheel` at a node, which target a
+//! point or a GUI node by path and become move / down / up / wheel events when the timeline reaches
+//! them. A node is located then, against the current layout (its AbsolutePosition / AbsoluteSize),
+//! so a layout change does not move the click off its target. cli/actions.mjs checks the same
+//! schema in the JS CLI.
 //!
 //!   {t?, type:"move", x, y}   {t?, type:"down"|"up", x?, y?, button?: 1|2|3}   {t?, type:"leave"}
-//!   {t?, type:"wheel", x?, y?, notches | dy, dx?}   {t?, type:"key", key, down?, shift?, ctrl?, alt?}
-//!   {t?, type:"text"|"paste", text}
+//!   {t?, type:"wheel", x?, y? (or a node <point>), notches | dy, dx?}
+//!   {t?, type:"key", key, down?, shift?, ctrl?, alt?}   {t?, type:"text"|"paste", text}
 //!   {t?, type:"click", <point>, button?, hold?: seconds between down and up (0)}
 //!   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?,
 //!    steps?: moves from `from` to `to` (10), duration?: seconds they take (0.25)}
@@ -15,6 +16,9 @@
 //! suffix of it, e.g. "StoryTarget.Stack.Button"; a name holding dots is quoted, `["Item.Name"]`),
 //! with `anchor` {x, y} (fraction of the node's size, default the centre 0.5, 0.5) and `offset`
 //! {x, y} (logical px), or `x`, `y` (logical px). In `from` / `to` a point is also a bare path string.
+//! A wheel at a node moves the pointer there first, as a click does (Studio's wheel replay,
+//! tools/interaction/scenarios/wheel.mjs, sends the mouse position before the wheel); a wheel by
+//! x, y (or at the pointer) is dispatched as it is.
 //!
 //! Fields other than these are ignored (live events carry `frame`), as the input dispatch does.
 
@@ -26,10 +30,18 @@ use crate::engine::{Engine, InstanceId, dom::flags, layout::absolute_position};
 /// The event types of an action list
 pub const TYPES: [&str; 10] = ["move", "down", "up", "wheel", "leave", "key", "text", "paste", "click", "drag"];
 
-/// Whether an action is expanded by the timeline (not dispatched as it is)
+/// Whether an action is expanded by the timeline (not dispatched as it is): a click, a drag, or a
+/// wheel that names a node
 pub fn is_compound(action: &Json) -> bool {
-    matches!(action.get("type").and_then(Json::as_str), Some("click" | "drag"))
+    match action.get("type").and_then(Json::as_str) {
+        Some("click" | "drag") => true,
+        Some("wheel") => action.get("node").is_some() || action.get("target").is_some(),
+        _ => false,
+    }
 }
+
+/// The fields of a point other than x, y: a wheel with one of them is checked as a point
+const NODE_FIELDS: [&str; 4] = ["node", "target", "anchor", "offset"];
 
 /// A point an action targets
 #[derive(Clone, Debug, PartialEq)]
@@ -140,6 +152,15 @@ pub fn click_point(action: &Json) -> Result<Point, String> {
     point_fields(object, "click")?.ok_or_else(|| "click: needs `node` (or `target`) or x, y".into())
 }
 
+/// A wheel's node point; None for a wheel by x, y or at the pointer
+pub fn wheel_point(action: &Json) -> Result<Option<Point>, String> {
+    let Json::Object(object) = action else { return Err("an object expected".into()) };
+    if !NODE_FIELDS.iter().any(|key| object.contains_key(*key)) {
+        return Ok(None);
+    }
+    point_fields(object, "wheel")
+}
+
 /// A drag's start and end
 pub fn drag_points(action: &Json) -> Result<(Point, Point), String> {
     let Json::Object(object) = action else { return Err("an object expected".into()) };
@@ -192,6 +213,7 @@ fn check(action: &Json) -> Result<(), String> {
                 check_button(object)?;
             }
             if kind == "wheel" {
+                wheel_point(action)?;
                 let notches = optional_number(object, "notches")?;
                 let dy = optional_number(object, "dy")?;
                 optional_number(object, "dx")?;
@@ -364,8 +386,8 @@ fn event(kind: &str, (x, y): (f64, f64), button: Option<f64>) -> Json {
     event
 }
 
-/// A click / drag as timed input events from `now` (seconds of virtual time), located against the
-/// current layout (laid out first). The error says which node could not be found.
+/// A click / drag / wheel at a node as timed input events from `now` (seconds of virtual time),
+/// located against the current layout (laid out first). The error says which node could not be found.
 pub fn expand(engine: &std::rc::Rc<Engine>, action: &Json, now: f64) -> Result<Vec<(f64, Json)>, String> {
     super::super::layout::update_all(engine);
     let number = |key: &str| action.get(key).and_then(Json::as_f64);
@@ -389,7 +411,18 @@ pub fn expand(engine: &std::rc::Rc<Engine>, action: &Json, now: f64) -> Result<V
             events.push((now + duration, event("up", b, Some(button))));
             Ok(events)
         }
-        _ => Err("not a click or drag".into()),
+        Some("wheel") => {
+            let point = wheel_point(action)?.ok_or("wheel: needs `node` (or `target`)")?;
+            let at = resolve(engine, &point)?;
+            let mut wheel = event("wheel", at, None);
+            for key in ["notches", "dy", "dx"] {
+                if let Some(value) = action.get(key) {
+                    wheel[key] = value.clone();
+                }
+            }
+            Ok(vec![(now, event("move", at, None)), (now, wheel)])
+        }
+        _ => Err("not a click, drag or wheel at a node".into()),
     }
 }
 
@@ -410,10 +443,24 @@ mod schema_tests {
             {"type": "click", "node": "StoryTarget.Button"}, {"type": "click", "target": "Button", "anchor": {"x": 0}, "offset": {"x": 2, "y": -1}, "button": 2, "hold": 0.1},
             {"type": "click", "x": 10, "y": 20}, {"frame": 3, "type": "click", "x": 10, "y": 20},
             {"type": "drag", "from": "A", "to": {"x": 5, "y": 6}, "steps": 4, "duration": 0.5},
-            {"type": "drag", "node": "A", "to": {"node": "B", "anchor": {"x": 1, "y": 1}}}
+            {"type": "drag", "node": "A", "to": {"node": "B", "anchor": {"x": 1, "y": 1}}},
+            {"type": "wheel", "node": "Scroll", "notches": -1}, {"type": "wheel", "target": "Scroll", "anchor": {"x": 0.2}, "offset": {"x": 1, "y": 2}, "dy": 100}
         ]"#;
         validate(&serde_json::from_str(ok).unwrap()).unwrap();
         validate(&json!([])).unwrap();
+    }
+
+    #[test]
+    fn a_wheel_is_compound_only_at_a_node() {
+        assert!(is_compound(&json!({"type": "wheel", "node": "Scroll", "notches": 1})));
+        assert!(is_compound(&json!({"type": "wheel", "target": "Scroll", "dy": 100})));
+        assert!(!is_compound(&json!({"type": "wheel", "x": 1, "y": 2, "notches": 1})));
+        assert!(!is_compound(&json!({"type": "wheel", "dy": 100})));
+        assert_eq!(wheel_point(&json!({"type": "wheel", "x": 1, "y": 2, "notches": 1})), Ok(None));
+        assert_eq!(
+            wheel_point(&json!({"type": "wheel", "node": " A.Scroll ", "anchor": {"y": 0}, "notches": 1})),
+            Ok(Some(Point::Node { path: "A.Scroll".into(), anchor: (0.5, 0.0), offset: (0.0, 0.0) }))
+        );
     }
 
     #[test]
@@ -432,6 +479,10 @@ mod schema_tests {
         assert_eq!(error(r#"[{"type": "drag", "from": "A"}]"#), "--actions[0] (drag): drag: needs `to` (a node path or {\"x\": .., \"y\": ..})");
         assert_eq!(error(r#"[{"type": "drag", "from": "A", "to": "B", "steps": 0}]"#), "--actions[0] (drag): `steps` must be a whole number from 1 to 10000, not 0");
         assert_eq!(error(r#"[{"type": "wheel", "x": 1, "y": 1}]"#).split(": ").nth(1), Some("wheel"));
+        assert_eq!(error(r#"[{"type": "wheel", "node": "A", "x": 1, "y": 1, "notches": 1}]"#).split(": ").nth(2), Some("give a node or x, y, not both (use `offset` to move off the node's anchor)"));
+        assert_eq!(error(r#"[{"type": "wheel", "x": 1, "y": 1, "anchor": {"x": 0}, "notches": 1}]"#), "--actions[0] (wheel): wheel: `anchor` needs a `node`");
+        assert_eq!(error(r#"[{"type": "wheel", "target": 5, "notches": 1}]"#), "--actions[0] (wheel): wheel: `target` must be a node path string, not a number");
+        assert_eq!(error(r#"[{"type": "wheel", "node": "A"}]"#).split(": ").nth(1), Some("wheel"));
     }
 
     #[test]

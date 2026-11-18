@@ -325,8 +325,12 @@ end
 	bad('[{"type":"click","node":"A","anchor":{"x":"0"}}]', /^--actions\[0\] \(click\): click: `anchor`: `x` must be a number/);
 	bad('[{"type":"drag","from":"A"}]', /^--actions\[0\] \(drag\): drag: needs `to`/);
 	bad('[{"t":0.9,"type":"drag","from":"A","to":"B"}]', /^--actions\[0\] \(drag\): ends at 1\.15 s, after the capture at --time 1; raise --time$/, { time: 1 });
+	bad('[{"type":"wheel","node":"A","x":1,"y":1,"notches":1}]', /^--actions\[0\] \(wheel\): wheel: give a node or x, y, not both/);
+	bad('[{"type":"wheel","x":1,"y":1,"offset":{"x":1},"notches":1}]', /^--actions\[0\] \(wheel\): wheel: `offset` needs a `node`$/);
+	bad('[{"type":"wheel","target":5,"notches":1}]', /^--actions\[0\] \(wheel\): wheel: `target` must be a node path string, not a number$/);
+	bad('[{"type":"wheel","node":"A"}]', /^--actions\[0\] \(wheel\): wheel: needs `notches`/);
 	bad(path.join(os.tmpdir(), "rur-no-such-actions.json"), /no such file/);
-	assert.deepEqual(readActions('[{"t":0.2,"type":"click","target":"Toggle","anchor":{"x":0.1},"offset":{"x":1,"y":0},"button":1,"hold":0.05},{"t":0.3,"type":"drag","node":"A","to":{"x":1,"y":2},"steps":3,"duration":0.1},{"frame":2,"type":"wheel","dy":100}]', { time: 1 }).length, 3);
+	assert.deepEqual(readActions('[{"t":0.2,"type":"click","target":"Toggle","anchor":{"x":0.1},"offset":{"x":1,"y":0},"button":1,"hold":0.05},{"t":0.3,"type":"drag","node":"A","to":{"x":1,"y":2},"steps":3,"duration":0.1},{"frame":2,"type":"wheel","dy":100},{"type":"wheel","node":"Panel","anchor":{"y":0.2},"offset":{"x":-4},"notches":-1}]', { time: 1 }).length, 4);
 
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-cli-actions-"));
 	fs.writeFileSync(path.join(dir, "toggle.luau"), `return function(Target)
