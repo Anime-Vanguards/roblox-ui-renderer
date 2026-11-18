@@ -934,3 +934,62 @@ fn bad_action_lists_are_refused() {
     let error = crate::engine::story::read_actions(r#"[{"type": "move""#).unwrap_err();
     assert!(error.starts_with("--actions: not valid JSON: "), "{error}");
 }
+
+/// Replayed keys and mouse buttons (the `--actions` key, down and up events) drive bound InputActions through the
+/// engine's input_actions::deliver, after UserInputService's events: Pressed, Released and GetState follow them, a
+/// mouse button reaches the binding that names it (MouseLeftButton), and a key a focused TextBox takes reaches no
+/// action (ree notes "Input actions": measured in a 0.747 client).
+#[test]
+fn replayed_input_drives_bound_input_actions() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r#"
+local Log = {}
+local UIS = game:GetService("UserInputService")
+UIS.InputBegan:Connect(function(Input) table.insert(Log, "began " .. (if Input.KeyCode == Enum.KeyCode.Unknown then Input.UserInputType.Name else Input.KeyCode.Name)) end)
+local Context = Instance.new("InputContext")
+local function action(Label, KeyCode)
+	local Action = Instance.new("InputAction")
+	Action.Name = Label
+	local Binding = Instance.new("InputBinding")
+	Binding.KeyCode = KeyCode
+	Binding.Parent = Action
+	Action.Parent = Context
+	Action.Pressed:Connect(function() table.insert(Log, Label .. " pressed " .. tostring(Action:GetState())) end)
+	Action.Released:Connect(function() table.insert(Log, Label .. " released " .. tostring(Action:GetState())) end)
+	return Action
+end
+local Jump = action("jump", Enum.KeyCode.Space)
+local Shoot = action("shoot", Enum.KeyCode.MouseLeftButton)
+Context.Parent = game:GetService("ReplicatedStorage")
+Dispatch({ type = "key", key = "Space", down = true })
+Flush()
+assert(Jump:GetState() == true, "held")
+Dispatch({ type = "key", key = "Space", down = false })
+Flush()
+assert(Jump:GetState() == false, "released")
+Dispatch({ type = "down", x = 10, y = 10, button = 1 })
+Flush()
+assert(Shoot:GetState() == true, "the left button")
+Dispatch({ type = "up", x = 10, y = 10, button = 1 })
+Flush()
+local Gui = Instance.new("ScreenGui")
+local Box = Instance.new("TextBox")
+Box.Size = UDim2.fromOffset(200, 40)
+Box.Parent = Gui
+Gui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+UpdateAll()
+Box:CaptureFocus()
+Flush()
+Dispatch({ type = "key", key = "Space", down = true })
+Flush()
+assert(Jump:GetState() == false, "a focused TextBox takes the key")
+Dispatch({ type = "key", key = "Space", down = false })
+Flush()
+local Joined = table.concat(Log, ",")
+assert(Joined == "began Space,jump pressed true,jump released false,began MouseButton1,shoot pressed true,shoot released false,began Space", Joined)
+"#,
+    );
+}

@@ -769,6 +769,28 @@ fn key_input_type(code_name: &str) -> &'static str {
     if GAMEPAD.contains(&code_name) { "Gamepad1" } else { "Keyboard" }
 }
 
+/// Hands a replayed key or mouse button going down or up to the engine's InputActions (ree's
+/// services::input_actions::deliver: the actions bound to it take it as a client delivers it, after
+/// UserInputService's own events, which the callers fire first). Mouse buttons are the KeyCode items
+/// a binding names them by.
+fn deliver_to_actions(cx: &Cx, key: Option<EnumItemId>, down: bool) {
+    if let Some(key) = key {
+        services::input_actions::deliver(cx.engine, key, down);
+    }
+}
+
+/// The KeyCode item an InputBinding names mouse button `button` (1 left, 2 right, 3 middle) by.
+fn button_key(cx: &Cx, button: f64) -> Option<EnumItemId> {
+    let name = if button == 2.0 {
+        "MouseRightButton"
+    } else if button == 3.0 {
+        "MouseMiddleButton"
+    } else {
+        "MouseLeftButton"
+    };
+    cx.engine.reflection.enum_item("KeyCode", name)
+}
+
 fn button_type(button: f64) -> &'static str {
     if button == 2.0 {
         BUTTON_TYPES[1]
@@ -841,6 +863,7 @@ fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
 
     cx.set_last_input_type(type_name);
     cx.fire_uis(n.InputBegan, vec![Value::Instance(object), Value::Bool(processed)]);
+    deliver_to_actions(cx, button_key(cx, button), true);
     if button == 1.0 {
         cx.fire_legacy("Button1Down", Vec::new())?;
     } else if button == 2.0 {
@@ -952,6 +975,7 @@ fn button_up(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
     cx.set_last_input_type(type_name);
     let processed = cx.any_active(&list) || sink.is_some();
     cx.fire_uis(n.InputEnded, vec![Value::Instance(object), Value::Bool(processed)]);
+    deliver_to_actions(cx, button_key(cx, button), false);
     if button == 1.0 {
         cx.fire_legacy("Button1Up", Vec::new())?;
     } else if button == 2.0 {
@@ -1092,7 +1116,8 @@ fn key(cx: &Cx, event: &Json) -> LuaResult<()> {
     if is_down {
         let repeat = cx.i.keys_down.borrow().iter().any(|(k, _)| *k == code);
         let mut used = false;
-        if textbox::focused_box(cx).is_some() {
+        let typing = textbox::focused_box(cx).is_some();
+        if typing {
             let modifiers = modifiers(cx, event);
             textbox::key(cx, &code_name, &modifiers, object)?;
             used = true;
@@ -1128,6 +1153,9 @@ fn key(cx: &Cx, event: &Json) -> LuaResult<()> {
         cx.i.key_receivers.borrow_mut().insert(code, receivers);
         cx.flush_states();
         cx.fire_uis(n.InputBegan, vec![Value::Instance(object), Value::Bool(used)]);
+        if !typing {
+            deliver_to_actions(cx, Some(code), true);
+        }
         if code_name.len() == 1 {
             cx.fire_legacy("KeyDown", vec![Value::String(Str::from(code_name.to_lowercase()))])?;
         }
@@ -1162,6 +1190,8 @@ fn key(cx: &Cx, event: &Json) -> LuaResult<()> {
         }
         cx.flush_states();
         cx.fire_uis(n.InputEnded, vec![Value::Instance(object), Value::Bool(processed)]);
+        // (a release reaches only what the key holds, so one a TextBox took releases nothing)
+        deliver_to_actions(cx, Some(code), false);
         if code_name.len() == 1 {
             cx.fire_legacy("KeyUp", vec![Value::String(Str::from(code_name.to_lowercase()))])?;
         }

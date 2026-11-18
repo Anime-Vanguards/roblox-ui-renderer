@@ -46,6 +46,10 @@ measured by delivering real input to Studio (`tools/interaction/`) and recording
   centre. Arrow and gamepad navigation are not emulated.
 - `--device gamepad` and `--device touch` change what UserInputService reports; ContextActionService binds
   run for key input, highest priority and newest first.
+- Keys and mouse buttons also drive the InputActions bound to them (an InputBinding's KeyCode, or
+  MouseLeftButton / MouseRightButton / MouseMiddleButton for a button), after UserInputService's events: the
+  engine's input action system decides which actions take the input and sets their state, so Pressed, Released
+  and GetState follow a replay. A key a focused TextBox takes reaches no action.
 
 ## Wheel and scrolling
 
