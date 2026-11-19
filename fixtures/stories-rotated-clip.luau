@@ -1,5 +1,5 @@
 -- Repro: rotated descendants of a clipping (ClipsDescendants = true), unrotated frame,
--- the structure of a level-up screen story: its
+-- the structure of a full-screen popup story: its
 -- DesignCanvas clips and holds stripes rotated -12.8 degrees that Studio draws past the canvas.
 --   node cli/rur.mjs compare --fixture fixtures/stories-rotated-clip.luau --viewport 1100x640 --time 0.3 --background 20,20,26
 return function(Target)

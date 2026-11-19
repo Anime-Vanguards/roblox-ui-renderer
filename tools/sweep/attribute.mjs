@@ -347,7 +347,7 @@ async function paintMasks(renderDir) {
 async function renderPaintMasks(renderDir, executable) {
 	const scene = JSON.parse(fs.readFileSync(path.join(renderDir, "scene.json"), "utf8"));
 	const manifest = JSON.parse(fs.readFileSync(path.join(renderDir, "manifest.json"), "utf8"));
-	// The variants sit in a directory of their own with the render's manifest, its files one level up
+	// The variants sit in a directory of their own with the render's manifest, its files in the folder above
 	const work = path.join(renderDir, "paint-masks");
 	fs.rmSync(work, { recursive: true, force: true });
 	fs.mkdirSync(work, { recursive: true });

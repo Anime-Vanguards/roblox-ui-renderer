@@ -1,5 +1,5 @@
 -- Rotated text: where do the glyph quads of a rotated TextLabel land and how is the atlas sampled? Labels
--- rotated by small and large angles (a level-up screen tilts its labels by -13 degrees) at whole and fractional
+-- rotated by small and large angles (a tilted popup turns its labels by -13 degrees) at whole and fractional
 -- positions, plain white text and text with a UIStroke / a UIGradient, on the parent's flat background
 -- (the labels are transparent).
 -- rur compare --fixture fixtures/text-probe-rotate.luau --viewport 2060x1150 --time 0.2 --background 0,0,0

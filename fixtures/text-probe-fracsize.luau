@@ -1,5 +1,5 @@
 -- Fractional pixel sizes: TextSize x UIScale x DPI that is not a whole number of device px (odd TextSizes at
--- 1.5x, UIScale 0.625 like a level-up screen). Plain vs rich text, a rich <font size> run, TextScaled, the Legacy
+-- 1.5x, UIScale 0.625 like a scaled-down popup). Plain vs rich text, a rich <font size> run, TextScaled, the Legacy
 -- font's 1.5x size, a UIStroke, and the same labels rotated, in large glyphs so a quad scale shows.
 -- rur compare --fixture fixtures/text-probe-fracsize.luau --viewport 1200x900 --time 0.2 --background 20,20,26
 return function(Target)
@@ -47,7 +47,7 @@ return function(Target)
 	Label("ScaledRich", { FontFace = Gotham, TextScaled = true, RichText = true, Text = "WAVE", Size = UDim2.fromOffset(200, 33), Position = UDim2.fromOffset(300, Y) })
 	Y += 58
 
-	-- UIScale 0.625 (a level-up screen): TextSize 40 -> 25 logical -> 37.5 px; 18 -> 11 -> 16.5 px
+	-- UIScale 0.625 (a scaled-down popup): TextSize 40 -> 25 logical -> 37.5 px; 18 -> 11 -> 16.5 px
 	local Scaled = Instance.new("Frame")
 	Scaled.Name = "UIScale625"
 	Scaled.BackgroundTransparency = 1
@@ -63,7 +63,7 @@ return function(Target)
 	Label("S625Small", { FontFace = Gotham, TextSize = 18, Text = "WAVE gy small", Size = UDim2.fromOffset(440, 60), Position = UDim2.fromOffset(1440, 0) }, Scaled)
 	Y += 50
 
-	-- Rotated (-13 degrees like a level-up screen): plain and rich odd sizes
+	-- Rotated (-13 degrees like a tilted popup): plain and rich odd sizes
 	Label("RotPlain51", { FontFace = Gotham, TextSize = 51, Text = "WAVE", Rotation = -13, Size = UDim2.fromOffset(260, 70), Position = UDim2.fromOffset(20, Y + 20) })
 	Label("RotRich51", { FontFace = Gotham, TextSize = 51, RichText = true, Text = "WAVE", Rotation = -13, Size = UDim2.fromOffset(260, 70), Position = UDim2.fromOffset(320, Y + 20) })
 	Label("RotFPlain37", { FontFace = Fredoka, TextSize = 37, Text = "Wave gy", Rotation = 13, Size = UDim2.fromOffset(260, 70), Position = UDim2.fromOffset(620, Y + 20) })

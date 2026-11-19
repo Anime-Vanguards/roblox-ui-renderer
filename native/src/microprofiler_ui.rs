@@ -316,7 +316,7 @@ impl MicroProfilerView {
 fn self_times(events: &[Event]) -> Vec<u64> {
     let mut own: Vec<u64> = events.iter().map(|e| e.end.saturating_sub(e.start)).collect();
     // A child closes before its parent: walk back from each event over later-closing... simpler:
-    // for every event, find its parent as the nearest later event one level up that contains it
+    // for every event, find its parent as the nearest later event one level higher that contains it
     let mut open: Vec<usize> = Vec::new();
     for index in (0..events.len()).rev() {
         let event = &events[index];
