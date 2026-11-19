@@ -1858,7 +1858,7 @@ fn decode_file(id: AssetId, file: &Path, byte_limit: usize) -> Result<TextureAss
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1909,7 +1909,7 @@ mod tests {
     }
 
     /// A TrueType font for the glyph tests (RUR_TEST_FONT, else a system font); None skips them.
-    fn test_font() -> Option<String> {
+    pub(crate) fn test_font() -> Option<String> {
         [
             std::env::var("RUR_TEST_FONT").ok(),
             Some("C:/Windows/Fonts/arial.ttf".into()),

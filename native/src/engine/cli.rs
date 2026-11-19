@@ -837,6 +837,11 @@ impl SceneOutput {
 /// A one-shot run in a VM of its own: the engine and the project of `args`, the story, virtual time,
 /// layout and export (what `rur-native engine --out` does, without writing anything).
 pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
+    run_once_with(args, |_| {})
+}
+
+/// [`run_once`], with `ready` given the story's engine before anything mounts in it (a test gives it fonts of its own)
+fn run_once_with(args: &Args, ready: impl FnOnce(&Engine)) -> Result<SceneOutput, String> {
     let started = Instant::now();
     if let Some(spec) = &args.actions {
         story::read_actions(spec)?;
@@ -846,6 +851,7 @@ pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
     let target = prepared.target;
     let server = loopback_server(args, &prepared, &spec)?;
     let engine = story_engine(&prepared, &server)?;
+    ready(&engine);
     let lua = Lua::new();
     interpret(&lua, &engine);
     let result = (|| {
@@ -2053,6 +2059,10 @@ mod layer_tests {
 #[cfg(test)]
 mod loopback_tests {
     use super::*;
+    use crate::engine::{
+        GuiEngine,
+        text::{FontPaths, TextEngine},
+    };
 
     const SERVER: &str = "return {\n\tServer = function(Context)\n\t\tlocal Storage = game:GetService(\"ReplicatedStorage\")\n\t\tlocal Greeting = Instance.new(\"StringValue\")\n\t\tGreeting.Name = \"Greeting\"\n\t\tGreeting.Value = \"hello from the server\"\n\t\tGreeting.Parent = Storage\n\t\tlocal Count = Instance.new(\"RemoteEvent\")\n\t\tCount.Name = \"Count\"\n\t\tCount.Parent = Storage\n\t\ttask.wait(0.2)\n\t\tGreeting.Value = \"changed by the server\"\n\t\tCount:FireAllClients(42)\n\tend,\n}\n";
     // (each label says what it shows as it is set: a scene holds glyphs, not text)
@@ -2080,6 +2090,19 @@ mod loopback_tests {
         text.chars().filter(|c| !c.is_whitespace()).count()
     }
 
+    /// Fonts of the test's own under `directory`: a frozen font set (as RUR_FONT_ROOT names one) whose only face is
+    /// the test font in the place of the face every family without files of its own falls back to (Source Sans Pro
+    /// Regular), so the labels draw the same glyphs on a machine with no Studio install
+    fn own_fonts(directory: &std::path::Path, repo: &std::path::Path) -> FontPaths {
+        let font = crate::assets::tests::test_font().expect("the labels need a TrueType font: set RUR_TEST_FONT");
+        let fonts = directory.join("fonts");
+        let faces = fonts.join("studio").join("content").join("fonts");
+        std::fs::create_dir_all(&faces).unwrap();
+        std::fs::copy(font, faces.join("SourceSansPro-Regular.ttf")).unwrap();
+        let fonts = Some(fonts.to_string_lossy().replace('\\', "/"));
+        FontPaths { fonts, ..FontPaths::for_repo(&repo.to_string_lossy()) }
+    }
+
     /// `--run-context loopback --server-harness`: the story is the client's, its DataModel the server's replicated
     /// containers (the emulator's "Loopback run context"); the server's harness makes a value before the join, then
     /// changes it and fires a remote at 0.2 s, and the client's labels draw what arrived. `--server-harness` without the
@@ -2105,7 +2128,11 @@ mod loopback_tests {
             parse(&list).unwrap()
         };
         let server_path = server.to_string_lossy().into_owned();
-        let with_server = |time: &str| run_once(&argv(time, &["--run-context", "loopback", "--server-harness", &server_path])).unwrap();
+        let fonts = own_fonts(&directory, &repo);
+        let with_server = |time: &str| {
+            let args = argv(time, &["--run-context", "loopback", "--server-harness", &server_path]);
+            run_once_with(&args, |engine| *engine.text().borrow_mut() = Some(TextEngine::new(fonts.clone()))).unwrap()
+        };
 
         let (printed, glyphs) = shown(&with_server("0.1"));
         for (label, text) in [("Side", "client true"), ("Greeting", "hello from the server"), ("Count", "nothing yet")] {
