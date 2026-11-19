@@ -16,6 +16,12 @@
 # runner), build (Linux and macOS, one zip each), smoke (run each zip on a fresh runner), notes
 # (release notes, tags only), publish (version tags only) and canary (the canary tag only); publish
 # and canary are the only jobs that can write.
+# Build cache: a run on main starts each build from the compiled dependencies of an earlier run on
+# main, and compiles rur-native itself from its source every time. Only runs on main store them, so
+# no pull request's run can reach a binary; a tag run that builds starts clean. A version bump keeps
+# the cache key (tools/release/build-cache.mjs), so a release commit finds the dependencies its dry
+# runs before it compiled. The repository variable RELEASE_BUILD_CACHE=off, or a manual run with
+# clean-build, turns the cache off.
 # The workflow never creates or moves a tag: a version tag is pushed to the private repository and
 # mirrored here by the export, and the export moves the canary tag to the newest commit of main
 # with a passing run.
@@ -46,6 +52,11 @@ on:
       - THIRD_PARTY_NOTICES.md
       - licenses/**
   workflow_dispatch:
+    inputs:
+      clean-build:
+        description: Build every crate from nothing, without the build cache
+        type: boolean
+        default: false
   # The nightly build of main's head, which the canary publishes
   schedule:
     - cron: "51 1 * * *"
@@ -77,6 +88,9 @@ jobs:
       dry-run-date: ${{ steps.dry-run.outputs.run-date }}
       # false when a nightly run has nothing to build; empty on every other run
       nightly-build: ${{ steps.nightly.outputs.build }}
+      # What the dependencies are compiled from, without rur-native's own version: the build
+      # cache's key (tools/release/build-cache.mjs)
+      build-cache: ${{ steps.build-cache.outputs.key }}
     steps:
       # Full history, for the check that a tag is on main
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -106,6 +120,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Release script self-checks
         run: node --test tools/release/test.mjs
+      - name: Key the build cache by the dependencies
+        id: build-cache
+        run: |
+          set -euo pipefail
+          key=$(node tools/release/build-cache.mjs native/Cargo.toml native/Cargo.lock native/.cargo/config.toml)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
       # A tag publishes the zips (and the FreeType source) of the passing dry run of the same
       # commit, which built, tested and smoke-tested every platform; the build and test jobs below
       # then have nothing to do. Without one they run, except on the canary tag, which never builds:
@@ -163,14 +183,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The same toolchain as ci.yml. No build cache here: a release starts clean, so nothing a
-      # pull request's CI run saved can reach a release binary.
+      # The same toolchain as ci.yml
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch, 2026-10-16
         with:
           toolchain: "1.90.0"
+      # The build cache (see the top of this file): the dependencies an earlier run on main compiled
+      # for this build. Restored only on main, never by a tag run, so the only caches it can find
+      # are ones that runs of main's own workflows stored; pull requests' runs store theirs apart.
+      # The key names what the compiled crates depend on: the target, C runtime, toolchain, this
+      # build, and the Cargo files with rur-native's own version left out. When the key is not
+      # stored, the newest cache of this build is restored instead, and Cargo compiles again only
+      # what changed, usually the engine after a new pin; its checks of each crate's inputs decide,
+      # as in any local build. The paths are what Cargo needs to find a crate already built: the
+      # host's build scripts and proc macros (target/dist), the target's crates
+      # (target/<triple>/dist), and ~/.cargo/git, the git dependencies' checkouts with their
+      # original file times (a fresh checkout would run the engine's C++ build scripts again).
+      - name: Restore the compiled dependencies of an earlier run on main
+        id: cache
+        if: ${{ github.ref == 'refs/heads/main' && vars.RELEASE_BUILD_CACHE != 'off' && !inputs.clean-build }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: rur-release-v1-windows-x86_64-pc-windows-msvc-crt-static-1.90.0-${{ matrix.profile }}-${{ needs.version.outputs.build-cache }}
+          restore-keys: rur-release-v1-windows-x86_64-pc-windows-msvc-crt-static-1.90.0-${{ matrix.profile }}-
+          # The anchor lets the save step use exactly these paths
+          path: &windows-cache-paths |
+            ~/.cargo/git
+            native/target/dist
+            native/target/x86_64-pc-windows-msvc/dist
       - name: Download and verify FreeType
         run: node tools/native-app/build.mjs --prepare
       - name: Build this profile
+        id: build
         working-directory: native
         shell: bash
         run: |
@@ -259,6 +302,20 @@ jobs:
           name: freetype-source
           path: .cache/native-app/source/freetype-2.14.2.tar.gz
           if-no-files-found: error
+      # The last steps, so the build's outputs are uploaded first. They run when the build passed
+      # and its key was not stored, so a later step's failure still leaves a cache. A cache keeps
+      # only the dependencies: rur-native's own crate, binary and test program are compiled again
+      # by every run, so they are left out.
+      - name: Leave rur-native's own files out of the build cache
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success' }}
+        shell: bash
+        run: node tools/release/build-cache.mjs --prune native/target/dist "native/target/$RELEASE_TARGET/dist" --names rur-native,standalone
+      - name: Store the compiled dependencies for later runs on main
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+          path: *windows-cache-paths
 
   # The Windows installed tests, on a fresh runner. They run against the rur-native.exe inside the
   # zip that smoke tests and publish ships, not against the build job's own output. Nothing is
@@ -360,25 +417,43 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The same toolchain as ci.yml. No build cache here: a release starts clean, so nothing a
-      # pull request's CI run saved can reach a release binary.
+      # The same toolchain as ci.yml
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch, 2026-10-16
         with:
           toolchain: "1.90.0"
+      # The build cache, as in windows-build: one per platform, holding the dependencies of both
+      # builds below (the marked binary, then the unmarked one with the test program), which share
+      # the dist profile
+      - name: Restore the compiled dependencies of an earlier run on main
+        id: cache
+        if: ${{ github.ref == 'refs/heads/main' && vars.RELEASE_BUILD_CACHE != 'off' && !inputs.clean-build }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: rur-release-v1-${{ matrix.os }}-${{ matrix.target }}-1.90.0-${{ needs.version.outputs.build-cache }}
+          restore-keys: rur-release-v1-${{ matrix.os }}-${{ matrix.target }}-1.90.0-
+          # The anchor lets the save step use exactly these paths
+          path: &cache-paths |
+            ~/.cargo/git
+            native/target/dist
+            native/target/${{ matrix.target }}/dist
       # Build tools only; none of these packages ship in the zip. mesa-vulkan-drivers is the software
       # Vulkan the installed release tests need to draw a PNG, because the runner has no GPU.
+      # Installed before the build, which looks for some of them. A mirror that does not answer is
+      # given up after 10 seconds and the next one tried: on 2026-11-19 one that kept each package
+      # waiting about 30 seconds made this step take five minutes.
       - name: Linux desktop build libraries and software Vulkan for release tests
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::Retries=3 install -y \
             libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
             libgl1-mesa-dev mesa-vulkan-drivers
       - name: Install npm packages
         run: npm ci
       - name: Download and verify FreeType
         run: node tools/native-app/build.mjs --prepare
-      - name: Build public default features from a clean target
+      - name: Build public default features
+        id: build
         working-directory: native
         shell: bash
         env:
@@ -429,6 +504,17 @@ jobs:
           name: binary-${{ matrix.os }}-${{ matrix.arch }}
           path: release/*.zip
           if-no-files-found: error
+      # As in windows-build: stored last, without rur-native's own files, when the marked build
+      # passed and the key was not stored
+      - name: Leave rur-native's own files out of the build cache
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success' }}
+        run: node tools/release/build-cache.mjs --prune native/target/dist "native/target/$RELEASE_TARGET/dist" --names rur-native,standalone
+      - name: Store the compiled dependencies for later runs on main
+        if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+          path: *cache-paths
 
   smoke:
     if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' && needs.version.outputs.nightly-build != 'false' }}

@@ -14,6 +14,8 @@ import { fileStates, outsideFileStates } from "./file-states.mjs";
 // The choice of the dry run a tag publishes from has tests of its own, run with these
 import "./dry-run.test.mjs";
 import "./nightly.test.mjs";
+// So has the key of the build cache
+import "./build-cache.test.mjs";
 
 // Runs `run` with an empty temporary folder and removes it afterwards
 function temporary(run) {

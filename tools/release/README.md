@@ -12,6 +12,8 @@ node tools/release/notes.mjs --tag v0.1.0 --out release-notes.md
 node tools/release/notes.mjs --tag canary --run <run id> --run-date <run start time> --out release-notes.md
 node tools/release/dry-run.mjs --repository <owner/name> --sha <commit> --artifacts <name,...> [--required]
 node tools/release/nightly.mjs --repository <owner/name> --sha <main's head> --artifacts <name,...>
+node tools/release/build-cache.mjs native/Cargo.toml native/Cargo.lock native/.cargo/config.toml
+node tools/release/build-cache.mjs --prune native/target/dist native/target/<triple>/dist --names rur-native,standalone
 node --test tools/release/test.mjs
 ```
 
@@ -23,6 +25,7 @@ node --test tools/release/test.mjs
 - `notes.mjs` writes the release notes, or the canary's.
 - `dry-run.mjs` finds the passing dry run of a commit whose zips a tag publishes (see below).
 - `nightly.mjs` decides whether the nightly run builds main's head (see below).
+- `build-cache.mjs` gives the build cache its key and leaves rur-native's own files out of it (see below).
 
 ## Dry runs, the nightly build and the canary
 
@@ -61,6 +64,27 @@ For `linux x86_64` or `macos aarch64`, use that platform's target triple and bin
 checks that the binary is the first entry with mode 0755 and that no other file is executable, because
 installers pick the executable from the zip. The tests also open each zip with the platform's own archive
 reader.
+
+## Build cache
+
+Each build of a run on main (a dry run, a manual run or the nightly build) starts from the dependencies
+an earlier run on main compiled for the same build: GitHub's Actions cache, one entry per Windows build
+(`dist`, `tests`) and one each for Linux and macOS. rur-native itself is compiled from its source in
+every run, so a cache holds only the dependencies, and `build-cache.mjs --prune` leaves rur-native's
+crate, binaries and test program out before one is stored.
+
+The key names the target, the C runtime, the toolchain, the build and `build-cache.mjs`'s hash of
+`native/Cargo.toml`, `native/Cargo.lock` and `native/.cargo/config.toml` with rur-native's own version
+left out. A version bump changes nothing else in them, so the release commit finds the cache its dry
+runs before it stored. When the key is not stored (a new engine pin, a changed dependency), the newest
+cache of the same build is restored and Cargo compiles what changed, by the same checks of each crate's
+inputs as in any local build; the run then stores its own. A run that found its key stores nothing.
+
+Only runs on main restore or store a cache. A pull request's runs keep their caches apart (GitHub scopes
+them to the pull request), so they cannot reach a binary. A tag run that builds, because its commit has
+no passing dry run, starts from nothing. To build without the cache, start a run by hand with
+`clean-build` (`gh workflow run release.yml -f clean-build=true`), or set the repository variable
+`RELEASE_BUILD_CACHE` to `off` for every run.
 
 ## Checking the real license graph
 

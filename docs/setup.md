@@ -115,8 +115,10 @@ and explicit `--mount` arguments apply after them.
 ### How releases are built
 
 `.github/workflows/release.yml` builds each release from a public version tag on GitHub's runners, with
-Rust 1.90.0, the public default features and `cargo build --profile dist --locked --target <triple>`, from a
-clean target with no build cache. The cargo step sets `RUR_RELEASE_BUILD=1`. The build reads it at compile
+Rust 1.90.0, the public default features and `cargo build --profile dist --locked --target <triple>`. Runs on
+main start from the dependencies an earlier run on main compiled and compile rur-native itself from its source;
+only runs on main store that cache, and a tag build starts clean (tools/release/README.md, "Build cache"). The
+cargo step sets `RUR_RELEASE_BUILD=1`. The build reads it at compile
 time, so a release binary always uses standalone defaults, even when it runs inside the checkout it was built
 in. Cargo rebuilds when the variable changes. Windows links the C runtime in with
 `-C target-feature=+crt-static`. Pushes to main that touch release files, and manual runs, build the zips
