@@ -99,8 +99,10 @@ roots, and a story with no project options mounts the project file beside it:
 `--git-ref <ref>` renders the sources as they are at a commit: the roots (with the project files next to
 them), the Rojo project and every `$path` it maps, `--mount` sources and the story are extracted from `<ref>` into
 `<state dir>/git-refs/`, reused by later runs, through a temporary index (your index, HEAD and working tree
-are untouched). A story or mount the commit does not have is taken from the working tree, with a note on stderr.
-The extraction is rur-native's (`native/src/gitref.rs`); `git` must be on the PATH.
+are untouched; git runs with `core.longpaths`, so a deeply nested project extracts under a long state directory
+on Windows). A file the commit does not have is taken from the working tree, with a note on stderr: a story or
+mount added since, or a folder git ignores that the project maps, such as a package manager's install folder mapped
+to `ReplicatedStorage.Packages`. The extraction is rur-native's (`native/src/gitref.rs`); `git` must be on the PATH.
 
 `rur diff --git-ref <ref> --story <file>` (`rur-native diff`) renders the source at `<ref>` and in the working tree,
 at the same time in two processes, into `<out>/before` and `<out>/after`, and prints both renders' summaries, the

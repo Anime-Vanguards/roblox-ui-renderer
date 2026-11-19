@@ -5,10 +5,13 @@
 //! `--mount` sources, the story) are extracted from each repository's `<ref>` into
 //! `<state dir>/git-refs/<repo>-<hash>/<commit>/` through a temporary index (`git read-tree` + `checkout-index`; the
 //! repository's own index, HEAD and working tree are untouched) and reused by later runs of the same commit.
-//! Submodules (e.g. external/ data) are linked to the working tree's checkout. A story or a mount the commit does not
-//! have is taken from the working tree, with a note.
+//! Submodules (e.g. external/ data) are linked to the working tree's checkout. A file the commit does not have is
+//! taken from the working tree, with a note: a story or a mount added since, or a folder git ignores that the project
+//! maps (a package manager's install folder mapped to ReplicatedStorage.Packages).
 //!
-//! git runs with explicit arguments (no shell), only `rev-parse`, `read-tree`, `ls-files` and `checkout-index`.
+//! git runs with explicit arguments (no shell), only `rev-parse`, `read-tree`, `ls-files` and `checkout-index`; the
+//! three that write the extracted tree take `-c core.longpaths=true`, so a deeply nested project extracts under a long
+//! state directory on Windows (git ignores the setting elsewhere).
 use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -23,10 +26,13 @@ fn is_credential(name: &str) -> bool {
     ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "ROBLOX_BROKER_TOKEN"].iter().any(|known| name.eq_ignore_ascii_case(known))
 }
 
-/// `git -C <cwd> <args>`: its stdout, or an error naming the command and git's message. `index` runs it on that index
-/// file; `input` goes to its stdin.
-fn git(cwd: &Path, args: &[&str], index: Option<&Path>, input: Option<&[u8]>) -> Result<Vec<u8>, String> {
+/// `git -C <cwd> <args>`: its stdout, or an error naming the command and git's message. `long_paths` adds
+/// `-c core.longpaths=true`; `index` runs it on that index file; `input` goes to its stdin.
+fn git(cwd: &Path, args: &[&str], long_paths: bool, index: Option<&Path>, input: Option<&[u8]>) -> Result<Vec<u8>, String> {
     let mut command = Command::new("git");
+    if long_paths {
+        command.args(["-c", "core.longpaths=true"]);
+    }
     command.arg("-C").arg(cwd).args(args).stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
     for (name, _) in std::env::vars_os() {
         if is_credential(&name.to_string_lossy()) {
@@ -118,7 +124,7 @@ struct Snapshot {
 
 impl Snapshot {
     fn new(top: PathBuf, reference: &str, state: &Path) -> Result<Snapshot, String> {
-        let commit = git(&top, &["rev-parse", "--verify", "--quiet", &format!("{reference}^{{commit}}")], None, None)?;
+        let commit = git(&top, &["rev-parse", "--verify", "--quiet", &format!("{reference}^{{commit}}")], false, None, None)?;
         let commit = String::from_utf8_lossy(&commit).trim().to_string();
         let hash = Sha256::digest(same_case(&slash(&top.to_string_lossy())).as_bytes());
         let id: String = hash.iter().take(4).map(|byte| format!("{byte:02x}")).collect();
@@ -143,11 +149,11 @@ impl Snapshot {
         }
         std::fs::create_dir_all(&self.dir).map_err(|error| format!("{}: {error}", self.dir.display()))?;
         if !self.index.exists() {
-            git(&self.top, &["read-tree", &self.commit], Some(&self.index), None)?;
+            git(&self.top, &["read-tree", &self.commit], true, Some(&self.index), None)?;
         }
         let mut list_args = vec!["ls-files", "-s", "-z", "--"];
         list_args.extend(wanted.iter().map(String::as_str));
-        let listed = git(&self.top, &list_args, Some(&self.index), None)?;
+        let listed = git(&self.top, &list_args, true, Some(&self.index), None)?;
         let mut files: Vec<&[u8]> = Vec::new();
         for line in listed.split(|byte| *byte == 0).filter(|line| !line.is_empty()) {
             let Some(tab) = line.iter().position(|byte| *byte == b'\t') else { continue };
@@ -169,7 +175,7 @@ impl Snapshot {
         }
         if !files.is_empty() {
             let prefix = format!("--prefix={}/", slash(&self.dir.to_string_lossy()));
-            git(&self.top, &["checkout-index", "-f", "-z", "--stdin", &prefix], Some(&self.index), Some(&files.join(&0u8)))?;
+            git(&self.top, &["checkout-index", "-f", "-z", "--stdin", &prefix], true, Some(&self.index), Some(&files.join(&0u8)))?;
         }
         self.done.extend(wanted);
         let state = Json::object().with("commit", self.commit.as_str()).with("top", self.top.as_path()).with("pathspecs", self.done.clone());
@@ -199,7 +205,7 @@ impl GitRef {
                 None => break,
             }
         }
-        let Ok(top) = git(&dir, &["rev-parse", "--show-toplevel"], None, None) else { return Ok(None) };
+        let Ok(top) = git(&dir, &["rev-parse", "--show-toplevel"], false, None, None) else { return Ok(None) };
         let top = crate::rojo::resolve(Path::new(""), String::from_utf8_lossy(&top).trim());
         let key = same_case(&top.to_string_lossy());
         if let Some(index) = self.snapshots.iter().position(|snapshot| same_case(&snapshot.top.to_string_lossy()) == key) {
@@ -220,6 +226,13 @@ impl GitRef {
             if let Some(relative) = inside(&snapshot.dir, &real) {
                 let relative = if relative.is_empty() { ".".to_string() } else { relative };
                 snapshot.extract(std::slice::from_ref(&relative))?;
+                // A path the project at the ref maps that the commit does not hold (a folder git ignores, such as
+                // the one a package manager installs into): the working tree's, as for a story or a mount
+                let working = snapshot.top.join(&relative);
+                if !real.exists() && working.exists() {
+                    eprintln!("rur: --git-ref {}: {relative} does not exist at {}; using the working tree's", self.reference, &snapshot.commit[..10.min(snapshot.commit.len())]);
+                    return Ok(working);
+                }
                 return Ok(real);
             }
         }
@@ -395,12 +408,14 @@ mod tests {
         crate::paths::canonical_path(&dir).unwrap()
     }
 
-    /// A committed file is read as committed while the working tree has another version, and a file the commit lacks
-    /// is the working tree's; the repository's index and working tree are untouched
+    /// A committed file is read as committed while the working tree has another version, a file the commit lacks is
+    /// the working tree's, and a folder git ignores (and the commit so lacks) is the working tree's when the project
+    /// at the ref maps it; the repository's index and working tree are untouched
     #[test]
-    fn files_come_from_the_commit_and_new_ones_from_the_working_tree() {
+    fn files_come_from_the_commit_and_ignored_folders_from_the_working_tree() {
         let repo = temp("repo");
         let state = temp("state");
+        std::fs::write(repo.join(".gitignore"), "Packages/\n").unwrap();
         std::fs::create_dir_all(repo.join("src")).unwrap();
         std::fs::write(repo.join("src/App.luau"), "return 'committed'").unwrap();
         run(&repo, &["init", "-q"]);
@@ -408,6 +423,8 @@ mod tests {
         run(&repo, &["commit", "-qm", "base"]);
         std::fs::write(repo.join("src/App.luau"), "return 'edited'").unwrap();
         std::fs::write(repo.join("src/New.luau"), "return 'new'").unwrap();
+        std::fs::create_dir_all(repo.join("Packages")).unwrap();
+        std::fs::write(repo.join("Packages/Lib.luau"), "return 'package'").unwrap();
 
         let mut reference = GitRef::new("HEAD", &state);
         let app = reference.map(&repo.join("src/App.luau"), &[], true).unwrap();
@@ -417,6 +434,7 @@ mod tests {
         // (the project file at the ref sits in the snapshot; its $paths resolve there)
         let snapshot = reference.snapshots[0].dir.clone();
         assert_eq!(reference.map(&snapshot.join("src"), &[], false).unwrap(), snapshot.join("src"));
+        assert_eq!(reference.map(&snapshot.join("Packages"), &[], false).unwrap(), repo.join("Packages"));
         assert_eq!(reference.map(&snapshot.join("Missing"), &[], false).unwrap(), snapshot.join("Missing"));
         let described = reference.describe();
         assert_eq!(described.get("ref").as_str(), Some("HEAD"));
@@ -425,6 +443,33 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&status.stdout).trim(), "M src/App.luau");
         let _ = std::fs::remove_dir_all(&repo);
         let _ = std::fs::remove_dir_all(&state);
+    }
+
+    /// A deeply nested file extracts into a state directory whose paths pass Windows' 260 characters (git needs
+    /// core.longpaths for that); elsewhere there is no such limit and the test checks the same extraction
+    #[test]
+    fn deeply_nested_files_extract_past_the_windows_path_limit() {
+        let repo = temp("deep");
+        let state = temp("deep-state").join("a-state-directory-with-a-long-name-like-a-user-temp-folder-has");
+        let nested: PathBuf = (0..6).map(|level| format!("nested-folder-{level}-with-a-long-name")).collect();
+        let file = repo.join(&nested).join("Story.story.luau");
+        let relative = nested.join("Story.story.luau");
+        // (git writes the long path itself; the test's own write goes through Rust, which handles long paths)
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "return 'deep'").unwrap();
+        run(&repo, &["-c", "core.longpaths=true", "init", "-q"]);
+        run(&repo, &["-c", "core.longpaths=true", "add", "-A"]);
+        run(&repo, &["-c", "core.longpaths=true", "commit", "-qm", "deep"]);
+        let mut reference = GitRef::new("HEAD", &state);
+        let mapped = reference.map(&file, &[], true).unwrap();
+        assert!(mapped.starts_with(&state), "{}", mapped.display());
+        assert!(mapped.ends_with(&relative));
+        if cfg!(windows) {
+            assert!(mapped.as_os_str().len() > 260, "{} characters", mapped.as_os_str().len());
+        }
+        assert_eq!(std::fs::read_to_string(&mapped).unwrap(), "return 'deep'");
+        let _ = std::fs::remove_dir_all(&repo);
+        let _ = std::fs::remove_dir_all(state.parent().unwrap());
     }
 
     #[cfg(windows)]

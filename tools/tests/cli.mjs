@@ -134,7 +134,7 @@ end
 		assert.match(git("status", "--short", "--untracked-files=no").stdout, /^ M stories\/App\.story\.luau\s*$/);
 
 		// `rur diff` (rur-native diff): the committed story before, the edited one after, the label's change named and its
-		// pixels counted
+		// pixels counted; a folder git ignores that the project maps (an installed package) comes from the working tree
 		const cli =(...extra) => spawnSync(process.execPath, ["cli/rur.mjs", ...extra],
 			{ cwd: root, encoding: "utf8", windowsHide: true, env: { ...process.env, RUR_STATE_DIR: path.join(dir, "state"), RUR_NO_SERVICE: "1" } });
 		const diffed = cli("diff", "--git-ref", "HEAD", "--rojo", path.join(dir, "plugin.project.json"), "--story", path.join(dir, "stories/App.story.luau"),
@@ -147,6 +147,20 @@ end
 		assert.ok(result.changes.some(change => change.startsWith("~ ") && change.includes('text="Story"') && change.includes('text="Edited"')), result.changes.join("\n"));
 		assert.ok(result.pixels.changed > 0 && result.pixels.changed < result.pixels.total, result.pixels.message);
 		assert.ok(fs.existsSync(path.join(dir, "out/diff/diff.png")) && fs.existsSync(path.join(dir, "out/diff/before/summary.json")));
+		write(".gitignore", "Packages/\n");
+		write("packages.project.json", JSON.stringify({ name: "Packages", tree: { $className: "DataModel",
+			ReplicatedStorage: { MyPlugin: { $path: "src" }, Packages: { $path: "Packages" } } } }));
+		write("stories/Lib.story.luau", `local Lib = require(game:GetService("ReplicatedStorage").Packages.Lib)
+return function(Target) local Label = Instance.new("TextLabel"); Label.Name = "Title"; Label.Text = Lib; Label.Parent = Target end
+`);
+		assert.equal(git("add", "-A").status, 0);
+		assert.equal(git("commit", "-qm", "packages").status, 0);
+		write("Packages/Lib.luau", 'return "installed"');
+		const packages = cli("diff", "--git-ref", "HEAD", "--rojo", path.join(dir, "packages.project.json"), "--story", path.join(dir, "stories/Lib.story.luau"),
+			"--no-png", "--offline", "--json", "--out", path.join(dir, "out/packages"));
+		assert.equal(packages.status, 0, packages.stderr);
+		assert.match(packages.stderr, /Packages does not exist at [0-9a-f]{10}; using the working tree's/);
+		assert.equal(JSON.parse(packages.stdout).before.status, "ok");
 
 		// `rur sweep` (rur-native sweep): the stories beside the Rojo project, each in a process of its own, reported (the
 		// filter leaves out the copy --git-ref extracted into the state dir, which is in the project's folder here)
