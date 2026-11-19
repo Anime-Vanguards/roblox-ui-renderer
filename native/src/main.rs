@@ -32,9 +32,11 @@ fn main() -> anyhow::Result<()> {
     }
     // Release builds fix their repo, state directory and Vulkan loader defaults for this process, its
     // threads and its children. This is the only place they change the environment: on Linux and macOS
-    // that must happen before any other thread can read it (see the `paths` module comment).
+    // that must happen before any other thread can read it (see the `paths` module comment). The Open
+    // Cloud API key leaves the environment here too, so no child process inherits it (download.rs).
     // SAFETY: nothing above started a thread, and no engine or GPU library has been loaded yet
     unsafe {
+        rur_native::download::take_api_key_from_environment();
         if let Err(error) = rur_native::paths::initialize() {
             return Err(answer_batch_job_startup_error(error));
         }

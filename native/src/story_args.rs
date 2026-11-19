@@ -606,6 +606,8 @@ impl Context {
                 None => command.env_remove(name),
             };
         }
+        // It downloads: the API key this process took out of its environment at startup goes with it
+        crate::download::with_api_key(&mut command);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

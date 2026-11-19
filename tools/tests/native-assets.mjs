@@ -1,7 +1,7 @@
 // The CLI's side of assets, which the engine downloads (native/src/download.rs, whose own checks are
 // `cargo test --release download::`): `rur-native assets` answers the CLI (offline here, so no request goes
-// out) and reports the account without its secret; child processes that download nothing get no
-// credentials. All credentials are synthetic.
+// out) and reports the account and the Open Cloud API key without their secrets; child processes that
+// download nothing get no credentials. All credentials are synthetic.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -21,7 +21,7 @@ fs.writeFileSync(path.join(cache, "999.rbxmx"), "<roblox><url>rbxassetid://124</
 fs.writeFileSync(path.join(cache, "77.ttf"), Buffer.from([0, 1, 0, 0, 1, 2, 3]));
 const local = path.join(directory, "local image.png");
 fs.writeFileSync(local, png);
-const SECRETS = ["dummy-native-assets", "dummy-broker-token", "dummy-env-cookie", "dummy-file-cookie"];
+const SECRETS = ["dummy-native-assets", "dummy-broker-token", "dummy-env-cookie", "dummy-file-cookie", "dummy-env-api-key", "dummy-file-api-key"];
 const noSecret = (text, what) => {
 	for (const secret of SECRETS) assert.ok(!text.includes(secret), `${what} must not contain a credential`);
 };
@@ -60,6 +60,21 @@ try {
 	assert.equal(access({ ...broker, ROBLOX_BROKER_URL: "http://broker.example", ROBLOX_ASSET_DELIVERY_COOKIE: "dummy-env-cookie" }), null, "a refused broker address does not fall back to the cookie");
 	assert.equal(assets(["account"], { env: broker }).stdout.trim(), "broker");
 
+	// The Open Cloud API key: from its variable or the RUR_COOKIE_ENV file, asked before the account, and
+	// reported without its value; one that can't be a key is not used
+	const account = env => JSON.parse(assets(["account", "--json"], { env }).stdout);
+	const API_KEY = "ROBLOX_ASSET_DELIVERY_API_KEY";
+	assert.deepEqual(account({}), { access: null, apiKey: false });
+	assert.deepEqual(account({ [API_KEY]: "dummy-env-api-key" }), { access: null, apiKey: true });
+	const cookieFile = path.join(directory, "cookie.env");
+	fs.writeFileSync(cookieFile, ["ROBLOX_ASSET_DELIVERY_COOKIE=dummy-file-cookie", `${API_KEY}="dummy-file-api-key" # the key`, ""].join("\n"));
+	assert.deepEqual(account({ RUR_COOKIE_ENV: cookieFile }), { access: "cookie", apiKey: true }, "the key beside the cookie in RUR_COOKIE_ENV's file");
+	assert.equal(assets(["account"], { env: { RUR_COOKIE_ENV: cookieFile } }).stdout.trim(), "api key, then cookie");
+	assert.equal(assets(["account"], { env: { [API_KEY]: "dummy-env-api-key" } }).stdout.trim(), "api key");
+	assert.deepEqual(account({ [API_KEY]: "dummy env api key" }), { access: null, apiKey: false }, "a key with spaces is not used");
+	assert.deepEqual(account({ ...broker, [API_KEY]: "dummy-env-api-key" }), { access: "broker", apiKey: true });
+	fs.rmSync(cookieFile);
+
 	// Offline resolution, as a render does it: the cache, thumbnails, local files, decals; no request
 	const uris = ["rbxassetid://123", "rbxassetid://404", pathToFileURL(local).href, "rbxthumb://type=AvatarHeadShot&id=42&w=150&h=150", "rbxassetid://999"];
 	const fetched = assets(["fetch", "--offline", "--json", "--stdin", uris[0]], { env: broker, input: uris.slice(1).join("\n") });
@@ -77,9 +92,9 @@ try {
 	assert.ok(fs.readFileSync(path.join(cache, "fonts.json"), "utf8").includes("77.ttf"), "a cached font is listed in fonts.json");
 	assert.match(assets(["fetch", "--offline", "rbxassetid://123"]).stdout, /^rbxassetid:\/\/123\t.*123\.png\r?\n$/);
 
-	// Child processes that download nothing get neither the cookie nor the token
-	assert.deepEqual(withoutCookie({ ROBLOX_BROKER_TOKEN: "a", Roblox_Broker_Token: "b", ROBLOSECURITY: "c", ROBLOX_BROKER_URL: "https://env.example", PATH: "kept" }), { ROBLOX_BROKER_URL: "https://env.example", PATH: "kept" });
-	console.log("Native assets: rur-native assets reports the account without it and resolves offline (cache, thumbnails, files, decals, fonts) without a request; child environments carry no credential.");
+	// Child processes that download nothing get neither the cookie, the token nor the API key
+	assert.deepEqual(withoutCookie({ ROBLOX_BROKER_TOKEN: "a", Roblox_Broker_Token: "b", ROBLOSECURITY: "c", ROBLOX_ASSET_DELIVERY_API_KEY: "d", roblox_asset_delivery_api_key: "e", ROBLOX_BROKER_URL: "https://env.example", PATH: "kept" }), { ROBLOX_BROKER_URL: "https://env.example", PATH: "kept" });
+	console.log("Native assets: rur-native assets reports the account and the API key without them and resolves offline (cache, thumbnails, files, decals, fonts) without a request; child environments carry no credential.");
 } finally {
 	assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
 	assert.ok(path.basename(directory).startsWith("rur-native-assets-test-"));

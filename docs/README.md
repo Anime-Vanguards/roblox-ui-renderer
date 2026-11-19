@@ -8,7 +8,7 @@ Reference guides for running `rur`, understanding its Studio parity rules, and e
 | [render.md](render.md) | CLI commands: `render`, `sequence`, `--git-ref`/`diff`, `--plugin`, `--all-layers`, `sweep`, `record`, `profile`, and `inspect` |
 | [storybook.md](storybook.md) | Desktop storybook (`rur native`), headless captures, benchmarks, and memory leak inspection |
 | [web.md](web.md) | WebAssembly browser build, asset bundles, and frame-identity testing |
-| [assets.md](assets.md) | Built-in textures, fonts, `rbxassetid://` downloads, cookies, account broker, and Studio image reads |
+| [assets.md](assets.md) | Built-in textures, fonts, `rbxassetid://` downloads, Open Cloud API key, cookies, account broker, and Studio image reads |
 | [how-it-works.md](how-it-works.md) | Architecture, source layout, `roblox-engine-emulator` dependency, and script execution |
 | [projects.md](projects.md) | Projects, `rur.json` places, Rojo auto-detection, explicit mounts, and environment variables |
 | [stories.md](stories.md) | UI Labs, Flipbook, module, model, and fixture formats; controls; timed `--actions` |

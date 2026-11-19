@@ -7,6 +7,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ensureEngine } from "./engine.mjs";
+import { withoutCookie } from "./assets.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -35,7 +36,8 @@ export async function selftest() {
 	// one's output is printed whole, in the list's order
 	const jobs = Math.max(1, Number(process.env.RUR_JOBS) || Math.min(8, Math.max(2, Math.floor(os.availableParallelism() / 4))));
 	const run = ([command, args]) => new Promise(resolve => {
-		const child = spawn(command, args, { cwd: ROOT, windowsHide: true });
+		// The checks bring their own synthetic credentials: they never get the cookie, the broker token or the API key
+		const child = spawn(command, args, { cwd: ROOT, windowsHide: true, env: withoutCookie() });
 		let output = "";
 		child.stdout.on("data", chunk => { output += chunk; });
 		child.stderr.on("data", chunk => { output += chunk; });

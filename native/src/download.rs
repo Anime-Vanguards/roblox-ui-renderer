@@ -2,8 +2,10 @@
 //! render service and the Node CLI (`rur-native assets`). The web build has none (it draws its bundle).
 //!
 //! - `rbxassetid://N` (and `roblox.com/asset/?id=N`, bare ids) from asset delivery: the public route
-//!   first, then with the account. The CDN location it answers is downloaded without credentials. Many
-//!   ids are located first through the batch endpoint, 100 per request, and 16 downloads run at once.
+//!   first; for an asset it refuses with 401 or 403, Open Cloud's asset delivery route with the API key
+//!   when one is configured; then with the account. The CDN location it answers is downloaded without
+//!   credentials. Many ids are located first through the batch endpoint, 100 per request, and 16
+//!   downloads run at once.
 //! - `rbxthumb://` from the thumbnail service: its WebP rendition (what Studio draws), decoded to PNG
 //!   here, else its PNG rendition. A Blocked avatar thumbnail is Studio's placeholder silhouette.
 //! - The cloud fonts a run reported missing.
@@ -11,10 +13,13 @@
 //!   Studio MCP bridge configured, the checkout's `node cli/studio-images.mjs store` reads the refused
 //!   ids once and stores them in the cache (docs/assets.md "Images from Studio").
 //!
-//! The account is an account broker or a cookie ([`Account`]). The cookie is only ever placed in the
-//! Cookie header of requests to `https://assetdelivery.roblox.com`, the broker's token only in the
-//! Authorization header of requests to that broker. Neither is printed, logged, cached or written
-//! anywhere, sent across a redirect or passed to a child process.
+//! The account is an account broker or a cookie ([`Account`]); an Open Cloud API key ([`ApiKey`]) can come
+//! before either. The cookie is only ever placed in the Cookie header of requests to
+//! `https://assetdelivery.roblox.com`, the broker's token only in the Authorization header of requests to
+//! that broker, the API key only in the `x-api-key` header of requests to
+//! `https://apis.roblox.com/asset-delivery-api/v1/assetId/<id>`. None of them is printed, logged, cached or
+//! written anywhere, sent across a redirect or passed to a child process that downloads nothing; rur-native
+//! takes the API key out of its environment at startup, so only its own render processes get it back.
 //!
 //! The cache is cli/assets.mjs's layout, so caches it filled stay valid: `<state dir>/assets/<id>.<ext>`
 //! with a record of each download in `assets/downloaded/<name>.json`, cloud fonts listed in
@@ -30,7 +35,7 @@ use std::{
         Arc, Condvar, Mutex, OnceLock,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde_json::{Value, json};
@@ -39,6 +44,20 @@ use crate::resolve::{Sniffed, sniff};
 
 pub const USER_AGENT: &str = "rur/0.1 (offline Roblox UI renderer)";
 const DELIVERY_HOST: &str = "assetdelivery.roblox.com";
+/// Open Cloud: the only host the API key is sent to
+const OPEN_CLOUD_HOST: &str = "apis.roblox.com";
+/// Open Cloud's asset delivery route, the only one the API key is sent to; the asset id follows it. rur asks
+/// for no version or other representation on the public route either (resolve.rs asset_id drops `version=`).
+const OPEN_CLOUD_ROUTE: &str = "/asset-delivery-api/v1/assetId/";
+/// The variable (and RUR_COOKIE_ENV file entry) that holds an Open Cloud API key for private assets. Not a
+/// `RUR_*` name: those are a batch job's settings (engine/cli.rs), which the key must never travel in.
+pub const API_KEY_VARIABLE: &str = "ROBLOX_ASSET_DELIVERY_API_KEY";
+/// The variables that hold a credential (any case): the cookie, the broker's token and the API key
+pub const CREDENTIAL_VARIABLES: [&str; 4] = ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "ROBLOX_BROKER_TOKEN", API_KEY_VARIABLE];
+/// Requests with the API key for one asset: the first, and the retries after a rate limit (HTTP 429)
+const KEY_ATTEMPTS: u32 = 5;
+/// The longest one rate limit holds requests with the key (Open Cloud counts requests per minute)
+const KEY_WAIT_LIMIT: Duration = Duration::from_secs(60);
 /// How long the server may take to accept, answer or send a request (Node's socket timeout was 30 s of
 /// silence; a body may take longer as long as it keeps arriving, up to BODY_TIMEOUT)
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -74,7 +93,7 @@ impl Request {
     }
 }
 
-/// Header names only: a request can carry the cookie or the broker token
+/// Header names only: a request can carry the cookie, the broker token or the API key
 impl std::fmt::Debug for Request {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let names: Vec<&str> = self.headers.iter().map(|(name, _)| *name).collect();
@@ -272,9 +291,9 @@ fn nonempty(env: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> 
     env(name).filter(|value| !value.is_empty())
 }
 
-/// A cookie value as written in an env file or variable: quotes keep everything inside them, an
-/// unquoted value ends at `#`, and a leading `.ROBLOSECURITY=` is dropped
-fn cookie_value(raw: &str) -> Option<String> {
+/// A value as written in an env file or variable: quotes keep everything inside them, an unquoted value
+/// ends at `#`
+fn env_value(raw: &str) -> Option<String> {
     let value = raw.trim();
     let value = match value.chars().next() {
         Some(quote @ ('"' | '\'')) => {
@@ -283,12 +302,20 @@ fn cookie_value(raw: &str) -> Option<String> {
         }
         _ => value.split('#').next().unwrap_or_default().trim(),
     };
-    let value = value.strip_prefix(".ROBLOSECURITY=").unwrap_or(value);
     (!value.is_empty()).then(|| value.to_string())
 }
 
-/// The first cookie an env file sets: `[export] ROBLOX_ASSET_DELIVERY_COOKIE=...` or `ROBLOSECURITY=...`
-fn cookie_from_file(file: &Path) -> Option<String> {
+/// A cookie value as written in an env file or variable ([`env_value`]), without a leading `.ROBLOSECURITY=`
+fn cookie_value(raw: &str) -> Option<String> {
+    let value = env_value(raw)?;
+    let value = value.strip_prefix(".ROBLOSECURITY=").unwrap_or(&value);
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// The first value an env file sets for one of `names` (`[export] NAME=value` lines), as `parse` reads
+/// it; a line it gives nothing for is skipped. A file that can't be read gives None: its path and content
+/// are never repeated in a message.
+fn value_from_file(file: &Path, names: &[&str], parse: fn(&str) -> Option<String>) -> Option<String> {
     let bytes = std::fs::read(file).ok()?;
     let text = String::from_utf8_lossy(&bytes);
     for line in text.split('\n') {
@@ -297,17 +324,22 @@ fn cookie_from_file(file: &Path) -> Option<String> {
             Some(rest) if rest.starts_with(char::is_whitespace) => rest.trim_start(),
             _ => line,
         };
-        let Some(rest) = ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY"].iter().find_map(|name| line.strip_prefix(name)) else {
+        let Some(rest) = names.iter().find_map(|name| line.strip_prefix(name)) else {
             continue;
         };
         let Some(value) = rest.trim_start().strip_prefix('=') else {
             continue;
         };
-        if let Some(value) = cookie_value(value) {
+        if let Some(value) = parse(value) {
             return Some(value);
         }
     }
     None
+}
+
+/// The first cookie an env file sets: `[export] ROBLOX_ASSET_DELIVERY_COOKIE=...` or `ROBLOSECURITY=...`
+fn cookie_from_file(file: &Path) -> Option<String> {
+    value_from_file(file, &["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY"], cookie_value)
 }
 
 fn load_cookie(env: &dyn Fn(&str) -> Option<String>, checkout: Option<&Path>) -> Option<String> {
@@ -402,6 +434,125 @@ fn broker_address(raw: &str) -> Result<String, String> {
     Ok(format!("{scheme}://{host}{}", path.trim_end_matches('/')))
 }
 
+// The API key
+
+/// An Open Cloud API key for asset delivery's private assets: asked with after the public route refuses
+/// an asset (401 or 403), before the account, as the narrower credential. Its Debug never shows it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApiKey(String);
+
+impl std::fmt::Debug for ApiKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ApiKey")
+    }
+}
+
+impl ApiKey {
+    /// The key `env` configures: `ROBLOX_ASSET_DELIVERY_API_KEY`, else the same entry in the file
+    /// `RUR_COOKIE_ENV` names (as the cookie is written there). None when neither sets one; an error, which
+    /// never holds the value, for one that can't be a key.
+    pub fn load(env: &dyn Fn(&str) -> Option<String>) -> Option<Result<ApiKey, String>> {
+        let from_file = || nonempty(env, "RUR_COOKIE_ENV").and_then(|file| value_from_file(Path::new(&file), &[API_KEY_VARIABLE], env_value));
+        let key = env(API_KEY_VARIABLE).and_then(|raw| env_value(&raw)).or_else(from_file)?;
+        // It goes into a header as it is: printable ASCII, no spaces
+        Some(match key.bytes().all(|byte| byte.is_ascii_graphic()) {
+            true => Ok(ApiKey(key)),
+            false => Err(format!("the Open Cloud API key ({API_KEY_VARIABLE}) is not used: it holds a space, a control character or a character outside ASCII")),
+        })
+    }
+
+    /// The key itself, for the `x-api-key` header and for hiding it in reports (report.rs)
+    pub(crate) fn secret(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The API key's variable as rur-native started with it, once [`take_api_key_from_environment`] has taken it
+/// out of the environment: Some(None) when it was unset
+static TAKEN_API_KEY: OnceLock<Option<String>> = OnceLock::new();
+
+/// Takes the API key's variable (any case) out of this process's environment and keeps its value here, so no
+/// child process inherits it: not the ViewportFrame worker, git, ffmpeg or Node, nor a process the engine
+/// library starts. rur-native's own render processes get it back ([`with_api_key`]).
+///
+/// # Safety
+///
+/// Changes the environment: call it before any other thread can read it (rur-native's `main` does).
+pub unsafe fn take_api_key_from_environment() {
+    let _ = TAKEN_API_KEY.set(std::env::var(API_KEY_VARIABLE).ok());
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().eq_ignore_ascii_case(API_KEY_VARIABLE) {
+            // SAFETY: the caller guarantees that no other thread exists yet
+            unsafe { std::env::remove_var(name) };
+        }
+    }
+}
+
+/// The environment as the downloader reads it: the API key's variable as rur-native started with it, any
+/// other as it is now
+pub(crate) fn env_variable(name: &str) -> Option<String> {
+    match TAKEN_API_KEY.get() {
+        Some(taken) if name == API_KEY_VARIABLE => taken.clone(),
+        _ => std::env::var(name).ok(),
+    }
+}
+
+/// The API key this process's environment configures ([`ApiKey::load`])
+pub(crate) fn configured_api_key() -> Option<Result<ApiKey, String>> {
+    ApiKey::load(&env_variable)
+}
+
+/// Gives a child that is rur-native rendering (a batch job, a story's render) the API key's variable as this
+/// process started with it; the key in a RUR_COOKIE_ENV file the child reads itself
+pub fn with_api_key(command: &mut Command) -> &mut Command {
+    if let Some(Some(key)) = TAKEN_API_KEY.get() {
+        command.env(API_KEY_VARIABLE, key);
+    }
+    command
+}
+
+/// What a rate limit waits on: the system's clock, or a test's that moves only when waited on
+pub trait Clock: Send + Sync {
+    /// The time since some fixed start
+    fn now(&self) -> Duration;
+    fn sleep(&self, duration: Duration);
+}
+
+struct SystemClock(Instant);
+
+impl Clock for SystemClock {
+    fn now(&self) -> Duration {
+        self.0.elapsed()
+    }
+
+    fn sleep(&self, duration: Duration) {
+        std::thread::sleep(duration);
+    }
+}
+
+/// The number a header value starts with: `59`, `0.5`, `1000, 1000;w=60`
+fn leading_number(value: &str) -> Option<f64> {
+    let value = value.trim();
+    let end = value.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(value.len());
+    value[..end].parse::<f64>().ok().filter(|number| number.is_finite())
+}
+
+/// How long Open Cloud asks requests with the key to wait (at most KEY_WAIT_LIMIT). After a 429: its
+/// Retry-After in seconds, else its x-ratelimit-reset, else 1, 2, 4, 8 s by attempt. After any other answer:
+/// x-ratelimit-reset when x-ratelimit-remaining says no request is left in the window. None: no wait.
+fn rate_limit_wait(response: &Response, attempt: u32) -> Option<Duration> {
+    let seconds = |name: &str| response.header(name).and_then(leading_number);
+    let limit = KEY_WAIT_LIMIT.as_secs_f64();
+    let wait = if response.status == 429 {
+        seconds("retry-after").or_else(|| seconds("x-ratelimit-reset")).unwrap_or_else(|| f64::from(1u32 << attempt.saturating_sub(1).min(5)))
+    } else if seconds("x-ratelimit-remaining")? <= 0.0 {
+        seconds("x-ratelimit-reset").unwrap_or(1.0)
+    } else {
+        return None;
+    };
+    Some(Duration::from_secs_f64(wait.clamp(0.0, limit)))
+}
+
 /// Whether refused images are read from Studio: a Studio MCP bridge is configured (RUR_STUDIO_MCP_URL,
 /// or the TCP bridge's port) and RUR_STUDIO_IMAGES is not "0" (cli/assets.mjs studioImagesEnabled)
 pub fn studio_images_enabled(env: &dyn Fn(&str) -> Option<String>) -> bool {
@@ -410,12 +561,25 @@ pub fn studio_images_enabled(env: &dyn Fn(&str) -> Option<String>) -> bool {
     env("RUR_STUDIO_IMAGES").as_deref() != Some("0") && bridge
 }
 
-/// The environment variables that hold the account (any case): kept from child processes that download
-/// nothing (cli/assets.mjs withoutCookie)
+/// The environment variables that hold the account or the API key (any case): kept from child processes
+/// that download nothing (cli/assets.mjs withoutCookie)
 pub fn without_account(command: &mut Command) -> &mut Command {
+    without(command, &CREDENTIAL_VARIABLES)
+}
+
+/// The API key's variable (any case): kept from a child process that may download with an account of its own
+/// but never with rur's key, the ViewportFrame worker (ror)
+pub fn without_api_key(command: &mut Command) -> &mut Command {
+    without(command, &[API_KEY_VARIABLE])
+}
+
+fn without<'a>(command: &'a mut Command, names: &[&str]) -> &'a mut Command {
+    for name in names {
+        command.env_remove(name);
+    }
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "ROBLOX_BROKER_TOKEN"].iter().any(|secret| text.eq_ignore_ascii_case(secret)) {
+        if names.iter().any(|secret| text.eq_ignore_ascii_case(secret)) {
             command.env_remove(&name);
         }
     }
@@ -613,14 +777,20 @@ pub struct Downloader {
     transport: Arc<dyn Transport>,
     account: OnceLock<Account>,
     load_account: Box<dyn Fn() -> Account + Send + Sync>,
+    api_key: OnceLock<Option<Result<ApiKey, String>>>,
+    load_api_key: Box<dyn Fn() -> Option<Result<ApiKey, String>> + Send + Sync>,
+    /// What rate limits wait on, and when requests with the API key may go out again (on that clock) after
+    /// Open Cloud said its limit was reached
+    clock: Arc<dyn Clock>,
+    key_resume: Mutex<Duration>,
     studio: Studio,
     /// Roblox's HTTP cache (rbx-storage), where the Blocked placeholders are found
     storage: Option<PathBuf>,
 }
 
 impl Downloader {
-    /// The downloader of `repo`'s asset cache (`<state dir>/assets`), over the network. The account is
-    /// read at the first request that needs it, once.
+    /// The downloader of `repo`'s asset cache (`<state dir>/assets`), over the network. The account and the
+    /// API key are read at the first request that needs them, once.
     pub fn new(repo: &Path) -> Self {
         let checkout = (!crate::paths::is_standalone()).then(|| repo.to_path_buf());
         let local = std::env::var_os("LOCALAPPDATA").filter(|value| !value.is_empty()).map(PathBuf::from).or_else(|| {
@@ -632,6 +802,10 @@ impl Downloader {
             transport: Arc::new(Network),
             account: OnceLock::new(),
             load_account: Box::new(move || Account::load(&|name| std::env::var(name).ok(), checkout.as_deref())),
+            api_key: OnceLock::new(),
+            load_api_key: Box::new(configured_api_key),
+            clock: Arc::new(SystemClock(Instant::now())),
+            key_resume: Mutex::new(Duration::ZERO),
             studio: Studio::Node { repo: repo.to_path_buf() },
             storage: local.map(|local| local.join("Roblox").join("rbx-storage")),
         }
@@ -653,6 +827,16 @@ impl Downloader {
         self.account().access()
     }
 
+    fn api_key(&self) -> Option<&Result<ApiKey, String>> {
+        self.api_key.get_or_init(|| (self.load_api_key)()).as_ref()
+    }
+
+    /// Whether an Open Cloud API key is asked with (before the account): None when none is configured, an
+    /// error (never the value) when the one configured is not used
+    pub fn api_key_state(&self) -> Option<Result<(), String>> {
+        self.api_key().map(|key| key.as_ref().map(|_| ()).map_err(Clone::clone))
+    }
+
     fn cached(&self, key: &str) -> Option<PathBuf> {
         if !self.assets.is_dir() {
             return None;
@@ -669,7 +853,7 @@ impl Downloader {
     }
 
     /// GET `url`, following up to `redirects` redirects. A redirect never carries a header (so never the
-    /// cookie or the broker's token). Plain http is only the broker on this machine (`plain_http`).
+    /// cookie, the broker's token or the API key). Plain http is only the broker on this machine (`plain_http`).
     fn get(&self, url: &str, headers: Vec<(&'static str, String)>, redirects: u32, plain_http: bool) -> Result<Response, TransportError> {
         if !is_https(url) && !plain_http {
             return Err(TransportError { message: format!("refusing a plain http request to {}", host_of(url)), code: None });
@@ -723,11 +907,87 @@ impl Downloader {
         Some(format!("the account broker refused: {text}"))
     }
 
-    /// Where asset delivery has `id`: the public route first, then with the account
+    /// GET Open Cloud's asset delivery route for `id` with the API key: that route only, over https, and a
+    /// redirect it answers is not followed. A rate limit (429, or no request left in the window) holds every
+    /// request with the key until Open Cloud says the window resets; a 429 is asked again, KEY_ATTEMPTS
+    /// requests in all.
+    fn key_get(&self, id: &str, key: &ApiKey) -> Result<Response, TransportError> {
+        // The URL is built here, from the id's digits: the key reaches no other host or path
+        if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(TransportError { message: format!("invalid asset id {id}"), code: None });
+        }
+        let url = format!("https://{OPEN_CLOUD_HOST}{OPEN_CLOUD_ROUTE}{id}");
+        let mut attempt = 0;
+        loop {
+            let resume = *self.key_resume.lock().unwrap();
+            let now = self.clock.now();
+            if resume > now {
+                self.clock.sleep(resume - now);
+            }
+            attempt += 1;
+            let response = self.get(&url, vec![("x-api-key", key.secret().to_string())], 0, false)?;
+            if let Some(wait) = rate_limit_wait(&response, attempt) {
+                let mut resume = self.key_resume.lock().unwrap();
+                *resume = (*resume).max(self.clock.now() + wait);
+            }
+            if response.status != 429 || attempt >= KEY_ATTEMPTS {
+                return Ok(response);
+            }
+        }
+    }
+
+    /// Where Open Cloud's asset delivery has `id`, asked with the API key: None when no key is configured,
+    /// else the location or why there is none (never with the key in it)
+    fn key_location(&self, id: &str) -> Option<Result<String, String>> {
+        let key = match self.api_key()? {
+            Ok(key) => key,
+            Err(reason) => return Some(Err(reason.clone())),
+        };
+        let response = match self.key_get(id, key) {
+            Ok(response) => response,
+            Err(error) => return Some(Err(format!("Open Cloud with the API key did not answer{}", error.code.map(|code| format!(" ({code})")).unwrap_or_default()))),
+        };
+        let payload = serde_json::from_slice::<Value>(&response.body).unwrap_or_default();
+        if response.ok() {
+            let location = payload["location"].as_str().or_else(|| payload["locations"][0]["location"].as_str());
+            if let Some(location) = location.filter(|location| !location.is_empty()) {
+                return Some(Ok(location.to_string()));
+            }
+        }
+        // Open Cloud's error ({code, message}) or asset delivery's ({errors: [{code, message}]}), the key masked
+        let error = if payload["errors"][0].is_object() { &payload["errors"][0] } else { &payload };
+        let detail: Vec<String> = ["code", "message"]
+            .iter()
+            .filter_map(|field| match &error[*field] {
+                Value::String(text) if !text.is_empty() => Some(text.clone()),
+                Value::Number(number) => Some(number.to_string()),
+                _ => None,
+            })
+            .collect();
+        let status = match response.status {
+            429 => format!("rate limited (HTTP 429) after {KEY_ATTEMPTS} requests"),
+            status => format!("HTTP {status}"),
+        };
+        let text = if detail.is_empty() { status } else { format!("{status}: {}", detail.join(": ")) };
+        Some(Err(format!("Open Cloud with the API key: {}", text.replace(key.secret(), "<api key>"))))
+    }
+
+    /// Where asset delivery has `id`: the public route first; for an asset it refuses with 401 or 403 (a
+    /// private one), Open Cloud's route with the API key; then with the account
     fn delivery_location(&self, id: &str) -> Result<String, String> {
         let route = format!("/v1/assetId/{id}");
         let (mut last_status, mut last_error, mut account_tried, mut refusal) = (0i64, None::<Value>, false, None::<String>);
+        let mut key_failure = None::<String>;
         for with_account in [false, true] {
+            // After the public route refused the asset as private (401 or 403, its status or its error's code)
+            let private = last_status == 401 || last_status == 403 || last_error.as_ref().is_some_and(|error| matches!(error["code"].as_f64(), Some(code) if code == 401.0 || code == 403.0));
+            if with_account && private {
+                match self.key_location(id) {
+                    Some(Ok(location)) => return Ok(location),
+                    Some(Err(reason)) => key_failure = Some(reason),
+                    None => {}
+                }
+            }
             let target = match self.delivery_target(&route, with_account) {
                 Ok(Some(target)) => target,
                 Ok(None) => continue,
@@ -764,8 +1024,9 @@ impl Downloader {
                 }
             }
         }
+        let key_note = key_failure.map(|reason| format!("; {reason}")).unwrap_or_default();
         if let Some(refusal) = refusal {
-            return Err(format!("asset {id} unavailable from asset delivery ({refusal})"));
+            return Err(format!("asset {id} unavailable from asset delivery ({refusal}{key_note})"));
         }
         if let Some(error) = last_error {
             // [code, message].filter(part => part !== undefined && part !== "").join(": ")
@@ -783,19 +1044,21 @@ impl Downloader {
             let private = matches!(error["code"].as_f64(), Some(code) if code == 401.0 || code == 403.0);
             let hint = if private && !account_tried { "; private asset, no asset cookie is configured" } else { "" };
             let detail = if detail.is_empty() { format!("HTTP {last_status}") } else { detail };
-            return Err(format!("asset {id} unavailable from asset delivery ({detail}{hint})"));
+            return Err(format!("asset {id} unavailable from asset delivery ({detail}{hint}{key_note})"));
         }
-        Err(format!("asset {id} unavailable from asset delivery (HTTP {last_status})"))
+        Err(format!("asset {id} unavailable from asset delivery (HTTP {last_status}{key_note})"))
     }
 
     /// Where many assets are, from asset delivery's batch endpoint: up to 100 per request, through the
     /// broker or with the cookie when there is one (so a private asset costs no second trip). Each asset
     /// through delivery_location costs a round trip (two for a private one) before its download, so a UI
     /// of many images waited on lookups. An id it does not place is left out; its download asks
-    /// delivery_location, which reports why.
+    /// delivery_location, which reports why. With an API key the batch goes without the account: Open Cloud
+    /// has no batch route, and the key is asked for a private asset before the account is.
     fn delivery_locations(&self, ids: &[String]) -> HashMap<String, String> {
         const ROUTE: &str = "/v1/assets/batch";
-        let target = match self.delivery_target(ROUTE, true) {
+        let with_account = !matches!(self.api_key(), Some(Ok(_)));
+        let target = match self.delivery_target(ROUTE, with_account) {
             Ok(Some(target)) => target,
             Ok(None) => match self.delivery_target(ROUTE, false) {
                 Ok(Some(target)) => target,
@@ -1251,8 +1514,9 @@ const USAGE: &str = "usage: rur-native assets fetch [--repo <dir>] [--offline] [
 /// arguments are cloud font asset ids (a run's missingFontAssets). `--stdin`: more URIs, one per line.
 /// `--json`: an array of `{uri, file, kind, mime}` / `{uri, error}`. Exits 1 when any failed.
 ///
-/// `rur-native assets account`: how private assets are asked for: "broker", "cookie" or "none" (`--json`:
-/// `{"access": ...}`). Neither the cookie nor the token is printed.
+/// `rur-native assets account`: how private assets are asked for: "broker", "cookie" or "none", after "api
+/// key, then " when an Open Cloud API key comes first (`--json`: `{"access": ..., "apiKey": true|false}`).
+/// Neither the cookie, the token nor the key is printed.
 pub fn cli(args: &[String]) -> i32 {
     let (mut repo, mut offline, mut fonts, mut studio, mut json_output, mut stdin) = (None, false, false, true, false, false);
     let mut uris = Vec::new();
@@ -1284,10 +1548,15 @@ pub fn cli(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         Some("account") => {
             let access = resolver.account_access();
+            let api_key = matches!(resolver.downloads_mut().api_key_state(), Some(Ok(())));
             if json_output {
-                println!("{}", json!({ "access": access }));
+                println!("{}", json!({ "access": access, "apiKey": api_key }));
             } else {
-                println!("{}", access.unwrap_or("none"));
+                match (api_key, access) {
+                    (true, Some(access)) => println!("api key, then {access}"),
+                    (true, None) => println!("api key"),
+                    (false, access) => println!("{}", access.unwrap_or("none")),
+                }
             }
             0
         }
@@ -1361,6 +1630,7 @@ pub(crate) mod tests {
         pub url: String,
         pub cookie: Option<String>,
         pub authorization: Option<String>,
+        pub api_key: Option<String>,
         pub csrf: Option<String>,
         pub content_type: Option<String>,
         pub user_agent: Option<String>,
@@ -1401,6 +1671,7 @@ pub(crate) mod tests {
                 url: request.url.clone(),
                 cookie: header("Cookie"),
                 authorization: header("Authorization"),
+                api_key: header("x-api-key"),
                 csrf: header("X-CSRF-TOKEN"),
                 content_type: header("Content-Type"),
                 user_agent: header("User-Agent"),
@@ -1431,15 +1702,37 @@ pub(crate) mod tests {
         rest.find('/').map_or("/", |at| &rest[at..])
     }
 
+    /// A clock that moves only when waited on, and remembers each wait
+    #[derive(Default)]
+    pub(crate) struct TestClock {
+        now: Mutex<Duration>,
+        waits: Mutex<Vec<Duration>>,
+    }
+
+    impl Clock for TestClock {
+        fn now(&self) -> Duration {
+            *self.now.lock().unwrap()
+        }
+
+        fn sleep(&self, duration: Duration) {
+            *self.now.lock().unwrap() += duration;
+            self.waits.lock().unwrap().push(duration);
+        }
+    }
+
     impl Downloader {
-        /// A downloader over `assets` through `transport`, with no account (Account::Public), no Studio
-        /// reads and no Roblox HTTP cache
+        /// A downloader over `assets` through `transport`, with no account (Account::Public), no API key, no
+        /// Studio reads, no Roblox HTTP cache and a test clock
         pub(crate) fn for_tests(assets: &Path, transport: Arc<dyn Transport>) -> Self {
             Self {
                 assets: assets.to_path_buf(),
                 transport,
                 account: OnceLock::new(),
                 load_account: Box::new(|| Account::Public),
+                api_key: OnceLock::new(),
+                load_api_key: Box::new(|| None),
+                clock: Arc::new(TestClock::default()),
+                key_resume: Mutex::new(Duration::ZERO),
                 studio: Studio::Off,
                 storage: None,
             }
@@ -1449,6 +1742,12 @@ pub(crate) mod tests {
             let account_cell = OnceLock::new();
             let _ = account_cell.set(account);
             Self { account: account_cell, ..self }
+        }
+
+        fn with_key(self, key: &str) -> Self {
+            let key_cell = OnceLock::new();
+            let _ = key_cell.set(Some(Ok(ApiKey(key.to_string()))));
+            Self { api_key: key_cell, ..self }
         }
     }
 
@@ -1765,6 +2064,264 @@ pub(crate) mod tests {
         assert!(roblox.ends_with("asset 404 unavailable from asset delivery (403: User is not authorized to access Asset.)"), "{roblox}");
         let silent = refusal(Err("connect refused".into()), "405");
         assert!(silent.contains("the account broker did not answer (ECONNREFUSED)"), "{silent}");
+    }
+
+    /// The Open Cloud API key: its variable, else the RUR_COOKIE_ENV file (written as the cookie is); one that
+    /// can't be a key is refused without being repeated; a file that is absent or unreadable says nothing
+    #[test]
+    fn the_api_key_comes_from_its_variable_or_the_cookie_file() {
+        let temp = Temp::new("api-key-sources");
+        let file = temp.0.join("cookie.env");
+        let file_text = file.to_string_lossy().into_owned();
+        let key = |env: &[(&str, &str)], text: Option<&[u8]>| {
+            match text {
+                Some(text) => std::fs::write(&file, text).unwrap(),
+                None => {
+                    let _ = std::fs::remove_file(&file);
+                }
+            }
+            let mut env = env.to_vec();
+            env.push(("RUR_COOKIE_ENV", file_text.as_str()));
+            ApiKey::load(&env_of(&env))
+        };
+        let found = |value: &str| Some(Ok(ApiKey(value.to_string())));
+        // The variable comes before the file; quotes and spaces around it are dropped
+        assert_eq!(key(&[(API_KEY_VARIABLE, "dummy-env-key")], Some(b"ROBLOX_ASSET_DELIVERY_API_KEY=dummy-file-key\n")), found("dummy-env-key"));
+        assert_eq!(key(&[(API_KEY_VARIABLE, " 'dummy-quoted-key' ")], None), found("dummy-quoted-key"));
+        // The file, beside the cookie: export, quotes, comments, CRLF; an empty variable is unset
+        let both = b"ROBLOX_ASSET_DELIVERY_COOKIE=dummy-cookie\r\nexport ROBLOX_ASSET_DELIVERY_API_KEY=\"dummy-file-key\" # comment\r\n";
+        assert_eq!(key(&[], Some(both)), found("dummy-file-key"));
+        assert_eq!(cookie_from_file(&file).as_deref(), Some("dummy-cookie"), "the cookie in the same file is read as before");
+        assert_eq!(key(&[(API_KEY_VARIABLE, "")], Some(b"ROBLOX_ASSET_DELIVERY_API_KEY=dummy-file-key # comment")), found("dummy-file-key"));
+        // Nothing that only looks like it: the cookie, another name, no `=`, an unterminated quote, no file,
+        // a folder, bytes that are not text
+        assert_eq!(key(&[], Some(b"ROBLOX_ASSET_DELIVERY_COOKIE=dummy-cookie\nROBLOSECURITY=dummy-alias\n")), None);
+        assert_eq!(key(&[], Some(b"ROBLOX_ASSET_DELIVERY_API_KEY_OLD=dummy-other\nROBLOX_ASSET_DELIVERY_API_KEY dummy-no-equals\n")), None);
+        assert_eq!(key(&[], Some(b"ROBLOX_ASSET_DELIVERY_API_KEY=\"dummy-unterminated\n")), None);
+        assert_eq!(key(&[], Some(&[0xff, 0xfe, 0, 0x80, b'=', 0x9f])), None);
+        assert_eq!(key(&[], None), None);
+        let folder = temp.0.to_string_lossy().into_owned();
+        assert_eq!(ApiKey::load(&env_of(&[("RUR_COOKIE_ENV", folder.as_str())])), None);
+        assert_eq!(cookie_from_file(&file), None);
+        // Refused: what can't go into a header as it is; the reason never repeats the value
+        for (env, text) in [
+            (vec![(API_KEY_VARIABLE, "dummy key with spaces")], None),
+            (vec![(API_KEY_VARIABLE, "dummy-key\u{7f}")], None),
+            (vec![(API_KEY_VARIABLE, "dummy-k\u{e9}y")], None),
+            (vec![], Some(&b"ROBLOX_ASSET_DELIVERY_API_KEY=\"dummy\tkey\"\n"[..])),
+        ] {
+            let refused = key(&env, text);
+            let Some(Err(reason)) = &refused else { panic!("not refused: {refused:?}") };
+            assert!(reason.contains(API_KEY_VARIABLE) && !reason.contains("dummy") && !reason.contains("key with"), "{reason}");
+        }
+        assert_eq!(format!("{:?}", ApiKey("dummy-debug-key".into())), "ApiKey", "its Debug never shows it");
+    }
+
+    /// The key is asked with only after the public route refuses an asset as private (401 or 403), only at
+    /// Open Cloud's asset delivery route, with no redirect followed, and before the cookie
+    #[test]
+    fn an_api_key_is_asked_after_a_private_refusal_and_before_the_cookie() {
+        const KEY: &str = "dummy-open-cloud-key";
+        let temp = Temp::new("api-key");
+        let assets = temp.0.join("state").join("assets");
+        // Asset delivery refuses every bare request as private (403), except the 404x ids (not found), the
+        // 200x ids (a 200 whose error says 401) and the 500x ids (no answer); with the cookie it places all.
+        // Open Cloud places what the key asks for, except ids ending in 9 (refused, its message repeating
+        // the key) and in 8 (a redirect elsewhere).
+        let fake = Fake::new(|seen| {
+            let route = path(&seen.url);
+            let id = route.rsplit('/').next().unwrap().to_string();
+            match host_of(&seen.url) {
+                DELIVERY_HOST if seen.method == Method::Post => ok(r#"[{"requestId":"0","errors":[{"code":403,"message":"User is not authorized to access Asset."}]},{"requestId":"1","errors":[{"code":403,"message":"User is not authorized to access Asset."}]}]"#),
+                DELIVERY_HOST if seen.cookie.is_some() => ok(json!({"location": format!("https://cdn.example/{id}-cookie")}).to_string()),
+                DELIVERY_HOST if id.starts_with("404") => status(404, &[], r#"{"errors":[{"code":404,"message":"Request asset was not found"}]}"#),
+                DELIVERY_HOST if id.starts_with("200") => ok(r#"{"errors":[{"code":401,"message":"Authentication required to access Asset."}]}"#),
+                DELIVERY_HOST if id.starts_with("500") => Err("connect refused".into()),
+                DELIVERY_HOST => status(403, &[], r#"{"errors":[{"code":403,"message":"User is not authorized to access Asset."}]}"#),
+                OPEN_CLOUD_HOST if id.ends_with('9') => status(403, &[], format!(r#"{{"code":"PERMISSION_DENIED","message":"key {KEY} can't read this asset"}}"#)),
+                OPEN_CLOUD_HOST if id.ends_with('8') => status(302, &[("location", format!("https://other.example/{id}").as_str())], ""),
+                OPEN_CLOUD_HOST => ok(json!({"location": format!("https://cdn.example/{id}-key")}).to_string()),
+                _ => ok(png()),
+            }
+        });
+        let downloader = |cookie: bool| {
+            let downloader = Downloader::for_tests(&assets, fake.clone()).with_key(KEY);
+            if cookie { downloader.with_account(Account::Cookie("dummy-cookie".into())) } else { downloader }
+        };
+        let fetch = |cookie: bool, id: &str| {
+            fake.clear();
+            downloader(cookie).resolve_uri(&format!("rbxassetid://{id}"), false, &HashMap::new())
+        };
+        let lines = || fake.seen().iter().map(|seen| format!("{} {}{}", host_of(&seen.url), path(&seen.url), [(seen.api_key.is_some(), " +key"), (seen.cookie.is_some(), " +cookie")].iter().filter(|(on, _)| *on).map(|(_, tag)| *tag).collect::<String>())).collect::<Vec<_>>();
+        let mut every = Vec::new();
+
+        // A private asset: the public route, then Open Cloud with the key, then the CDN, which gets nothing
+        let fetched = fetch(false, "101").unwrap();
+        assert_eq!(lines(), ["assetdelivery.roblox.com /v1/assetId/101", "apis.roblox.com /asset-delivery-api/v1/assetId/101 +key", "cdn.example /101-key"]);
+        let seen = fake.seen();
+        assert_eq!(seen[1].url, "https://apis.roblox.com/asset-delivery-api/v1/assetId/101");
+        assert_eq!((seen[1].api_key.as_deref(), seen[1].authorization.as_deref(), seen[1].user_agent.as_deref()), (Some(KEY), None, Some(USER_AGENT)));
+        assert_eq!(std::fs::read(&fetched.file).unwrap(), png());
+        every.extend(seen);
+        // With a cookie too: the key comes first, and once it places the asset the cookie is never sent
+        fetch(true, "102").unwrap();
+        assert_eq!(lines(), ["assetdelivery.roblox.com /v1/assetId/102", "apis.roblox.com /asset-delivery-api/v1/assetId/102 +key", "cdn.example /102-key"]);
+        every.extend(fake.seen());
+        // Open Cloud refuses it: the cookie next
+        fetch(true, "109").unwrap();
+        assert_eq!(lines(), ["assetdelivery.roblox.com /v1/assetId/109", "apis.roblox.com /asset-delivery-api/v1/assetId/109 +key", "assetdelivery.roblox.com /v1/assetId/109 +cookie", "cdn.example /109-cookie"]);
+        every.extend(fake.seen());
+        // ...or, with no cookie, the refusal in Open Cloud's words, the key masked
+        let refused = fetch(false, "119").unwrap_err();
+        assert_eq!(refused, "asset 119 unavailable from asset delivery (403: User is not authorized to access Asset.; private asset, no asset cookie is configured; Open Cloud with the API key: HTTP 403: PERMISSION_DENIED: key <api key> can't read this asset)");
+        every.extend(fake.seen());
+        // A redirect from Open Cloud is not followed, with the key or without it
+        fetch(true, "108").unwrap();
+        assert_eq!(lines(), ["assetdelivery.roblox.com /v1/assetId/108", "apis.roblox.com /asset-delivery-api/v1/assetId/108 +key", "assetdelivery.roblox.com /v1/assetId/108 +cookie", "cdn.example /108-cookie"]);
+        every.extend(fake.seen());
+        let redirected = fetch(false, "118").unwrap_err();
+        assert!(redirected.ends_with("; Open Cloud with the API key: HTTP 302)"), "{redirected}");
+        every.extend(fake.seen());
+        // A 200 from asset delivery whose error says 401 is a private refusal too
+        fetch(false, "2001").unwrap();
+        assert_eq!(lines()[1], "apis.roblox.com /asset-delivery-api/v1/assetId/2001 +key");
+        every.extend(fake.seen());
+        // Anything else is not: not found goes to the cookie as before, and no answer goes nowhere
+        fetch(true, "4041").unwrap();
+        assert_eq!(lines(), ["assetdelivery.roblox.com /v1/assetId/4041", "assetdelivery.roblox.com /v1/assetId/4041 +cookie", "cdn.example /4041-cookie"]);
+        every.extend(fake.seen());
+        let missing = fetch(false, "4042").unwrap_err();
+        assert_eq!(missing, "asset 4042 unavailable from asset delivery (404: Request asset was not found)");
+        assert_eq!(lines(), ["assetdelivery.roblox.com /v1/assetId/4042"]);
+        assert!(fetch(false, "5001").is_err());
+        assert_eq!(lines(), ["assetdelivery.roblox.com /v1/assetId/5001"]);
+        // The batch lookup goes without the cookie when there is a key (Open Cloud has none), so each private
+        // id is asked with the key before the cookie
+        fake.clear();
+        let results = downloader(true).resolve_all(&["rbxassetid://131".into(), "rbxassetid://132".into()], false);
+        assert!(results.values().all(Result::is_ok), "{results:?}");
+        let mut batch = lines();
+        batch.sort();
+        assert_eq!(
+            batch,
+            [
+                "apis.roblox.com /asset-delivery-api/v1/assetId/131 +key",
+                "apis.roblox.com /asset-delivery-api/v1/assetId/132 +key",
+                "assetdelivery.roblox.com /v1/assetId/131",
+                "assetdelivery.roblox.com /v1/assetId/132",
+                "assetdelivery.roblox.com /v1/assets/batch",
+                "cdn.example /131-key",
+                "cdn.example /132-key",
+            ]
+        );
+        every.extend(fake.seen());
+
+        // Everywhere: the key went only to Open Cloud's route, by GET over https, alone; nothing reached the
+        // redirect's host; no answer, cache file name or record holds it
+        for seen in every.iter().filter(|seen| seen.api_key.is_some()) {
+            let id = seen.url.strip_prefix("https://apis.roblox.com/asset-delivery-api/v1/assetId/").unwrap_or_else(|| panic!("the key went to {}", seen.url));
+            assert!(!id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()), "{}", seen.url);
+            assert_eq!((seen.method, seen.cookie.as_deref(), seen.authorization.as_deref(), seen.api_key.as_deref()), (Method::Get, None, None, Some(KEY)));
+        }
+        assert!(every.iter().all(|seen| host_of(&seen.url) != "other.example" && !seen.url.contains(KEY) && !seen.body.contains(KEY)));
+        assert!(!format!("{fetched:?}{results:?}{refused}{redirected}").contains(KEY));
+        let mut cached = vec![assets.clone()];
+        while let Some(folder) = cached.pop() {
+            for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+                assert!(!entry.file_name().to_string_lossy().contains(KEY));
+                if entry.path().is_dir() {
+                    cached.push(entry.path());
+                } else {
+                    assert!(!String::from_utf8_lossy(&std::fs::read(entry.path()).unwrap()).contains(KEY));
+                }
+            }
+        }
+    }
+
+    /// Open Cloud's rate limit: a 429 waits for its Retry-After (else the window's reset, else 1, 2, 4, 8 s)
+    /// and asks again, up to 5 requests; a window with no request left holds the next request with the key
+    /// until it resets; no wait is longer than a minute
+    #[test]
+    fn the_api_key_backs_off_when_rate_limited() {
+        let temp = Temp::new("api-key-limits");
+        let answers: Arc<Mutex<std::collections::VecDeque<Result<Response, String>>>> = Arc::default();
+        let queue = answers.clone();
+        let fake = Fake::new(move |seen| match host_of(&seen.url) {
+            DELIVERY_HOST => status(403, &[], r#"{"errors":[{"code":403,"message":"User is not authorized to access Asset."}]}"#),
+            OPEN_CLOUD_HOST => queue.lock().unwrap().pop_front().unwrap_or_else(|| panic!("unexpected request {}", seen.url)),
+            _ => ok(png()),
+        });
+        let clock = Arc::new(TestClock::default());
+        let mut downloader = Downloader::for_tests(&temp.0.join("assets"), fake.clone()).with_key("dummy-limited-key");
+        let shared: Arc<dyn Clock> = clock.clone();
+        downloader.clock = shared;
+        let located = |id: &str| ok(json!({"location": format!("https://cdn.example/{id}")}).to_string());
+        let key_requests = || fake.urls().iter().filter(|url| host_of(url) == OPEN_CLOUD_HOST).count();
+        let waits = || std::mem::take(&mut *clock.waits.lock().unwrap());
+        let fetch = |id: &str, queued: Vec<Result<Response, String>>| {
+            *answers.lock().unwrap() = queued.into();
+            fake.clear();
+            downloader.fetch_asset_id(id, false, false, None)
+        };
+        let seconds = |values: &[u64]| values.iter().map(|value| Duration::from_secs(*value)).collect::<Vec<_>>();
+
+        // A 429 with Retry-After: waited, asked again; the answer says the window is spent for 30 s more
+        let spent = status(200, &[("x-ratelimit-limit", "1000, 1000;w=60"), ("x-ratelimit-remaining", "0"), ("x-ratelimit-reset", "30")], json!({"location": "https://cdn.example/601"}).to_string());
+        assert!(fetch("601", vec![status(429, &[("retry-after", "2")], ""), spent]).is_ok());
+        assert_eq!((key_requests(), waits()), (2, seconds(&[2])));
+        // So the next request with the key waits for the reset first
+        assert!(fetch("602", vec![status(200, &[("x-ratelimit-remaining", "999"), ("x-ratelimit-reset", "59")], json!({"location": "https://cdn.example/602"}).to_string())]).is_ok());
+        assert_eq!((key_requests(), waits()), (1, seconds(&[30])));
+        // 429s without a hint: 1, 2, 4, 8 s apart, five requests, then the asset is reported as rate limited,
+        // and the next request with the key waits out the last back-off (16 s)
+        let limited = fetch("603", (0..5).map(|_| status(429, &[], "")).collect()).unwrap_err();
+        assert_eq!((key_requests(), waits()), (5, seconds(&[1, 2, 4, 8])));
+        assert!(limited.ends_with("; Open Cloud with the API key: rate limited (HTTP 429) after 5 requests)"), "{limited}");
+        assert!(fetch("604", vec![located("604")]).is_ok());
+        assert_eq!(waits(), seconds(&[16]));
+        // The window's reset when a 429 has no Retry-After; at most a minute however long it asks for
+        assert!(fetch("605", vec![status(429, &[("x-ratelimit-reset", "7")], ""), status(429, &[("retry-after", "3600")], ""), located("605")]).is_ok());
+        assert_eq!((key_requests(), waits()), (3, seconds(&[7, 60])));
+        assert_eq!([leading_number("59"), leading_number(" 0.5 "), leading_number("1000, 1000;w=60"), leading_number("soon")], [Some(59.0), Some(0.5), Some(1000.0), None]);
+    }
+
+    /// Child processes that download nothing lose every credential; the ViewportFrame worker loses the API key
+    /// and keeps the account it may download meshes with
+    #[test]
+    fn children_are_started_without_the_credentials() {
+        let removed = |command: &Command| -> Vec<String> { command.get_envs().filter(|(_, value)| value.is_none()).map(|(name, _)| name.to_string_lossy().to_ascii_uppercase()).collect() };
+        let mut plain = Command::new("child");
+        without_account(&mut plain);
+        let gone = removed(&plain);
+        assert!(CREDENTIAL_VARIABLES.iter().all(|name| gone.contains(&name.to_string())), "{gone:?}");
+        let mut worker = Command::new("worker");
+        without_api_key(&mut worker);
+        assert_eq!(removed(&worker), [API_KEY_VARIABLE]);
+    }
+
+    /// rur-native takes the key's variable out of its environment at startup, so no child inherits it; its own
+    /// render processes get it back. Run in a child test process, since it changes the environment.
+    #[test]
+    fn the_api_key_leaves_the_environment_at_startup() {
+        const CHILD: &str = "RUR_TEST_API_KEY_STARTUP";
+        if std::env::var_os(CHILD).is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "download::tests::the_api_key_leaves_the_environment_at_startup", "--test-threads", "1"])
+                .env(CHILD, "1")
+                .env(API_KEY_VARIABLE, "dummy-startup-key")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(output.status.success() && stdout.contains("1 passed"), "{stdout}\n{}", String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        // SAFETY: this test process runs this one test, on one thread
+        unsafe { take_api_key_from_environment() };
+        assert_eq!(std::env::var_os(API_KEY_VARIABLE), None, "a child inherits nothing");
+        assert_eq!(configured_api_key(), Some(Ok(ApiKey("dummy-startup-key".into()))), "the downloader still reads it");
+        let mut render = Command::new("rur-native");
+        with_api_key(&mut render);
+        assert_eq!(render.get_envs().map(|(name, value)| (name.to_string_lossy().into_owned(), value.map(|value| value.to_string_lossy().into_owned()))).collect::<Vec<_>>(), [(API_KEY_VARIABLE.to_string(), Some("dummy-startup-key".to_string()))]);
     }
 
     /// The former tools/tests/asset_records.mjs: the cache serves only what rur downloaded

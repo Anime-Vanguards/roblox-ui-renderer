@@ -127,7 +127,16 @@ impl Redactor {
         }
         // The longest first, so a folder is replaced before the home folder it is in
         pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-        Redactor { pairs }
+        let key = crate::download::configured_api_key().and_then(Result::ok);
+        Redactor { pairs }.hide_key(key.as_ref().map(crate::download::ApiKey::secret))
+    }
+
+    /// Also replaces the Open Cloud API key (as `<api key>`), before anything else, should it ever reach a message
+    fn hide_key(mut self, key: Option<&str>) -> Redactor {
+        if let Some(key) = key.filter(|key| key.len() >= 8) {
+            self.pairs.insert(0, (key.to_string(), "<api key>".into()));
+        }
+        self
     }
 
     pub fn apply(&self, text: &str) -> String {
@@ -222,6 +231,8 @@ fn render(story: &Path, dir: &Path, options: &Options) -> Run {
     let mut command = Command::new(exe);
     command.arg("render").arg("--story").arg(story).arg("--dir").arg(dir).args(&options.forwarded);
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).env("NO_COLOR", "1");
+    // It downloads: the API key this process took out of its environment at startup goes with it
+    crate::download::with_api_key(&mut command);
     let mut run = Run { file: story.to_path_buf(), seconds: 0.0, exit: None, timed_out: false, scene: None, manifest: None, result: None, stderr: String::new() };
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -593,6 +604,10 @@ mod tests {
         let token = "A1".repeat(150);
         let digest = "f".repeat(64);
         assert_eq!(redact.apply(&format!("value {token} end {digest}")), format!("value <token> end {digest}"));
+        // The Open Cloud API key, first: even inside a folder name it never shows
+        let redact = redact.hide_key(Some("dummy-report-key/Someone+1="));
+        assert_eq!(redact.apply(r"key dummy-report-key/Someone+1= in D:\Profiles\Someone\dummy-report-key/Someone+1="), r"key <api key> in ~\<api key>");
+        assert_eq!(Redactor { pairs: Vec::new() }.hide_key(Some("short")).pairs, Vec::<(String, String)>::new(), "not a key");
     }
 
     #[test]

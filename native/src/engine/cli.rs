@@ -429,6 +429,9 @@ fn spawn_job_child(variables: &RurVariables, argv: &[String]) -> std::io::Result
         command.env_remove(name);
     }
     command.envs(variables);
+    // It downloads: the API key this process took out of its environment at startup goes with it
+    #[cfg(feature = "desktop")]
+    crate::download::with_api_key(&mut command);
     command.spawn()
 }
 

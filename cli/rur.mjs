@@ -77,7 +77,7 @@ import { fileURLToPath } from "node:url";
 
 // First: applies the global --state-dir flag before anything resolves a path (cli/paths.mjs)
 import { OUT_DIR, sharedStatePath, stateDir } from "./paths.mjs";
-import { accountAccess, studioContentRoots, CACHE_DIR } from "./assets.mjs";
+import { accountAccess, studioContentRoots, withoutCookie, CACHE_DIR } from "./assets.mjs";
 import { engineBaseArgs, ensureEngine } from "./engine.mjs";
 import { detectRojoProject, mountArgs, rojoFileOf, runMounts } from "./rojo.mjs";
 import { readActions, UsageError } from "./actions.mjs";
@@ -617,12 +617,13 @@ async function doctor({ fix = false } = {}) {
 	const given = process.env.RUR_NATIVE_ENGINE;
 	const service = await serviceStatus().catch(() => null);
 	const holder = studioLockHolder();
-	const rust = spawnSync("rustc", ["--version"], { encoding: "utf8", windowsHide: true });
+	const rust = spawnSync("rustc", ["--version"], { encoding: "utf8", windowsHide: true, env: withoutCookie() });
 	const content = studioContentRoots();
 	const { missingPackages } = await import("./packages.mjs");
 	const missing = missingPackages();
-	// The engine's downloader reads the cookie or the broker; it says only which (never a value)
-	const access = await accountAccess();
+	// The engine's downloader reads the cookie or the broker and the API key; it says only which (never a value)
+	const credentials = await accountAccess();
+	const access = credentials?.access;
 	// ror, which draws ViewportFrames: as the engine finds it (`rur-native doctor`)
 	const { findEngine } = await import("./engine.mjs");
 	const engine = findEngine();
@@ -658,7 +659,10 @@ async function doctor({ fix = false } = {}) {
 		freetype: "2.14.2, compiled into the engine (native/build.rs; the release Studio's glyphs match it)",
 		studioInstall: content[0] || "missing (fonts/textures need a local Roblox Studio install)",
 		assetCookie: { broker: "an account broker is used instead (its token is never printed)", cookie: "available (never printed)" }[access]
-			|| (access === undefined ? "unknown until the native engine is built (it reads the cookie)" : "not configured (public assets only)"),
+			|| (credentials === undefined ? "unknown until the native engine is built (it reads the cookie)" : "not configured (public assets only)"),
+		assetApiKey: credentials === undefined ? "unknown until the native engine is built (it reads the key)"
+			: credentials.apiKey ? `an Open Cloud API key (never printed), asked for private assets before ${access ? `the ${access}` : "nothing else"}`
+			: "not configured",
 		viewports,
 		cache: CACHE_DIR,
 		defaultProject: fs.existsSync(DEFAULT_PROJECT) ? DEFAULT_PROJECT : "not found",

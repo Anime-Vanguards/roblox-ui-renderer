@@ -280,6 +280,8 @@ impl ViewportWorker {
         }
         let mut command = Command::new(&program);
         command.args(&args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        // It downloads meshes and textures with an account of its own, never with rur's API key
+        crate::download::without_api_key(&mut command);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -362,7 +364,7 @@ impl Drop for ViewportWorker {
 
 /// Why a worker exited before answering: most often a ror too old to have the command
 fn exit_reason(executable: &Path) -> String {
-    let version = Command::new(executable)
+    let version = crate::download::without_account(&mut Command::new(executable))
         .arg("--version")
         .stdin(Stdio::null())
         .stderr(Stdio::null())

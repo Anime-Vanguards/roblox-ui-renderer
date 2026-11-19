@@ -88,7 +88,7 @@ The first run compiles `rur-native` (takes a few minutes). `render` writes `rend
 
 - **Getting started:** [Setup & release binaries](docs/setup.md) · [Projects, places & Rojo](docs/projects.md) · [Stories, controls & actions](docs/stories.md)
 - **Workflows:** [CLI rendering, sequences, sweeps & profiling](docs/render.md) · [Desktop storybook](docs/storybook.md) · [Comparing with Studio](docs/studio.md) · [Browser / WebAssembly build](docs/web.md)
-- **Integrations & services:** [Live sessions & render service HTTP API](docs/live-preview.md) · [Assets, cookies & broker](docs/assets.md) · [ViewportFrames with ror](docs/viewports.md)
+- **Integrations & services:** [Live sessions & render service HTTP API](docs/live-preview.md) · [Assets, API key, cookies & broker](docs/assets.md) · [ViewportFrames with ror](docs/viewports.md)
 - **Measured Studio rules:** [Layout](docs/layout.md) · [Text & fonts](docs/text.md) · [Images, CanvasGroups, strokes, gradients & shadows](docs/images.md) · [Input & scrolling](docs/interaction.md)
 - **Internals:** [Architecture & emulator dependency](docs/how-it-works.md) · [Testing & goldens](docs/testing.md) · [Full docs index](docs/README.md)
 

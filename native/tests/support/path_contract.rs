@@ -135,7 +135,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/main.rs",
         "fn main()",
-        0xc73cb01a1c77f9ef,
+        0x4a76f3953228243b,
     ),
     // `rur-native assets`: its positionals are content URIs, read and never written; it writes only into
     // the state directory, and its one path option, `--repo`, is in PATH_OPTIONS
@@ -143,7 +143,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/download.rs",
         "pub fn cli(",
-        0x2a7ff91c1c8b442e,
+        0x02c66db86efd2088,
     ),
     // `rur-native doctor`: no positionals and no path options; it reads the state directory, the Studio
     // install and the worker it finds, and writes nothing

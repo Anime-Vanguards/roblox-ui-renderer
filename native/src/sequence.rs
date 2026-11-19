@@ -491,11 +491,9 @@ impl Video {
             .arg(&file)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            // ffmpeg downloads nothing: it gets neither the asset cookie nor the broker token (cli/assets.mjs withoutCookie)
-            .env_remove("ROBLOX_ASSET_DELIVERY_COOKIE")
-            .env_remove("ROBLOSECURITY")
-            .env_remove("ROBLOX_BROKER_TOKEN");
+            .stderr(Stdio::piped());
+        // ffmpeg downloads nothing: it gets no asset cookie, broker token or API key (cli/assets.mjs withoutCookie)
+        crate::download::without_account(&mut command);
         hide_console(&mut command);
         let mut child = command.spawn().map_err(|error| format!("no video: could not start {} ({error}); set RUR_FFMPEG to an ffmpeg", ffmpeg.display()))?;
         let stdin: ChildStdin = child.stdin.take().ok_or("ffmpeg's stdin")?;
@@ -547,6 +545,7 @@ fn quarter_speed(real: &Path, quarter: &Path) -> Result<PathBuf, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+    crate::download::without_account(&mut command);
     hide_console(&mut command);
     let output = command.output().map_err(|error| error.to_string())?;
     if !output.status.success() {

@@ -23,9 +23,9 @@ use sha2::{Digest, Sha256};
 
 use crate::js::Json;
 
-/// The environment variables that hold an account's credentials: git is run without them
+/// The environment variables that hold an account's credentials or the API key: git is run without them
 fn is_credential(name: &str) -> bool {
-    ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "ROBLOX_BROKER_TOKEN"].iter().any(|known| name.eq_ignore_ascii_case(known))
+    crate::download::CREDENTIAL_VARIABLES.iter().any(|known| name.eq_ignore_ascii_case(known))
 }
 
 /// `git -C <cwd> <args>`: its stdout, or an error naming the command and git's message. `long_paths` adds

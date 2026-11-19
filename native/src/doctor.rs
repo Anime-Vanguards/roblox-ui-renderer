@@ -16,13 +16,20 @@ pub(crate) fn checks() -> Vec<(&'static str, String, bool)> {
         Some(content) => ("studio", content.display().to_string(), false),
         None => ("studio", "not found: fonts and built-in textures come from a Roblox Studio install (or set RUR_ROBLOX_CONTENT to its content folder)".to_owned(), true),
     });
-    let account = crate::resolve::Resolver::new(&repo, true).account_access();
+    let mut resolver = crate::resolve::Resolver::new(&repo, true);
+    let account = match resolver.account_access() {
+        Some("broker") => Some("an account broker (its token is never shown)"),
+        Some(_) => Some("the account cookie (never shown)"),
+        None => None,
+    };
     checks.push((
         "account",
-        match account {
-            Some("broker") => "an account broker (its token is never shown)".to_owned(),
-            Some(_) => "the account cookie (never shown)".to_owned(),
-            None => "none: public assets only (docs/assets.md says how to add one)".to_owned(),
+        match (resolver.downloads_mut().api_key_state(), account) {
+            (Some(Ok(())), Some(account)) => format!("an Open Cloud API key (never shown), then {account}"),
+            (Some(Ok(())), None) => "an Open Cloud API key (never shown)".to_owned(),
+            (Some(Err(reason)), account) => format!("{}; {reason}", account.unwrap_or("none: public assets only")),
+            (None, Some(account)) => account.to_owned(),
+            (None, None) => "none: public assets only (docs/assets.md says how to add one)".to_owned(),
         },
         false,
     ));
@@ -38,7 +45,7 @@ pub(crate) fn checks() -> Vec<(&'static str, String, bool)> {
 
 /// The worker's version, or why it can't draw ViewportFrames
 fn worker_version(worker: &Path) -> Result<String, String> {
-    let run = |args: &[&str]| Command::new(worker).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output();
+    let run = |args: &[&str]| crate::download::without_account(&mut Command::new(worker)).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output();
     let version = run(&["--version"]).ok().map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned()).filter(|version| !version.is_empty());
     let version = version.unwrap_or_else(|| "version unknown".into());
     match run(&["viewport-worker", "--help"]) {

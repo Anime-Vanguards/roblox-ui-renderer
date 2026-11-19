@@ -1,13 +1,14 @@
-// The asset cache, as the Node CLI sees it. Downloads, the account (cookie or account broker) and the
-// cache rules are the native engine's (native/src/download.rs): `rur-native assets fetch` resolves URIs
-// for the CLI's tools, as a render does, and `rur-native assets account` says how private assets are
-// asked for. What stays here: the state dir, the environment for child processes that download
-// nothing, the cache's records (which file was rur's download, which was read from Studio) and the
-// images an open Studio reads for a render (cli/studio-images.mjs, storeStudioImage).
+// The asset cache, as the Node CLI sees it. Downloads, the account (cookie or account broker), the Open
+// Cloud API key and the cache rules are the native engine's (native/src/download.rs): `rur-native assets
+// fetch` resolves URIs for the CLI's tools, as a render does, and `rur-native assets account` says how
+// private assets are asked for. What stays here: the state dir, the environment for child processes that
+// download nothing, the cache's records (which file was rur's download, which was read from Studio) and
+// the images an open Studio reads for a render (cli/studio-images.mjs, storeStudioImage).
 //
 // rbxasset://      → the local Roblox Studio install (content/, ExtraContent/, PlatformContent/pc/)
-// rbxassetid://N   → assetdelivery.roblox.com (public route first, then the account), then an open
-//                    Studio for an image asset delivery refuses (cli/studio-images.mjs, when a bridge is set)
+// rbxassetid://N   → assetdelivery.roblox.com (public route first; for a private asset Open Cloud's asset
+//                    delivery with the API key, then the account), then an open Studio for an image
+//                    asset delivery refuses (cli/studio-images.mjs, when a bridge is set)
 // rbxthumb://...   → thumbnails.roblox.com
 
 import fs from "node:fs";
@@ -23,12 +24,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const CACHE_DIR = stateDir();
 const ASSET_DIR = path.join(CACHE_DIR, "assets");
 
-// The environment without the asset cookie variables and the broker token (any case), for child processes
-// that never download assets: cargo and its build scripts, git, PowerShell, browsers. The render service
-// and `rur-native assets` still inherit them, because they download.
+// The environment without the asset cookie variables, the broker token and the Open Cloud API key (any
+// case), for child processes that never download assets: cargo and its build scripts, git, rustc,
+// PowerShell, browsers, the sim, the selftest's checks. The render service and `rur-native assets` still
+// inherit them, because they download.
 export function withoutCookie(env = process.env) {
 	const copy = { ...env };
-	for (const key of Object.keys(copy)) if (/^(?:ROBLOX_ASSET_DELIVERY_COOKIE|ROBLOSECURITY|ROBLOX_BROKER_TOKEN)$/i.test(key)) delete copy[key];
+	for (const key of Object.keys(copy)) if (/^(?:ROBLOX_ASSET_DELIVERY_COOKIE|ROBLOSECURITY|ROBLOX_BROKER_TOKEN|ROBLOX_ASSET_DELIVERY_API_KEY)$/i.test(key)) delete copy[key];
 	return copy;
 }
 
@@ -70,15 +72,17 @@ export async function resolveAll(uris, { offline = false, fonts = false, studio 
 	return results;
 }
 
-// How private assets are asked for: "broker" (which comes before any cookie), "cookie", null (public assets
-// only), or undefined when there is no native build to ask (`rur doctor` before the first build)
+// How private assets are asked for: { access, apiKey }. access: "broker" (which comes before any cookie),
+// "cookie" or null (no account); apiKey: whether an Open Cloud API key is asked first. Undefined when there
+// is no native build to ask (`rur doctor` before the first build). Never a value.
 export async function accountAccess() {
 	const { findEngine } = await import("./engine.mjs");
 	const engine = findEngine();
 	if (!engine) return undefined;
 	const result = spawnSync(engine, ["assets", "account", "--json", "--repo", ROOT], { cwd: ROOT, encoding: "utf8", windowsHide: true });
 	try {
-		return JSON.parse(result.stdout).access ?? null;
+		const { access, apiKey } = JSON.parse(result.stdout);
+		return { access: access ?? null, apiKey: apiKey === true };
 	} catch {
 		return undefined;
 	}

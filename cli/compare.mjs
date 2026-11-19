@@ -13,6 +13,7 @@ import { runLuau, captureViewport, captureEngine, studioCaptureMethod, luauStrin
 import { withStudioLock } from "./lock.mjs";
 import { OUT_DIR, sharedStatePath, textSubpixel } from "./paths.mjs";
 import { findEngine } from "./engine.mjs";
+import { withoutCookie } from "./assets.mjs";
 import { execFileSync } from "node:child_process";
 import { render } from "./rur.mjs";
 import { CLOCK_LUAU, writeClock, clockSummary, withRecordedClock } from "./clock.mjs";
@@ -915,8 +916,8 @@ export function engineIdentity(executable = findEngine()) {
 		let commit = null, dirty = null;
 		try {
 			const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-			commit = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-			dirty = execFileSync("git", ["-C", root, "status", "--porcelain", "--", "native", "cli"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() !== "";
+			commit = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: withoutCookie() }).trim();
+			dirty = execFileSync("git", ["-C", root, "status", "--porcelain", "--", "native", "cli"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: withoutCookie() }).trim() !== "";
 		} catch {
 			// not a git checkout: the binary's hash still identifies it
 		}
