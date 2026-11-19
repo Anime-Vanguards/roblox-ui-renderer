@@ -74,7 +74,7 @@ test("only the workspace's own versions are left out", () => {
 });
 
 test("pruning leaves only the dependencies' outputs", () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-build-cache-test-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "build-cache-test-"));
 	try {
 		const host = path.join(dir, "target/dist");
 		const target = path.join(dir, "target/x86_64-pc-windows-msvc/dist");
@@ -117,7 +117,7 @@ test("pruning leaves only the dependencies' outputs", () => {
 });
 
 test("the script prints the key of the files it is given", () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-build-cache-test-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "build-cache-test-"));
 	try {
 		for (const [file, text] of Object.entries(base)) {
 			fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });

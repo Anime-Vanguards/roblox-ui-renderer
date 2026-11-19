@@ -458,6 +458,19 @@ jobs:
             native/target/${{ matrix.target }}/dist
             native/target/release
             native/target/${{ matrix.target }}/release
+      # The .deb files of the packages below, as an earlier run on main downloaded them. Ubuntu's
+      # mirror for these runners is slow at times: on 2026-11-19 this step or the smoke job's took
+      # 76 to 299 seconds in four of seven runs, against 13 to 20. apt checks every file against the
+      # signed package lists it has just fetched, so a cached file is installed only when it is
+      # exactly the package apt would download, and anything missing or newer is downloaded.
+      - name: Restore the apt packages of an earlier run on main
+        id: apt-cache
+        if: ${{ runner.os == 'Linux' && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: rur-apt-v1-${{ matrix.runner }}-${{ hashFiles('.github/workflows/release.yml') }}
+          restore-keys: rur-apt-v1-${{ matrix.runner }}-
+          path: ~/apt-archives
       # Build tools only; none of these packages ship in the zip. mesa-vulkan-drivers is the software
       # Vulkan the installed release tests need to draw a PNG, because the runner has no GPU.
       # Installed before the build, which looks for some of them. A mirror that does not answer is
@@ -466,10 +479,20 @@ jobs:
       - name: Linux desktop build libraries and software Vulkan for release tests
         if: runner.os == 'Linux'
         run: |
+          mkdir -p ~/apt-archives/partial
           sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::Retries=3 update
-          sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::Retries=3 install -y \
+          sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::Retries=3 -o Dir::Cache::Archives="$HOME/apt-archives" install -y \
             libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
             libgl1-mesa-dev mesa-vulkan-drivers
+          # apt leaves its lock and the files root-owned; the cache step reads them as the runner user
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
+      # The smoke job restores the same files, a superset of the one package it installs
+      - name: Store the apt packages for later runs on main
+        if: ${{ steps.apt-cache.outcome == 'success' && steps.apt-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
+          path: ~/apt-archives
       - name: Install npm packages
         run: npm ci
       - name: Download and verify FreeType
@@ -572,9 +595,20 @@ jobs:
         with:
           name: binary-${{ matrix.os }}-${{ matrix.arch }}
           path: archives
+      # The .deb files the Linux build job of this run (or an earlier one on main) stored, as there
+      - name: Restore the apt packages of an earlier run on main
+        if: ${{ runner.os == 'Linux' && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: rur-apt-v1-${{ matrix.runner }}-${{ hashFiles('inputs/.github/workflows/release.yml') }}
+          restore-keys: rur-apt-v1-${{ matrix.runner }}-
+          path: ~/apt-archives
       - name: Linux software Vulkan
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+        run: |
+          mkdir -p ~/apt-archives/partial
+          sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::http::Timeout=10 -o Acquire::Retries=3 -o Dir::Cache::Archives="$HOME/apt-archives" install -y mesa-vulkan-drivers
       - name: Installed binary smoke test outside the checkout
         shell: bash
         run: node inputs/tools/release/smoke.mjs --zip "archives/rur-native-$VERSION-$RELEASE_OS-$RELEASE_ARCH.zip" --version "$VERSION" --png "$SMOKE_PNG"
