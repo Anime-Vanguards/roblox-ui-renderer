@@ -174,3 +174,30 @@ fn a_destroyed_tree_is_freed_whole() {
     assert_eq!((&activated["connections"], &activated["class"]), (&serde_json::json!(40), &serde_json::json!("TextButton")));
     assert!(activated["captures"].as_str().unwrap().contains("field"), "{activated:#}");
 }
+
+/// The desktop build decodes mesh assets (the emulator's `meshes` feature): a MeshPart made from an EditableMesh's
+/// CreateDataModelContentAsync copy reads that copy back as a FileMesh. Without the feature CreateMeshPartAsync raises
+/// "this build decodes no mesh assets", while the same script runs under the emulator's own CLI.
+#[cfg(feature = "desktop")]
+#[test]
+fn the_desktop_build_makes_mesh_parts_from_editable_mesh_content() {
+    let (lua, engine) = start();
+    let output = run(
+        &lua,
+        &engine,
+        r#"
+        local AssetService = game:GetService("AssetService")
+        local m = AssetService:CreateEditableMesh()
+        m:AddTriangle(m:AddVertex(Vector3.new(0, 0, 0)), m:AddVertex(Vector3.new(2, 0, 0)), m:AddVertex(Vector3.new(0, 3, 0)))
+        task.spawn(function()
+            local result, content = AssetService:CreateDataModelContentAsync(Content.fromObject(m))
+            local ok, part = pcall(AssetService.CreateMeshPartAsync, AssetService, content)
+            print("part", result, ok, if ok then part.MeshSize == Vector3.new(2, 3, 0.001) else part)
+        end)
+        "#,
+    );
+    assert!(output.iter().all(|line| !line.starts_with("error")), "{output:?}");
+    scheduler::run_until(&lua, &engine, 0.5).unwrap();
+    let lines = lines(&engine);
+    assert!(lines.iter().any(|line| line == "print: part Enum.CreateContentResult.Success true true"), "{lines:?}");
+}

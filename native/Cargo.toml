@@ -31,7 +31,7 @@ required-features = ["web"]
 default = ["desktop"]
 # The egui desktop app, headless captures, the render service, the runtime worker thread, the Luau
 # JIT and the native GPU backends
-desktop = ["dep:eframe", "dep:egui", "dep:egui-wgpu", "dep:tokio", "dep:ree-profile-view", "dep:ureq", "dep:flate2", "dep:md-5", "mlua/luau-jit", "roblox-engine-emulator/jit", "roblox-engine-emulator/bundles", "wgpu/dx12", "wgpu/vulkan", "wgpu/metal"]
+desktop = ["dep:eframe", "dep:egui", "dep:egui-wgpu", "dep:tokio", "dep:ree-profile-view", "dep:ureq", "dep:flate2", "dep:md-5", "mlua/luau-jit", "roblox-engine-emulator/jit", "roblox-engine-emulator/bundles", "roblox-engine-emulator/meshes", "wgpu/dx12", "wgpu/vulkan", "wgpu/metal"]
 # The engine and renderer in a browser: WebGL2 through wgpu's GLES backend, single-threaded, files
 # from the page's bundle (src/web.rs)
 web = []
