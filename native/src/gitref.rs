@@ -11,7 +11,9 @@
 //!
 //! git runs with explicit arguments (no shell), only `rev-parse`, `read-tree`, `ls-files` and `checkout-index`; the
 //! three that write the extracted tree take `-c core.longpaths=true`, so a deeply nested project extracts under a long
-//! state directory on Windows (git ignores the setting elsewhere).
+//! state directory on Windows (git ignores the setting elsewhere). Each runs in the repository's top folder, never in
+//! a nested one: Windows refuses a working directory of about 258 characters or more, which core.longpaths does not
+//! lift.
 use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -205,7 +207,10 @@ impl GitRef {
                 None => break,
             }
         }
-        let Ok(top) = git(&dir, &["rev-parse", "--show-toplevel"], false, None, None) else { return Ok(None) };
+        // git asks in the nearest folder that holds `.git`, where its own search up from `dir` gets to: `dir` may be
+        // nested past the length Windows allows a working directory (Rust's file calls have no such limit)
+        let cwd = dir.ancestors().find(|folder| folder.join(".git").exists()).unwrap_or(dir.as_path());
+        let Ok(top) = git(cwd, &["rev-parse", "--show-toplevel"], false, None, None) else { return Ok(None) };
         let top = crate::rojo::resolve(Path::new(""), String::from_utf8_lossy(&top).trim());
         let key = same_case(&top.to_string_lossy());
         if let Some(index) = self.snapshots.iter().position(|snapshot| same_case(&snapshot.top.to_string_lossy()) == key) {
@@ -445,15 +450,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&state);
     }
 
-    /// A deeply nested file extracts into a state directory whose paths pass Windows' 260 characters (git needs
-    /// core.longpaths for that); elsewhere there is no such limit and the test checks the same extraction
+    /// A file in a folder nested past Windows' 260 characters finds its repository (git can't start in that folder)
+    /// and extracts into a state directory whose paths pass them too (git needs core.longpaths for that); elsewhere
+    /// there is no such limit and the test checks the same extraction
     #[test]
     fn deeply_nested_files_extract_past_the_windows_path_limit() {
         let repo = temp("deep");
         let state = temp("deep-state").join("a-state-directory-with-a-long-name-like-a-user-temp-folder-has");
-        let nested: PathBuf = (0..6).map(|level| format!("nested-folder-{level}-with-a-long-name")).collect();
+        // (eight levels pass 260 characters whatever the temp folder's length, which six did only for a long one)
+        let nested: PathBuf = (0..8).map(|level| format!("nested-folder-{level}-with-a-long-name")).collect();
         let file = repo.join(&nested).join("Story.story.luau");
         let relative = nested.join("Story.story.luau");
+        if cfg!(windows) {
+            assert!(file.parent().unwrap().as_os_str().len() > 260, "{} characters", file.parent().unwrap().as_os_str().len());
+        }
         // (git writes the long path itself; the test's own write goes through Rust, which handles long paths)
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(&file, "return 'deep'").unwrap();
