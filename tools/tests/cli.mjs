@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { snapshotDir } from "../../cli/rur.mjs";
+import { recordSummary, snapshotDir } from "../../cli/rur.mjs";
 import { luauString } from "../../cli/studio.mjs";
 
 // Luau string literals: quotes and backslashes escaped, control characters as Luau's \ddd (not JSON's \uXXXX)
@@ -14,6 +14,15 @@ assert.equal(luauString("line\nnext\ttab\u0001\u007f!"), '"line\\nnext\\ttab\\00
 assert.equal(luauString("\u00e9\u{1f600}"), '"\u00e9\u{1f600}"');
 assert.equal(luauString("\ud800"), '"\ufffd"');
 assert.equal(luauString(12), '"12"');
+
+// `rur record` takes the engine's summary from a run that ended: exit 0, or exit 1 with status "error" (the engine's exit
+// for a failed run, which `rur record` reports with its own exit 2); an exit 1 without that summary is a failure
+const failed = { status: "error", failure: "boom" };
+assert.deepEqual(recordSummary(1, `rur: record error; 31 frames\n${JSON.stringify(failed)}\n`), failed);
+assert.deepEqual(recordSummary(0, `${JSON.stringify({ status: "ok" })}\r\n`), { status: "ok" });
+assert.equal(recordSummary(1, `${JSON.stringify({ status: "ok" })}\n`), null);
+assert.equal(recordSummary(1, ""), null);
+assert.equal(recordSummary(126, `${JSON.stringify(failed)}\n`), null);
 const root = fileURLToPath(new URL("../../", import.meta.url));
 // No project or place has an implicit Studio snapshot: they load only when --snapshot-dir names one
 {

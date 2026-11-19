@@ -315,15 +315,24 @@ export async function record(args) {
 		});
 		child.on("error", reject);
 		child.on("close", code => {
-			const line = stdout.trim().split(/\r?\n/).pop();
-			try {
-				if (code === 0) return resolve(JSON.parse(line));
-			} catch {
-				// reported below
-			}
+			const summary = recordSummary(code, stdout);
+			if (summary) return resolve(summary);
 			reject(new Error(`record failed (exit ${code})${stderr ? `\n${stderr.slice(-4000)}` : ""}`));
 		});
 	});
+}
+
+// The summary `rur-native record` printed (its last stdout line) when its run ended: exit 0, or exit 1 with status
+// "error", the engine's exit for a run whose harness or a frame failed (its summary printed and its recording written as
+// for any run); null when it did not end its run
+export function recordSummary(code, stdout) {
+	let summary;
+	try {
+		summary = JSON.parse(stdout.trim().split(/\r?\n/).pop());
+	} catch {
+		return null;
+	}
+	return code === 0 || (code === 1 && summary?.status === "error") ? summary : null;
 }
 
 function asArray(value) {
