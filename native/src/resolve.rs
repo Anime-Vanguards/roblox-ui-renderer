@@ -186,6 +186,7 @@ impl Resolver {
         #[cfg(feature = "desktop")]
         {
             let mut unavailable: Option<String> = None;
+            let mut persisted = std::collections::HashSet::new();
             for uri in uris {
                 if let Some(reason) = &unavailable {
                     results.insert(uri.clone(), Err(reason.clone()));
@@ -193,12 +194,19 @@ impl Resolver {
                 }
                 let snapshot = self.viewports.get(uri.as_str()).cloned().unwrap_or(Value::Null);
                 let result = self.worker.render(uri, &snapshot, self.persist_viewports);
-                if let Err(error) = &result {
-                    if crate::viewports::is_unavailable(error) {
+                match &result {
+                    Ok(path) if self.persist_viewports => {
+                        persisted.insert(path.clone());
+                    }
+                    Err(error) if crate::viewports::is_unavailable(error) => {
                         unavailable = Some(error.clone());
                     }
+                    _ => {}
                 }
                 results.insert(uri.clone(), result);
+            }
+            if self.persist_viewports && !persisted.is_empty() {
+                self.worker.prune_persisted(&persisted);
             }
         }
         #[cfg(not(feature = "desktop"))]

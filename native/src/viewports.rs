@@ -8,7 +8,7 @@
 //! The same worker answers the model bundle requests of a project that mounts bundles lazily
 //! (`catalog`, `bundle`; engine/mod.rs).
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
@@ -196,8 +196,13 @@ impl ViewportWorker {
             let _ = std::fs::remove_file(&partial);
             format!("keeping the ViewportFrame picture: {error}")
         })?;
-        prune(folder, PERSISTED);
         Ok(persisted)
+    }
+
+    /// Prunes persisted pictures down to the cache limit without removing any picture in `protect`
+    /// (the pictures resolved for the current render batch).
+    pub fn prune_persisted(&self, protect: &HashSet<PathBuf>) {
+        prune(&self.state.join("viewports-persisted"), PERSISTED, protect);
     }
 
     /// Forgets the pictures of slots no longer shown, so the folder holds only what the scene draws
@@ -406,8 +411,9 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Keeps the newest `keep` pictures of `folder`
-fn prune(folder: &Path, keep: usize) {
+/// Keeps the newest `keep` pictures of `folder`, never removing any file in `protect` (so a scene
+/// with more than `keep` ViewportFrames does not evict its own pictures before rendering reads them).
+fn prune(folder: &Path, keep: usize, protect: &HashSet<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return;
     };
@@ -420,8 +426,16 @@ fn prune(folder: &Path, keep: usize) {
         return;
     }
     pictures.sort();
-    for (_, file) in &pictures[..pictures.len() - keep] {
+    let mut excess = pictures.len() - keep;
+    for (_, file) in &pictures {
+        if excess == 0 {
+            break;
+        }
+        if protect.contains(file) {
+            continue;
+        }
         let _ = std::fs::remove_file(file);
+        excess -= 1;
     }
 }
 
@@ -594,6 +608,36 @@ mod tests {
         let error = worker.render(&format!("rur-viewport://1/{DIGEST}"), &json!({}), false).unwrap_err();
         assert!(error.contains("exited without answering"), "{error}");
         drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn persisted_pruning_preserves_the_current_batch_and_evicts_older_entries() {
+        let root = folder("prune");
+        let persisted = root.join("viewports-persisted");
+        std::fs::create_dir_all(&persisted).unwrap();
+        let make = |name: &str, secs: u64| {
+            let file = persisted.join(format!("{name}.png"));
+            std::fs::write(&file, b"png").unwrap();
+            let modified = std::time::UNIX_EPOCH + Duration::from_secs(secs);
+            std::fs::File::options().write(true).open(&file).unwrap().set_modified(modified).unwrap();
+            file
+        };
+        let stale = make("stale", 10);
+        let batch: Vec<PathBuf> = (0..5).map(|i| make(&format!("batch-{i}"), 20 + i as u64)).collect();
+        let protected: HashSet<PathBuf> = batch.iter().cloned().collect();
+        // A batch larger than the cache limit keeps all of its own pictures and still evicts stale ones.
+        prune(&persisted, 3, &protected);
+        assert!(!stale.exists(), "older picture outside the batch is pruned");
+        for file in &batch {
+            assert!(file.is_file(), "picture in the current batch must survive pruning: {}", file.display());
+        }
+        // A later smaller batch brings the cache back down to the limit while protecting its own hit.
+        let keep_one: HashSet<PathBuf> = [batch[0].clone()].into_iter().collect();
+        prune(&persisted, 3, &keep_one);
+        assert!(batch[0].is_file(), "protected oldest picture is kept");
+        let remaining = std::fs::read_dir(&persisted).unwrap().count();
+        assert_eq!(remaining, 3, "cache trims back to the limit");
         std::fs::remove_dir_all(root).unwrap();
     }
 }
