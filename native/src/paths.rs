@@ -277,7 +277,7 @@ pub(crate) fn validate_arguments(argv: &[String]) -> Result<(), String> {
 }
 
 /// The commands `main` dispatches before the storybook's own parser (NativeOptions) sees the arguments
-const COMMANDS: &[&str] = &["engine", "engine-batch", "render", "rojo-mounts", "sequence", "serve", "record", "profile", "assets", "doctor"];
+const COMMANDS: &[&str] = &["engine", "engine-batch", "render", "rojo-mounts", "sequence", "serve", "record", "profile", "assets", "doctor", "debug-report"];
 
 /// Refuses an empty project folder given to the storybook without an option name (`rur-native ""`), which would
 /// otherwise open the current folder. A blank word can only be that positional: a blank value of a path option is

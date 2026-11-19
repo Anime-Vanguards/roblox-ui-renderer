@@ -653,3 +653,223 @@ fn a_generic_story_converts_and_calls_listeners_as_ui_labs_does() {
     drop(lua);
     let _ = std::fs::remove_file(fixture);
 }
+
+/// A stand-in for React and ReactRoblox (createElement, createRoot, function components rendered synchronously) and
+/// for Fusion 0.2 (Value objects), enough to see which renderer the host picks and what it passes
+const FAKE_PACKAGES: &str = r#"
+local Fake = {}
+function Fake.createElement(Type, Props)
+    return { ["$$typeof"] = "element", type = Type, props = Props or {} }
+end
+function Fake.createRoot(Container)
+    local Root = {}
+    function Root:render(Element)
+        _G.Renders = (_G.Renders or 0) + 1
+        Container:ClearAllChildren()
+        local function Build(Element)
+            if type(Element.type) == "function" then
+                return Build(Element.type(Element.props))
+            end
+            local Made = Instance.new(Element.type)
+            for Key, Value in Element.props do
+                Made[Key] = Value
+            end
+            Made.Parent = Container
+            return Made
+        end
+        _G.Built = Build(Element)
+    end
+    return Root
+end
+function Fake.Value(Initial)
+    local Value = { Current = Initial }
+    function Value:get()
+        return self.Current
+    end
+    function Value:set(New)
+        self.Current = New
+        if self.Changed then
+            self.Changed(New)
+        end
+    end
+    return Value
+end
+return Fake
+"#;
+
+/// A Flipbook project laid out as a root: the stand-in packages, a storybook giving its stories React and ReactRoblox,
+/// and the stories under its storyRoots
+fn flipbook_root(name: &str, stories: &[(&str, &str)]) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("rur-flipbook-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let storage = dir.join("ReplicatedStorage");
+    std::fs::create_dir_all(storage.join("Stories")).unwrap();
+    std::fs::write(storage.join("Fake.luau"), FAKE_PACKAGES).unwrap();
+    std::fs::write(
+        storage.join("Stories.storybook.luau"),
+        r#"local Fake = require(script.Parent.Fake)
+        return { name = "Test", storyRoots = { script.Parent.Stories }, packages = { React = Fake, ReactRoblox = Fake } }"#,
+    )
+    .unwrap();
+    for (file, source) in stories {
+        std::fs::write(storage.join("Stories").join(file), source).unwrap();
+    }
+    dir
+}
+
+fn mount_flipbook(dir: &std::path::Path, file: &str, controls: Option<&serde_json::Value>) -> (Lua, Rc<Engine>, super::session::Session) {
+    use super::story;
+    let engine = crate::engine::new_engine(crate::engine::options()).expect("engine");
+    let lua = Lua::new();
+    let spec = story::ProjectSpec { roots: vec![dir.to_string_lossy().into_owned()], ..Default::default() };
+    let project = story::mount_project(&lua, &engine, &spec, std::time::Instant::now()).unwrap();
+    let path = dir.join("ReplicatedStorage").join("Stories").join(file);
+    let source = story::Source { kind: story::SourceKind::Story, path: path.to_string_lossy().into_owned() };
+    let mounted = story::mount(&lua, &engine, &project, Some(&source), 0.0, (800.0, 600.0), controls).unwrap();
+    assert_eq!(mounted.status, "ok", "{file}: {:?}", mounted.failure);
+    let session = super::session::Session::new(&engine, project, mounted, [0.2, 0.2, 0.2], true);
+    (lua, engine, session)
+}
+
+/// A Flipbook story whose storybook names React: its function is rendered as a component through createRoot with
+/// Flipbook's props, typed and raw controls (with `--controls`) reach it, the storybook lists them, and a live change
+/// renders it again
+#[test]
+fn a_flipbook_story_renders_with_its_storybooks_react_and_controls() {
+    let dir = flipbook_root(
+        "react",
+        &[(
+            "Counter.story.luau",
+            r#"local Fake = require(game:GetService("ReplicatedStorage").Fake)
+            return {
+                controls = { label = "Hi", size = { type = "Select", items = { "Small", "Large" }, default = "Large" } },
+                story = function(props)
+                    _G.Props = props
+                    return Fake.createElement("TextLabel", {
+                        Text = props.controls.label .. " " .. props.controls.size,
+                        Size = UDim2.fromOffset(if props.controls.size == "Large" then 300 else 100, 50),
+                    })
+                end,
+            }"#,
+        )],
+    );
+    let (lua, engine, mut session) = mount_flipbook(&dir, "Counter.story.luau", Some(&json!({ "label": "Yo" })));
+    let ready = session.ready(&lua).unwrap();
+    let controls = ready["controls"].as_array().cloned().unwrap_or_default();
+    let size = controls.iter().find(|control| control["path"] == json!(["size"])).expect("size control");
+    assert_eq!((size["kind"].as_str(), size["value"].as_str(), size["options"].clone()), (Some("choose"), Some("Large"), json!(["Small", "Large"])), "{ready}");
+    run(
+        &lua,
+        &engine,
+        r#"
+        assert(_G.Built.Text == "Yo Large" and _G.Built.Size.X.Offset == 300, _G.Built.Text)
+        assert(_G.Props.theme == "Dark" and _G.Props.locale == "en-us" and _G.Props.container == _G.Props.target)
+        assert(_G.Props.container.Name == "StoryTarget" and type(_G.Props.story) == "table" and _G.Renders == 1)
+        "#,
+    );
+    assert_eq!(session.control(&lua, &json!(["size"]), &json!("Small"))["type"], "frame");
+    run(&lua, &engine, r#"assert(_G.Built.Text == "Yo Small" and _G.Built.Size.X.Offset == 100 and _G.Renders == 2, _G.Built.Text)"#);
+    assert_eq!(session.control(&lua, &json!(["missing"]), &json!(1))["type"], "error");
+    drop(session);
+    drop(lua);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The other story shapes Flipbook takes: an element as the story, a story with its own packages (Fusion: a Value per
+/// control, set on a change), one with none (`packages = {}`: story(container, props) for a two-argument function)
+/// and a Hoarcekat function
+#[test]
+fn flipbook_elements_fusion_manual_and_hoarcekat_stories_mount() {
+    let dir = flipbook_root(
+        "shapes",
+        &[
+            (
+                "Element.story.luau",
+                r#"local Fake = require(game:GetService("ReplicatedStorage").Fake)
+                return { story = Fake.createElement("Frame", { Name = "FromElement", Size = UDim2.fromOffset(40, 40) }) }"#,
+            ),
+            (
+                "Fusion.story.luau",
+                r#"local Fake = require(game:GetService("ReplicatedStorage").Fake)
+                return {
+                    packages = { Fusion = Fake },
+                    controls = { title = "One" },
+                    story = function(props)
+                        local Label = Instance.new("TextLabel")
+                        Label.Name = "FromFusion"
+                        Label.Text = props.controls.title:get()
+                        props.controls.title.Changed = function(New) Label.Text = New end
+                        _G.Fusion = Label
+                        return Label
+                    end,
+                }"#,
+            ),
+            (
+                "Manual.story.luau",
+                r#"return {
+                    packages = {},
+                    controls = { width = 70 },
+                    story = function(container, props)
+                        local Frame = Instance.new("Frame")
+                        Frame.Name = "FromManual"
+                        Frame.Size = UDim2.fromOffset(props.controls.width, 10)
+                        Frame.Parent = container
+                        _G.Mounts = (_G.Mounts or 0) + 1
+                        return function() _G.Cleanups = (_G.Cleanups or 0) + 1 end
+                    end,
+                }"#,
+            ),
+            (
+                "Hoarcekat.story.luau",
+                r#"return function(target)
+                    local Frame = Instance.new("Frame")
+                    Frame.Name = "FromHoarcekat"
+                    Frame.Parent = target
+                    return function() end
+                end"#,
+            ),
+        ],
+    );
+    let (lua, engine, session) = mount_flipbook(&dir, "Element.story.luau", None);
+    run(&lua, &engine, r#"assert(_G.Built.Name == "FromElement" and _G.Built.Parent.Name == "StoryTarget")"#);
+    drop((session, lua, engine));
+    let (lua, engine, mut session) = mount_flipbook(&dir, "Fusion.story.luau", None);
+    run(&lua, &engine, r#"assert(_G.Fusion.Text == "One" and _G.Fusion.Parent.Name == "StoryTarget" and _G.Renders == nil)"#);
+    let _ = session.ready(&lua).unwrap();
+    assert_eq!(session.control(&lua, &json!(["title"]), &json!("Two"))["type"], "frame");
+    run(&lua, &engine, r#"assert(_G.Fusion.Text == "Two" and _G.Fusion.Parent ~= nil)"#);
+    drop((session, lua, engine));
+    let (lua, engine, mut session) = mount_flipbook(&dir, "Manual.story.luau", Some(&json!({ "width": 90 })));
+    let target = r#"game:GetService("CoreGui").RURStory.StoryTarget"#;
+    run(&lua, &engine, &format!("assert({target}.FromManual.Size.X.Offset == 90 and _G.Mounts == 1 and _G.Cleanups == nil)"));
+    let _ = session.ready(&lua).unwrap();
+    assert_eq!(session.control(&lua, &json!(["width"]), &json!(120))["type"], "frame");
+    run(&lua, &engine, &format!("assert(_G.Mounts == 2 and _G.Cleanups == 1 and {target}.FromManual.Size.X.Offset == 120 and #{target}:GetChildren() == 1)"));
+    drop((session, lua, engine));
+    let (lua, engine, session) = mount_flipbook(&dir, "Hoarcekat.story.luau", None);
+    run(&lua, &engine, &format!("assert({target}:FindFirstChild(\"FromHoarcekat\") ~= nil)"));
+    drop((session, lua, engine));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Members a game script can't call raise Roblox's own error, which Roblox's packages catch (Foundation's resolution
+/// scale, SafeFlags), where the emulator's stub returned nil
+#[test]
+fn members_a_game_script_cannot_call_raise_robloxs_error() {
+    let (lua, engine) = start();
+    run(
+        &lua,
+        &engine,
+        r#"
+        local GuiService = game:GetService("GuiService")
+        local Ok, Message = pcall(GuiService.GetResolutionScale, GuiService)
+        assert(not Ok and Message == "The current thread cannot call 'GetResolutionScale' (lacking capability RobloxScript)", tostring(Message))
+        -- SafeFlags (Roblox's packages): a define that fails this way means every flag but Debug ones is on
+        local Defined, Problem = pcall(function() game:DefineFastFlag("FoundationThing", false) end)
+        assert(not Defined and string.match(Problem, "The current thread cannot call"), tostring(Problem))
+        local Read, Error = pcall(function() return game:GetFastInt("Thing") end)
+        assert(not Read and Error == "The current thread cannot call 'GetFastInt' (lacking capability LocalUser)", tostring(Error))
+        assert(GuiService:IsTenFootInterface() == false)
+        "#,
+    );
+}

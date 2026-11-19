@@ -135,7 +135,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/main.rs",
         "fn main()",
-        0xcdb8e95a33b5078c,
+        0x6277808a51af0fa5,
     ),
     // `rur-native assets`: its positionals are content URIs, read and never written; it writes only into
     // the state directory, and its one path option, `--repo`, is in PATH_OPTIONS
@@ -152,6 +152,14 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         "src/doctor.rs",
         "pub fn cli(",
         0x28fa199d1d5edf89,
+    ),
+    // `rur-native debug-report`: its positionals are story files, each checked to be a file and passed to a child
+    // `render --story`; `--out` (the report it writes) and the project options it passes on are in PATH_OPTIONS
+    (
+        Crate::Native,
+        "src/report.rs",
+        "fn parse(",
+        0xc6448c36900b2250,
     ),
     (
         Crate::Native,
@@ -447,6 +455,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--idle",
     "--json",
     "--keys",
+    "--limit",
     "--load-module",
     "--load-string",
     "--margin",
@@ -465,6 +474,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--placeholders",
     "--player",
     "--port",
+    "--prints",
     "--profile",
     "--profile-alloc-step",
     "--profile-counters",
@@ -481,6 +491,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--select",
     "--session",
     "--size",
+    "--source",
     "--stdin",
     "--streaming",
     "--strict-assets",
@@ -488,6 +499,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--test-hooks",
     "--theme",
     "--time",
+    "--timeout",
     "--timing-check",
     "--to",
     "--top",

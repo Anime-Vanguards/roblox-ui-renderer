@@ -16,6 +16,7 @@ pub mod layers;
 pub mod layout;
 pub mod order;
 pub mod path2d_layout;
+pub mod script_security;
 pub mod session;
 pub mod story;
 pub mod text;
@@ -76,6 +77,7 @@ impl Layer for GuiLayer {
     fn install(&self, engine: &Rc<Engine>) {
         engine.extension_or_insert_with(Gui::default);
         text_service::install(engine, &mut engine.behaviors.borrow_mut());
+        script_security::install(engine, &mut engine.behaviors.borrow_mut());
         layout::install(engine);
         path2d_layout::install(engine);
         input::install(engine);

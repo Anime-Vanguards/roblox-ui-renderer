@@ -34,7 +34,35 @@ A story module returns one of:
   `{"cmd":"control"}`) calls each listener with a new values table and `{ __old, __new }` per
   control, as UI Labs does; a listener that errors or yields is reported with a warning, and the
   listeners after it still run. rur has no unmount, so the cleanup `render` returns is not called.
-- A function: called with the target.
+- A function: called with the target (a Hoarcekat story; its returned cleanup is not called).
+- A [Flipbook](https://github.com/flipbook-labs/flipbook) story (below).
+
+### Flipbook stories and storybooks
+
+rur mounts Flipbook 2.x stories as Flipbook does through Storyteller 1.12. A story table goes to a renderer when it
+names `packages`, its `story` is not a function (a React or Roact element, or an Instance), or its storybook names
+packages:
+
+| Packages | Mounted with | A control change |
+|---|---|---|
+| `Roact` | `Roact.mount(Roact.createElement(story, props), target)` (an element as it is) | `Roact.update` |
+| `React` and `ReactRoblox` | `ReactRoblox.createRoot(target):render(React.createElement(story, props))`: `story` is a function component, so hooks work | rendered again |
+| `Fusion` | `story(props)` parented to the target; each control a Fusion `Value` (0.3: of a scope of its own) | the one `Value` set |
+| `Vide` | `vide.mount` of `story(props)`; each control a source | the one source set |
+| none (`packages = {}`) | `story(target, props)` when it takes two arguments, else `story(props)`; a returned Instance is parented | mounted again (the returned cleanup first) |
+
+The legacy `react`, `reactRoblox`, `roact` and `fusion` keys count as packages, so a UI Labs React story mounts the
+same way. A story's own packages replace its storybook's. `props` holds `controls`, `container` (also as `target`),
+`story`, `theme = "Dark"`, `locale = "en-us"` and the story's `props` table. A `stories` group mounts its first story.
+
+A storybook is a `*.storybook.luau` (or `.lua`) module returning `{ name, storyRoots = { ... }, packages, mapStory,
+mapDefinition }`; a story belongs to the first storybook whose `storyRoots` hold it. rur looks for storybooks among
+the files of the run's roots and mounts (not inside Wally's `_Index`), so a storybook must be in the project rur
+mounts. `mapDefinition(story)` runs once before the mount and `mapStory(story)` wraps the component, as in Flipbook.
+
+Flipbook's typed controls (`{ type = "Select", items = { ... }, default = ... }`, `Radio`, `Number` and `Slider` with
+a `range`, `Boolean`, `String`, `Color`, `MultiSelect`, `Check`) work like UI Labs controls: `--controls`, the
+storybook's controls panel and `node cli/controls.mjs` take them.
 
 Controls are the UI Labs kinds: plain values, `{ value, ... }` lists (the first is the default),
 `EntryType = "Control"` tables and `EntryType = "ControlGroup"` groups. `rur render --controls

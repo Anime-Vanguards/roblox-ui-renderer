@@ -90,7 +90,8 @@ const SERVICES: [&str; 16] = [
 fn missing_member(message: &str) -> Option<(Vec<String>, String)> {
     const MARKER: &str = " is not a valid member of ";
     let at = message.find(MARKER)?;
-    let child = message[..at].rsplit([':', ' ']).next().filter(|child| !child.is_empty())?;
+    // (the name is the last word before the marker: after a chunk's `:12: `, or a line React's error boundary adds)
+    let child = message[..at].rsplit(|c: char| c == ':' || c.is_whitespace()).next().filter(|child| !child.is_empty())?;
     let (_class, rest) = message[at + MARKER.len()..].split_once(' ')?;
     let full_name = rest.strip_prefix('"')?.split('"').next()?;
     let parent: Vec<String> = full_name.split('.').map(str::to_string).collect();
@@ -372,6 +373,9 @@ mod tests {
         assert!(hint.starts_with("No Rojo project file maps ReplicatedStorage.Packages, but the folder") && hint.contains("pass --mount ReplicatedStorage/Packages="), "{hint}");
         assert_eq!(story_frame("ReplicatedStorage.RURFixtures.Button.story:5", Some(&story)), "Button.story.luau:5");
         assert_eq!(story_frame("ReplicatedStorage.Shared.Theme:3 function Get", Some(&story)), "ReplicatedStorage.Shared.Theme:3");
+        // The name after a line of its own (React's "------ Error caught by React ------")
+        let caught = "------ Error caught by React ------\nPackages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"";
+        assert!(missing_child_hint(caught, &Sources::default(), Some(&story)).unwrap().contains("maps ReplicatedStorage.Packages"));
         // Not a missing member, or not a service's descendant: no hint
         assert!(missing_child_hint("attempt to index nil with 'Packages'", &Sources::default(), Some(&story)).is_none());
         assert!(missing_child_hint(r#"Foo is not a valid member of Frame "Frame""#, &Sources::default(), Some(&story)).is_none());

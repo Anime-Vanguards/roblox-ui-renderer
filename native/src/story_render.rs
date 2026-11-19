@@ -638,8 +638,17 @@ fn print_result(result: &Value) {
 /// warning), and the hint (crate::hints) unless one of the `printed` lines already said it
 fn problem_lines(scene: &Value, printed: &[String], story: Option<&Path>) -> Vec<(fn(&str), String)> {
     let mut lines: Vec<(fn(&str), String)> = Vec::new();
+    let output = scene.pointer("/diagnostics/output").and_then(Value::as_array).cloned().unwrap_or_default();
+    let script_errors: Vec<&str> = output.iter().filter(|entry| entry["kind"] == "error").filter_map(|entry| entry["message"].as_str()).collect();
     if let Some(failure) = scene["failure"].as_str() {
         lines.push((crate::term::error, failure.to_string()));
+    } else if let Some(first) = scene["status"].as_str().filter(|status| *status == "ok").and(script_errors.first()) {
+        // A mount that went well with script errors after it (React catches a tree's render errors): the first one
+        // (React's message: the scheduler's positions, then the error after its "Error caught by React" line)
+        let caught = first.split("------ Error caught by React ------").nth(1).and_then(|rest| rest.lines().map(str::trim).find(|line| !line.is_empty()));
+        let line = caught.unwrap_or_else(|| first.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or(first));
+        let more = if script_errors.len() > 1 { format!(" (and {} more script errors in scene.json)", script_errors.len() - 1) } else { String::new() };
+        lines.push((crate::term::warning, format!("the story mounted, then a script error: {line}{more}")));
     } else if scene["status"] == "yielded" {
         // (engine/story.rs settle: the warning for a mount that still yields, with its traceback)
         let waiting = scene.pointer("/diagnostics/output").and_then(Value::as_array).into_iter().flatten().find(|entry| {

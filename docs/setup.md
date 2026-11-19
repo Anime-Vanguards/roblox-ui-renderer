@@ -79,6 +79,18 @@ with Node and its npm packages installed. Set `RUR_ASSET_REPO` to that checkout 
 works too. Neither changes the project or the state directory. Studio comparison, build tools, fixture
 collections and the other Node CLI commands need the checkout.
 
+### When stories fail: `rur-native debug-report`
+
+`rur-native debug-report` in the project folder renders every story (or the stories you name: `rur-native debug-report
+src/Button.story.luau`), each in a process of its own, and writes `rur-report.md`: rur's version and setup, and for
+each story its status, failure, traceback, errors and warnings, the engine members it used that rur doesn't emulate,
+the images and fonts that failed, drawing errors and what rur printed. Send that file when you report a problem.
+
+It is written to share: paths are relative to the project, your user name, home folder and computer name are
+replaced, and it holds no source code, `print` output or credentials. `--source` adds the line of each frame of a
+failure's traceback (your code), `--prints` the stories' `print` output. Read it before you send it. `--help` lists
+the rest (`--out`, `--limit`, `--timeout`, and the project options `render` takes).
+
 ### State directory
 
 The state directory is `%LOCALAPPDATA%\rur` on Windows, `$XDG_CACHE_HOME/rur` on Linux (else `~/.cache/rur`)

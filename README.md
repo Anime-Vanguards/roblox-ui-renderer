@@ -65,7 +65,9 @@ Run `rur-native --version` to check the install. `rur-native <your-project-folde
 storybook, and `rur-native render --story <story.luau> --project <your-project> --dir out/render`
 renders headless. In a Rojo project (Wally packages included) run it from the project folder and no
 project flag is needed: the folder's `default.project.json`, or its only `*.project.json`, is found and mounted, or name one with `--rojo <file>`
-([projects](docs/projects.md#rojo-projects-and-explicit-mounts)). The storybook and PNG renders need a graphics driver, and fonts and textures come from
+([projects](docs/projects.md#rojo-projects-and-explicit-mounts)). UI Labs and [Flipbook](docs/stories.md#flipbook-stories-and-storybooks)
+stories (React, Roact, Fusion and Vide) both work. When stories fail, `rur-native debug-report` writes a report to send
+([setup](docs/setup.md#when-stories-fail-rur-native-debug-report)). The storybook and PNG renders need a graphics driver, and fonts and textures come from
 your Roblox Studio install. A release binary downloads the assets and cloud fonts a story uses by itself,
 and draws ViewportFrames' 3D content with [ror](docs/viewports.md) when ror is installed. On Linux and macOS use rokit 1.0 or later, since 0.2.x
 cannot select an executable whose name differs from this repository's. [Setup](docs/setup.md#release-binaries)

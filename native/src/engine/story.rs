@@ -7,7 +7,11 @@
 //! yield mount when they finish (pending mounts), `--controls`, `--actions` timelines, the
 //! RUR_ORDER sibling order replay and the scene diagnostics.
 
-use std::{path::PathBuf, rc::Rc, time::Instant};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+    time::Instant,
+};
 
 use mlua::prelude::*;
 use serde_json::{Map, Value as Json, json};
@@ -474,6 +478,10 @@ pub fn mount(
     let mount_story: LuaFunction = project.host.get("MountStory").map_err(lua_error)?;
     let require: LuaFunction = engine.prelude().exports.get("Require").map_err(lua_error)?;
     let module_value = instance_value(lua, engine, module).map_err(lua_error)?;
+    // A Flipbook story finds its storybook from these (story/host.luau FindStorybook)
+    story.state.set("Module", module_value.clone()).map_err(lua_error)?;
+    story.state.set("Require", require.clone()).map_err(lua_error)?;
+    story.state.set("FindStorybooks", storybook_finder(lua, engine, project).map_err(lua_error)?).map_err(lua_error)?;
     // A story module that yields while loading mounts when it finishes during the run, as UI Labs
     // mounts a story once require returns. Scheduler.BeginMount: math.random restarts from the run's
     // seed right before the mount (after the require: Studio keeps required modules loaded).
@@ -516,6 +524,48 @@ pub fn mount(
     }
     story.story_time = story_start.elapsed().as_secs_f64();
     Ok(story)
+}
+
+/// The storybook ModuleScripts (`*.storybook.luau` / `.lua`) among the files of the run's roots and mounted folders,
+/// listed when a Flipbook story asks (story/host.luau FindStorybook), by path; Wally's `_Index`, `node_modules` and
+/// dot folders are skipped. Reading the files finds them without loading any instance the project imports lazily.
+fn storybook_finder(lua: &Lua, engine: &Rc<Engine>, project: &Project) -> LuaResult<LuaFunction> {
+    let mut dirs: Vec<PathBuf> = project.sources.roots.clone();
+    dirs.extend(project.sources.mounts.iter().map(|(_, path)| path.clone()).filter(|path| path.is_dir()));
+    let e = engine.clone();
+    lua.create_function(move |lua, ()| {
+        let mut files = Vec::new();
+        for dir in &dirs {
+            find_storybooks(dir, 0, &mut files);
+        }
+        let mut modules = Vec::new();
+        for file in files {
+            if let Some(id) = project::find_module_by_path(&e, &file.to_string_lossy()) {
+                modules.push(instance_value(lua, &e, id)?);
+            }
+        }
+        lua.create_sequence_from(modules)
+    })
+}
+
+fn find_storybooks(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
+    if depth > 16 || out.len() >= 256 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
+            if !(name.starts_with('.') || name == "_Index" || name == "node_modules") {
+                find_storybooks(&entry.path(), depth + 1, out);
+            }
+        } else if name.ends_with(".storybook.luau") || name.ends_with(".storybook.lua") {
+            out.push(entry.path());
+        }
+    }
 }
 
 /// An input event handler (runtime/input Dispatch): the input port installs one; without it

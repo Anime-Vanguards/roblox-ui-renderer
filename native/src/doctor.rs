@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use serde_json::{Value, json};
 
 /// The checks, as `(name, value, problem)`: a problem says what is missing and how to get it
-fn checks() -> Vec<(&'static str, String, bool)> {
+pub(crate) fn checks() -> Vec<(&'static str, String, bool)> {
     let repo = crate::paths::default_repo();
     let build = if crate::paths::is_standalone() { "release build".to_owned() } else { format!("checkout build of {}", repo.display()) };
     let mut checks = vec![("rur", format!("{} ({build})", env!("CARGO_PKG_VERSION")), false)];

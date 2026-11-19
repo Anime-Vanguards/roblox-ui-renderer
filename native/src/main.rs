@@ -52,6 +52,8 @@ fn main() -> anyhow::Result<()> {
         Some("assets") => std::process::exit(rur_native::download::cli(&argv[2..])),
         // `rur-native doctor [--json]`: what this install uses and is missing, with how to fix it (doctor.rs)
         Some("doctor") => std::process::exit(rur_native::doctor::cli(&argv[2..])),
+        // `rur-native debug-report [<story>...]`: every story rendered on its own, written up to share (report.rs)
+        Some("debug-report") => std::process::exit(rur_native::report::cli(&argv[2..])),
         // `rur-native rojo-mounts <file.project.json>`: the mounts a Rojo project gives a run (rojo.rs)
         Some("rojo-mounts") => std::process::exit(rur_native::rojo::mounts_cli(&argv[2..])),
         // `rur-native sequence ...`: a story captured frame by frame (sequence.rs)

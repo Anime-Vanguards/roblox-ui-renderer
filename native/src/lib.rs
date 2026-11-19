@@ -14,6 +14,9 @@ pub mod catalog;
 pub mod download;
 #[cfg(feature = "desktop")]
 pub mod doctor;
+/// `rur-native debug-report`: a shareable report of the project's stories (report.rs)
+#[cfg(feature = "desktop")]
+pub mod report;
 pub mod engine;
 pub mod glyphs;
 #[cfg(feature = "desktop")]

@@ -204,7 +204,7 @@ function Host.MountStory(Story, Target, IsModule, State)
 		if typeof(Result) == "Instance" and Result.Parent == nil then
 			Result.Parent = Target
 		end
-	elseif type(Story) == "table" and Story.story then
+	elseif type(Story) == "table" and Story.story and not Host.NeedsRenderer(Story, State) then
 		local Vide = Story.vide
 		local Controls = ConvertControls(Story.controls, if Vide then Vide.source else function(Value)
 			return Value
@@ -226,8 +226,8 @@ function Host.MountStory(Story, Target, IsModule, State)
 				Result.Parent = Target
 			end
 		end
-	elseif type(Story) == "table" and Story.render then
-		Host.MountGeneric(Story, Target, State)
+	elseif type(Story) == "table" and (Story.render or Story.story ~= nil or type(Story.stories) == "table") then
+		if Story.render then Host.MountGeneric(Story, Target, State) else Host.MountRendered(Story, Target, State) end
 	elseif type(Story) == "function" then
 		Story(Target)
 	else
@@ -272,7 +272,7 @@ end
 
 -- A module / fixture returning a UI Labs story table mounts as a story (with --controls)
 function Host.IsStoryTable(Story)
-	return type(Story) == "table" and (type(Story.story) == "function" or type(Story.render) == "function")
+	return type(Story) == "table" and (Story.story ~= nil or type(Story.render) == "function" or type(Story.stories) == "table")
 end
 
 -- The arguments after Target of a function(Target, Controls) module: --controls as nested tables
@@ -472,6 +472,287 @@ function Host.SetControl(Controls, Specs, Path, Value, Strict)
 		return
 	end
 	SetSourceControl(Controls, Specs, Path, Value, Strict)
+end
+
+
+-- Flipbook stories and storybooks (github.com/flipbook-labs/flipbook 2.x, which loads them through Storyteller 1.12:
+-- github.com/flipbook-labs/storyteller, src/loadStoryModule.luau, src/createRendererForStory.luau, src/renderers/*,
+-- src/render.luau). A story table whose `story` needs a renderer is mounted here: it names `packages` (or the legacy
+-- `react` / `reactRoblox` / `roact` / `fusion` keys, as UI Labs React stories do), or its storybook does, or `story` is
+-- an element or an Instance. The storybook is the `*.storybook` ModuleScript whose `storyRoots` hold the story.
+
+Host.Rendered = setmetatable({}, { __mode = "k" })
+
+-- migrateLegacyPackages: the story's (or storybook's) legacy library keys as packages
+local function LegacyPackages(Table)
+	if type(Table) ~= "table" then
+		return nil
+	end
+	if type(Table.packages) == "table" then
+		return Table.packages
+	end
+	local Packages = {}
+	local React = Table.react
+	-- (Roblox-internal: `roact` holding React itself)
+	if Table.roact and Table.reactRoblox and type(Table.roact) == "table" and (Table.roact.Ref == "ref" or rawget(Table.roact, "useState")) then
+		React = Table.roact
+	elseif Table.roact then
+		Packages.Roact = Table.roact
+	end
+	Packages.React = React
+	Packages.ReactRoblox = Table.reactRoblox
+	Packages.Fusion = Table.fusion
+	return if next(Packages) then Packages else nil
+end
+
+local function IsReactElement(Value)
+	return type(Value) == "table" and Value["$$typeof"] ~= nil and Value.props ~= nil and Value.type ~= nil
+end
+
+local function IsRoactElement(Value)
+	return type(Value) == "table" and Value.component ~= nil and Value.props ~= nil
+end
+
+-- The storybook that holds a story module: the first `*.storybook` module whose storyRoots (or Roblox's `storyRoot`)
+-- hold it, as Storyteller ties stories to storybooks. State.FindStorybooks (engine/story.rs) lists the storybook
+-- ModuleScripts from the files of the run's roots and mounts, so finding them loads nothing else.
+function Host.FindStorybook(State)
+	local Module, Require = State and State.Module, State and State.Require
+	if typeof(Module) ~= "Instance" or type(Require) ~= "function" or type(State.FindStorybooks) ~= "function" then
+		return nil
+	end
+	for _, Candidate in State.FindStorybooks() do
+		local Loaded, Storybook = pcall(Require, Candidate)
+		if not Loaded then
+			warn(`storybook {Candidate:GetFullName()} failed to load: {Storybook}`)
+		elseif type(Storybook) == "table" then
+			local Roots = Storybook.storyRoots or (Storybook.storyRoot and { Storybook.storyRoot }) or {}
+			for _, Root in Roots do
+				if typeof(Root) == "Instance" and Root:IsAncestorOf(Module) then
+					return Storybook
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Whether a story table mounts here (MountRendered) rather than as a UI Labs story
+function Host.NeedsRenderer(Story, State)
+	if type(Story) ~= "table" then
+		return false
+	end
+	if Story.vide ~= nil and type(Story.story) == "function" then
+		return false
+	end
+	if type(Story.story) ~= "function" or LegacyPackages(Story) ~= nil then
+		return true
+	end
+	local Storybook = Host.FindStorybook(State)
+	if State then
+		State.Storybook = Storybook
+	end
+	return LegacyPackages(Storybook) ~= nil
+end
+
+-- A Flipbook controls schema as UI Labs controls, which the rest of the host reads: typed controls
+-- (`{ type = "Select", items, default }`...: Storyteller src/controls/ControlTypes.luau) become UI Labs `Control`
+-- entries; raw values and `{ value, ... }` lists are the same in both
+function Host.FlipbookControls(Controls)
+	if type(Controls) ~= "table" then
+		return Controls
+	end
+	local Result = {}
+	for Key, Control in Controls do
+		if type(Control) == "table" and type(Control.type) == "string" and Control.EntryType == nil then
+			local Kind = Control.type
+			local Entry = { EntryType = "Control", Type = Kind, ControlValue = Control.default }
+			if Kind == "Select" or Kind == "Radio" then
+				Entry.Type = "Choose"
+				Entry.List = Control.items
+			elseif Kind == "Number" or Kind == "Slider" then
+				local Range = Control.range
+				Entry.Min = if typeof(Range) == "NumberRange" then Range.Min else nil
+				Entry.Max = if typeof(Range) == "NumberRange" then Range.Max else nil
+				Entry.Step = Control.step
+				if Entry.ControlValue == nil then
+					Entry.ControlValue = Entry.Min or 0
+				end
+			elseif Entry.ControlValue == nil then
+				Entry.ControlValue = if Kind == "Boolean" then false
+					elseif Kind == "String" then ""
+					elseif Kind == "MultiSelect" or Kind == "Check" then {}
+					else nil
+			end
+			Result[Key] = Entry
+		else
+			Result[Key] = Control
+		end
+	end
+	return Result
+end
+
+-- v1.12's `stories` group: its first entry (in key order for a dictionary), with the group's packages, controls and
+-- props as fallbacks
+local function FirstOfGroup(Story)
+	if type(Story.stories) ~= "table" or Story.story ~= nil then
+		return Story
+	end
+	local Keys = {}
+	for Key in Story.stories do
+		table.insert(Keys, Key)
+	end
+	table.sort(Keys, function(A, B)
+		if type(A) == "number" and type(B) == "number" then
+			return A < B
+		end
+		return string.lower(tostring(A)) < string.lower(tostring(B))
+	end)
+	local Entry = Story.stories[Keys[1]]
+	local Chosen = if type(Entry) == "table" and Entry.story ~= nil then table.clone(Entry) else { story = Entry }
+	for _, Key in { "packages", "controls", "props", "summary", "react", "reactRoblox", "roact", "fusion" } do
+		if Chosen[Key] == nil then
+			Chosen[Key] = Story[Key]
+		end
+	end
+	return Chosen
+end
+
+-- Mounts a story that needs a renderer (Storyteller createRendererForStory: Roact, else React + ReactRoblox, else
+-- Fusion, else Vide, else the story itself) and keeps how to render it again with new controls in Host.Rendered
+function Host.MountRendered(Story, Target, State)
+	Story = FirstOfGroup(Story)
+	local Storybook = State and (State.Storybook or (LegacyPackages(Story) == nil and Host.FindStorybook(State)))
+	local Packages = LegacyPackages(Story) or LegacyPackages(Storybook) or {}
+	local Definition = if Storybook and type(Storybook.mapDefinition) == "function" then Storybook.mapDefinition(Story) else Story
+	local Specs = Host.FlipbookControls(Story.controls)
+	local Controls = ConvertControls(Specs, function(Value)
+		return Value
+	end)
+	if State and State.Controls ~= nil then
+		ApplyControls(Controls, Specs, State.Controls)
+	end
+	if State then
+		State.StoryControls, State.StoryControlSpecs = Controls, Specs
+	end
+	-- render.luau's props: Flipbook's own (theme, locale), the story's props, then container, story and controls
+	-- (and `target`, as UI Labs names the container)
+	local function Props(Values)
+		local Props = { theme = "Dark", locale = "en-us" }
+		for Key, Value in if type(Definition.props) == "table" then Definition.props else {} do
+			Props[Key] = Value
+		end
+		Props.container, Props.target, Props.story, Props.controls = Target, Target, Story, Values
+		return Props
+	end
+	local Component = Definition.story
+	if Storybook and type(Storybook.mapStory) == "function" then
+		Component = Storybook.mapStory(Definition.story)
+	end
+	local Update
+	if Packages.Roact then
+		local Roact = Packages.Roact
+		local function Element(Values)
+			if IsRoactElement(Component) then
+				return Component
+			end
+			return Roact.createElement(Component, Props(Values))
+		end
+		local Tree = Roact.mount(Element(Controls), Target, "RoactRenderer")
+		Update = function(Values)
+			Tree = Roact.update(Tree, Element(Values))
+		end
+	elseif Packages.React and Packages.ReactRoblox then
+		local React, ReactRoblox = Packages.React, Packages.ReactRoblox
+		local function Element(Values)
+			if IsReactElement(Component) then
+				return Component
+			end
+			return React.createElement(Component, Props(Values))
+		end
+		local Root = ReactRoblox.createRoot(Target)
+		Root:render(Element(Controls))
+		Update = function(Values)
+			Root:render(Element(Values))
+		end
+	elseif Packages.Fusion or Packages.Vide then
+		-- Each control a Fusion Value (0.3: of a scope of its own) or a Vide source, set in place on a change
+		local Fusion, Vide = Packages.Fusion, Packages.Vide
+		local Scope = Fusion and type(Fusion.scoped) == "function" and Fusion.scoped(Fusion)
+		local Sources = {}
+		for Key, Value in Controls do
+			Sources[Key] = if Vide then Vide.source(Value) elseif Scope then Scope:Value(Value) else Fusion.Value(Value)
+		end
+		local function Mount()
+			local Handle = if typeof(Component) == "Instance" then Component else Component(Props(Sources))
+			if typeof(Handle) == "Instance" and Handle.Parent == nil then
+				Handle.Parent = Target
+			end
+			return Handle
+		end
+		if Vide then
+			Vide.mount(Mount, Target)
+		else
+			Mount()
+		end
+		Update = function(Values)
+			for Key, Value in Values do
+				local Source = Sources[Key]
+				if Vide and Source then
+					Source(Value)
+				elseif Source then
+					Source:set(Value)
+				end
+			end
+		end
+	else
+		-- The Manual renderer: an Instance as it is, else story(container, props) when it takes two arguments, else
+		-- story(props); a returned Instance without a parent goes into the container. A change mounts it again.
+		local Cleanup
+		local function Mount(Values)
+			local Result = Component
+			if type(Component) == "function" then
+				local Arity = debug.info(Component, "a")
+				Result = if Arity >= 2 then Component(Target, Props(Values)) else Component(Props(Values))
+			end
+			if typeof(Result) == "Instance" and Result.Parent == nil then
+				Result.Parent = Target
+			end
+			Cleanup = if type(Result) == "function" then Result else nil
+		end
+		Mount(Controls)
+		Update = function(Values)
+			if Cleanup then
+				Cleanup()
+			end
+			Target:ClearAllChildren()
+			Mount(Values)
+		end
+	end
+	Host.Rendered[Controls] = { Update = Update, Specs = Specs }
+end
+
+-- A session's control change of a rendered story: the value set in its controls table, then the story rendered with
+-- them (React and Roact render again, Fusion and Vide set the one value, a Manual story mounts again)
+local SetOtherControl = Host.SetControl
+function Host.SetControl(Controls, Specs, Path, Value, Strict)
+	local Rendered = Host.Rendered[Controls]
+	if not Rendered then
+		SetOtherControl(Controls, Specs, Path, Value, Strict)
+		return
+	end
+	Path = Path or {}
+	local Name = Path[#Path]
+	local Parent = if #Path > 1 then (FindControl(Controls, Specs, { table.unpack(Path, 1, #Path - 1) })) else Controls
+	local _, ControlSpec = FindControl(Controls, Specs, Path)
+	if Name == nil or type(Parent) ~= "table" or (ControlSpec == nil and Parent[Name] == nil) then
+		if Strict then
+			error(`no control at {table.concat(Path, ".")}`, 0)
+		end
+		return
+	end
+	Parent[Name] = ControlValue(ControlSpec, Value)
+	Rendered.Update(Controls)
 end
 
 return Host
