@@ -36,6 +36,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch, 2026-10-16
         with:
           toolchain: "1.90.0"
+      # The runner image brings its own stable Rust, which this build never uses. rust-cache keys its
+      # cache by every installed toolchain, so each image with a newer stable found no cache and
+      # compiled everything (2026-11-19: 1.99.1 to 1.100.0, 17.8 instead of 5.5 minutes). Removing
+      # the others leaves the pinned one in the key.
+      - name: Remove the runner image's other Rust toolchains
+        shell: bash
+        run: |
+          set -euo pipefail
+          for toolchain in $(rustup toolchain list --quiet | cut -d' ' -f1); do
+            case "$toolchain" in
+              1.90.0-*) ;;
+              *) rustup toolchain uninstall "$toolchain" ;;
+            esac
+          done
+          rustup toolchain list
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: native
