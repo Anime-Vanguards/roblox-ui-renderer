@@ -157,7 +157,8 @@ jobs:
   # of running one after the other:
   #   dist   the binary that ships, marked as a release build. It is packaged and uploaded as the zip.
   #   tests  the unmarked build the installed tests compare it with, and the test program itself,
-  #          both with the same dist profile as the shipped binary.
+  #          both with the release profile: without the dist profile's thin LTO they compile in
+  #          about half the time, and the tests check what the binaries do, not their code.
   # windows-validation then runs the installed tests on a fresh runner. Linux and macOS keep one
   # build job each: a second macOS job would only add another wait for a scarce macOS runner.
   windows-build:
@@ -217,8 +218,8 @@ jobs:
           # The anchor lets the save step use exactly these paths
           path: &windows-cache-paths |
             ~/.cargo/git
-            native/target/dist
-            native/target/x86_64-pc-windows-msvc/dist
+            native/target/${{ matrix.profile == 'dist' && 'dist' || 'release' }}
+            native/target/x86_64-pc-windows-msvc/${{ matrix.profile == 'dist' && 'dist' || 'release' }}
       - name: Download and verify FreeType
         run: node tools/native-app/build.mjs --prepare
       - name: Build this profile
@@ -238,9 +239,9 @@ jobs:
             # Builds the unmarked rur-native the comparison tests start as the checkout binary, and
             # the standalone test program, without running anything. Cargo writes the absolute path
             # of that rur-native into the test program, so the program has to be run from where it
-            # was built (see windows-validation). The dist profile, as the shipped binary: a clean
-            # build of it is also faster here than one of the release profile, which is incremental.
-            cargo test --profile dist --locked --test standalone --target "$RELEASE_TARGET" --no-run
+            # was built (see windows-validation). The release profile: the comparison is about what
+            # the binaries do, and without thin LTO rur-native compiles in about half the time.
+            cargo test --release --locked --test standalone --target "$RELEASE_TARGET" --no-run
           fi
       # The parser inventory (path_contract) is an ordinary test, which the --ignored run in
       # windows-validation does not include. It runs here, with the cargo command Linux and macOS
@@ -256,7 +257,7 @@ jobs:
           set -euo pipefail
           # Nothing here may mark the comparison binary
           unset RUR_RELEASE_BUILD
-          cargo test --profile dist --locked --test standalone --target "$RELEASE_TARGET" path_contract::
+          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" path_contract::
       # The test program is named standalone-<hash>.exe and the hash is not known here, so the
       # pattern must match exactly one file. The program has the path of this checkout compiled
       # in (CARGO_MANIFEST_DIR), so record that path for windows-validation to compare.
@@ -265,15 +266,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TEST_BINARIES=(native/target/x86_64-pc-windows-msvc/dist/deps/standalone-*.exe)
+          TEST_BINARIES=(native/target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe)
           [ "${#TEST_BINARIES[@]}" = 1 ]
           [ -f "${TEST_BINARIES[0]}" ]
           node -e "require('node:fs').writeFileSync(
-            'native/target/x86_64-pc-windows-msvc/dist/workspace.txt',
+            'native/target/x86_64-pc-windows-msvc/release/workspace.txt',
             require('node:fs').realpathSync('.')
           )"
       # The validation runner needs only these three files from this job: the unmarked comparison
-      # binary, the test program and the recorded path. They are stored relative to the dist
+      # binary, the test program and the recorded path. They are stored relative to the release
       # folder and the validation job downloads them back into the same folder, so each lands at
       # the path Cargo compiled into the test program. deps/ stays in the pattern for that reason.
       # It keeps the default retention, so re-running only the failed jobs of a run days later still
@@ -284,9 +285,9 @@ jobs:
         with:
           name: windows-validation-binaries
           path: |
-            native/target/x86_64-pc-windows-msvc/dist/rur-native.exe
-            native/target/x86_64-pc-windows-msvc/dist/deps/standalone-*.exe
-            native/target/x86_64-pc-windows-msvc/dist/workspace.txt
+            native/target/x86_64-pc-windows-msvc/release/rur-native.exe
+            native/target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe
+            native/target/x86_64-pc-windows-msvc/release/workspace.txt
           if-no-files-found: error
       - name: Generate licenses and package
         if: matrix.profile == 'dist'
@@ -318,7 +319,9 @@ jobs:
       - name: Leave rur-native's own files out of the build cache
         if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success' }}
         shell: bash
-        run: node tools/release/build-cache.mjs --prune native/target/dist "native/target/$RELEASE_TARGET/dist" --names rur-native,standalone
+        env:
+          PROFILE_DIR: ${{ matrix.profile == 'dist' && 'dist' || 'release' }}
+        run: node tools/release/build-cache.mjs --prune "native/target/$PROFILE_DIR" "native/target/$RELEASE_TARGET/$PROFILE_DIR" --names rur-native,standalone
       - name: Store the compiled dependencies for later runs on main
         if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -352,7 +355,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-validation-binaries
-          path: native/target/x86_64-pc-windows-msvc/dist
+          path: native/target/x86_64-pc-windows-msvc/release
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-windows-x86_64
@@ -375,12 +378,12 @@ jobs:
           node -e "
             const fs = require('node:fs');
             require('node:assert/strict').equal(
-              fs.readFileSync('target/x86_64-pc-windows-msvc/dist/workspace.txt', 'utf8'),
+              fs.readFileSync('target/x86_64-pc-windows-msvc/release/workspace.txt', 'utf8'),
               fs.realpathSync('..')
             )
           "
           # Exactly one test program must have arrived; a missing or doubled one fails the job
-          TEST_BINARIES=(target/x86_64-pc-windows-msvc/dist/deps/standalone-*.exe)
+          TEST_BINARIES=(target/x86_64-pc-windows-msvc/release/deps/standalone-*.exe)
           [ "${#TEST_BINARIES[@]}" = 1 ]
           [ -f "${TEST_BINARIES[0]}" ]
           # --ignored runs only the ignored tests, which are the installed_* ones: the tests the
@@ -431,8 +434,8 @@ jobs:
         with:
           toolchain: "1.90.0"
       # The build cache, as in windows-build: one per platform, holding the dependencies of both
-      # builds below (the marked binary, then the unmarked one with the test program), which share
-      # the dist profile
+      # builds below, the marked binary (dist profile), then the unmarked one with the test program
+      # (release profile)
       # The runner image, which the cache key names: the C and C++ objects in a cache (the engine's
       # Luau VM, mimalloc, zstd) were compiled by its compilers, and the build links them with its C
       # runtime. A cache from another image is never restored, so a build mixes no two toolchains.
@@ -453,6 +456,8 @@ jobs:
             ~/.cargo/git
             native/target/dist
             native/target/${{ matrix.target }}/dist
+            native/target/release
+            native/target/${{ matrix.target }}/release
       # Build tools only; none of these packages ship in the zip. mesa-vulkan-drivers is the software
       # Vulkan the installed release tests need to draw a PNG, because the runner has no GPU.
       # Installed before the build, which looks for some of them. A mirror that does not answer is
@@ -506,15 +511,15 @@ jobs:
           set -euo pipefail
           # The project comparison tests also run a checkout binary, which cargo builds for the tests.
           # It has to be unmarked: if it were marked, both binaries would be standalone and the
-          # comparison would prove nothing. It is built with the dist profile too, so of the whole
-          # build only rur-native itself compiles again (the mark is read at compile time).
+          # comparison would prove nothing. It is built with the release profile, as on Windows,
+          # from the dependencies the build cache keeps for that profile.
           unset RUR_RELEASE_BUILD
           # The parser inventory is an ordinary test, which the --ignored run below does not
           # include. Run it here so that a new path option, positional input or request field fails
           # the release build until the path check covers it.
-          cargo test --profile dist --locked --test standalone --target "$RELEASE_TARGET" path_contract::
+          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" path_contract::
           # --ignored runs only the ignored tests, which are the installed_* ones
-          cargo test --profile dist --locked --test standalone --target "$RELEASE_TARGET" -- --ignored
+          cargo test --release --locked --test standalone --target "$RELEASE_TARGET" -- --ignored
       - name: Upload the zip
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -525,7 +530,7 @@ jobs:
       # passed and the key was not stored
       - name: Leave rur-native's own files out of the build cache
         if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success' }}
-        run: node tools/release/build-cache.mjs --prune native/target/dist "native/target/$RELEASE_TARGET/dist" --names rur-native,standalone
+        run: node tools/release/build-cache.mjs --prune native/target/dist "native/target/$RELEASE_TARGET/dist" native/target/release "native/target/$RELEASE_TARGET/release" --names rur-native,standalone
       - name: Store the compiled dependencies for later runs on main
         if: ${{ !cancelled() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true' && steps.build.outcome == 'success' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

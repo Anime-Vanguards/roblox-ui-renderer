@@ -69,7 +69,8 @@ reader.
 
 Each build of a run on main (a dry run, a manual run or the nightly build) starts from the dependencies
 an earlier run on main compiled for the same build: GitHub's Actions cache, one entry per Windows build
-(`dist`, `tests`) and one each for Linux and macOS. rur-native itself is compiled from its source in
+(`dist`, `tests`) and one each for Linux and macOS, which holds both the dist and the release
+profile's. rur-native itself is compiled from its source in
 every run, so a cache holds only the dependencies, and `build-cache.mjs --prune` leaves rur-native's
 crate, binaries and test program out before one is stored.
 
@@ -236,13 +237,14 @@ inventory explicitly (`path_contract::`) before the installed tests.
 
 ### Where the workflow runs them
 
-The Linux and macOS `build` jobs run the inventory and the installed tests before packaging, against
-the marked `dist` binary they just built.
+The Linux and macOS `build` jobs package the marked `dist` binary they just built, then build the
+unmarked comparison binary and the test program with the release profile and run the inventory and the
+installed tests against the binary in the zip.
 
 On Windows the two builds run on separate runners, so the installed tests run in a third job.
 `windows-build` is a matrix of the two profiles. The `dist` job builds the marked binary and
-packages it. The `release` job builds the unmarked comparison binary and the test program
-(`standalone-*.exe`), runs the inventory with the cargo command the other platforms use, and
+packages it. The `tests` job builds the unmarked comparison binary and the test program
+(`standalone-*.exe`) with the release profile, runs the inventory with the cargo command the other platforms use, and
 uploads those two files with a record of its workspace path.
 
 `windows-validation` then starts on a fresh runner. It checks out the same commit, downloads the
