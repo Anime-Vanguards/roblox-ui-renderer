@@ -109,6 +109,16 @@ Renders every story in the project in isolated `rur-native render` child process
 - `--summarize`: regenerate `summary.md` and totals from `report.json` without rendering.
 - **Forwarded render flags:** `--viewport` (default `1200x900`), `--time` (`1`), `--scale` (`1.5`), `--mode`, `--player`, `--background`, `--project`, `--roots`, `--place-id`, `--rotation-clipping`, `--device`, `--topbar-inset`, `--rojo`, `--rojo-at`, `--git-ref`, `--plugin`, `--mount`, `--offline`, `--no-png`.
 
+**Exit codes:** `rur sweep` and `rur-native sweep` exit with the same code, which agrees with the report. A story is clean when it rendered with status `ok`, no script errors and no render errors (`clean` in each record of `report.json`; the totals count them).
+
+| Code | Meaning |
+|---|---|
+| `0` | Every story is clean (also when no story matched). |
+| `1` | At least one story is not clean: the totals' `clean` is below their `stories`. The headline is printed on stdout and `report.json`, `summary.md` and each story's output are written, as for a clean sweep. Also used when the sweep could not run (for example, no report for `--summarize`); then stdout is empty and the reason is on stderr. |
+| `64` | Bad option: nothing was run or written. |
+
+A caller should read the headline or `report.json` whenever stdout has one: exit `1` with a headline is a sweep with failing stories, not a crash. `--failed` and `--summarize` exit by the merged or rebuilt totals.
+
 ## Recording 3D scenes (`rur record`)
 
 `rur record` runs a Luau harness in play mode using the emulator's 3D recorder (`ree record`; see [ree's CLI docs](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md)) with `rur`'s project setup, producing `scene.rbxm`, `playback.json`, `events.json`, `camera.json`, and `summary.json` ready for [roblox-object-renderer](https://github.com/Anime-Vanguards/roblox-object-renderer).

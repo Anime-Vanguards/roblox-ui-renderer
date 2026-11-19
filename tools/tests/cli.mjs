@@ -172,17 +172,40 @@ return function(Target) local Label = Instance.new("TextLabel"); Label.Name = "T
 		assert.equal(JSON.parse(packages.stdout).before.status, "ok");
 
 		// `rur sweep` (rur-native sweep): the stories beside the Rojo project, each in a process of its own, reported (the
-		// filter leaves out the copy --git-ref extracted into the state dir, which is in the project's folder here)
-		const swept = cli("sweep", "--rojo", path.join(dir, "plugin.project.json"), "--filter", path.join(dir, "stories", "App.story"), "--no-png", "--offline", "--jobs", "2", "--out", path.join(dir, "out/sweep"));
+		// filter leaves out the copy --git-ref extracted into the state dir, which is in the project's folder here); every
+		// story is clean, so it exits 0
+		const swept =cli("sweep", "--rojo", path.join(dir, "plugin.project.json"), "--filter", path.join(dir, "stories", "App.story"), "--no-png", "--offline", "--jobs", "2", "--out", path.join(dir, "out/sweep"));
 		assert.equal(swept.status, 0, swept.stderr);
 		assert.equal(JSON.parse(swept.stdout).stories, 1);
 		const report = JSON.parse(fs.readFileSync(path.join(dir, "out/sweep/report.json"), "utf8"));
 		assert.deepEqual([report.records.length, report.records[0].status, report.records[0].clean], [1, "ok", true]);
 		assert.ok(report.records[0].story.endsWith("stories/App.story.luau") && fs.existsSync(path.join(dir, "out/sweep", report.records[0].out, "summary.json")));
 		assert.match(fs.readFileSync(path.join(dir, "out/sweep/summary.md"), "utf8"), /^# Story sweep\n/);
+
+		// A story that fails makes the sweep exit 1, with the headline on stdout and report.json, summary.md and every
+		// story's output written as for a clean sweep: the exit code agrees with the report's clean count, and `rur sweep`
+		// hands on rur-native's code
+		write("stories/Broken.story.luau", `return function(Target)
+	local Label = Instance.new("TextLabel")
+	Label.Name = "Partial"
+	Label.Parent = Target
+	error("broken on purpose")
+end
+`);
+		const unclean = cli("sweep", "--rojo", path.join(dir, "plugin.project.json"), "--filter", `${path.join(dir, "stories", "App.story")}|${path.join(dir, "stories", "Broken.story")}`,
+			"--no-png", "--offline", "--jobs", "2", "--out", path.join(dir, "out/sweep-unclean"));
+		assert.equal(unclean.status, 1, unclean.stderr);
+		const headline = JSON.parse(unclean.stdout);
+		assert.deepEqual([headline.stories, headline.clean], [2, 1], unclean.stdout);
+		const uncleanReport = JSON.parse(fs.readFileSync(path.join(dir, "out/sweep-unclean/report.json"), "utf8"));
+		assert.deepEqual([uncleanReport.totals.stories, uncleanReport.totals.clean], [2, 1]);
+		assert.deepEqual(uncleanReport.records.map(record => [path.basename(record.story), record.clean]), [["App.story.luau", true], ["Broken.story.luau", false]]);
+		assert.match(uncleanReport.records[1].failure || uncleanReport.records[1].errors.join("\n"), /broken on purpose/, JSON.stringify(uncleanReport.records[1]));
+		assert.ok(uncleanReport.records.every(record => fs.existsSync(path.join(dir, "out/sweep-unclean", record.out, "summary.json"))));
+		assert.match(fs.readFileSync(path.join(dir, "out/sweep-unclean/summary.md"), "utf8"), /^# Story sweep\n/);
 	}
 	fs.rmSync(dir, { recursive: true, force: true });
-	console.log("CLI project options: PASS (rojo, native rojo parity, outside stories, fixture controls, @physical, --json, --git-ref, diff, sweep, --plugin, tree ancestry)");
+	console.log("CLI project options: PASS (rojo, native rojo parity, outside stories, fixture controls, @physical, --json, --git-ref, diff, sweep and its exit code, --plugin, tree ancestry)");
 }
 
 // Render diagnostics (cli/diagnostics.mjs): AutomaticSize-culled rows, wrapped lines a short box drops,

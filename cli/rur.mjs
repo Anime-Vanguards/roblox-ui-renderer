@@ -9,7 +9,8 @@
 //                                                       exact moments: frames/, trace.json, video.mp4, video-quarter.mp4
 //   rur stories [--filter a|b] [--place <name>|all]     list storybook stories in the project
 //   rur sweep [--filter a|b] [--jobs N] [--timeout s] [--no-png] [--out out/sweep]
-//                                                       render every story (every place), report failures
+//                                                       render every story (every place), report failures;
+//                                                       exits 1 when a story is not clean (docs/render.md)
 //             [--failed]  re-run the non-clean stories of the last report, [--limit N], [--retries 1],
 //             [--summarize]  rebuild report totals + summary.md without rendering (rur-native sweep)
 //   rur compare --story <file> [--studio <name>]       render in Studio + offline, diff layout & pixels

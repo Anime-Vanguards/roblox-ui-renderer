@@ -12,6 +12,10 @@
 //! stories the last report has as not clean and merges them into it, `--limit N` runs the first N, `--summarize`
 //! rebuilds the totals and summary.md from report.json without rendering.
 //!
+//! The exit code follows the report: 0 when every story is clean, 1 when one is not (the totals' `clean` is below
+//! their `stories`), with the headline printed and every file written as for a clean sweep. 1 with nothing on stdout
+//! is a sweep that could not run (the reason is on stderr), 64 a bad option.
+//!
 //! The render options passed to every story: `--viewport` (1200x900), `--time` (1), `--scale` (1.5), `--mode`,
 //! `--player`, `--background`, `--project`, `--roots`, `--place-id`, `--rotation-clipping`, `--device`,
 //! `--topbar-inset`, `--rojo`, `--rojo-at`, `--git-ref`, `--plugin`, `--mount`, `--offline`.
@@ -941,8 +945,16 @@ pub fn sweep(context: &Context, args: &Args) -> Result<Json, Failure> {
     Ok(report)
 }
 
-/// `rur-native sweep ...`: the sweep, then the totals' headline as JSON on stdout; returns the exit code (64 for a bad
-/// option, 1 when it could not run)
+/// The exit code of a sweep that ran: 1 when a story is not clean (the totals' `clean` count, which is the report's, is
+/// below their `stories`), so a CI job or an agent that checks the code first sees the failure; 0 when every story is
+/// clean
+pub fn exit_code(totals: &Json) -> i32 {
+    let count = |key: &str| totals.get(key).as_f64().unwrap_or(0.0);
+    if count("clean") < count("stories") { 1 } else { 0 }
+}
+
+/// `rur-native sweep ...`: the sweep, then the totals' headline as JSON on stdout; returns the exit code (0 when every
+/// story is clean, 1 when one is not or the sweep could not run, 64 for a bad option)
 pub fn cli(argv: &[String]) -> i32 {
     let run = || -> Result<Json, Failure> {
         let (context, args) = Context::new(argv)?;
@@ -965,7 +977,7 @@ pub fn cli(argv: &[String]) -> i32 {
     match run() {
         Ok(headline) => {
             println!("{}", headline.stringify(2));
-            0
+            exit_code(&headline)
         }
         Err(failure) => {
             eprintln!("rur sweep: {}", failure.message());
@@ -1060,5 +1072,31 @@ mod tests {
         assert_eq!(totals.get("warnings").stringify(0), r#"[{"message":"careful N","stories":4}]"#);
         assert_eq!(totals.get("seconds").stringify(0), r#"{"total":10,"median":3,"p90":4,"max":4}"#);
         assert_eq!(totals.get("clean").as_f64(), Some(1.0));
+        // One clean story of four: the sweep exits 1
+        assert_eq!(exit_code(&totals), 1);
+    }
+
+    /// A sweep exits 1 when its totals count a story that is not clean, whatever made it so (a script error in a story
+    /// that rendered ok, an error status, a crash), and 0 when every story is clean or there were none
+    #[test]
+    fn a_sweep_exits_1_unless_every_story_is_clean() {
+        let record = |status: &str, script_errors: f64| {
+            Json::object()
+                .with("story", "a")
+                .with("place", "lobby")
+                .with("status", status)
+                .with("clean", status == "ok" && script_errors == 0.0)
+                .with("scriptErrors", script_errors)
+                .with("seconds", 1.0)
+        };
+        let exit = |mut records: Vec<Json>| exit_code(&aggregate(&mut records, &HashMap::new()));
+        assert_eq!(exit(vec![record("ok", 0.0), record("ok", 0.0)]), 0);
+        assert_eq!(exit(Vec::new()), 0);
+        assert_eq!(exit(vec![record("ok", 0.0), record("ok", 2.0)]), 1);
+        assert_eq!(exit(vec![record("ok", 0.0), record("error", 0.0)]), 1);
+        assert_eq!(exit(vec![record("crash", 0.0)]), 1);
+        // The headline cli() prints carries the totals' counts, so its code is the same
+        assert_eq!(exit_code(&Json::object().with("stories", 2.0).with("clean", 1.0)), 1);
+        assert_eq!(exit_code(&Json::object().with("stories", 2.0).with("clean", 2.0)), 0);
     }
 }

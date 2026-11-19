@@ -215,7 +215,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/sweep.rs",
         "pub fn cli(",
-        0xfd621ed3e7d4395d,
+        0xa1d1f2513b8d0d56,
     ),
     (
         Crate::Native,
