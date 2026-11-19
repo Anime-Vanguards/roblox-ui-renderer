@@ -11,7 +11,8 @@
 //
 // `--mount Service/Name=<dir|file>` (repeatable, `;`-separated too) adds explicit mounts.
 // native/src/rojo.rs is the same in Rust (`rur-native render --rojo`, and `rur-native rojo-mounts <file>`, which
-// tools/tests/cli.mjs compares with rojoMounts); change both together.
+// tools/tests/cli.mjs compares with rojoMounts); its reader is the engine's (roblox_engine_emulator::rojo, which
+// `ree run --rojo` uses too), so a rule changes here and in the engine together.
 
 import fs from "node:fs";
 import path from "node:path";

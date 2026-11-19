@@ -902,6 +902,7 @@ fn loopback_server(args: &Args, prepared: &Prepared, spec: &story::ProjectSpec) 
         snapshot_dir: spec.snapshot_dir.clone(),
         mounts: spec.mounts.clone(),
         model_assets: spec.model_assets.clone(),
+        ..Default::default()
     };
     super::loopback::start_server(&super::new_engine, &prepared.options, &core, &|_| {}).map(Some)
 }

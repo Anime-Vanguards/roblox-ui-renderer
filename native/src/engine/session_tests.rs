@@ -853,7 +853,7 @@ fn flipbook_elements_fusion_manual_and_hoarcekat_stories_mount() {
 }
 
 /// Members a game script can't call raise Roblox's own error, which Roblox's packages catch (Foundation's resolution
-/// scale, SafeFlags), where the emulator's stub returned nil
+/// scale, SafeFlags): the emulator raises it, as rur's own list of them did before
 #[test]
 fn members_a_game_script_cannot_call_raise_robloxs_error() {
     let (lua, engine) = start();

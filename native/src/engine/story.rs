@@ -94,6 +94,7 @@ pub fn mount_project(lua: &Lua, engine: &Rc<Engine>, spec: &ProjectSpec, started
         snapshot_dir: spec.snapshot_dir.clone(),
         mounts: spec.mounts.clone(),
         model_assets: spec.model_assets.clone(),
+        ..Default::default()
     };
     let mounting = mount::begin_project(lua, engine, &core, started)?;
 
