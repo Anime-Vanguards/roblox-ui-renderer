@@ -58,6 +58,12 @@ fn main() -> anyhow::Result<()> {
         Some("rojo-mounts") => std::process::exit(rur_native::rojo::mounts_cli(&argv[2..])),
         // `rur-native sequence ...`: a story captured frame by frame (sequence.rs)
         Some("sequence") => std::process::exit(rur_native::story_render::sequence_cli(&argv[2..])),
+        // `rur-native sweep ...` / `diff ...`: every story rendered and reported on (sweep.rs), a source rendered at a git
+        // ref and in the working tree and compared (diff.rs); `rur sweep` and `rur diff` forward to them
+        Some("sweep") => std::process::exit(rur_native::sweep::cli(&argv[2..])),
+        Some("diff") => std::process::exit(rur_native::diff::cli(&argv[2..])),
+        // `rur-native git-ref ...`: a run's sources extracted at a git ref, for `rur render --git-ref` (gitref.rs)
+        Some("git-ref") => std::process::exit(rur_native::gitref::cli(&argv[2..])),
         // `rur-native serve ...`: the render service cli/client.mjs starts (serve.rs)
         Some("serve") => std::process::exit(rur_native::serve::cli(&argv[2..])),
         // `rur-native record ...`: a harness run recorded as a 3D scene and a playback: the emulator's

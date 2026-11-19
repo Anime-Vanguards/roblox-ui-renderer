@@ -24,8 +24,10 @@ current directory. The desktop Open field resolves relative paths in the selecte
 `--project <file.project.json>`, or a project file in the project folder or above the story when no project option
 is given: its `default.project.json`, else its only `*.project.json` ([projects](projects.md#rojo-projects-and-explicit-mounts)).
 
-The native `engine`, `render`, `sequence`, `serve`, `record` and `profile` commands work on local inputs you
-name. `render` and `sequence` need `--dir <output>`. Sequence videos also need ffmpeg. They print a summary on stderr
+The native `engine`, `render`, `sequence`, `serve`, `record`, `profile`, `sweep` and `diff` commands work on local
+inputs you name. `render` and `sequence` need `--dir <output>`. Sequence videos also need ffmpeg, and `diff --git-ref`
+needs git. `sweep` and `diff` are `rur sweep` and `rur diff` ([render.md](render.md#sweep)), the same options and
+output without Node. They print a summary on stderr
 (with a failed story's error and [hint](projects.md#rojo-projects-and-explicit-mounts)), and the result as one JSON
 line on stdout when stdout is a pipe or a file. On a terminal their `error:`, `warning:` and `hint:` labels and the
 run's status are colored (`NO_COLOR` turns that off, `CLICOLOR_FORCE=1` keeps it in a pipe).

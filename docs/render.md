@@ -20,7 +20,9 @@ sweeps, recordings of 3D worlds and the text-first inspection of a render.
 | `rur native` | the desktop storybook ([storybook.md](storybook.md)) |
 | `rur doctor [--fix]`, `rur clean`, `rur selftest` | toolchain check, output cleanup, the offline checks |
 
-Run them as `node cli/rur.mjs <command>` (or `npm run rur -- <command>`). Global switches: `--state-dir <dir>`
+Run them as `node cli/rur.mjs <command>` (or `npm run rur -- <command>`). `rur sweep` and `rur diff` are
+rur-native's own commands, which the Node CLI hands its arguments to: a release binary without Node or a checkout
+runs them as `rur-native sweep` and `rur-native diff`, with the same options and output. Global switches: `--state-dir <dir>`
 (or `RUR_STATE_DIR`) for caches, builds and logs; `RUR_OUT_DIR` for the default output root; `--json` to get
 only the JSON result on stdout; `--isolated` and `--no-service` (see
 [How a render runs](live-preview.md#how-a-render-runs)).
@@ -95,10 +97,17 @@ roots, and a story with no project options mounts the project file beside it:
 ## Before and after (`--git-ref`)
 
 `--git-ref <ref>` renders the sources as they are at a commit: the roots (with the project files next to
-them), the Rojo project, `--mount` sources and the story are extracted from `<ref>` into
+them), the Rojo project and every `$path` it maps, `--mount` sources and the story are extracted from `<ref>` into
 `<state dir>/git-refs/`, reused by later runs, through a temporary index (your index, HEAD and working tree
-are untouched). `rur diff --git-ref <ref> --story <file>` renders both and prints the layout changes and
-pixel difference (`<out>/diff.png`).
+are untouched). A story or mount the commit does not have is taken from the working tree, with a note on stderr.
+The extraction is rur-native's (`native/src/gitref.rs`); `git` must be on the PATH.
+
+`rur diff --git-ref <ref> --story <file>` (`rur-native diff`) renders the source at `<ref>` and in the working tree,
+at the same time in two processes, into `<out>/before` and `<out>/after`, and prints both renders' summaries, the
+layout changes (`- removed`, `+ added`, `~ <path>` with each side's description; the first 200) and the pixel
+difference (`<out>/diff.png`: unchanged pixels grey, changed ones from yellow to red by how much). `<out>` is `--out`,
+else `out/<name>-diff`; it takes `rur render`'s options, `--json` for one line, and exits 2 when either side's story
+failed.
 
 ## Studio's `plugin` global (`--plugin`)
 
@@ -123,10 +132,17 @@ node cli/rur.mjs render --fixture clone-playergui.luau --load "ServerStorage/Sav
 
 ## Sweep
 
-`node cli/rur.mjs sweep [--place all] [--jobs 4] [--timeout 90] [--out out/sweep]` renders every story of
-the project, each in a process of its own, and writes `report.json` and `summary.md`: status per story,
-failure causes grouped across stories, unemulated members, Studio-only instances, missing images and fonts,
-the slowest stories. `--failed` re-runs the stories that were not clean.
+`node cli/rur.mjs sweep [--place all] [--jobs 4] [--timeout 90] [--out out/sweep]` (`rur-native sweep`) renders
+every story of the project, each in a `rur-native render` process of its own (killed with everything it started
+after `--timeout` seconds; a crashed one runs again at the end, `--retries 1`), and writes `report.json` and
+`summary.md`: status per story, failure causes grouped across stories, unemulated members, Studio-only instances,
+missing images and fonts, the slowest stories. Each story's output is in `<out>/stories/<story>/`, summary.json
+included. `--filter a|b` keeps the stories whose paths hold either text, `--limit N` the first N, `--failed`
+re-runs the stories that were not clean and merges them into the last report, and `--summarize` rebuilds the
+totals and `summary.md` from `report.json` without rendering. The render options it passes on: `--viewport`
+(default 1200x900), `--time` (1), `--scale` (1.5), `--mode`, `--player`, `--background`, `--project`, `--roots`,
+`--place-id`, `--rotation-clipping`, `--device`, `--topbar-inset`, `--rojo`, `--rojo-at`, `--git-ref`, `--plugin`,
+`--mount`, `--offline`, `--no-png`.
 
 ## Record (3D worlds)
 

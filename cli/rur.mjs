@@ -11,7 +11,7 @@
 //   rur sweep [--filter a|b] [--jobs N] [--timeout s] [--no-png] [--out out/sweep]
 //                                                       render every story (every place), report failures
 //             [--failed]  re-run the non-clean stories of the last report, [--limit N], [--retries 1],
-//             [--summarize]  rebuild report totals + summary.md without rendering
+//             [--summarize]  rebuild report totals + summary.md without rendering (rur-native sweep)
 //   rur compare --story <file> [--studio <name>]       render in Studio + offline, diff layout & pixels
 //   rur doctor [--fix]                                  check the toolchain (--fix: remove build leftovers)
 //   rur clean [--older-than <days>] [--dry-run]         shrink the output root: copied images to hard links,
@@ -22,7 +22,7 @@
 //   rur selftest                                        run offline assertion checks
 //   rur native [--story <file>]                         the desktop storybook (native/, wgpu)
 //   rur native --headless --scene <scene.json>           a saved scene to PNG (--batch: many)
-//   rur diff --git-ref <ref> --story <file> [--out dir]  render at <ref> and in the working tree, diff them
+//   rur diff --git-ref <ref> --story <file> [--out dir]  render at <ref> and in the working tree, diff them (rur-native diff)
 //   rur record --harness <file.luau> [--place <name>] [--seconds 3] [--fps 60] [--out dir]
 //             [--context <json|file>] [--assets-at <Service.Path>] [--assets <prefix>,...] [--mode play|edit]
 //                                                       run a harness on the project frame by frame and record
@@ -39,7 +39,7 @@
 // (seconds): --isolated (RUR_ISOLATED=1), a frozen engine while native/ is being edited (another agent's
 // work, a bisect): no service is started or contacted and the engine is the state dir's build as it is;
 // --no-service (RUR_NO_SERVICE=1), debugging the service itself, or a story that must be killable on its
-// own (the sweep's children, tests that need a state dir of their own).
+// own (tests that need a state dir of their own; `rur sweep` runs each story in a process of its own anyway).
 // --actions '<JSON list>' | <file>: timed input (move, down, up, wheel, leave, key, text, paste, and
 // click / drag / wheel by coordinates or node path), checked first: a bad list exits 64 (cli/actions.mjs).
 // --profile <kinds> [--profile-out <dir>] (render, sequence, record): the engine's profiling suite (work, caches,
@@ -70,7 +70,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -204,9 +203,10 @@ export function loadArgs(args) {
 
 // The engine arguments of a run (`rur-native engine` / `render`, cli/engine.mjs): the renderer
 // checkout, project roots, the source and the run's options. `scenePath`: also --out <scene.json> and
-// --dependencies (a bare engine run); `rur-native render` writes both into its --dir itself.
-export function runtimeArgs(args, scenePath = null) {
-	const result = [...engineBaseArgs(), "--roots", projectRoots(args).join(";"), ...mountArgs(runMounts(args)), ...loadArgs(args)];
+// --dependencies (a bare engine run); `rur-native render` writes both into its --dir itself. `project`: the
+// roots and mounts as engine arguments, already resolved (--git-ref: cli/gitref.mjs).
+export function runtimeArgs(args, scenePath = null, project = null) {
+	const result = [...engineBaseArgs(), ...(project || ["--roots", projectRoots(args).join(";"), ...mountArgs(runMounts(args))]), ...loadArgs(args)];
 	if (scenePath) result.push("--out", scenePath);
 	args = { ...args, viewport: resolveViewport(args) };
 	if (args.plugin !== undefined && args.plugin !== false) {
@@ -360,6 +360,7 @@ export async function render(args, { service = false, env = process.env } = {}) 
 	const started = Date.now();
 	let argv;
 	let gitRef = null;
+	let project = null;
 	if (args.scene) {
 		// Re-render an existing (possibly hand-edited) scene.json without running the runtime
 		const scenePath = path.join(outDir, "scene.json");
@@ -368,14 +369,14 @@ export async function render(args, { service = false, env = process.env } = {}) 
 	} else {
 		let runArgs = { ...args, "snapshot-dir": snapshotDir(args) };
 		if (args["git-ref"] && args["git-ref"] !== true) {
-			// The project's sources at a commit, extracted into the state dir (cli/gitref.mjs)
+			// The project's sources at a commit, extracted into the state dir (`rur-native git-ref`, cli/gitref.mjs)
 			const { applyGitRef } = await import("./gitref.mjs");
-			const applied = applyGitRef(runArgs, { roots: projectRoots(runArgs), rojoFile: rojoFileOf(runArgs) });
+			const applied = await applyGitRef(runArgs, { roots: projectRoots(runArgs), rojoFile: rojoFileOf(runArgs) });
 			runArgs = applied.args;
-			runMounts(runArgs, { onPath: source => applied.ref.map(source) });
-			gitRef = runArgs.gitRef;
+			project = applied.project;
+			gitRef = applied.gitRef;
 		}
-		argv = runtimeArgs(runArgs);
+		argv = runtimeArgs(runArgs, null, project);
 	}
 	const options = { png: !args["no-png"], offline: Boolean(args.offline), placeholders: Boolean(args.placeholders) };
 	let result = null;
@@ -599,393 +600,6 @@ export function storyEntries(args) {
 	}).sort((a, b) => a.key.localeCompare(b.key));
 }
 
-// Story sweep
-
-const CLI_FILE = fileURLToPath(import.meta.url);
-
-function killTree(child) {
-	if (!child.pid) return;
-	if (process.platform === "win32") {
-		spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-		return;
-	}
-	try {
-		process.kill(-child.pid, "SIGKILL");
-	} catch {
-		child.kill("SIGKILL");
-	}
-}
-
-// Renders one story in a child `rur render` process of its own (no render service: a story that runs
-// away is killed with its whole process tree when it exceeds the timeout).
-function renderStoryProcess(entry, dir, args, timeoutSeconds, engine, withPng) {
-	const childArgs = [CLI_FILE, "render", "--story", entry.file, "--out", dir, "--place", entry.place, ...(withPng ? [] : ["--no-png"])];
-	for (const key of ["viewport", "time", "scale", "mode", "player", "background", "project", "roots", "place-id", "rotation-clipping", "device", "topbar-inset", "rojo", "rojo-at", "git-ref", "plugin"]) {
-		if (args[key] !== undefined && args[key] !== true) childArgs.push(`--${key}`, String(args[key]));
-	}
-	for (const mount of Array.isArray(args.mount) ? args.mount : args.mount && args.mount !== true ? [args.mount] : []) childArgs.push("--mount", String(mount));
-	if (args.plugin === true) childArgs.push("--plugin");
-	if (args.offline) childArgs.push("--offline");
-	return new Promise(resolve => {
-		const child = spawn(process.execPath, childArgs, { cwd: ROOT, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "ignore", "pipe"],
-			env: { ...process.env, RUR_NATIVE_ENGINE: engine, RUR_NO_SERVICE: "1" } });
-		let stderr = "";
-		let timedOut = false;
-		child.stderr.on("data", chunk => {
-			stderr = (stderr + chunk.toString("utf8")).slice(-8000);
-		});
-		const timer = setTimeout(() => {
-			timedOut = true;
-			killTree(child);
-		}, timeoutSeconds * 1000);
-		child.on("error", error => {
-			clearTimeout(timer);
-			resolve({ code: -1, timedOut, stderr: `${stderr}\n${error.message}` });
-		});
-		child.on("close", code => {
-			clearTimeout(timer);
-			resolve({ code, timedOut, stderr });
-		});
-	});
-}
-
-// The line of a (possibly nested, traceback-laden) Luau error that states what went wrong.
-function primaryMessage(text) {
-	const lines = String(text || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-	const meaningful = lines.filter(line => !/^error while running/i.test(line) && !/^\[string ".*"\]:\d+( function .*)?$/.test(line) && !/^Stack Begin|^Stack End/.test(line));
-	return meaningful.find(line => /:\d+: /.test(line)) || meaningful[0] || lines[0] || "";
-}
-
-// Splits "[string "A.B"]:12: message" / "A.B:12: message" into a site and a message.
-function splitSite(message) {
-	const match = /^(?:\[string "([^"]+)"\]|([\w.\- ]+?)):(\d+): ([\s\S]*)$/.exec(message);
-	if (!match) return { site: null, message };
-	return { site: `${match[1] || match[2]}:${match[3]}`, message: match[4] };
-}
-
-// Groups messages that differ only in instance paths / numbers.
-function causeKey(message) {
-	return message
-		.replace(/(valid member of \w+) "[^"]*"/g, "$1 \"…\"")
-		.replace(/(Infinite yield possible on ')[^']*(')/g, "$1…$2")
-		.replace(/\b\d+(\.\d+)?\b/g, "N")
-		.slice(0, 240);
-}
-
-function readJson(file) {
-	try {
-		return JSON.parse(fs.readFileSync(file, "utf8"));
-	} catch {
-		return null;
-	}
-}
-
-async function sweepOne(entry, args, outRoot, timeoutSeconds, withPng, engine) {
-	const dir = path.join(outRoot, "stories", entry.slug);
-	fs.rmSync(dir, { recursive: true, force: true });
-	fs.mkdirSync(dir, { recursive: true });
-	const started = Date.now();
-	const result = await renderStoryProcess(entry, dir, args, timeoutSeconds, engine, withPng);
-	const record = {
-		story: entry.key,
-		place: entry.place,
-		out: path.relative(outRoot, dir).replace(/\\/g, "/"),
-		status: "crash",
-		clean: false,
-		failure: null,
-		errors: [],
-		scriptErrors: 0,
-		warnings: 0,
-		warningMessages: [],
-		unemulated: [],
-		missingImages: [],
-		missingFonts: [],
-		renderErrors: [],
-		nodes: 0,
-		placeholders: 0,
-		placeholderRoots: [],
-		timings: null,
-		seconds: 0,
-	};
-	const summary = readJson(path.join(dir, "summary.json"));
-	if (result.timedOut) {
-		record.status = "timeout";
-		record.failure = `timed out after ${timeoutSeconds}s`;
-	} else if (!summary) {
-		// Engine crash: the engine prints the error ("rur-native engine: ..."), then the CLI its own
-		const lines = result.stderr.split(/\r?\n/).map(line => line.trim()).filter(line => line && !/^at /.test(line) && !/^rur: /.test(line) && !/^\[Stack (Begin|End)\]$/.test(line) && !/^Script '/.test(line));
-		record.failure = lines.find(line => !/^Error: runtime failed/.test(line)) || lines[0] || `exit code ${result.code}`;
-		record.detail = result.stderr.slice(-2000);
-	} else {
-		const scene = readJson(path.join(dir, "scene.json")) || {};
-		const diagnostics = scene.diagnostics || {};
-		const output = asArray(diagnostics.output);
-		record.status = summary.status || "unknown";
-		record.failure = summary.failure ? primaryMessage(summary.failure) : null;
-		record.errors = output.filter(item => item.kind === "error").map(item => primaryMessage(item.message)).slice(0, 20);
-		record.scriptErrors = summary.scriptErrors;
-		record.warnings = summary.warnings;
-		record.warningMessages = output.filter(item => item.kind === "warn").map(item => primaryMessage(item.message)).slice(0, 20);
-		record.unemulated = asArray(diagnostics.unemulated);
-		record.missingImages = summary.missingImages;
-		record.missingFonts = summary.missingFonts;
-		record.nodes = summary.nodes;
-		record.timings = diagnostics.timings || null;
-		// Studio-only instances the story touched (created from the place hierarchy, default properties)
-		const studioOnly = diagnostics.studioOnly || {};
-		record.placeholders = Number(studioOnly.count) || 0;
-		record.placeholderRoots = asArray(studioOnly.used).slice(0, 10);
-		record.renderErrors = asArray(summary.renderErrors);
-		record.clean = record.status === "ok" && record.scriptErrors === 0 && record.renderErrors.length === 0;
-	}
-	record.seconds = (Date.now() - started) / 1000;
-	return record;
-}
-
-function countBy(records, keyOf) {
-	const counts = new Map();
-	for (const record of records) {
-		for (const key of new Set(keyOf(record))) counts.set(key, (counts.get(key) || 0) + 1);
-	}
-	return counts;
-}
-
-// Instance paths (below the DataModel, dot-joined) known to exist in each place's Studio hierarchy, so
-// failures on them count as Studio-only content, not emulation (none are known here: an empty map).
-function studioHierarchies(args) {
-	return new Map();
-}
-
-// "X is not a valid member of Class "A.B"" where A.B.X exists in the place's Studio hierarchy.
-function studioOnlyMember(message, place, hierarchies) {
-	const match = /([^\s"]+) is not a valid member of \w+ "([^"]+)"/.exec(message);
-	const set = hierarchies.get(place);
-	if (!match || !set) return null;
-	const full = `${match[2]}.${match[1]}`;
-	return set.has(full) ? full : null;
-}
-
-function aggregateSweep(records, hierarchies = new Map()) {
-	const status = {};
-	for (const record of records) status[record.status] = (status[record.status] || 0) + 1;
-
-	// Failure causes: mount failures, script errors and timeouts/crashes, counted once per story
-	const causes = new Map();
-	const addCause = (record, message, kind) => {
-		const { site, message: text } = splitSite(message);
-		const studioOnly = studioOnlyMember(text, record.place, hierarchies);
-		if (studioOnly) {
-			record.studioOnly = record.studioOnly || studioOnly;
-			kind = `${kind} (Studio-only instance)`;
-		}
-		const key = `${kind}: ${causeKey(text)}`;
-		let cause = causes.get(key);
-		if (!cause) {
-			cause = { cause: key, stories: new Set(), sites: new Map(), examples: [] };
-			causes.set(key, cause);
-		}
-		if (!cause.stories.has(record.story) && cause.examples.length < 5) cause.examples.push(record.story);
-		cause.stories.add(record.story);
-		if (site) cause.sites.set(site, (cause.sites.get(site) || 0) + 1);
-	};
-	for (const record of records) {
-		if (record.status === "timeout" || record.status === "crash") addCause(record, record.failure || record.status, record.status);
-		else if (record.status === "error" && record.failure) addCause(record, record.failure, "mount");
-		for (const message of record.errors) {
-			if (record.status === "error" && message === record.failure) continue;
-			addCause(record, message, "script");
-		}
-		if (record.status === "yielded") addCause(record, "story mount never finished (yielded)", "yielded");
-	}
-	const causeList = [...causes.values()].map(cause => ({
-		cause: cause.cause,
-		stories: cause.stories.size,
-		sites: [...cause.sites].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([site, count]) => `${site} (${count})`),
-		examples: cause.examples,
-	})).sort((a, b) => b.stories - a.stories);
-
-	const unemulated = new Map();
-	for (const record of records) {
-		for (const entry of record.unemulated) {
-			const item = unemulated.get(entry.member) || { member: entry.member, stories: 0, calls: 0 };
-			item.stories++;
-			item.calls += entry.count;
-			unemulated.set(entry.member, item);
-		}
-	}
-	const warnings = countBy(records, record => record.warningMessages.map(message => causeKey(splitSite(message).message)));
-	const images = countBy(records, record => record.missingImages);
-	const placeholders = countBy(records, record => record.placeholderRoots || []);
-	const fonts = countBy(records, record => record.missingFonts);
-	const seconds = records.map(record => record.seconds).sort((a, b) => a - b);
-	const percentile = p => (seconds.length ? seconds[Math.min(seconds.length - 1, Math.floor(p * seconds.length))] : 0);
-	return {
-		stories: records.length,
-		clean: records.filter(record => record.clean).length,
-		studioOnly: records.filter(record => !record.clean && record.studioOnly).length,
-		status,
-		causes: causeList,
-		unemulated: [...unemulated.values()].sort((a, b) => b.stories - a.stories || b.calls - a.calls),
-		warnings: [...warnings].sort((a, b) => b[1] - a[1]).map(([message, stories]) => ({ message, stories })),
-		missingImages: [...images].sort((a, b) => b[1] - a[1]).map(([image, stories]) => ({ image, stories })),
-		placeholders: [...placeholders].sort((a, b) => b[1] - a[1]).map(([instance, stories]) => ({ instance, stories })),
-		missingFonts: [...fonts].sort((a, b) => b[1] - a[1]).map(([font, stories]) => ({ font, stories })),
-		seconds: {
-			total: seconds.reduce((sum, value) => sum + value, 0),
-			median: percentile(0.5),
-			p90: percentile(0.9),
-			max: seconds.length ? seconds[seconds.length - 1] : 0,
-		},
-		slowest: [...records].sort((a, b) => b.seconds - a.seconds).slice(0, 15).map(record => ({ story: record.story, seconds: record.seconds, status: record.status })),
-	};
-}
-
-// A table cell's text, cut to 200 characters before escaping (a cut cannot leave half an escape), with backslashes
-// escaped before pipes (text ending in a backslash cannot unescape the cell's own `|`)
-export function markdownCell(value) {
-	return String(value ?? "").replace(/\r?\n/g, " ").slice(0, 200).replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
-}
-
-function sweepMarkdown(report) {
-	const { totals, options, changes } = report;
-	const lines = [];
-	lines.push("# Story sweep", "");
-	lines.push(`${report.finished} · ${totals.stories} stories · ${totals.clean} clean · jobs ${options.jobs} · timeout ${options.timeout}s · viewport ${options.viewport} @${options.scale}x · time ${options.time}s · wall ${report.wallSeconds.toFixed(0)}s`, "");
-	lines.push("Clean = mounted without error, no script errors, no render errors.", "");
-	lines.push("## Status", "", "| status | stories |", "|---|---|");
-	for (const [status, count] of Object.entries(totals.status).sort((a, b) => b[1] - a[1])) lines.push(`| ${status} | ${count} |`);
-	lines.push(`| ok with script errors | ${report.records.filter(record => record.status === "ok" && record.scriptErrors > 0).length} |`);
-	lines.push(`| not clean, needs Studio-only content (instances the place has but the repo does not) | ${totals.studioOnly} |`);
-	lines.push(`| rendered with Studio-only placeholder instances (default properties) | ${report.records.filter(record => record.placeholders > 0).length} |`, "");
-	if (changes) {
-		lines.push("## Changes vs previous report", "");
-		lines.push(`Fixed (now clean): ${changes.fixed.length} · regressed (no longer clean): ${changes.regressed.length}`, "");
-		for (const story of changes.regressed.slice(0, 50)) lines.push(`- regressed: ${story}`);
-		if (changes.regressed.length) lines.push("");
-	}
-	lines.push("## Failure causes (stories affected)", "", "| stories | cause | top sites | example |", "|---|---|---|---|");
-	for (const cause of totals.causes.slice(0, 40)) lines.push(`| ${cause.stories} | ${markdownCell(cause.cause)} | ${markdownCell(cause.sites.join(", "))} | ${markdownCell(cause.examples[0])} |`);
-	lines.push("", "## Unemulated members (stories / calls)", "", "| member | stories | calls |", "|---|---|---|");
-	for (const item of totals.unemulated.slice(0, 40)) lines.push(`| ${markdownCell(item.member)} | ${item.stories} | ${item.calls} |`);
-	lines.push("", "## Studio-only instances used (placeholders with default properties)", "", "| stories | instance |", "|---|---|");
-	for (const item of (totals.placeholders || []).slice(0, 25)) lines.push(`| ${item.stories} | ${markdownCell(item.instance)} |`);
-	lines.push("", "## Warnings (stories)", "", "| stories | warning |", "|---|---|");
-	for (const item of totals.warnings.slice(0, 20)) lines.push(`| ${item.stories} | ${markdownCell(item.message)} |`);
-	lines.push("", `## Missing images (${totals.missingImages.length} unique)`, "", "| stories | image |", "|---|---|");
-	for (const item of totals.missingImages.slice(0, 15)) lines.push(`| ${item.stories} | ${markdownCell(item.image)} |`);
-	lines.push("", `## Missing fonts (${totals.missingFonts.length} unique)`, "");
-	for (const item of totals.missingFonts.slice(0, 15)) lines.push(`- ${item.stories} stories: ${item.font}`);
-	lines.push("", "## Time", "", `Total ${totals.seconds.total.toFixed(0)}s · median ${totals.seconds.median.toFixed(1)}s · p90 ${totals.seconds.p90.toFixed(1)}s · max ${totals.seconds.max.toFixed(1)}s`, "");
-	for (const item of totals.slowest) lines.push(`- ${item.seconds.toFixed(1)}s ${item.story} (${item.status})`);
-	lines.push("", "## Stories", "", "| story | place | status | errors | first problem | unemulated | missing images | nodes | s |", "|---|---|---|---|---|---|---|---|---|");
-	for (const record of report.records) {
-		const problem = record.failure || record.errors[0] || record.renderErrors[0] || "";
-		lines.push(`| ${markdownCell(record.story)} | ${record.place} | ${record.status} | ${record.scriptErrors} | ${markdownCell(problem)} | ${markdownCell(record.unemulated.slice(0, 3).map(entry => entry.member).join(", "))} | ${record.missingImages.length} | ${record.nodes} | ${record.seconds.toFixed(1)} |`);
-	}
-	return lines.join("\n") + "\n";
-}
-
-async function sweep(args) {
-	const outRoot = path.resolve(args.out && args.out !== true ? String(args.out) : path.join(OUT_DIR, "sweep"));
-	const jobs = Math.max(1, Number(args.jobs) || Math.min(8, Math.max(1, Math.floor(os.cpus().length / 3))));
-	const timeoutSeconds = Math.max(5, Number(args.timeout) || 90);
-	const withPng = !args["no-png"];
-	// Studio runs at 1.5x DPI here; sweep renders match it unless --scale says otherwise
-	const options = { jobs, timeout: timeoutSeconds, viewport: String(args.viewport && args.viewport !== true ? args.viewport : "1200x900"), scale: Number(args.scale) || 1.5, time: Number(args.time) || 1, png: withPng, filter: args.filter || null };
-	const childArgs = { ...args, viewport: options.viewport, scale: String(options.scale), time: String(options.time) };
-	fs.mkdirSync(outRoot, { recursive: true });
-
-	const reportFile = path.join(outRoot, "report.json");
-	const previous = readJson(reportFile);
-
-	// --summarize: rebuild totals + summary.md from the existing report without rendering
-	if (args.summarize) {
-		if (!previous) throw new Error(`no report at ${reportFile}`);
-		previous.totals = aggregateSweep(previous.records, studioHierarchies(args));
-		fs.writeFileSync(reportFile, JSON.stringify(previous, null, 1));
-		fs.writeFileSync(path.join(outRoot, "summary.md"), sweepMarkdown(previous));
-		return previous;
-	}
-
-	let entries = storyEntries(args);
-	if (args.failed && previous) {
-		const notClean = new Set(previous.records.filter(record => !record.clean).map(record => record.story));
-		entries = entries.filter(entry => notClean.has(entry.key));
-	}
-	if (args.limit) entries = entries.slice(0, Number(args.limit));
-	// One engine build for every child render (cli/engine.mjs)
-	const engine = await ensureEngine();
-	process.stderr.write(`rur sweep: ${entries.length} stories, ${jobs} jobs, timeout ${timeoutSeconds}s${withPng ? "" : ", no png"} -> ${outRoot}\n`);
-
-	const started = Date.now();
-	const records = [];
-	let next = 0;
-	let done = 0;
-	const worker = async () => {
-		while (next < entries.length) {
-			const entry = entries[next++];
-			const record = await sweepOne(entry, childArgs, outRoot, timeoutSeconds, withPng, engine);
-			records.push(record);
-			done++;
-			const problem = record.clean ? "" : ` ${(record.failure || record.errors[0] || record.renderErrors[0] || "").slice(0, 140)}`;
-			process.stderr.write(`[${done}/${entries.length}] ${record.status}${record.scriptErrors ? ` (${record.scriptErrors} errors)` : ""} ${record.seconds.toFixed(1)}s ${entry.key}${problem}\n`);
-		}
-	};
-	await Promise.all(Array.from({ length: Math.min(jobs, entries.length) }, worker));
-
-	// Runtime crashes are re-run once more at the end: other agents edit the runtime while sweeps run,
-	// and a half-written file crashes every story that starts during the edit
-	const retries = args.retries !== undefined ? Number(args.retries) : 1;
-	for (let attempt = 0; attempt < retries; attempt++) {
-		const crashed = records.filter(record => record.status === "crash");
-		if (!crashed.length) break;
-		process.stderr.write(`rur sweep: re-running ${crashed.length} crashed stories
-`);
-		const byKey = new Map(entries.map(entry => [entry.key, entry]));
-		const retry = crashed.map(record => byKey.get(record.story)).filter(Boolean);
-		let retryNext = 0;
-		const retryWorker = async () => {
-			while (retryNext < retry.length) {
-				const entry = retry[retryNext++];
-				const record = await sweepOne(entry, childArgs, outRoot, timeoutSeconds, withPng, engine);
-				records[records.findIndex(item => item.story === entry.key)] = record;
-			}
-		};
-		await Promise.all(Array.from({ length: Math.min(jobs, retry.length) }, retryWorker));
-	}
-	// --failed re-runs merge into the previous report so it stays complete
-	let allRecords = records;
-	if (args.failed && previous) {
-		const rerun = new Map(records.map(record => [record.story, record]));
-		allRecords = previous.records.map(record => rerun.get(record.story) || record);
-	}
-	allRecords.sort((a, b) => a.story.localeCompare(b.story));
-
-	let changes = null;
-	if (previous && Array.isArray(previous.records)) {
-		const before = new Map(previous.records.map(record => [record.story, record]));
-		changes = { fixed: [], regressed: [] };
-		for (const record of allRecords) {
-			const old = before.get(record.story);
-			if (!old) continue;
-			if (record.clean && !old.clean) changes.fixed.push(record.story);
-			if (!record.clean && old.clean) changes.regressed.push(record.story);
-		}
-	}
-
-	const report = {
-		finished: new Date().toISOString(),
-		wallSeconds: (Date.now() - started) / 1000,
-		options,
-		totals: aggregateSweep(allRecords, studioHierarchies(args)),
-		changes,
-		records: allRecords,
-	};
-	fs.writeFileSync(reportFile, JSON.stringify(report, null, 1));
-	fs.writeFileSync(path.join(outRoot, "summary.md"), sweepMarkdown(report));
-	return report;
-}
-
 // `fix`: remove the state dir's build leftovers (cli/cleanup.mjs)
 async function doctor({ fix = false } = {}) {
 	const { nativeAppStatus, describeNativeApp } = await import("../tools/native-app/config.mjs");
@@ -1069,27 +683,11 @@ async function jsonResult(args, work, shape = value => value) {
 	return result;
 }
 
-// rur diff --git-ref <ref>: the same source rendered at <ref> (before) and in the working tree
-// (after), then cli/inspect.mjs's layout + pixel diff (diff.png)
-async function beforeAfter(args) {
-	if (!args["git-ref"] || args["git-ref"] === true) throw new Error("rur diff needs --git-ref <ref> (the 'before' commit)");
-	const source = args.story || args.module || args.model || args.fixture;
-	if (!source || source === true) throw new Error("rur diff needs --story, --module, --model or --fixture");
-	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$/, "");
-	const outDir = renderOutDir(args, `${name}-diff`);
-	const own = { ...args, tag: undefined, keep: undefined };
-	const before = await render({ ...own, out: path.join(outDir, "before") });
-	const after = await render({ ...own, "git-ref": undefined, out: path.join(outDir, "after") });
-	const { diffRenders } = await import("./inspect.mjs");
-	const diff = diffRenders(before.out, after.out, { out: path.join(outDir, "diff.png") });
-	return { before, after, changes: diff.changes, pixels: diff.pixels, out: outDir };
-}
-
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
 	const command = args._[0];
 	// A story beside a Rojo project (default.project.json) and no project options: that project is the run's
-	if (["render", "sequence", "diff", "compare", "record"].includes(command)) {
+	if (["render", "sequence", "compare", "record"].includes(command)) {
 		const note = detectRojoProject(args, DEFAULT_PROJECT);
 		if (note) process.stderr.write(`${note}
 `);
@@ -1110,9 +708,13 @@ async function main() {
 			return sequence(args, { service: !serviceDisabled() });
 		});
 		if (summary.status === "error") process.exitCode = 2;
-	} else if (command === "diff") {
-		const result = await jsonResult(args, () => beforeAfter(args), value => ({ ...value, changes: value.changes.slice(0, 200) }));
-		if (result.before.status === "error" || result.after.status === "error") process.exitCode = 2;
+	} else if (command === "sweep" || command === "diff") {
+		// `rur-native sweep` / `rur-native diff` (native/src/sweep.rs, diff.rs): the same arguments, with this checkout as
+		// the renderer; their output, files and exit code are the command's
+		const executable = await ensureEngine();
+		const result = spawnSync(executable, [command, "--repo", ROOT, ...process.argv.slice(3)], { cwd: process.cwd(), stdio: "inherit", windowsHide: true });
+		if (result.error) throw result.error;
+		process.exitCode = result.status ?? 1;
 	} else if (command === "compare") {
 		const { compare, CaptureNeeded } = await import("./compare.mjs");
 		try {
@@ -1139,10 +741,6 @@ async function main() {
 		} else {
 			for (const file of listStories(args)) console.log(file);
 		}
-	} else if (command === "sweep") {
-		const report = await sweep(args);
-		const { totals } = report;
-		console.log(JSON.stringify({ stories: totals.stories, clean: totals.clean, status: totals.status, topCauses: totals.causes.slice(0, 10).map(cause => `${cause.stories} ${cause.cause}`), topUnemulated: totals.unemulated.slice(0, 10).map(item => `${item.stories} ${item.member}`), seconds: totals.seconds, report: path.resolve(args.out && args.out !== true ? String(args.out) : path.join(OUT_DIR, "sweep"), "summary.md") }, null, 2));
 	} else if (command === "doctor") {
 		console.log(JSON.stringify(await doctor({ fix: Boolean(args.fix) }), null, 2));
 	} else if (command === "clean") {

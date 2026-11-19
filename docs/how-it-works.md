@@ -32,9 +32,12 @@ options, projects, git refs, Studio comparisons, asset downloads, inspection and
   decoded textures and glyph pages ([native/ASSETS.md](../native/ASSETS.md)); `resolve.rs`: content URIs to files;
   `download.rs`: asset downloads, the account and `rur-native assets`.
 - `native/src/story_render.rs`, `serve.rs`: `rur render`'s output and the render service; `headless.rs`:
-  captures, benchmarks and batches; `app.rs`: the desktop storybook; `places.rs`: projects and places.
+  captures, benchmarks and batches; `app.rs`: the desktop storybook; `places.rs`: projects and places;
+  `sweep.rs`, `diff.rs`: `rur sweep` and `rur diff` (`story_args.rs` turns their options into engine arguments,
+  `summary.rs` writes a render's summary.json); `gitref.rs`: `--git-ref`.
 - `cli/`: the command line (`rur.mjs`), compare (`compare.mjs`, `studio.mjs`, `clock.mjs`), inspection,
-  assets (`assets.mjs`: the native downloader's CLI side and Studio reads), projects (`places.mjs`, `rojo.mjs`, `gitref.mjs`).
+  assets (`assets.mjs`: the native downloader's CLI side and Studio reads), projects (`places.mjs`, `rojo.mjs`, `gitref.mjs`:
+  `rur-native git-ref`'s CLI side).
 - `fixtures/`: the measurement scenes; `tools/analysis`: the fitting scripts behind the rules;
   `tools/studio`, `tools/interaction`: Studio probes and input experiments; `data/studio`: frozen Studio
   measurements the tests compare with.

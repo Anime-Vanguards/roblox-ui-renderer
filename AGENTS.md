@@ -36,6 +36,7 @@ engine binary frozen while `native/` is being edited; `--no-service` skips the r
   `session.rs`, `cli.rs`. `native/src/render/`: the wgpu renderer and the uber shader. `native/src/glyphs.rs`
   and `glyphs/rur_glyph.c`: FreeType glyphs. `resolve.rs` and `download.rs`: content URIs, asset downloads and
   the Roblox cookie (keep cookie handling there). `serve.rs`: the render service. `app.rs`: the storybook.
+  `sweep.rs`, `diff.rs`, `gitref.rs`: `rur sweep`, `rur diff` and `--git-ref` (the Node CLI forwards to them).
 - `fixtures/`: measurement scenes, each run by the golden suite. `tools/engine/golden.mjs` and `golden.json`:
   the engine's recorded output. `data/studio/`: frozen Studio measurements.
 - `tools/analysis/`: fitting scripts; `tools/studio/`, `tools/interaction/`: Studio probes and input

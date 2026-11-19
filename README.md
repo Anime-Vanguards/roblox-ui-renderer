@@ -63,7 +63,8 @@ the latest tested commit of main, refreshed nightly. It is not a release and may
 
 Run `rur-native --version` to check the install. `rur-native <your-project-folder>` opens the
 storybook, and `rur-native render --story <story.luau> --project <your-project> --dir out/render`
-renders headless. In a Rojo project (Wally packages included) run it from the project folder and no
+renders headless; `rur-native sweep` renders every story and reports what failed, and `rur-native diff --git-ref <ref>
+--story <story.luau>` compares a story at a commit with your working tree. In a Rojo project (Wally packages included) run it from the project folder and no
 project flag is needed: the folder's `default.project.json`, or its only `*.project.json`, is found and mounted, or name one with `--rojo <file>`
 ([projects](docs/projects.md#rojo-projects-and-explicit-mounts)). UI Labs and [Flipbook](docs/stories.md#flipbook-stories-and-storybooks)
 stories (React, Roact, Fusion and Vide) both work. When stories fail, `rur-native debug-report` writes a report to send

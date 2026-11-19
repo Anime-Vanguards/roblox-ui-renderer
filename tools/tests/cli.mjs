@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { snapshotDir, markdownCell } from "../../cli/rur.mjs";
+import { snapshotDir } from "../../cli/rur.mjs";
 import { luauString } from "../../cli/studio.mjs";
 
 // Luau string literals: quotes and backslashes escaped, control characters as Luau's \ddd (not JSON's \uXXXX)
@@ -14,12 +14,6 @@ assert.equal(luauString("line\nnext\ttab\u0001\u007f!"), '"line\\nnext\\ttab\\00
 assert.equal(luauString("\u00e9\u{1f600}"), '"\u00e9\u{1f600}"');
 assert.equal(luauString("\ud800"), '"\ufffd"');
 assert.equal(luauString(12), '"12"');
-// Markdown cells: pipes escaped, and a backslash cannot escape the cell's own closing pipe
-assert.equal(markdownCell("a|b"), "a\\|b");
-assert.equal(markdownCell("ends with \\"), "ends with \\\\");
-assert.equal(markdownCell("x".repeat(199) + "\\|"), "x".repeat(199) + "\\\\");
-assert.equal(markdownCell("two\r\nlines"), "two lines");
-
 const root = fileURLToPath(new URL("../../", import.meta.url));
 // No project or place has an implicit Studio snapshot: they load only when --snapshot-dir names one
 {
@@ -138,9 +132,34 @@ end
 		assert.equal(before.text("Title"), "Story");
 		assert.ok(before.summary.gitRef.commits[0].dir.startsWith(path.join(dir, "state", "git-refs")));
 		assert.match(git("status", "--short", "--untracked-files=no").stdout, /^ M stories\/App\.story\.luau\s*$/);
+
+		// `rur diff` (rur-native diff): the committed story before, the edited one after, the label's change named and its
+		// pixels counted
+		const cli =(...extra) => spawnSync(process.execPath, ["cli/rur.mjs", ...extra],
+			{ cwd: root, encoding: "utf8", windowsHide: true, env: { ...process.env, RUR_STATE_DIR: path.join(dir, "state"), RUR_NO_SERVICE: "1" } });
+		const diffed = cli("diff", "--git-ref", "HEAD", "--rojo", path.join(dir, "plugin.project.json"), "--story", path.join(dir, "stories/App.story.luau"),
+			"--viewport", "600x450@physical", "--offline", "--json", "--out", path.join(dir, "out/diff"));
+		assert.equal(diffed.status, 0, diffed.stderr);
+		assert.equal(diffed.stdout.trim().split("\n").length, 1);
+		const result = JSON.parse(diffed.stdout);
+		assert.deepEqual([result.before.status, result.after.status], ["ok", "ok"]);
+		assert.ok(result.before.gitRef.commits[0].dir.startsWith(path.join(dir, "state", "git-refs")), JSON.stringify(result.before.gitRef));
+		assert.ok(result.changes.some(change => change.startsWith("~ ") && change.includes('text="Story"') && change.includes('text="Edited"')), result.changes.join("\n"));
+		assert.ok(result.pixels.changed > 0 && result.pixels.changed < result.pixels.total, result.pixels.message);
+		assert.ok(fs.existsSync(path.join(dir, "out/diff/diff.png")) && fs.existsSync(path.join(dir, "out/diff/before/summary.json")));
+
+		// `rur sweep` (rur-native sweep): the stories beside the Rojo project, each in a process of its own, reported (the
+		// filter leaves out the copy --git-ref extracted into the state dir, which is in the project's folder here)
+		const swept = cli("sweep", "--rojo", path.join(dir, "plugin.project.json"), "--filter", path.join(dir, "stories", "App.story"), "--no-png", "--offline", "--jobs", "2", "--out", path.join(dir, "out/sweep"));
+		assert.equal(swept.status, 0, swept.stderr);
+		assert.equal(JSON.parse(swept.stdout).stories, 1);
+		const report = JSON.parse(fs.readFileSync(path.join(dir, "out/sweep/report.json"), "utf8"));
+		assert.deepEqual([report.records.length, report.records[0].status, report.records[0].clean], [1, "ok", true]);
+		assert.ok(report.records[0].story.endsWith("stories/App.story.luau") && fs.existsSync(path.join(dir, "out/sweep", report.records[0].out, "summary.json")));
+		assert.match(fs.readFileSync(path.join(dir, "out/sweep/summary.md"), "utf8"), /^# Story sweep\n/);
 	}
 	fs.rmSync(dir, { recursive: true, force: true });
-	console.log("CLI project options: PASS (rojo, native rojo parity, outside stories, fixture controls, @physical, --json, --git-ref, --plugin, tree ancestry)");
+	console.log("CLI project options: PASS (rojo, native rojo parity, outside stories, fixture controls, @physical, --json, --git-ref, diff, sweep, --plugin, tree ancestry)");
 }
 
 // Render diagnostics (cli/diagnostics.mjs): AutomaticSize-culled rows, wrapped lines a short box drops,

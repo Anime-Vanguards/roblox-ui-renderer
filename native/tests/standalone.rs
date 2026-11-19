@@ -713,6 +713,76 @@ fn installed_story_and_module_use_their_place_unless_one_is_named() {
     }
 }
 
+/// `sweep` and `diff` are the release binary's own commands, with no Node and no checkout: the sweep finds the stories
+/// of the current project's place, renders each in a child process and writes its report; `diff --git-ref` renders a
+/// story at a commit and in the working tree and names what changed.
+#[test]
+#[ignore = "requires RUR_TEST_STANDALONE_BINARY from a marked release build"]
+fn installed_sweep_and_diff_run_without_node() {
+    let install = Installation::new("sweep-diff");
+    let project = &install.project;
+    let stories = project.join("src/ReplicatedStorage/Stories");
+    std::fs::create_dir_all(&stories).unwrap();
+    let story = |text: &str| {
+        format!(
+            "local value = require(game:GetService('ReplicatedStorage').Value)\n\
+             return function(target) local l = Instance.new('TextLabel'); l.Name = 'Label'; l.Text = '{text}' .. value; l.Parent = target end"
+        )
+    };
+    std::fs::write(stories.join("First.story.luau"), story("first")).unwrap();
+    std::fs::write(stories.join("Second.story.luau"), story("second")).unwrap();
+
+    let out = install.dir.join("sweep");
+    let output = install
+        .command()
+        .args(["sweep", "--no-png", "--offline", "--jobs", "2", "--out"])
+        .arg(&out)
+        .output_locked()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let headline: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!((headline["stories"].as_u64(), headline["clean"].as_u64()), (Some(2), Some(2)), "{headline}");
+    let report: serde_json::Value = serde_json::from_slice(&std::fs::read(out.join("report.json")).unwrap()).unwrap();
+    let records = report["records"].as_array().unwrap();
+    assert_eq!(records[0]["story"], "src/ReplicatedStorage/Stories/First.story.luau", "{report}");
+    assert_eq!(records[0]["place"], "main");
+    assert!(out.join("summary.md").is_file() && out.join(records[1]["out"].as_str().unwrap()).join("summary.json").is_file());
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(project)
+            .args(["-c", "user.name=rur", "-c", "user.email=rur@localhost"])
+            .args(args)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    };
+    if !git(&["init", "-q"]) {
+        eprintln!("installed_sweep_and_diff_run_without_node: no git, diff --git-ref not checked");
+        return;
+    }
+    assert!(git(&["add", "-A"]) && git(&["commit", "-qm", "base"]));
+    std::fs::write(stories.join("First.story.luau"), story("edited")).unwrap();
+    let out = install.dir.join("diff");
+    let output = install
+        .command()
+        .args(["diff", "--git-ref", "HEAD", "--no-png", "--offline", "--json", "--story"])
+        .arg(stories.join("First.story.luau"))
+        .arg("--out")
+        .arg(&out)
+        .output_locked()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!((&result["before"]["status"], &result["after"]["status"]), (&serde_json::json!("ok"), &serde_json::json!("ok")), "{result}");
+    let changes: Vec<&str> = result["changes"].as_array().unwrap().iter().filter_map(|change| change.as_str()).collect();
+    assert!(
+        changes.iter().any(|change| change.contains("text=\"first42\"") && change.contains("text=\"edited42\"")),
+        "{changes:?}"
+    );
+    assert!(out.join("before/summary.json").is_file() && out.join("after/summary.json").is_file());
+}
+
 #[test]
 #[ignore = "requires RUR_TEST_STANDALONE_BINARY from a marked release build"]
 fn installed_helper_checkout_does_not_change_the_project() {

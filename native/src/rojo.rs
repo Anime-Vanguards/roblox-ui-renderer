@@ -183,7 +183,7 @@ pub fn is_project_file(file: &str) -> bool {
 }
 
 /// `path` made absolute against the current directory with `.` and `..` removed, as Node's `path.resolve` does
-fn resolve(base: &Path, path: &str) -> PathBuf {
+pub(crate) fn resolve(base: &Path, path: &str) -> PathBuf {
     let joined = base.join(path);
     let joined = std::path::absolute(&joined).unwrap_or(joined);
     let mut out = PathBuf::new();
@@ -215,25 +215,37 @@ fn is_service(name: &str) -> bool {
 /// The mounts of a project file, in the order cli/rojo.mjs gives them. `at` is `--rojo-at Service/Name` (for a tree
 /// that is not a DataModel). A non-optional `$path` that is missing is skipped and reported in `warnings`.
 pub fn mounts(project_file: &Path, at: Option<&str>, warnings: &mut Vec<String>) -> Result<Vec<Mount>, String> {
-    let walk = walk(project_file, at)?;
+    mounts_with(project_file, at, warnings, &mut |path| Ok(path))
+}
+
+/// [`mounts`], each `$path` first handed to `source`, which can stand another file or folder in for it (`--git-ref`:
+/// the path as it is at a commit, extracted there; gitref.rs)
+pub fn mounts_with(
+    project_file: &Path,
+    at: Option<&str>,
+    warnings: &mut Vec<String>,
+    source: &mut dyn FnMut(PathBuf) -> Result<PathBuf, String>,
+) -> Result<Vec<Mount>, String> {
+    let walk = walk(project_file, at, source)?;
     warnings.extend(walk.missing.iter().map(|mount| format!("rur: {}", missing_path(&walk.file, &mount.path, Path::new(&mount.value)))));
     Ok(walk.mounts)
 }
 
 /// Every `$path` of a project file, also the ones that do not exist: (instance path `a/b`, file or folder, exists)
 pub fn mappings(project_file: &Path) -> Result<Vec<(String, PathBuf, bool)>, String> {
-    let walk = walk(project_file, None)?;
+    let mut unchanged = |path| Ok(path);
+    let walk = walk(project_file, None, &mut unchanged)?;
     let present = walk.mounts.into_iter().filter(|mount| !mount.instance).map(|mount| (mount.path, PathBuf::from(mount.value), true));
     Ok(present.chain(walk.missing.into_iter().map(|mount| (mount.path, PathBuf::from(mount.value), false))).collect())
 }
 
-fn walk(project_file: &Path, at: Option<&str>) -> Result<Walk, String> {
+fn walk<'a>(project_file: &Path, at: Option<&str>, source: &'a mut dyn FnMut(PathBuf) -> Result<PathBuf, String>) -> Result<Walk<'a>, String> {
     let file = resolve(Path::new(""), &project_file.to_string_lossy());
     let project = read_project(&file)?;
     let Some(tree @ Node::Object(_)) = project.get("tree") else {
         return Err(format!("{}: not a Rojo project (no \"tree\")", file.display()));
     };
-    let mut walk = Walk { file: file.clone(), mounts: Vec::new(), missing: Vec::new() };
+    let mut walk = Walk { file: file.clone(), mounts: Vec::new(), missing: Vec::new(), source };
     let base = file.parent().map(Path::to_path_buf).unwrap_or_default();
     if tree.string("$className") == Some("DataModel") {
         for (name, child) in tree.children() {
@@ -255,14 +267,16 @@ fn walk(project_file: &Path, at: Option<&str>) -> Result<Walk, String> {
     Ok(walk)
 }
 
-struct Walk {
+struct Walk<'a> {
     file: PathBuf,
     mounts: Vec<Mount>,
     /// The non-optional `$path`s that do not exist
     missing: Vec<Mount>,
+    /// What each `$path` stands for ([`mounts_with`])
+    source: &'a mut dyn FnMut(PathBuf) -> Result<PathBuf, String>,
 }
 
-impl Walk {
+impl Walk<'_> {
     fn visit(&mut self, node: &Node, segments: &mut Vec<String>, base: &Path, depth: u32) -> Result<(), String> {
         if depth > 32 {
             return Err(format!("{}: project nesting too deep", self.file.display()));
@@ -273,7 +287,7 @@ impl Walk {
             _ => (None, false),
         };
         if let Some(path_value) = path_value {
-            let source = resolve(base, path_value);
+            let source = (self.source)(resolve(base, path_value))?;
             let source_text = source.to_string_lossy().into_owned();
             if !source.exists() {
                 if !optional {

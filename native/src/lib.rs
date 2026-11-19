@@ -14,15 +14,25 @@ pub mod catalog;
 pub mod download;
 #[cfg(feature = "desktop")]
 pub mod doctor;
+/// `rur diff` (rur-native diff): a source rendered at a git ref and in the working tree, compared
+#[cfg(feature = "desktop")]
+pub mod diff;
 /// `rur-native debug-report`: a shareable report of the project's stories (report.rs)
 #[cfg(feature = "desktop")]
 pub mod report;
 pub mod engine;
+/// `--git-ref`: a run's sources extracted at a git commit
+#[cfg(feature = "desktop")]
+pub mod gitref;
 pub mod glyphs;
 #[cfg(feature = "desktop")]
 pub mod headless;
 #[cfg(feature = "desktop")]
 pub mod input;
+/// What the Node CLI's JavaScript did with values (JSON in key order, toFixed, localeCompare), for the commands that
+/// moved from it
+#[cfg(feature = "desktop")]
+pub mod js;
 pub mod memtrace;
 #[cfg(feature = "desktop")]
 pub mod microprofiler_ui;
@@ -49,7 +59,15 @@ pub mod sequence;
 #[cfg(feature = "desktop")]
 pub mod serve;
 #[cfg(feature = "desktop")]
+pub mod story_args;
+#[cfg(feature = "desktop")]
 pub mod story_render;
+/// A render's summary.json and scene diagnostics
+#[cfg(feature = "desktop")]
+pub mod summary;
+/// `rur sweep` (rur-native sweep): every story of a project rendered and reported on
+#[cfg(feature = "desktop")]
+pub mod sweep;
 #[cfg(feature = "desktop")]
 pub mod viewports;
 #[cfg(feature = "desktop")]
