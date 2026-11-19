@@ -171,7 +171,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/engine/cli.rs",
         "pub fn parse(",
-        0xa569d4b2026982f2,
+        0xa67986a94929099e,
     ),
     (
         Crate::Native,
@@ -263,7 +263,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Engine,
         "src/record/run.rs",
         "pub fn parse(",
-        0x1743072293f5d4ec,
+        0x8d2cb867f9db6e8c,
     ),
     (
         Crate::Engine,
@@ -487,6 +487,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--json",
     "--keep",
     "--keys",
+    "--latency",
     "--limit",
     "--load-module",
     "--load-string",
@@ -517,6 +518,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--quiet",
     "--retries",
     "--rojo-at",
+    "--record-side",
     "--rotation-clipping",
     "--run-context",
     "--save-frames",

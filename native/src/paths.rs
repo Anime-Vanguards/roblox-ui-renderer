@@ -203,6 +203,7 @@ const PATH_OPTIONS: &[&str] = &[
     "--module",
     "--model",
     "--harness",
+    "--server-harness",
     "--controls",
     "--context",
     "--actions",

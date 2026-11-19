@@ -92,6 +92,11 @@ pub struct Args {
     pub topbar_inset: f64,
     /// `--device desktop|touch|gamepad`: the input hardware UserInputService reports (Options::device)
     pub device: Option<String>,
+    /// `--server-harness <file>` with `--run-context loopback`: the loopback harness whose `Server` runs on the pair's
+    /// server (the emulator's "Loopback run context"); the story is the client's. None: the place's own server scripts
+    pub server_harness: Option<String>,
+    /// `--latency <frames>` with `--run-context loopback`: each way's delivery that many frames on (1: the next frame)
+    pub latency: Option<u32>,
     /// The first argument [`parse`] did not know (a misspelt option, or a value with no option); the
     /// commands people type refuse it ([`parse_command`]), the service and batch requests the CLI
     /// builds skip it
@@ -183,6 +188,12 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 }
             }
             "--test-hooks" => result.test_hooks = need()? != "0",
+            "--server-harness" => result.server_harness = Some(need()?),
+            "--latency" => {
+                let text = need()?;
+                let frames = text.parse::<u32>().map_err(|_| format!("--latency: expected a whole number of frames, got {text}"))?;
+                result.latency = Some(frames);
+            }
             "--dump-scene" | "--out" => result.dump_scene = Some(need()?),
             "--dependencies" => result.dependencies = Some(need()?),
             "--plugin" => result.plugin = Some(need()?),
@@ -470,22 +481,16 @@ fn run_with(args: Args, free: bool) -> Result<i32, String> {
         story::read_actions(spec)?;
     }
     let prepared = prepare(&args)?;
-    let engine = super::new_engine(prepared.options)?;
+    let spec = project_spec(&args, &prepared)?;
+    let server = loopback_server(&args, &prepared, &spec)?;
+    let engine = story_engine(&prepared, &server)?;
     // RUR_LUAU_PROFILE=<file>: folded Luau stacks (startup, then frames after the first reply)
     let _profile = crate::luau_profile::begin();
     let lua = Lua::new();
     interpret(&lua, &engine);
     crate::luau_profile::install(&lua);
     let result = (|| {
-        let spec = story::ProjectSpec {
-            roots: prepared.roots.clone(),
-            snapshots: args.snapshots.clone(),
-            snapshot_dir: prepared.snapshot_dir.clone(),
-            mounts: prepared.mounts.clone(),
-            plugin: plugin_settings(&args)?,
-            model_assets: Default::default(),
-        };
-        let project = story::mount_project(&lua, &engine, &spec, started)?;
+        let project = mount_story_project(&lua, &engine, &args, &spec, started, server)?;
         if args.test_hooks {
             install_test_hooks(&lua, &engine).map_err(|e| e.to_string())?;
         }
@@ -720,18 +725,12 @@ impl Host {
         let _memory = crate::memtrace::scope(crate::memtrace::Tag::Project);
         let started = Instant::now();
         let prepared = prepare(args)?;
-        let engine = super::new_engine(prepared.options)?;
+        let spec = project_spec(args, &prepared)?;
+        let server = loopback_server(args, &prepared, &spec)?;
+        let engine = story_engine(&prepared, &server)?;
         let lua = Lua::new();
         interpret(&lua, &engine);
-        let spec = story::ProjectSpec {
-            roots: prepared.roots.clone(),
-            snapshots: args.snapshots.clone(),
-            snapshot_dir: prepared.snapshot_dir.clone(),
-            mounts: prepared.mounts.clone(),
-            plugin: plugin_settings(args)?,
-            model_assets: Default::default(),
-        };
-        let project = story::mount_project(&lua, &engine, &spec, started)?;
+        let project = mount_story_project(&lua, &engine, args, &spec, started, server)?;
         Ok(Host {
             session: None,
             project: Some(project),
@@ -845,11 +844,12 @@ pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
     let prepared = prepare(args)?;
     let spec = project_spec(args, &prepared)?;
     let target = prepared.target;
-    let engine = super::new_engine(prepared.options)?;
+    let server = loopback_server(args, &prepared, &spec)?;
+    let engine = story_engine(&prepared, &server)?;
     let lua = Lua::new();
     interpret(&lua, &engine);
     let result = (|| {
-        let project = story::mount_project(&lua, &engine, &spec, started)?;
+        let project = mount_story_project(&lua, &engine, args, &spec, started, server)?;
         // A profile of the run (`rur-native render --profile`, the emulator's profiler) hooks the VM once the project
         // is mounted, as `ree record` does, and reads it after the last frame and the export; nothing without one
         super::luau_profile::install(&lua);
@@ -875,6 +875,52 @@ pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
 /// project mounts.
 fn interpret(lua: &Lua, engine: &Engine) {
     super::lua::modules::interpret_all(lua, engine);
+}
+
+/// `--run-context loopback`'s server (the emulator's "Loopback run context"): started before its client, the story's
+/// engine, with the project mounted as a server run mounts it; none for any other run. `--server-harness` needs a
+/// loopback run.
+fn loopback_server(args: &Args, prepared: &Prepared, spec: &story::ProjectSpec) -> Result<Option<super::Emulator>, String> {
+    if prepared.options.run_context != super::RunContext::Loopback {
+        if args.server_harness.is_some() || args.latency.is_some() {
+            return Err("--server-harness and --latency need --run-context loopback".into());
+        }
+        return Ok(None);
+    }
+    let core = super::mount::ProjectSpec {
+        roots: spec.roots.clone(),
+        snapshots: spec.snapshots.clone(),
+        snapshot_dir: spec.snapshot_dir.clone(),
+        mounts: spec.mounts.clone(),
+        model_assets: spec.model_assets.clone(),
+    };
+    super::loopback::start_server(&super::new_engine, &prepared.options, &core, &|_| {}).map(Some)
+}
+
+/// The engine a run's story mounts in: [`super::new_engine`] of the run's options, or a loopback pair's client (its
+/// own random sequence: the run's seed plus one)
+fn story_engine(prepared: &Prepared, server: &Option<super::Emulator>) -> Result<Rc<Engine>, String> {
+    if server.is_none() {
+        return super::new_engine(prepared.options.clone());
+    }
+    let engine = super::new_engine(super::loopback::side_options(&prepared.options, super::loopback::Side::Client))?;
+    super::loopback::ready_client(&engine);
+    Ok(engine)
+}
+
+/// The project of `spec` mounted in the story's VM. A loopback pair's client mounts none (its DataModel comes from the
+/// server at the join): it starts the engine alone, links with `server`, whose part of `--server-harness` starts (none:
+/// the place's own server scripts), and its player joins before the story mounts.
+fn mount_story_project(lua: &Lua, engine: &Rc<Engine>, args: &Args, spec: &story::ProjectSpec, started: Instant, server: Option<super::Emulator>) -> Result<story::Project, String> {
+    let Some(server) = server else { return story::mount_project(lua, engine, spec, started) };
+    let client = story::ProjectSpec { roots: Vec::new(), snapshots: Vec::new(), snapshot_dir: None, mounts: Vec::new(), ..spec.clone() };
+    let project = story::mount_project(lua, engine, &client, started)?;
+    super::loopback::link(server, lua, engine, super::loopback::Spec { latency: args.latency.unwrap_or(1), record_server: false })?;
+    let frame = engine.state.borrow().sched.frame_duration;
+    let frame = if frame > 0.0 { frame } else { 1.0 / 60.0 };
+    let harness = args.server_harness.as_deref().map(std::path::Path::new);
+    super::record::run::begin_server(lua, engine, harness, frame, 600)?;
+    Ok(project)
 }
 
 fn project_spec(args: &Args, prepared: &Prepared) -> Result<story::ProjectSpec, String> {
@@ -974,10 +1020,11 @@ impl Preloaded {
         let prepared = prepare(args)?;
         let spec = project_spec(args, &prepared)?;
         let target = prepared.target;
-        let engine = super::new_engine(prepared.options)?;
+        let server = loopback_server(args, &prepared, &spec)?;
+        let engine = story_engine(&prepared, &server)?;
         let lua = Lua::new();
         interpret(&lua, &engine);
-        let project = match story::mount_project(&lua, &engine, &spec, started) {
+        let project = match mount_story_project(&lua, &engine, args, &spec, started, server) {
             Ok(project) => project,
             Err(error) => {
                 drop(lua);
@@ -2000,5 +2047,81 @@ mod layer_tests {
         let bad = format!("Saved/Blob={}", model.to_string_lossy());
         assert!(run_once(&args(&fixture, &["--load", &bad])).err().unwrap().contains("not a service"));
         std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod loopback_tests {
+    use super::*;
+
+    const SERVER: &str = "return {\n\tServer = function(Context)\n\t\tlocal Storage = game:GetService(\"ReplicatedStorage\")\n\t\tlocal Greeting = Instance.new(\"StringValue\")\n\t\tGreeting.Name = \"Greeting\"\n\t\tGreeting.Value = \"hello from the server\"\n\t\tGreeting.Parent = Storage\n\t\tlocal Count = Instance.new(\"RemoteEvent\")\n\t\tCount.Name = \"Count\"\n\t\tCount.Parent = Storage\n\t\ttask.wait(0.2)\n\t\tGreeting.Value = \"changed by the server\"\n\t\tCount:FireAllClients(42)\n\tend,\n}\n";
+    // (each label says what it shows as it is set: a scene holds glyphs, not text)
+    const FIXTURE: &str = "return function(Target)\n\tlocal Storage = game:GetService(\"ReplicatedStorage\")\n\tlocal RunService = game:GetService(\"RunService\")\n\tlocal function Set(Label, Text)\n\t\tLabel.Text = Text\n\t\tprint(Label.Name .. \": \" .. Text)\n\tend\n\tlocal function Label(Name, Y, Text)\n\t\tlocal Made = Instance.new(\"TextLabel\")\n\t\tMade.Name = Name\n\t\tMade.Position = UDim2.fromOffset(10, Y)\n\t\tMade.Size = UDim2.fromOffset(380, 40)\n\t\tMade.Parent = Target\n\t\tSet(Made, Text)\n\t\treturn Made\n\tend\n\tLabel(\"Side\", 10, (RunService:IsClient() and \"client\" or \"server\") .. \" \" .. tostring(Storage:FindFirstChild(\"Greeting\") ~= nil))\n\tlocal Greeting = Label(\"Greeting\", 60, Storage.Greeting.Value)\n\tlocal Count = Label(\"Count\", 110, \"nothing yet\")\n\tStorage.Greeting.Changed:Connect(function(Value)\n\t\tSet(Greeting, Value)\n\tend)\n\tStorage.Count.OnClientEvent:Connect(function(Value)\n\t\tSet(Count, \"the server sent \" .. Value)\n\tend)\nend\n";
+
+    /// What a run printed, and each label's glyph count (its path's last part)
+    fn shown(output: &SceneOutput) -> (Vec<String>, Vec<(String, usize)>) {
+        let scene = &output.scene;
+        let printed = scene["diagnostics"]["output"].as_array().into_iter().flatten().filter_map(|line| line["message"].as_str().map(str::to_string)).collect();
+        let glyphs = scene["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|node| {
+                let name = node["path"].as_str()?.rsplit('.').next()?.to_string();
+                let count = node["text"]["lines"].as_array()?.iter().map(|line| line["glyphs"].as_array().map_or(0, Vec::len)).sum();
+                Some((name, count))
+            })
+            .collect();
+        (printed, glyphs)
+    }
+
+    /// The glyphs a label of `text` draws (one a character but spaces)
+    fn glyphs_of(text: &str) -> usize {
+        text.chars().filter(|c| !c.is_whitespace()).count()
+    }
+
+    /// `--run-context loopback --server-harness`: the story is the client's, its DataModel the server's replicated
+    /// containers (the emulator's "Loopback run context"); the server's harness makes a value before the join, then
+    /// changes it and fires a remote at 0.2 s, and the client's labels draw what arrived. `--server-harness` without the
+    /// loopback context is refused.
+    #[test]
+    fn a_story_on_a_loopback_client_shows_what_the_server_sent() {
+        let directory = std::env::temp_dir().join(format!("rur-loopback-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root = directory.join("root");
+        std::fs::create_dir_all(root.join("ReplicatedStorage")).unwrap();
+        let (server, fixture) = (directory.join("server.luau"), directory.join("labels.luau"));
+        std::fs::write(&server, SERVER).unwrap();
+        std::fs::write(&fixture, FIXTURE).unwrap();
+        let repo = crate::engine::default_repo();
+        let argv = |time: &str, extra: &[&str]| -> Args {
+            let mut list: Vec<String> = vec![
+                "--repo".into(), repo.to_string_lossy().into_owned(),
+                "--roots".into(), root.to_string_lossy().into_owned(),
+                "--fixture".into(), fixture.to_string_lossy().into_owned(),
+                "--viewport".into(), "400x200".into(), "--time".into(), time.into(), "--no-snapshots".into(),
+                "--mode".into(), "play".into(),
+            ];
+            list.extend(extra.iter().map(|arg| arg.to_string()));
+            parse(&list).unwrap()
+        };
+        let server_path = server.to_string_lossy().into_owned();
+        let with_server = |time: &str| run_once(&argv(time, &["--run-context", "loopback", "--server-harness", &server_path])).unwrap();
+
+        let (printed, glyphs) = shown(&with_server("0.1"));
+        for (label, text) in [("Side", "client true"), ("Greeting", "hello from the server"), ("Count", "nothing yet")] {
+            assert!(printed.contains(&format!("{label}: {text}")), "{printed:?}");
+            assert!(glyphs.contains(&(label.to_string(), glyphs_of(text))), "{label} draws {text:?}: {glyphs:?}");
+        }
+        assert!(!printed.iter().any(|line| line.contains("changed by the server")), "{printed:?}");
+
+        let (printed, glyphs) = shown(&with_server("0.5"));
+        for (label, text) in [("Greeting", "changed by the server"), ("Count", "the server sent 42")] {
+            assert!(printed.contains(&format!("{label}: {text}")), "{printed:?}");
+            assert!(glyphs.contains(&(label.to_string(), glyphs_of(text))), "{label} draws {text:?}: {glyphs:?}");
+        }
+
+        let refused = run_once(&argv("0.1", &["--server-harness", &server_path]));
+        assert!(refused.is_err_and(|error| error.contains("--run-context loopback")));
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

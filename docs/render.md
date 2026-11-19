@@ -45,6 +45,7 @@ node cli/rur.mjs render --story path/to/Button.story.luau --viewport 1200x900 --
 | `--actions JSON\|file` | Scripted mouse/keyboard input timeline ([stories.md](stories.md#timed-input---actions)). |
 | `--rotation-clipping enabled\|disabled` | Toggle modern Roblox clipping of rotated descendants (default `enabled`). |
 | `--mode edit\|play`, `--device desktop\|touch\|gamepad`, `--player <name>`, `--place-id <n>`, `--topbar-inset <px>` | Emulated client environment settings. |
+| `--run-context loopback`, `--server-harness <file>`, `--latency <frames>` | With `--mode play`: the story runs on the client of a server and client in one run (the engine's "Loopback run context"). The server mounts the project and runs the harness's `Server` (`{ Server = function(Context) ... end }`; without it, the place's own server scripts); the client's DataModel is the server's replicated copy, kept up to date, and remotes cross both ways. `--latency` delays each way by that many frames (default 1). |
 | `--snapshot-dir <dir>` | Mount Studio-only instances previously exported via `tools/sweep/studio-assets.mjs`. |
 
 ### Output files

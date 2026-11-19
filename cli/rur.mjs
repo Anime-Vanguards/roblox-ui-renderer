@@ -62,7 +62,9 @@
 // ScreenGui the run leaves under the PlayerGui and CoreGui (DisplayOrder, then the order they were
 // parented or enabled), not only the story gui. --topbar-inset <px>: GuiService's top inset (default 0, as
 // in Studio's Edit mode), which ScreenGuis with IgnoreGuiInset false start below; scripts read AbsolutePosition
-// from below it, as in a Roblox client.
+// from below it, as in a Roblox client. --run-context loopback --server-harness <file> [--latency <frames>] (with
+// --mode play): the story is the client of a server and client in one run (the engine's "Loopback run context"); the
+// server mounts the project and runs the harness's Server, and the client's DataModel is the server's replicated copy.
 // --viewport WxH (logical px), WxH@physical (divided by --scale) or --viewport-from <png> (its size,
 // physical px). --plugin [settings JSON]: a Studio `plugin` global with dock widgets. --json: stdout
 // holds only the JSON result (one line). --tag <name> (<out>/<name>/), --keep (numbered <out>-2, ...
@@ -214,11 +216,11 @@ export function runtimeArgs(args, scenePath = null, project = null) {
 		const value = args.plugin === true ? "1" : String(args.plugin);
 		result.push("--plugin", value.trim().startsWith("{") || value === "1" || value === "0" ? value : path.resolve(value));
 	}
-	for (const key of ["story", "module", "model", "fixture", "viewport", "scale", "time", "mode", "player", "background", "place-name", "snapshot-dir", "actions", "controls", "camera", "place-id", "rotation-clipping", "topbar-inset", "device"]) {
+	for (const key of ["story", "module", "model", "fixture", "viewport", "scale", "time", "mode", "player", "background", "place-name", "snapshot-dir", "actions", "controls", "camera", "place-id", "rotation-clipping", "topbar-inset", "device", "run-context", "server-harness", "latency"]) {
 		if (args[key] !== undefined && args[key] !== true) {
 			// --actions / --controls: a JSON file or inline JSON
 			const inline = key === "actions" ? "[" : "{";
-			const isPath = ["story", "module", "model", "fixture", "snapshot-dir"].includes(key) || ((key === "actions" || key === "controls") && !String(args[key]).trim().startsWith(inline));
+			const isPath = ["story", "module", "model", "fixture", "snapshot-dir", "server-harness"].includes(key) || ((key === "actions" || key === "controls") && !String(args[key]).trim().startsWith(inline));
 			const value = isPath ? path.resolve(String(args[key])) : String(args[key]);
 			result.push(`--${key === "place-name" ? "place" : key}`, value);
 		}

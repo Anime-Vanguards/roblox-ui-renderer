@@ -109,8 +109,13 @@ impl GuiEngine for Engine {
 }
 
 /// An engine as rur runs it: with the GUI layer and (on the desktop) manifest bundles from the 3D
-/// worker that draws ViewportFrames (viewports.rs).
+/// worker that draws ViewportFrames (viewports.rs). A server (a loopback run's, or `--run-context
+/// server`) has neither: it lays nothing out and draws no ViewportFrame (bundles it mounts come
+/// through the emulator's own asset worker).
 pub fn new_engine(options: Options) -> Result<Rc<Engine>, String> {
+    if options.run_context == RunContext::Server {
+        return Engine::new(options);
+    }
     let engine = Engine::with_layers(options, vec![Rc::new(GuiLayer)])?;
     #[cfg(feature = "desktop")]
     engine.set_bundle_source(Box::new(WorkerBundles(crate::viewports::ViewportWorker::new(&engine.options.repo, engine.options.offline))));
