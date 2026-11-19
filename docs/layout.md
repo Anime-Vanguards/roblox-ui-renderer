@@ -1,127 +1,72 @@
 # Layout rules
 
-How rur's layout (`native/src/engine/layout/`) computes `AbsolutePosition`, `AbsoluteSize`,
-`TextBounds` and scroll state. Each rule was measured in Studio; the probe scripts are in
-`tools/studio/` and `tools/analysis/layout_probes.py` compares their numbers with rur's.
+How `rur`'s layout engine (`native/src/engine/layout/`) computes `AbsolutePosition`, `AbsoluteSize`, `TextBounds`, and `ScrollingFrame` geometry. All rules are measured in Roblox Studio via probes in `tools/studio/` and validated by `tools/analysis/layout_probes.py`.
 
-## Arithmetic
+## Single-precision arithmetic
 
-- Studio's GUI arithmetic is single precision (float32), in unscaled local units, then scaled. Sizes:
-  `Wu = f32(f32(Size.Scale * parent content Wu) + Offset)`, `AbsoluteSize = f32(Wu * s)` with `s` the
-  float32 product of the UIScale chain. Paddings, positions, list offsets and `TextBounds` follow the
-  same pattern. It matters at exact fits (a text that fits a box at 26.0 in float32 but not at
-  25.9999985 in double) and at .5 pixel snapping.
-- `AbsolutePosition` is read through the centre: `c = f32(anchored + f32(W * 0.5))`, then
-  `f32(c - f32(W * 0.5))`, so 18.6 can read back as 18.600006 next to a wide object.
-- AnchorPoint components are clamped to [0, 1]. `UIScale.Scale` is clamped to [1e-7, 1000] when assigned.
+- Studio evaluates GUI layout in **32-bit float (`f32`)** in unscaled local space first, then multiplies by the `UIScale` product `s`:
+  `Wu = f32(f32(Size.Scale * parent_content_Wu) + Offset)` → `AbsoluteSize = f32(Wu * s)`.
+  Padding, positions, list offsets, and `TextBounds` follow the same `f32` order—critical for tight text fits (e.g., `26.0` in `f32` vs. `25.9999985` in `f64`) and `.5` pixel snap boundaries.
+- `AbsolutePosition` reconstructs via the center: `c = f32(anchored + f32(W * 0.5))`, then `f32(c - f32(W * 0.5))`, reproducing Studio's rounding quirks (such as `18.6` reading back as `18.600006` next to a wide element).
+- `AnchorPoint` clamps to `[0, 1]`. `UIScale.Scale` clamps to `[1e-7, 1000]` on assignment.
 
-## The top-bar inset
+## Top-bar inset
 
-- With `--topbar-inset`, scripts read `AbsolutePosition` measured from below the inset, as in a playing
-  Roblox client, so a ScreenGui's content reads the inset higher than it is drawn. With a 58 px inset, an
-  `IgnoreGuiInset` ScreenGui reads `(0, -58)` and the full screen height. A default one reads `(0, 0)`, 58 px
-  shorter. `InputObject.Position`, `Mouse.Y` and `GetGuiObjectsAtPosition` use the same space. Layout
-  records, drawing, hit tests and exported rects stay in screen pixels.
+With `--topbar-inset <px>` (e.g., `58`), scripts read `AbsolutePosition` in Roblox client space (shifted upward by the inset relative to physical screen coordinates):
+- An `IgnoreGuiInset = true` `ScreenGui` reads `(0, -58)` with full screen height.
+- A default `ScreenGui` reads `(0, 0)` with height reduced by `58 px`.
+- `InputObject.Position`, `Mouse.Y`, and `GetGuiObjectsAtPosition` use the same inset coordinate space, while layout records, rendering, hit tests, and exported rects remain in screen pixels.
 
 ## AutomaticSize
 
-- Children size and position against a *stable* size: the base size (Size and constraints) grown on
-  the automatic axes by the extents the children have without their scale terms. The final size is the
-  larger of the stable size and where the children end up against it. Base 30x20 with a child at
-  Position (1, 5), 20 wide: the children see 30, the final width is 55.
-- Descendants count, not only children: every visible descendant below the children of a plain
-  container extends it (not into ScrollingFrames), with scale positions counting as 0. A child that is
-  itself AutomaticSize covers its content on its automatic axes. A scale-sized descendant that holds
-  children counts by what it holds.
-- UIPadding scale components are ignored for the automatic size (offsets count) but apply against the
-  final size when placing the content.
-- The space an object measures scale-sized content against blends both sides of its position by its
-  AnchorPoint `a`: `(1 - a) * (available - p) + a * p`.
-- A UIAspectRatioConstraint on an automatic object applies to the stable size, and the stable size is
-  then measured from the content on the other axis too.
-- Text objects resolve the scale Size of their automatic axes against the parent's whole size, not its
-  content box.
-- Wrapped text with AutomaticSize X wraps at the width available in the parent.
-- AutomaticSize Y text keeps only the lines that fit the height available to it (the parent's content
-  height below its position). A line fits when its bottom is within float32 rounding of that height, so a
-  label in an automatic parent keeps every line it was sized for, under any UIScale and device scale.
-- An AutomaticSize object whose centre lies outside its clip is not drawn at all, nor its subtree
-  (`fixtures/stories-autosize-cull*.luau`); `summary.json` lists these as `culled`.
+- **Two-pass sizing:** Children size and position against the container's **stable size** (base `Size` + constraints expanded on automatic axes by children's non-scale extents). The container's final size is `max(stable_size, child_final_extents)`. Example: a `30x20` base container with a `20 px` child at `Position (1, 5)` resolves child scale against `30`, yielding final width `55`.
+- **Deep descendants:** Visible descendants beyond direct children also expand plain containers (stopping at `ScrollingFrame` boundaries), with scale positions treated as `0`. Nested `AutomaticSize` children contribute their content on automatic axes; scale-sized descendants with children contribute their children's extents.
+- **Padding:** `UIPadding` scale components are ignored during automatic size measurement (offsets count), then applied against the final size when placing children.
+- **Anchor blending:** Available space for scale-sized content blends both sides around `AnchorPoint` `a`: `(1 - a) * (available - p) + a * p`.
+- **Aspect ratio:** `UIAspectRatioConstraint` applies to the stable size, which is then measured against content on the opposite axis as well.
+- **Automatic text:** Text objects resolve scale `Size` on automatic axes against the parent's full size (not padded content box). Wrapped text with `AutomaticSize.X` wraps at available parent width. `AutomaticSize.Y` keeps only lines whose bottom falls within `f32` rounding of available parent height below the object's position.
+- **Center culling:** Any `AutomaticSize` element whose center lies outside its clip rect is not drawn at all, nor is its subtree (`fixtures/stories-autosize-cull*.luau`; reported under `culled` in `summary.json`).
 
-## Lists, grids, pages, tables
+## Lists, grids, pages, and tables
 
-- UIListLayout: a line is as thick as its thickest item. With flex (Wraps, HorizontalFlex /
-  VerticalFlex other than None, or an ItemLineAlignment other than Automatic) items grow by GrowRatio
-  shares of the free space and shrink weighted by ShrinkRatio x size, freezing at 0 as CSS does; Space*
-  alignments treat Padding as a minimum gap. In flex lists a UIScale'd item keeps its unscaled
-  cross-axis size and invisible items are 0x0 at the content origin.
-- A list does not wrap along an automatic axis of its container.
-- Invisible children of a UIListLayout or UIGridLayout sit at the content origin; list children keep
-  their size, grid children get the cell size.
-- UIGridLayout: a UIScale'd item is its cell scaled about the cell centre; cells per row allow a relative
-  1e-5 overshoot.
-- UIPageLayout pages sit side by side one container size plus Padding apart, the current page at the
-  origin. UITableLayout sizes columns and rows by their largest cells.
+- **`UIListLayout`:** Each line is as thick as its thickest item. When flex is active (`Wraps`, non-`None` `HorizontalFlex`/`VerticalFlex`, or non-`Automatic` `ItemLineAlignment`), items grow proportional to `GrowRatio` and shrink weighted by `ShrinkRatio * size` (clamping at `0` like CSS), `Space*` alignments treat `Padding` as a minimum gap, `UIScale`'d items keep unscaled cross-axis size, and invisible items sit at `0x0` at the content origin. Lists never wrap along an automatic axis of their container.
+- **Invisible items:** In non-flex `UIListLayout`, invisible children sit at the content origin keeping their size; in `UIGridLayout`, they sit at the origin with cell size.
+- **`UIGridLayout`:** `UIScale`'d cells scale around the cell center; column count allows a `1e-5` relative overshoot tolerance.
+- **`UIPageLayout` & `UITableLayout`:** Pages sit side by side spaced by `container_size + Padding` with the active page at the origin. Tables size rows and columns by their largest cells.
 
-## Borders and padding
+## Borders, padding, and constraints
 
-- BorderMode Inset insets an object's content by BorderSizePixel, Middle by half of it, Outline not at
-  all, like an offset UIPadding.
-- A content box narrower than its padding lies between the two padded edges.
-
-## Constraints
-
-- UIAspectRatioConstraint FitWithinMaxSize: the largest box of the ratio inside the object's size.
-  ScaleWithParentSize: the dominant axis keeps its size, the other follows the ratio, capped by the parent.
-- UITextSizeConstraint bounds the UIScale'd text size: `floor(TextSize * UIScale)` clamped to
-  `[floor(MinTextSize), floor(MaxTextSize)]`.
+- **Borders:** `BorderMode.Inset` insets content by `BorderSizePixel`, `Middle` by `BorderSizePixel / 2`, `Outline` by `0` (equivalent to offset `UIPadding`). If padding exceeds width, the content box sits between the inverted edges.
+- **`UIAspectRatioConstraint`:** `FitWithinMaxSize` chooses the largest fitting box of the target ratio; `ScaleWithParentSize` preserves the dominant axis and scales the other capped by the parent.
+- **`UITextSizeConstraint`:** Clamps `floor(TextSize * UIScale)` to `[floor(MinTextSize), floor(MaxTextSize)]`.
 
 ## ScrollingFrame
 
-- CanvasSize scale is relative to the frame's parent content size; offsets scale with UIScale and are
-  truncated to whole px.
-- Assigning CanvasPosition clamps it at once to the frame's current layout.
-- Bars: a vertical bar is needed when the canvas is taller than the frame, a horizontal one when it is
-  wider; a needed bar makes the other axis need its bar when canvas >= frame - (thickness + border).
-- `AbsoluteWindowSize` is the frame minus `ScrollBarThickness + BorderSizePixel` per visible bar.
-- The canvas offset is rounded to whole physical pixels, half up.
-- AutomaticCanvasSize: an automatic axis is `max(CanvasSize, content extent + UIPadding offsets)`; list
-  Padding is measured against the frame's own Size applied to the measuring box.
+- `CanvasSize` scale resolves against the frame's parent content size; offsets multiply by `UIScale` and truncate to integers.
+- Writing `CanvasPosition` immediately clamps to current layout bounds.
+- **Scroll bars:** A bar appears on an axis when `canvas > frame`. Once one bar is visible, the perpendicular axis also shows its bar whenever `canvas >= frame - (ScrollBarThickness + BorderSizePixel)`. `AbsoluteWindowSize` subtracts `ScrollBarThickness + BorderSizePixel` for each visible bar.
+- Canvas scroll offset rounds half-up to whole physical pixels.
+- **`AutomaticCanvasSize`:** Evaluates to `max(CanvasSize, content_extent + UIPadding_offsets)` (list `Padding` resolves against the frame's own `Size`).
 
 ## Rotation
 
-- Under rotated ancestors, `AbsolutePosition` is the ancestor-rotated centre of the unrotated box minus
-  half of `AbsoluteSize`; the object's own Rotation does not move it. `AbsoluteSize` is unrotated.
-- Children placed by a UIListLayout or UIGridLayout ignore their own Rotation.
-- Rotated descendants of a clipping, unrotated frame are clipped by it in the current (modern) rotation
-  clipping mode, with a coarse cull; `--rotation-clipping disabled` selects the legacy behaviour.
+- Under rotated ancestors, `AbsolutePosition` is the rotated center of the unrotated box minus half of `AbsoluteSize`; an object's own `Rotation` does not shift `AbsolutePosition`, and `AbsoluteSize` stays unrotated.
+- Items laid out by `UIListLayout` or `UIGridLayout` ignore their own `Rotation`.
+- Modern rotation clipping (`--rotation-clipping enabled`, default) clips rotated descendants against unrotated clipping ancestors with a coarse cull; `--rotation-clipping disabled` restores legacy behavior.
 
 ## Path2D
 
-- A Path2D has no rectangle of its own. Its control points resolve against its parent's: `Position` like a
-  GuiObject's Position, `LeftTangent` and `RightTangent` like sizes. A rotated parent turns the path with it.
-- A UIScale scales the parent's rectangle, not the path's offsets or `Thickness`; UIPadding does not move it; in
-  a ScrollingFrame it resolves against the window and does not scroll.
-- `GetPositionOnCurve`, `GetTangentOnCurve`, their `ArcLength` forms, `GetLength` and `GetBoundingRect` answer from
-  the parent's laid-out rectangle, in Roblox's float32 digits. The curve itself is the engine's
-  ([its documentation](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/engine.md)); by
-  length it answers what a client answers, which near a tight bend is not the point at that share of the length.
+- Has no own rectangle; control point `Position` resolves like `GuiObject.Position` against the parent rect, and `LeftTangent`/`RightTangent` resolve like sizes. Rotates with a rotated parent.
+- `UIScale` scales the parent rect, not path offsets or `Thickness`. `UIPadding` does not offset it. Inside a `ScrollingFrame`, it resolves against the window and does not scroll.
+- `GetPositionOnCurve`, `GetTangentOnCurve`, their `ArcLength` variants, `GetLength`, and `GetBoundingRect` evaluate against the parent's laid-out rect in `f32` matching Roblox (including Roblox's arc-length approximation near sharp bends; see `ree`'s [docs/engine.md](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/engine.md)).
 
 ## Text boxes
 
-- Size under UIScale: `floor(floor(TextSize * UIScale) * DPI)` physical px, the product in float32.
-  `TextBounds` is in absolute (scaled) px.
-- A line of W whole px fits a plain text box when `W <= f32(box * DPI)`. Rich text wraps only lines at
-  least 1 px wider than that.
-- An unwrapped line wider than its box reports its width without its trailing whitespace when that
-  makes it fit. `TextBounds.X` of wrapped text spans every line, including lines the box height cuts off.
-- Word wrap takes a break opportunity only when more of the next word fits on a fresh line; otherwise it
-  breaks inside the word.
-- TextTruncate measures the ellipsis (U+2026) by its own rounded advance; AtEnd keeps the longest prefix of
-  whole words that fits beside it (or a character prefix of the first word); SplitWord keeps the longest
-  character prefix plus its trailing whitespace. Truncated text's `TextBounds` measure what is shown.
-- TextScaled picks the largest whole size at which no word breaks and all lines fit. Plain text steps
-  through UIScale'd logical sizes, rich text through physical pixel sizes. Setting `TextScaled = true`
-  also sets `TextWrapped`, and `TextWrapped = false` clears `TextScaled`.
+- **Physical size:** `floor(floor(TextSize * UIScale) * DPI)` in `f32`. `TextBounds` is reported in absolute (scaled) pixels.
+- **Line fitting:** Plain text fits a box if `W <= f32(box * DPI)`; rich text only wraps when a line exceeds that by at least `1 px`.
+- Unwrapped lines wider than their box drop trailing whitespace from reported width if doing so makes them fit. Wrapped `TextBounds.X` spans all lines, including lines clipped vertically.
+- Word wrap moves a word to a new line only if more of it fits on a fresh line than on the remainder of the current line; otherwise it splits mid-word.
+- **`TextTruncate`:** Measures ellipsis (`…`, U+2026) using its rounded advance. `AtEnd` keeps the longest whole-word prefix (or character prefix of the first word); `SplitWord` keeps the longest character prefix plus trailing whitespace. `TextBounds` reflects the visible truncated text.
+- **`TextScaled`:** Picks the largest integer size where no word splits and all lines fit (stepping UIScale'd logical sizes for plain text, physical sizes for rich text). Enabling `TextScaled` forces `TextWrapped = true`; disabling `TextWrapped` clears `TextScaled`.
 
-See [text.md](text.md) for glyph metrics, fallback fonts and how lines are placed and drawn.
+See [text.md](text.md) for glyph metrics, font fallbacks, and text rasterization.

@@ -1,82 +1,41 @@
-# How it works
+# How rur works
 
-Everything that runs or draws a story is native (`native/`, Rust):
+Everything that executes Luau, lays out UI, rasterizes glyphs, and draws pixels runs natively in Rust (`native/`). A single binary (`rur-native`) powers the desktop storybook, headless CLI renders, the background render service, and the engine CLI. The Node layer (`cli/`) handles CLI argument parsing, project/Rojo helpers, Studio comparisons, inspection commands, and reports.
 
-- the emulated engine, [roblox-engine-emulator](https://github.com/Anime-Vanguards/roblox-engine-emulator)
-  (instances, properties, signals, the scheduler, services, project mounting, the 3D world and a recorder,
-  with your Luau running on an embedded, patched Luau VM), plus the GUI layer rur adds to it
-  (`native/src/engine`): layout, text, input, the scene export, story mounting and sessions;
-- the renderer (`native/src/render`, wgpu): Studio's measured raster rules for fills, borders, UICorner,
-  UIStroke, UIGradient, images and 9-slice, text, shadows, CanvasGroups, Path2D strokes, scroll bars and rotation;
-- the glyph rasterizer (`native/src/glyphs.rs`, `glyphs/rur_glyph.c`): FreeType 2.14.2, compiled in.
+## Architecture and source layout
 
-One binary (`rur-native`) is the desktop storybook, the renderer of `rur render` (one-shot or through a warm
-render service), the headless exporter and the engine CLI. The Node side (`cli/`) is the command line:
-options, projects, git refs, Studio comparisons, asset downloads, inspection and reports.
+- **Core engine ([roblox-engine-emulator](https://github.com/Anime-Vanguards/roblox-engine-emulator)):** Instances, Studio reflection properties/defaults, enums, datatypes, deferred signals, virtual-time scheduler, services, `require` over project layouts, the 3D world, and the 3D recorder—running Luau in an embedded, patched Luau VM.
+- **GUI layer (`native/src/engine/`):** Installed onto every engine instance via `GuiLayer` (`engine/mod.rs`):
+  - `layout/`: UDim2, `AutomaticSize`, list/grid/flex/page/table layouts, constraints, scrolling, and lazy `Absolute*` / `TextBounds` computation.
+  - `text/`: OpenType parsing and text shaping calibrated against Studio datasets.
+  - `input/`: hit testing, `GuiState`, scroll springs, `TextBox` editing, and dragging.
+  - `export.rs` & `export/retained.rs`: full `scene.json` export and incremental per-frame deltas.
+  - `story.rs`, `session.rs`, `cli.rs`: story mounting, live stdio sessions, and one-shot/standby/in-process hosts.
+- **GPU renderer (`native/src/render/`):** wgpu renderer with `shaders/uber.*.glsl`, `scene_draw.rs`, and Studio-measured raster rules (`coverage.rs`, `geometry.rs`, `sampling.rs`, `images.rs`, `groups.rs`, `text.rs`).
+- **Glyphs and assets:** `native/src/glyphs.rs` + `glyphs/rur_glyph.c` (compiled-in FreeType 2.14.2), `assets.rs` (decoded texture/atlas store, see [native/ASSETS.md](../native/ASSETS.md)), `resolve.rs` (URI resolution), and `download.rs` (HTTP downloads, auth, `rur-native assets`).
+- **App, service, and CLI commands:** `story_render.rs`, `serve.rs`, `headless.rs`, `app.rs` (desktop storybook), `places.rs`, `sweep.rs`, `diff.rs`, `story_args.rs`, `summary.rs`, and `gitref.rs`.
+- **Node CLI & test tooling:** `cli/` (`rur.mjs`, `compare.mjs`, `studio.mjs`, `clock.mjs`, `inspect.mjs`, `assets.mjs`, `places.mjs`, `rojo.mjs`, `gitref.mjs`), `fixtures/` (measurement scenes), `tools/analysis/` (curve fitting), `tools/studio/` & `tools/interaction/` (Studio probes), and `data/studio/` (frozen Studio measurements).
 
-## Source layout
+## The `roblox-engine-emulator` dependency
 
-- [roblox-engine-emulator](https://github.com/Anime-Vanguards/roblox-engine-emulator): the emulated engine
-  (instances, properties and defaults from Studio's reflection data, enums, datatypes, deferred signals, a
-  virtual-time scheduler, services, `require` over a project's layout, the 3D world and the recorder).
-- `native/src/engine`: rur's side, installed into every engine as a layer: `layout/` (UDim2, AutomaticSize,
-  list, grid and flex layouts, constraints, scrolling, text measurement) writing `Absolute*` and
-  `TextBounds` lazily as the engine does; `text/` (OpenType parsing and shaping with metrics calibrated on
-  thousands of Studio samples); `input/` (hit testing, GuiState, scrolling springs, TextBox editing, drag);
-  `export.rs` (the scene JSON) and `export/retained.rs` (per-frame deltas); `story.rs` / `session.rs` (story
-  mounting and live sessions); `cli.rs` (the engine CLI and the one-shot, standby and in-process hosts).
-- `native/src/render`: the wgpu renderer. `scene_draw.rs` turns a scene into draw records in device pixels
-  with Studio's snapping and blending rules; `shaders/uber.*.glsl` evaluate them; `coverage.rs`,
-  `geometry.rs`, `sampling.rs`, `images.rs`, `groups.rs` and `text.rs` hold the measured raster rules.
-- `native/src/glyphs.rs`: glyph atlases and hinted metrics with the compiled-in FreeType; `assets.rs`:
-  decoded textures and glyph pages ([native/ASSETS.md](../native/ASSETS.md)); `resolve.rs`: content URIs to files;
-  `download.rs`: asset downloads, the account and `rur-native assets`.
-- `native/src/story_render.rs`, `serve.rs`: `rur render`'s output and the render service; `headless.rs`:
-  captures, benchmarks and batches; `app.rs`: the desktop storybook; `places.rs`: projects and places;
-  `sweep.rs`, `diff.rs`: `rur sweep` and `rur diff` (`story_args.rs` turns their options into engine arguments,
-  `summary.rs` writes a render's summary.json); `gitref.rs`: `--git-ref`.
-- `cli/`: the command line (`rur.mjs`), compare (`compare.mjs`, `studio.mjs`, `clock.mjs`), inspection,
-  assets (`assets.mjs`: the native downloader's CLI side and Studio reads), projects (`places.mjs`, `rojo.mjs`, `gitref.mjs`:
-  `rur-native git-ref`'s CLI side).
-- `fixtures/`: the measurement scenes; `tools/analysis`: the fitting scripts behind the rules;
-  `tools/studio`, `tools/interaction`: Studio probes and input experiments; `data/studio`: frozen Studio
-  measurements the tests compare with.
+`rur` pulls [roblox-engine-emulator](https://github.com/Anime-Vanguards/roblox-engine-emulator) as a pinned Cargo git dependency in `native/Cargo.toml` (including `[patch.crates-io]` entries for its vendored patched Luau VM and `mlua-sys` at the same commit).
 
-The rules themselves: the [documentation index](README.md).
-
-## The engine: roblox-engine-emulator
-
-The engine core is its own repository,
-[roblox-engine-emulator](https://github.com/Anime-Vanguards/roblox-engine-emulator). rur depends on it as a
-cargo git dependency pinned to a commit (`native/Cargo.toml`: the crate, and under `[patch.crates-io]` its
-vendored patched Luau VM and the mlua-sys that reads its bytecode, all at the same commit) and adds its GUI layer
-through the engine's layer hooks
-(`native/src/engine/mod.rs`: `GuiLayer`). Instances, reflection, values, signals, the scheduler, services,
-the Luau API, project mounting, the 3D world and the recorder are the emulator's; text, layout, input, the
-scene export, story mounting, sessions and the engine CLI are rur's.
-
-Changing both at once:
+To develop changes across both repositories simultaneously:
 
 ```powershell
-node tools/emulator.mjs link       # build against ../roblox-engine-emulator (or: link <dir>) instead of the pin
-node tools/emulator.mjs status     # the pin, the link, the checkout beside this one
-node tools/emulator.mjs pin        # pin the checkout's pushed HEAD (Cargo.toml and Cargo.lock)
-node tools/emulator.mjs unlink     # back to the pin
+node tools/emulator.mjs link       # Point Cargo at ../roblox-engine-emulator (or: link <dir>)
+node tools/emulator.mjs status     # Show current pin, link state, and sibling checkout
+node tools/emulator.mjs pin        # Update Cargo.toml + Cargo.lock to the sibling's pushed HEAD
+node tools/emulator.mjs unlink     # Remove local path override
 ```
 
-A link is an untracked `.cargo/config.toml` at this checkout's root that patches the git dependency with the
-local path. The Luau VM stays the pinned commit's even when linked.
+`link` writes an untracked `.cargo/config.toml` patching the git source to a local path. (The vendored Luau VM stays at the pinned commit even while linked.)
 
 
 ### How scripts run
 
-Every run runs its Luau as a playing client and the emulator's `record` run it, whichever host runs it: a
-one-shot `rur-native engine` run, the golden check's batch workers, `rur render` and `sequence`, the render
-service and the desktop app (`native/src/engine/cli.rs`, `interpret`). Every chunk is interpreted in a script
-environment that is safe as a client's is: a module's imports (`game`, `script.Parent.Child`, `math.floor`) are
-resolved when it loads, and builtins are fast calls. The scripts' own Luau is charged on the emulator's work clock
-at a client's prices, a `--!native` module's instructions at native code's (the emulator's docs/engine.md, "Work
-clock"), so `os.clock` moves by the same work in every host, and UI code that budgets its work by `os.clock` takes
-the same frames in a one-shot render, the render service and `record`. No host compiles Luau to native code:
-natively compiled code would run unseen by the VM's work counters, and compiling every module cost a run more
-than it saved (the golden corpus takes about a third less CPU interpreted).
+Every host—one-shot `rur-native engine`, golden batch workers, `rur render`, `rur sequence`, the render service, and the desktop storybook—executes Luau identically (`native/src/engine/cli.rs`, `interpret`):
+
+- Every chunk runs in the Luau **interpreter** with client-safe globals, resolved module imports (`game`, `script.Parent.Child`, `math.floor`), and fastcall builtins.
+- Luau execution advances the emulator's virtual work clock (`os.clock`) at Roblox client prices (charging `--!native` modules at native-code prices; see `ree`'s `docs/engine.md`). Because every host uses the same interpreter and clock, frame budgets driven by `os.clock` behave identically across renders, services, and `record`.
+- Native codegen is intentionally disabled: native code bypasses the VM's instruction work counters, and compiling every module costs more CPU than it saves (the golden corpus uses ~1/3 less CPU interpreted).

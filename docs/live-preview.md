@@ -1,29 +1,27 @@
-# Live preview: the session protocol and the render service
+# Live sessions and the render service
 
-Two ways to drive rur from another program: a live session over stdio (a story that keeps running and
-takes input frame by frame), and the render service (warm one-shot renders over local HTTP), which is also
-how `rur render` runs.
+`rur` exposes two programmatic interfaces:
+1. **Live sessions (stdio):** Mount a story once and step it frame by frame with input events and control updates.
+2. **Background render service (local HTTP):** Keeps VMs, GPU pipelines, fonts, and assets warm in memory for fast repeated renders (`rur render` uses this automatically).
 
 ## Live sessions (`rur-native engine ... --session 1`)
 
-```
+```sh
 rur-native engine --repo <checkout> --story <file> --roots "<dir>;<dir>" --viewport 1200x900 --scale 1.5 --time 0 --session 1
 ```
 
-The story mounts and keeps running. The program sends one JSON command per stdin line and gets one reply
-per command on stdout, on a line that starts with `@@RUR ` (other stdout lines are not replies). The
-first reply is `ready`; it lists the story's controls and the mount's diagnostics.
+Mounts the story and keeps the Luau VM alive. Send one JSON command per line on `stdin`; read replies on `stdout` from lines prefixed with `@@RUR ` (ignore other stdout lines). The initial reply is `ready`, containing the story's control schema and mount diagnostics.
 
-| Command | Effect | Reply |
+| Command | Action | Reply |
 |---|---|---|
-| `{"cmd":"frame","dt":0.0167,"events":[...]}` | dispatches the input events, then runs whole engine frames covering `dt` seconds, lays out and exports | a frame: the scene delta (changed nodes, `removed` ids, draw lists, fonts and header when they changed), or `unchanged` |
-| `{"cmd":"frame","dt":0.0083,"cadence":"display",...}` | the same at display cadence: the Heartbeats that elapsed and one render step, as a high refresh rate display steps | as above |
-| `{"cmd":"control","path":["Group","Name"],"value":...}` | sets a UI Labs control (its Vide source, or the plain value) and runs the frame it causes | a frame |
-| `{"cmd":"scene"}` | the full export of the current state, as a one-shot render writes `scene.json` | a scene |
-| `{"cmd":"leaks"}` | what the story keeps alive of UI it removed (trees outside the DataModel and the handlers holding them) | a report |
-| `{"cmd":"quit"}` | ends the session | none |
+| `{"cmd":"frame","dt":0.0167,"events":[...]}` | Dispatch input events, advance whole engine frames covering `dt` seconds, lay out, and export | Scene delta (changed nodes, `removed` IDs, updated draw lists/fonts/header) or `unchanged` |
+| `{"cmd":"frame","dt":0.0083,"cadence":"display",...}` | Same at display refresh cadence: elapsed Heartbeats + one render step | Scene delta or `unchanged` |
+| `{"cmd":"control","path":["Group","Name"],"value":...}` | Update a UI Labs / Flipbook control and advance one frame | Scene delta |
+| `{"cmd":"scene"}` | Export the full current `scene.json` | Full scene |
+| `{"cmd":"leaks"}` | Inspect unparented UI trees kept alive by references or connected handlers | Leak report |
+| `{"cmd":"quit"}` | Terminate the session | *(none)* |
 
-Input events in a frame command, in logical viewport px:
+**Input event shapes** (logical viewport pixels):
 
 ```json
 {"type":"move","x":600,"y":450}
@@ -35,65 +33,34 @@ Input events in a frame command, in logical viewport px:
 {"type":"text","text":"x"}
 ```
 
-A wheel's `dy` is in logical px at 100 per notch (`notches` works too). Events of one frame run in order
-before the frame's movement update, as Studio does ([interaction.md](interaction.md)). A frame command
-with a `presentation` packet asks for predicted scrolling: the reply carries every ScrollingFrame's
-scroll state so a client can move scrolled content at display rate between engine frames.
+Wheel `dy` is in logical pixels at `100` per notch (`notches` is also accepted). Events follow Studio's per-frame order ([interaction.md](interaction.md)). Including a `presentation` packet in `frame` returns `ScrollingFrame` spring state so a UI host can predict scrolling at display refresh rate.
 
-`tools/engine/golden.mjs` drives sessions this way for its `live` entries; read it for a complete client.
-The desktop storybook runs the same session in process.
+See `tools/engine/golden.mjs` (`live` entries) for a complete reference client. The desktop storybook drives the same session API in-process.
 
 ## How a render runs
 
-`rur render` goes through the **render service**, `rur-native serve` (native/src/serve.rs), which
-`cli/client.mjs` starts in the background on first use. It keeps warm what a render would otherwise start
-every time:
+By default, `rur render` talks to `rur-native serve` (`native/src/serve.rs`), auto-started in the background by `cli/client.mjs`. Keeping the service warm eliminates startup cost across repeated renders:
 
-- a **standby VM** for the last startup configuration (roots, viewport, scale, mode, snapshot dir,
-  mounts): an engine thread with the Luau VM and the project already mounted, so a render only mounts its
-  story, runs its virtual time, lays out and exports. Module sources and bytecode are kept between VMs;
-- the headless **GPU device** with the renderer's pipelines, the **glyph rasterizer** (fonts) and decoded
-  images;
-- the **image resolver** (local files, the asset cache, downloads and cloud fonts, and ViewportFrames
-  drawn by ror's worker, which starts on the first one).
+- **Standby VM:** Keeps a pre-mounted Luau VM ready for the last startup config (roots, viewport, scale, mode, snapshot dir, mounts), plus cached module sources and bytecode. Invalidated automatically when `data/`, project directory layout, mount-time files, snapshots, or the cloud font index change (using filesystem watches on Windows via `native/src/watch.rs`). Script sources are read on `require`, so edits always take effect immediately.
+- **Warm GPU & assets:** Keeps the Vulkan discrete GPU device, compiled shaders, FreeType rasterizer, decoded images, asset resolver, and `ror` viewport worker (started lazily on first `ViewportFrame`) resident in memory.
+- **Kept runs:** Retains the last rendered story's live VM at its final timestamp. A follow-up `rur render --time <t2>` on the exact same story/options with `t2 >= t1` resumes directly from `t1` instead of remounting—making animation frame sweeps fast. Dropped automatically if options, story, files, or past actions differ.
+- **Lifecycle:** One service runs per checkout + state directory, logging to `<state dir>/serve.log`, reclaiming memory between bursts, and exiting 30 s after its last request.
 
-So a render of a known project costs the story's own Luau plus a draw. A standby is used only while what it
-read at load is unchanged (the renderer's `data/`, the project's directory structure and the files read at
-mount, Studio snapshots, the cloud font index). On Windows the service watches those trees
-(`native/src/watch.rs`) instead of listing them for every render. Script sources are read at require time,
-so an edit is always seen. The service exits 30 s after its last render.
-
-**Kept runs.** The service keeps the last render's run: its VM with the story mounted and the clock at the
-captured moment. A render of the same story with the same options at that moment or a later one goes on from
-it, so a loop of `rur render --time t` over an animation costs a frame, a layout, an export and a draw per
-moment instead of a mount. It is let go when the new render can't go on exactly (another story or options,
-an earlier moment, a file it read changed, an action that would have to run in the past).
-
-Its GPU device prefers a discrete GPU through Vulkan. Between bursts of renders it gives memory back
-(`GET /memory` reports where it is). There is one service per checkout and state dir. Log:
-`<state dir>/serve.log`.
-
-Without the service (`--no-service`, `--isolated`, the sweep's child processes, `rur compare`),
-`rur-native render --dir <out> <engine arguments>` does the same work in a process of its own, with the same
-files and pixels. `--isolated` (or `RUR_ISOLATED=1`) also keeps the engine binary frozen while `native/` is
-being edited: it runs the state dir's last build even when the sources changed since.
+Pass `--no-service` or `--isolated` (or `RUR_ISOLATED=1`) to run `rur-native render --dir <out>` in a fresh process instead (`rur sweep` and `rur compare` also run out-of-service). `--isolated` additionally pins the last built binary in `<state dir>` so edits to `native/` do not trigger rebuilds mid-run.
 
 
-## The render service's HTTP API
+## Render service HTTP API
 
-The service listens on 127.0.0.1 only, on a port derived from the checkout and state dir (4180-4579;
-`RUR_SERVE_PORT` pins it). Every request needs the header `X-RUR: 1` and a local `Host`.
+Binds to `127.0.0.1` only on a deterministic port derived from checkout + state directory (`4180–4579`, override with `RUR_SERVE_PORT`). Every request requires a local `Host` header and `X-RUR: 1`.
 
-| Route | Body | Answer |
+| Endpoint | Request body | Response |
 |---|---|---|
-| `GET /health` | | `{ service, root, stateDir, pid, port, code, executable, renders }` |
-| `GET /stories?project=<dir>` | | the project's stories with their places: `[{ file, place, key, slug }]` |
-| `POST /render` | `{ argv, out, png, offline, env }` | `{ result }`, the files of a render written to `out` |
-| `POST /render` with `"pixels": "rgba"` | as above | one JSON line (`result`, `width`, `height`, `summary`), a newline, then the straight-alpha RGBA8 rows render.png would hold; `Content-Type: application/x-rur-pixels` |
-| `POST /sequence` | `{ argv, out, offline, env, sequence: { from, to, frames, duration, fps, crop, pad, png, scenes, video } }` | `{ result }`: frames captured at exact moments |
-| `GET /memory[?collect=1]` | | where the process's memory is |
-| `POST /shutdown` | | |
+| `GET /health` | — | `{ service, root, stateDir, pid, port, code, executable, renders }` |
+| `GET /stories?project=<dir>` | — | `[{ file, place, key, slug }]` |
+| `POST /render` | `{ argv, out, png, offline, env }` | `{ result }` (files written to `out`) |
+| `POST /render` (`"pixels": "rgba"`) | Same as above + `"pixels": "rgba"` | `Content-Type: application/x-rur-pixels`: one JSON line (`result`, `width`, `height`, `summary`), `\n`, then raw straight-alpha RGBA8 bytes |
+| `POST /sequence` | `{ argv, out, offline, env, sequence: { from, to, frames, duration, fps, crop, pad, png, scenes, video } }` | `{ result }` |
+| `GET /memory[?collect=1]` | — | Process memory breakdown |
+| `POST /shutdown` | — | Stops the service |
 
-`argv` holds engine arguments (`--story`, `--roots`, `--viewport`, ...; `cli/rur.mjs runtimeArgs` builds
-them). A render whose engine environment (`env`: `RUR_CLOCK`, `RUR_ORDER`, `RUR_PLAYER`, ...) differs
-from the service's is refused with 409; the client then runs it in a process of its own.
+`argv` holds engine CLI arguments (`cli/rur.mjs runtimeArgs`). If a request's engine environment (`RUR_CLOCK`, `RUR_ORDER`, `RUR_PLAYER`, etc.) differs from the running service, it returns `HTTP 409` and the client falls back to a one-shot process.

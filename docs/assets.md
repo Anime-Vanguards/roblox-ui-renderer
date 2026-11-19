@@ -1,84 +1,63 @@
-# Assets and the cookie
+# Assets, cookies, and Studio image reads
 
-- `rbxasset://` textures and fonts come from the Studio install (`RUR_ROBLOX_CONTENT` picks another
-  `content` folder).
-- `rbxassetid://` assets are downloaded from Roblox's asset delivery (the public route first) and cached in
-  the state dir as `assets/<id>.<ext>`, each with a record of the bytes rur downloaded: a cache file without a
-  matching record is downloaded again before it is drawn. `--offline` uses the cache as it is. Never put
-  stand-ins into the cache; draw a local image through a `file://` URI instead.
-- `rur-native` downloads by itself (`native/src/download.rs`), in a release binary too: renders, the desktop
-  app and the Node CLI all use it. `rur-native assets fetch <uri>...` resolves URIs as a render does
-  (`--offline`, `--json`), and `rur-native assets account` says whether a broker, a cookie or neither is used.
-- For assets the public route refuses, copy [`.env.example`](../.env.example) to `.env` in a checkout and set
-  `ROBLOX_ASSET_DELIVERY_COOKIE` to a `.ROBLOSECURITY` value (or set it, or `ROBLOSECURITY`, in the
-  environment, or name another file with `RUR_COOKIE_ENV`). A release binary reads no `.env`, only the
-  environment and `RUR_COOKIE_ENV`. The cookie is only sent to `assetdelivery.roblox.com`, never printed or
-  written anywhere, and kept out of child processes that download nothing. Use an account made for this. See
-  [SECURITY.md](../SECURITY.md). A team can use [an account broker](#an-account-broker-instead-of-the-cookie)
-  instead, so nobody holds the cookie.
-- An image asset delivery refuses (private to the game's creator) can be read from an open Roblox Studio
-  instead, with no cookie: see [Images from Studio](#images-from-studio).
-- `rbxthumb://` thumbnails come from the thumbnail service: its WebP rendition, as Studio draws, decoded and
-  cached as PNG.
+This page covers where `rur` loads textures, fonts, and thumbnails from, how authentication works for private assets, and how to read private game images directly from an open Roblox Studio.
+
+## Asset sources and caching
+
+- **Built-in assets (`rbxasset://`):** Loaded from your local Roblox Studio installation (override with `RUR_ROBLOX_CONTENT`).
+- **Uploaded assets (`rbxassetid://`):** Downloaded by `rur-native` (`native/src/download.rs`) from Roblox asset delivery (public route first) and cached in `<state dir>/assets/<id>.<ext>` alongside a download record. Files without a valid record are re-downloaded before use. Pass `--offline` to disable network access. Never drop placeholder files into the cache—use `file://` URIs for local images instead.
+- **Thumbnails (`rbxthumb://`):** Fetched as WebP from Roblox's thumbnail service (matching Studio), decoded, and cached as PNG.
+- **CLI helpers:** `rur-native assets fetch <uri>...` (`--offline`, `--json`) resolves and caches URIs using the exact render path; `rur-native assets account` reports whether a broker, cookie, or neither is active.
+
+### Roblox cookie (`.ROBLOSECURITY`)
+
+For assets that Roblox's public asset delivery rejects, configure a `.ROBLOSECURITY` cookie from one of:
+1. `ROBLOX_ASSET_DELIVERY_COOKIE` or `ROBLOSECURITY` environment variables
+2. The file named by `RUR_COOKIE_ENV`
+3. `.env` in a source checkout (copy `.env.example`; **release binaries never read `.env`**)
+
+The cookie is sent exclusively to `https://assetdelivery.roblox.com`, never logged or cached, and stripped from child processes that don't download assets. Use a dedicated account ([SECURITY.md](../SECURITY.md)), or use an [account broker](#an-account-broker-instead-of-the-cookie) so no developer holds the cookie.
+
 
 ## An account broker instead of the cookie
 
-A team that shares one asset account can keep its cookie off everyone's machine: an account broker is a
-small service that holds the Roblox session and forwards asset delivery's routes for personal tokens.
-With broker credentials rur sends no cookie at all, even when one is configured: each request that would
-have carried it goes to the broker instead.
+Teams sharing a single asset account can run an account broker that holds the Roblox session and proxies authenticated asset-delivery calls using personal bearer tokens. Whenever broker credentials are configured, `rur` ignores any local cookie.
 
-| Source, in this order | Meaning |
-|---|---|
-| `ROBLOX_BROKER_URL` and `ROBLOX_BROKER_TOKEN` | the broker's address and your token, both in the environment |
-| `ROBLOX_BROKER_CREDENTIALS` | or a JSON file `{ "url": "https://...", "token": "..." }` (other keys are ignored) |
-| `~/.config/roblox-broker/credentials.json` | or that file under your user folder, when no other is named |
+Lookup priority:
 
-- A request for `https://assetdelivery.roblox.com/<route>` goes to `<url>/rbx/assetdelivery.roblox.com/<route>`
-  with `Authorization: Bearer <token>`: the lookup of one asset (`GET /v1/assetId/<id>`) and of many
-  (`POST /v1/assets/batch`). The broker adds the cookie and answers Roblox's CSRF challenge itself.
-- The public first attempt, the CDN downloads and thumbnails go straight to Roblox as before, without the
-  token. The token is sent only to the broker, never across a redirect, never printed or written anywhere,
-  and kept out of child processes that download nothing.
-- The address must be `https`; plain `http` is accepted only for `127.0.0.1` or `localhost` (a tunnel). Any
-  other address is refused, and rur does not fall back to the cookie.
-- When the broker itself refuses (an `X-Broker-Error` answer with a JSON `message`: the account is signed
-  out, the token is unknown, too many requests), the asset's error carries that message.
-- `rur doctor` reports under `assetCookie` whether a broker, a cookie or neither is in use.
+| Priority | Source | Format |
+|---|---|---|
+| 1 | `ROBLOX_BROKER_URL` + `ROBLOX_BROKER_TOKEN` | Environment variables |
+| 2 | `ROBLOX_BROKER_CREDENTIALS` | Path to JSON file `{ "url": "https://...", "token": "..." }` (extra keys ignored) |
+| 3 | `~/.config/roblox-broker/credentials.json` | Default JSON file under your user profile |
+
+**Broker behavior:**
+- Authenticated requests for `https://assetdelivery.roblox.com/<route>` (`GET /v1/assetId/<id>` and `POST /v1/assets/batch`) go to `<url>/rbx/assetdelivery.roblox.com/<route>` with `Authorization: Bearer <token>`. The broker attaches the Roblox cookie and handles CSRF challenges.
+- Unauthenticated initial attempts, CDN asset downloads, and thumbnails still go directly to Roblox without the bearer token. The token is sent only to the broker, never across redirects, never logged or cached, and stripped from non-downloading child processes.
+- URLs must use `https://`, or `http://` only for `127.0.0.1` / `localhost`. Other URLs are rejected without falling back to a cookie.
+- Broker-generated errors (`X-Broker-Error` header + JSON `message`) surface directly in asset diagnostics.
+- `rur doctor` reports active auth (`assetCookie`) as broker, cookie, or none.
 
 ## Images from Studio
 
-With a Studio MCP bridge configured, a render's `rbxassetid://` images that asset delivery refuses are read
-from Studio (`cli/studio-images.mjs`, which `rur-native` runs as `node cli/studio-images.mjs store` from the
-checkout; a release binary needs `RUR_ASSET_REPO` for it, else the refusal stays, with a hint). Studio opens
-each one as an `EditableImage`
-(`AssetService:CreateEditableImageAsync`) and returns its pixels, and rur stores them losslessly as
-`assets/<id>.png`, recorded with `"source": "studio"`. One call reads many images: Studio loads 12 at a
-time and returns their pixels zstd-compressed, up to about 2 MB per call. Later renders use the cache and
-don't ask Studio again. `--offline` never asks Studio. The bridge is on this machine: a `RUR_STUDIO_MCP_URL`
-whose host isn't `127.0.0.0/8`, `::1` or `localhost` is refused before any request, and a redirect is refused,
-not followed. The Luau only reads (nothing is mounted, edited or saved). No Roblox credential is used;
-robloxstudio-mcp 3 needs a token of its own, below.
+When a Studio MCP bridge is configured and asset delivery refuses a private `rbxassetid://` image, `rur` can read the pixels straight out of an open Roblox Studio—no Roblox cookie required.
 
-| Variable | Meaning |
+- `rur-native` invokes `node cli/studio-images.mjs store` from a source checkout (release binaries need `RUR_ASSET_REPO` set to a checkout with `npm install` run).
+- Studio opens images in batches of 12 via `AssetService:CreateEditableImageAsync`, returns zstd-compressed pixels (~2 MB per batch), and `rur` caches them losslessly as `<state dir>/assets/<id>.png` (`"source": "studio"`). Later renders read from cache without touching Studio; `--offline` never queries Studio.
+- **Security:** `RUR_STUDIO_MCP_URL` must target loopback (`127.0.0.0/8`, `::1`, or `localhost`), redirects are rejected, and the Luau snippet is strictly read-only.
+- Studio can only load assets owned by the open place's creator. If Studio also lacks permission, diagnostics show both asset delivery's error and Studio's reason.
+
+| Variable | Description |
 |---|---|
-| `RUR_STUDIO_MCP_PORT` | the TCP bridge `rur compare` uses ([studio.md](studio.md)) |
-| `RUR_STUDIO_MCP_URL` | or an HTTP bridge on this machine, for example `http://127.0.0.1:58741`. Its `GET /health` picks the API: robloxstudio-mcp 3 or later uses its own, with `RUR_STUDIO_MCP_TOKEN`; any other answer, or none, uses `GET /instances` and `POST /mcp/execute_luau` (`robloxstudio-mcp --http-only`) |
-| `RUR_STUDIO_MCP_TOKEN` | robloxstudio-mcp 3's auth token: the server's `ROBLOX_STUDIO_AUTH_TOKEN`, or the contents of its token file. Read only from this variable, sent only to that bridge (in `X-MCP-Auth`), and never printed, cached or written anywhere |
-| `RUR_STUDIO` | the Studio to read from: its id or part of its name (default: each edit session in turn) |
-| `RUR_STUDIO_IMAGES=0` | don't read images from Studio, even with a bridge set |
+| `RUR_STUDIO_MCP_PORT` | Local TCP MCP bridge port used by `rur compare` ([studio.md](studio.md)) |
+| `RUR_STUDIO_MCP_URL` | Local HTTP bridge URL (e.g., `http://127.0.0.1:58741`). Probes `GET /health` to auto-detect `robloxstudio-mcp` 3 (uses `RUR_STUDIO_MCP_TOKEN`) vs. `--http-only` (`GET /instances` + `POST /mcp/execute_luau`). |
+| `RUR_STUDIO_MCP_TOKEN` | Auth token for `robloxstudio-mcp` 3 (`ROBLOX_STUDIO_AUTH_TOKEN` or token file content). Sent only in `X-MCP-Auth` to the loopback bridge; never logged or cached. |
+| `RUR_STUDIO` | Target Studio ID or window title substring (default: checks each edit session in turn). |
+| `RUR_STUDIO_IMAGES=0` | Disable Studio image fallback even when a bridge is configured. |
 
 
-`rur assets warm` fills the cache ahead of renders: it scans the open place for every image its GUI names
-(the `Image`, `HoverImage` and `PressedImage` of ImageLabels and ImageButtons, and ScrollingFrames' bar
-images), downloads the ones asset delivery gives and reads the rest from Studio. Afterwards renders find them
-cached and need neither Studio nor the network for them. It prints how many were already cached,
-downloaded, read from Studio and missing (with each one's reason). `--refresh` reads the images cached from
-Studio again. On a live place it found 101 images: a cold warm took 7.3 s, a second 3.5 s.
+### Pre-warming the cache (`rur assets warm`)
 
-Studio can open only the images the place's creator owns (others fail with "no permission to load
-asset"), so this covers a game's own private art, not another creator's. An id Studio can't read keeps
-asset delivery's error, followed by Studio's reason.
+`rur assets warm` scans the open Studio place for every GUI image (`Image`, `HoverImage`, `PressedImage` on `ImageLabel`/`ImageButton`, and `ScrollingFrame` bar images), downloads public ones via asset delivery, and reads private ones from Studio. Subsequent renders run offline with zero Studio queries. Pass `--refresh` to re-read images previously cached from Studio.
 
-
-ViewportFrames draw their models through a separate 3D worker: [viewports.md](viewports.md).
+For 3D `ViewportFrame` assets and rendering, see [viewports.md](viewports.md).

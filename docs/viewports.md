@@ -1,80 +1,53 @@
-# ViewportFrames
+# Rendering 3D ViewportFrames
 
-rur exports what a ViewportFrame shows (its models, camera, lighting, its fill and the place's materials) as a
-content-addressed snapshot and asks a separate 3D renderer to draw it. The picture goes through the normal
-image path. WorldModels are traversed as containers. While a new image is pending, the last one stays visible.
+`rur` renders `ViewportFrame` contents by exporting a content-addressed 3D snapshot (models, camera, lighting, background fill, and place materials) to a persistent 3D worker process, then compositing the resulting PNG through the normal UI image pipeline. `WorldModel` descendants are traversed as containers, and the previous image stays visible while a new snapshot renders.
 
-Roblox Studio (0.747, measured with `fixtures/viewport-probe-fade.luau` and `viewport-probe-layer.luau`) draws
-a ViewportFrame's world into a target cleared to the frame's fill (BackgroundColor3 at 1 -
-BackgroundTransparency), at the frame's logical size whatever the device scale, and then draws that target as
-the frame's image:
+Without a 3D worker installed, `ViewportFrame`s render only their background fill (matching an empty Studio viewport) and diagnostics explain how to install `ror`.
 
-- the fill and the world are one layer, the world replacing the fill where it covers it; ImageColor3 tints
-  the fill too, ImageTransparency fades it (at 1 the frame shows nothing but its border), and a UIGradient,
-  UICorner and Rotation apply to the layer as to an image;
-- the border and a UIStroke are drawn apart, over the layer, neither tinted nor faded; GUI children as usual;
-- a part's anti-aliased edge averages its samples as they are, so the fill's colour enters at full strength
-  whatever its opacity (a dark fringe round a model at BackgroundTransparency 1), and the mean is clipped;
-- at 1.5x the picture is stretched over the frame, so a part's edge ramps over about three device pixels;
-- the parts take the place's built-in materials: a place saved without MaterialService.Use2022Materials (a
-  new place file without a MaterialService) shows the pre-2022 materials in its frames as in its world
-  (`fixtures/viewport-probe-materials.luau`; scripts cannot read the property, so a project says which its
-  places use with the rur.json key `use2022Materials`, docs/projects.md).
+## Studio compositing rules
 
-rur draws it so: the snapshot asks for the picture at the frame's logical size, carries the frame's fill
-(`background`), and the renderer draws a ViewportFrame whose picture is ready as that picture plus its border.
+Measured in Studio 0.747 (`fixtures/viewport-probe-fade.luau`, `viewport-probe-layer.luau`, `viewport-probe-materials.luau`):
+- Studio renders the 3D world at the frame's **logical size** (independent of DPI scale) into a render target cleared to `BackgroundColor3` at opacity `1 - BackgroundTransparency`, then composites that target as the frame's image.
+- Because the background fill and 3D scene share one layer, `ImageColor3`, `ImageTransparency`, `UIGradient`, `UICorner`, and `Rotation` apply to both together (at `ImageTransparency = 1`, only the border remains).
+- Borders, `UIStroke`, and GUI children render separately on top without being tinted or faded by `ImageColor3`/`ImageTransparency`.
+- Anti-aliased part edges average against the full-strength `BackgroundColor3` regardless of `BackgroundTransparency` (producing a dark fringe when `BackgroundTransparency = 1` over a dark fill). At 1.5x DPI, upscaling softens part edges across ~3 device pixels.
+- Parts use the place's material generation (places without `MaterialService.Use2022Materials` use pre-2022 materials; configure per root via `use2022Materials` in [rur.json](projects.md#additional-rurjson-settings)).
 
-Without ror, a ViewportFrame draws only its own background (what Studio shows for an empty viewport), and
-the asset diagnostics say how to get ror.
+## Installing `ror`
 
-## Setting up ror
+[roblox-object-renderer](https://github.com/Anime-Vanguards/roblox-object-renderer) (`ror` 0.5.0+) provides `ror viewport-worker`, which `rur` spawns automatically across CLI renders, release binaries, and the desktop storybook (no Node.js or `rur` checkout required).
 
-[roblox-object-renderer](https://github.com/Anime-Vanguards/roblox-object-renderer) (ror, 0.5.0 or later)
-draws the 3D content: `ror viewport-worker` draws Roblox models the way Studio does. rur starts it by itself,
-from the desktop app, headless renders and the CLI alike; it needs no checkout of rur and no Node.js. Install
-ror any one way:
-
+Install `ror` using any of:
 - `rokit add --global Anime-Vanguards/roblox-object-renderer ror` (rokit puts it on your `PATH`);
-- a zip from [ror's releases](https://github.com/Anime-Vanguards/roblox-object-renderer/releases), with
-  `ror` on your `PATH` or `RUR_VIEWPORT_WORKER` set to its path;
-- a ror checkout built beside a rur checkout (`cargo build --release` in `../roblox-object-renderer`).
+- Download a release zip from [ror Releases](https://github.com/Anime-Vanguards/roblox-object-renderer/releases) and put `ror` on your `PATH` (or set `RUR_VIEWPORT_WORKER` to its path).
+- Build a sibling checkout alongside `rur` (`cargo build --release` in `../roblox-object-renderer`).
 
-rur looks for `RUR_VIEWPORT_WORKER`, then (in a checkout build) `../roblox-object-renderer/target/release/ror`,
-then `ror` on the `PATH`. A ror too old to have the command is named in the diagnostics with its version.
+Lookup order: `RUR_VIEWPORT_WORKER` → `../roblox-object-renderer/target/release/ror` (source builds only) → `ror` on `PATH`. If an older `ror` binary lacks `viewport-worker`, diagnostics report its version.
 
-## The worker protocol
+## Worker JSON protocol
 
-rur (`native/src/viewports.rs`) starts the worker as `<executable> viewport-worker [--offline]` and keeps it
-running; it exits when its stdin closes. Any program that answers these requests works in ror's place. The
-protocol is one JSON request per stdin line and one JSON reply per stdout line, one request at a time:
+`rur` (`native/src/viewports.rs`) launches `<executable> viewport-worker [--offline]` and communicates over stdin/stdout using one JSON object per line, one request at a time, shutting down when stdin closes. Any compatible executable can substitute for `ror`:
 
 | Request | Reply |
 |---|---|
-| `{ "viewport": <snapshot>, "out": "<file.png>" }` | `{ "file": "<file.png>", "background": true }` once `out` holds the picture, or `{ "error": "..." }` |
-| `{ "command": "catalog", "av": "<project dir>" }` | `{ "bundles": ["<key>", ...] }`: the model bundles a project's manifest offers |
-| `{ "command": "bundle", "av": "<project dir>", "path": "<key>", "out": "<file.rbxm>" }` | `{ "file": "<file.rbxm>" }` |
+| `{ "viewport": <snapshot>, "out": "<file.png>" }` | `{ "file": "<file.png>", "background": true }` or `{ "error": "..." }` |
+| `{ "command": "catalog", "av": "<project dir>" }` *(optional)* | `{ "bundles": ["<key>", ...] }` |
+| `{ "command": "bundle", "av": "<project dir>", "path": "<key>", "out": "<file.rbxm>" }` *(optional)* | `{ "file": "<file.rbxm>" }` |
 
-A snapshot holds the size to draw (the frame's logical size), its CurrentCamera (CFrame, FieldOfView),
-`background` (the frame's fill: `color` 0..1, `transparency`), and the instances: the ViewportFrame first
-(with its Ambient, LightColor and LightDirection) and those under it with their properties (MeshParts keep
-`InitialSize`, so meshes are scaled by `Size / InitialSize`), then the place's MaterialService as another
-root (`Use2022MaterialsXml` and its MaterialVariants). The worker draws the world over `background` as
-Studio's target does and says so with `"background": true`; from a worker that returns a transparent picture
-rur lays the picture over the fill itself (a texel covered in part, at coverage c, takes the straight mean of
-its colour and the fill's at opacity c + b (1 - c)). Images
-are capped at 2048 px per axis; moving viewports are coalesced and each keeps one image. A request that takes
-over 90 seconds stops the worker, and the next request starts it again.
+**Snapshot contents:**
+- Logical `width`/`height` (capped at 2048 px per axis), `CurrentCamera` (`CFrame` + `FieldOfView`), and `background` (`color` `0..1`, `transparency`).
+- `instances`: `ViewportFrame` first (`Ambient`, `LightColor`, `LightDirection`), followed by descendants (`MeshPart`s include `InitialSize` for `Size / InitialSize` scaling), plus the place's `MaterialService` (`Use2022MaterialsXml` and `MaterialVariant`s) as an additional root.
+- If the worker renders over `background`, it returns `"background": true`. If it returns a transparent PNG instead, `rur` composites it over the fill (`opacity = c + b * (1 - c)`).
 
-One-shot renders keep each snapshot's image in `<state dir>/viewports-persisted/` (the newest 512), keyed by
-the snapshot and the worker build, so a restarted render service doesn't start the worker for images it
-drew before.
-
-ror's worker answers the `viewport` requests (and an `asset` command, ror's docs/viewport-worker.md); it has
-no model bundles, which are optional: a worker with them lets a project mount models lazily, and
-`RUR_BUNDLE_MANIFEST` names the manifest module whose text keys the cached catalog.
+**Caching & timeouts:**
+- Rapid viewport updates coalesce so each slot keeps only its latest render. Requests exceeding 90 seconds terminate the worker and spawn a fresh one on the next job.
+- One-shot renders persist the newest 512 rendered viewport PNGs in `<state dir>/viewports-persisted/` keyed by snapshot hash and worker build, avoiding worker startup on repeated renders.
+- `catalog`/`bundle` are optional lazy-model hooks (`RUR_BUNDLE_MANIFEST` keys the catalog cache); `ror`'s stock worker handles `viewport` (and `asset`, see `ror`'s `docs/viewport-worker.md`).
 
 
-Smoke test, with ror installed:
+## Smoke test
+
+With `ror` installed:
 
 ```powershell
 node cli/rur.mjs render --fixture fixtures/viewport-models.luau --viewport 820x360 --scale 1 --out out/viewport-models --no-service

@@ -1,31 +1,27 @@
 # Rendering from the command line
 
-The commands, `rur render` and its options, frame-by-frame sequences, the other ways to mount a project,
-sweeps, recordings of 3D worlds and the text-first inspection of a render.
+CLI reference for `node cli/rur.mjs` (or `npm run rur -- <command>`), standalone `rur-native` subcommands, frame-by-frame sequences, Git diffs, sweeps, profiling, and text-first inspection.
 
-## Commands
+## Command overview
 
-| Command | What it does |
+| Command | Purpose |
 |---|---|
-| `rur render --story <file>` | run a story and draw it (also `--module`, `--model`, `--fixture`, `--scene`) |
-| `rur sequence --story <file>` | one run captured frame by frame at exact moments: frames, a trace, videos |
-| `rur stories [--place <name>\|all]` | list the project's stories |
-| `rur sweep` | render every story of the project, report failures grouped by cause |
-| `rur compare --story <file>` | render in Studio and offline, diff layout and pixels ([studio.md](studio.md)) |
-| `rur diff --git-ref <ref> --story <file>` | render at a commit and in the working tree, diff them |
-| `rur record --harness <file.luau>` | run a harness against the project and record the 3D world |
-| `rur profile diff <before> <after>` | compare two profiles that `--profile` wrote ([profiles](#profiles---profile)) |
-| `rur profile view <dir> [<dir2>]` | explore a profile, or a before/after pair, in the terminal ([profiles](#profiles---profile)) |
-| `rur profile render <dir> --view <name\|all> --out <file\|dir\|->` | the viewer's screens as PNG, SVG or text, for screenshots ([profiles](#profiles---profile)) |
-| `rur native` | the desktop storybook ([storybook.md](storybook.md)) |
-| `rur doctor [--fix]`, `rur clean`, `rur selftest` | toolchain check, output cleanup, the offline checks |
+| `rur render --story <file>` | Render a story (or `--module`, `--model`, `--fixture`, `--scene`) to PNG and `scene.json` |
+| `rur sequence --story <file>` | Capture an animation frame by frame as PNGs, layout trace, and MP4 videos |
+| `rur stories [--place <name>\|all]` | List stories discovered in the project |
+| `rur sweep` | Render every story in the project and group failures by root cause |
+| `rur compare --story <file>` | Capture in Roblox Studio and offline, diffing layout rects and pixels ([studio.md](studio.md)) |
+| `rur diff --git-ref <ref> --story <file>` | Render a story at `<ref>` vs. your working tree and diff layout + pixels |
+| `rur record --harness <file.luau>` | Run a Luau harness in play mode and record the 3D `Workspace` for `ror` |
+| `rur profile diff <before> <after>` | Compare two engine profiles ([Profiles](#profiles---profile)) |
+| `rur profile view <dir> [<dir2>]` | Interactive terminal viewer for a profile or diff ([Profiles](#profiles---profile)) |
+| `rur profile render <dir> --view <name\|all> --out <path>` | Export profile viewer screens to PNG, SVG, or text |
+| `rur native` | Launch the interactive desktop storybook ([storybook.md](storybook.md)) |
+| `rur doctor [--fix]` / `rur clean` / `rur selftest` | Check environment, prune output dir, run offline selftests |
 
-Run them as `node cli/rur.mjs <command>` (or `npm run rur -- <command>`). `rur sweep` and `rur diff` are
-rur-native's own commands, which the Node CLI hands its arguments to: a release binary without Node or a checkout
-runs them as `rur-native sweep` and `rur-native diff`, with the same options and output. Global switches: `--state-dir <dir>`
-(or `RUR_STATE_DIR`) for caches, builds and logs; `RUR_OUT_DIR` for the default output root; `--json` to get
-only the JSON result on stdout; `--isolated` and `--no-service` (see
-[How a render runs](live-preview.md#how-a-render-runs)).
+`rur sweep` and `rur diff` delegate directly to `rur-native sweep` and `rur-native diff`, so release binaries support them identically without Node.
+
+**Global flags & environment:** `--state-dir <dir>` (`RUR_STATE_DIR`), `RUR_OUT_DIR`, `--json` (JSON-only stdout), `--isolated`, and `--no-service` ([live-preview.md](live-preview.md#how-a-render-runs)).
 
 ## Render
 
@@ -33,100 +29,65 @@ only the JSON result on stdout; `--isolated` and `--no-service` (see
 node cli/rur.mjs render --story path/to/Button.story.luau --viewport 1200x900 --time 1
 ```
 
-- Sources: `--story <file.story.luau>` (a UI Labs story; controls become Vide sources, as in UI Labs),
-  `--module <file.luau>` (returns an Instance or `function(target)`), `--model <file.rbxm[x]>`,
-  `--fixture <file.luau>` (`return function(Target) ... end`), `--scene <scene.json>` (draw a saved or
-  hand-edited scene without running Luau). Formats: [stories.md](stories.md).
-- The project: `--project <dir>` (or `RUR_PROJECT`; default `examples/project`) and its place (`--place`,
-  else the place whose roots hold the story), or `--roots "a;b"`, or a Rojo project (`--rojo`). A story
-  outside the mounted roots is mounted on its own, as a ModuleScript in `ReplicatedStorage.RURFixtures`.
-  See [projects.md](projects.md).
-- `--viewport WxH` logical size (default 1920x1080), `--scale 1.5` device scale, `--time 1` virtual seconds
-  to run scripts and tweens before the capture (the engine frame nearest that time). Screenshots are physical
-  pixels: `--viewport 1800x1350@physical` divides by `--scale`, and `--viewport-from <reference.png>` takes
-  a screenshot's size the same way. `--background r,g,b` or `transparent` (straight alpha in render.png).
-- `--out <dir>` (default `out/<name>`), `--tag <name>` (`<out>/<name>/`), `--keep` (a numbered sibling
-  instead of replacing an earlier render), `--no-png`, `--offline` (no downloads).
-- `--placeholders` draws each image the render could not get as a magenta and black checkerboard with its
-  asset id on a black band, so a missing icon shows as missing instead of as a gap. Studio draws nothing
-  there, so it is off by default. The placeholder goes into the render's own `assets/`, never the asset
-  cache, and the image is still listed in `missingImages`.
-- `--controls '{"Group.Name": 2}'` (or a JSON file) starts the story with those control values;
-  `node cli/controls.mjs` lists a story's controls.
-- `--actions '[{"t":0.5,"type":"click","node":"Stack.Primary"}]'` (or a JSON file) replays input on a
-  timeline before the capture ([stories.md](stories.md#timed-input---actions)).
-- `--rotation-clipping enabled|disabled` selects Roblox's clipping mode for rotated descendants (default
-  enabled, the current Roblox default). `--mode edit|play`, `--device desktop|touch|gamepad`, `--player
-  <name>`, `--place-id <n>`, `--topbar-inset <px>`.
-- `--snapshot-dir <dir>` loads Studio-only instances exported with `tools/sweep/studio-assets.mjs`.
+### Key options
 
-Output: `render.png` (physical pixels), `scene.json`, `summary.json` (status, script errors, unemulated
-APIs, missing images and fonts, seconds per step, and what the render left out: `culled` nodes Studio's
-AutomaticSize culling hides, `textLinesDropped`, `missingGlyphs`, the script's `output`),
-`dependencies.json` (the source files the run required), `manifest.json` with the glyph atlas
-(`glyphs.png`) and `assets/` (the images, hard links into the state dir's cache). `render.png` holds straight
-alpha. The diagnostics are also printed on stderr. `node cli/inspect.mjs` reads these files
-([Inspect](#inspect-text-first-for-agents)).
+| Option | Description |
+|---|---|
+| `--story`, `--module`, `--model`, `--fixture`, `--scene` | Input source ([stories.md](stories.md)). `--scene` renders a saved `scene.json` without running Luau. |
+| `--project`, `--place`, `--roots`, `--rojo`, `--mount` | Project mounting ([projects.md](projects.md)). Defaults to `RUR_PROJECT` or `examples/project`; stories outside mounted roots mount under `ReplicatedStorage.RURFixtures`. |
+| `--viewport WxH`, `--scale N` | Logical viewport size (default `1920x1080`) and DPI scale (default `1.5`). Append `@physical` (e.g., `1800x1350@physical`) or use `--viewport-from <ref.png>` to divide physical pixels by `--scale`. |
+| `--time S` | Virtual seconds to simulate scripts and tweens before capturing (snaps to nearest 60 Hz frame). |
+| `--background r,g,b\|transparent` | Background fill (`transparent` writes straight alpha in `render.png`). |
+| `--out <dir>`, `--tag <name>`, `--keep` | Output location (default `out/<name>`, optional `<out>/<name>/` subfolder, or numbered sibling with `--keep`). |
+| `--no-png`, `--offline` | Skip PNG rasterization; disallow HTTP asset downloads. |
+| `--placeholders` | Draw missing images as magenta/black checkerboards labeled with their asset ID (off by default to match Studio). Placeholders stay inside `<out>/assets/` and never enter the shared cache; images remain listed in `missingImages`. |
+| `--controls JSON\|file` | Initial control values (e.g., `'{"Group.Name": 2}'`). List available controls with `node cli/controls.mjs`. |
+| `--actions JSON\|file` | Scripted mouse/keyboard input timeline ([stories.md](stories.md#timed-input---actions)). |
+| `--rotation-clipping enabled\|disabled` | Toggle modern Roblox clipping of rotated descendants (default `enabled`). |
+| `--mode edit\|play`, `--device desktop\|touch\|gamepad`, `--player <name>`, `--place-id <n>`, `--topbar-inset <px>` | Emulated client environment settings. |
+| `--snapshot-dir <dir>` | Mount Studio-only instances previously exported via `tools/sweep/studio-assets.mjs`. |
+
+### Output files
+
+Every render writes into `--out` (and prints diagnostics to stderr):
+- `render.png`: physical-pixel RGBA8 image (straight alpha).
+- `scene.json`: full laid-out tree, visual properties, glyph placements, and draw order.
+- `summary.json`: status, script errors, unemulated APIs, missing images/fonts, per-stage timings, `culled` AutomaticSize nodes, `textLinesDropped`, `missingGlyphs`, and script `output`.
+- `dependencies.json`: every source file required during the run.
+- `manifest.json`, `glyphs.png`, and `assets/`: bundled glyph atlas and hard links to cached images.
 
 
-How a render runs (the render service, kept runs, `--no-service` and `--isolated`):
-[live-preview.md](live-preview.md#how-a-render-runs).
+For details on the background render service, kept runs, `--no-service`, and `--isolated`, see [live-preview.md](live-preview.md#how-a-render-runs).
 
-## Sequence: an animation frame by frame
+## Sequence (frame-by-frame animation)
 
 ```powershell
 node cli/rur.mjs sequence --story <file> --from 0 --to 4 --fps 60 --crop Stage
 ```
 
-The story is mounted once and captured at exact moments, `from + i / fps` s. When the rate divides 60 those
-are the engine's own frames and frame `i` is pixel for pixel what `rur render --time <its moment>` draws.
+Mounts the story once and captures frames at `from + i / fps`. Whenever `fps` divides 60, frame `i` is pixel-identical to `rur render --time <t>`.
 
-- Moments: `--from`, then `--to` (excluded), `--frames N` or `--duration s` (default one second); `--fps` (60).
-- `--crop <node>` (its box at the first frame, even-sized for the video) or `--crop x,y,w,h`; `--pad px`.
-- `--actions` run as the clock reaches them; `--no-png`, `--no-video`, `--scenes` (each frame's whole scene).
-- Output (`out/<name>-sequence`): `frames/00000.png`..., `trace.json` (every node's position, size and
-  rotation per frame, written when they change), `video.mp4` (H.264, BT.709; ffmpeg from the PATH or
-  `RUR_FFMPEG`), `video-quarter.mp4` (a quarter of the speed) and `summary.json`.
+- **Range:** `--from` plus `--to` (exclusive), `--frames N`, or `--duration S` (default 1 s); `--fps` (default 60).
+- **Cropping & options:** `--crop <node>` (bounding box on frame 0, rounded to even dimensions for video) or `--crop x,y,w,h`; `--pad px`; `--actions`; `--no-png`; `--no-video`; `--scenes` (save every frame's `scene.json`).
+- **Output (`out/<name>-sequence`):** `frames/00000.png`..., `trace.json` (per-frame position/size/rotation changes), `video.mp4` (H.264 BT.709 via `ffmpeg` from `PATH` or `RUR_FFMPEG`), `video-quarter.mp4` (0.25x slow-motion), and `summary.json`.
 
 ## Rojo projects and explicit mounts
 
-`--rojo <file.project.json>` and `--mount Service/Name=<dir|file>` mount sources without a project's
-roots, and a story with no project options mounts the project file beside it:
-[projects.md](projects.md#rojo-projects-and-explicit-mounts).
+Use `--rojo <file.project.json>` or repeatable `--mount Service/Name=<dir|file>` without declaring `rur.json` places. Running a story with no project flags auto-detects the nearest `default.project.json` (or sole `*.project.json`). See [projects.md](projects.md#rojo-projects-and-explicit-mounts).
 
-## Before and after (`--git-ref`)
+## Git ref renders and before/after diffs (`--git-ref`, `rur diff`)
 
-`--git-ref <ref>` renders the sources as they are at a commit: the roots (with the project files next to
-them), the Rojo project and every `$path` it maps, `--mount` sources and the story are extracted from `<ref>` into
-`<state dir>/git-refs/`, reused by later runs, through a temporary index (your index, HEAD and working tree
-are untouched; git runs with `core.longpaths`, so a deeply nested project extracts under a long state directory
-on Windows). A file the commit does not have is taken from the working tree, with a note on stderr: a story or
-mount added since, or a folder git ignores that the project maps, such as a package manager's install folder mapped
-to `ReplicatedStorage.Packages`. The extraction is rur-native's (`native/src/gitref.rs`); `git` must be on the PATH.
+- **`--git-ref <ref>`:** Extracts project roots, Rojo `$path`s, `--mount` sources, and the story from `<ref>` into `<state dir>/git-refs/` using a temporary Git index (with `core.longpaths` on Windows), leaving your working tree and index untouched. Files missing at `<ref>` (e.g., newly added stories or gitignored Wally `Packages/`) fall back to the working tree with a stderr note. Requires `git` on `PATH` (`native/src/gitref.rs`).
+- **`rur diff --git-ref <ref> --story <file>` (`rur-native diff`):** Renders `<ref>` (`<out>/before`) and your working tree (`<out>/after`) concurrently in two processes, printing summaries, up to 200 layout diffs (`- removed`, `+ added`, `~ changed`), and pixel differences into `<out>/diff.png` (unchanged pixels in grayscale; changes shaded yellow to red). Defaults `--out` to `out/<name>-diff`, accepts all `render` flags plus `--json`, and exits with code `2` if either side fails.
 
-`rur diff --git-ref <ref> --story <file>` (`rur-native diff`) renders the source at `<ref>` and in the working tree,
-at the same time in two processes, into `<out>/before` and `<out>/after`, and prints both renders' summaries, the
-layout changes (`- removed`, `+ added`, `~ <path>` with each side's description; the first 200) and the pixel
-difference (`<out>/diff.png`: unchanged pixels grey, changed ones from yellow to red by how much). `<out>` is `--out`,
-else `out/<name>-diff`; it takes `rur render`'s options, `--json` for one line, and exits 2 when either side's story
-failed.
+## Plugin UIs (`--plugin`)
 
-## Studio's `plugin` global (`--plugin`)
+Pass `--plugin` (or `--plugin '{"Theme":"Dark"}'` / JSON file to seed plugin settings) to expose a `plugin` global (`native/src/engine/story/plugin.luau`) with in-memory `GetSetting`/`SetSetting`, `CreateDockWidgetPluginGui` (returning a real `DockWidgetPluginGui` sized to the viewport and exported as additional layers), stub toolbars/actions/menus, and a mouse at `(0, 0)`.
 
-Plugin UIs run with `--plugin` (optionally `--plugin '{"Theme": "Dark"}'` or a JSON file to seed the
-settings), which defines a `plugin` global (`native/src/engine/story/plugin.luau`): `GetSetting` /
-`SetSetting` in memory, `CreateDockWidgetPluginGui` returning a real `DockWidgetPluginGui` the size of the
-viewport (exported as layers after the story's own gui), toolbars, actions and menus whose signals never
-fire, and a mouse at (0, 0).
+## Full PlayerGuis (`--all-layers`, `--load`)
 
-## Whole PlayerGuis (`--all-layers`, `--load`)
-
-`--all-layers` draws every enabled ScreenGui the run leaves under the local player's PlayerGui and under
-CoreGui, in Roblox's draw order (`native/src/engine/layers.rs`): the PlayerGui pass under CoreGui's, then
-DisplayOrder, then, for equal DisplayOrders, the order the ScreenGuis were last parented or enabled. The
-rule was checked against a lossless Studio capture of a nine-ScreenGui scene: every overlap matched.
-`--load Service/Name=<file.rbxm>` puts a saved model's top-level instances in a Folder at that path before
-the story runs (a SerializationService blob of a playtest's PlayerGui, say, for a fixture to clone).
+- **`--all-layers`:** Renders every enabled `ScreenGui` under `LocalPlayer.PlayerGui` and `CoreGui` in Roblox's exact draw order (`native/src/engine/layers.rs`): `PlayerGui` below `CoreGui`, sorted by `DisplayOrder`, then by most recently parented or enabled (verified against lossless 9-ScreenGui Studio captures).
+- **`--load Service/Name=<file.rbxm>`:** Loads a saved model's top-level instances into a `Folder` at `Service/Name` before the story executes (handy for cloning a serialized playtest `PlayerGui`).
 
 ```powershell
 node cli/rur.mjs render --fixture clone-playergui.luau --load "ServerStorage/Saved=playergui.rbxm" --all-layers --viewport 844x390 --scale 1
@@ -134,26 +95,22 @@ node cli/rur.mjs render --fixture clone-playergui.luau --load "ServerStorage/Sav
 
 ## Sweep
 
-`node cli/rur.mjs sweep [--place all] [--jobs 4] [--timeout 90] [--out out/sweep]` (`rur-native sweep`) renders
-every story of the project, each in a `rur-native render` process of its own (killed with everything it started
-after `--timeout` seconds; a crashed one runs again at the end, `--retries 1`), and writes `report.json` and
-`summary.md`: status per story, failure causes grouped across stories, unemulated members, Studio-only instances,
-missing images and fonts, the slowest stories. Each story's output is in `<out>/stories/<story>/`, summary.json
-included. `--filter a|b` keeps the stories whose paths hold either text, `--limit N` the first N, `--failed`
-re-runs the stories that were not clean and merges them into the last report, and `--summarize` rebuilds the
-totals and `summary.md` from `report.json` without rendering. The render options it passes on: `--viewport`
-(default 1200x900), `--time` (1), `--scale` (1.5), `--mode`, `--player`, `--background`, `--project`, `--roots`,
-`--place-id`, `--rotation-clipping`, `--device`, `--topbar-inset`, `--rojo`, `--rojo-at`, `--git-ref`, `--plugin`,
-`--mount`, `--offline`, `--no-png`.
+```powershell
+node cli/rur.mjs sweep [--place all] [--jobs 4] [--timeout 90] [--out out/sweep]
+```
 
-## Record (3D worlds)
+Renders every story in the project in isolated `rur-native render` child processes (killing hung trees after `--timeout` seconds and retrying crashed stories at the end via `--retries 1`). Writes `report.json`, `summary.md` (status per story, grouped failure causes, unemulated APIs, missing images/fonts, slowest stories), and per-story outputs under `<out>/stories/<story>/`.
 
-`rur record` runs a harness script against the project in play mode, steps the virtual clock frame by frame
-and records everything the code puts in the Workspace (and does to Lighting): the emulator's recorder (`ree
-record`; [its command line documentation](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md)
-covers harnesses and outputs) with rur's engines. The output (`scene.rbxm`, `playback.json`, `events.json`,
-`camera.json`, `summary.json`) plays back in
-[roblox-object-renderer](https://github.com/Anime-Vanguards/roblox-object-renderer).
+**Sweep options:**
+- `--filter a|b`: render only stories whose path matches any pipe-separated substring.
+- `--limit N`: stop after `N` stories.
+- `--failed`: re-run only non-clean stories from the previous report and merge results.
+- `--summarize`: regenerate `summary.md` and totals from `report.json` without rendering.
+- **Forwarded render flags:** `--viewport` (default `1200x900`), `--time` (`1`), `--scale` (`1.5`), `--mode`, `--player`, `--background`, `--project`, `--roots`, `--place-id`, `--rotation-clipping`, `--device`, `--topbar-inset`, `--rojo`, `--rojo-at`, `--git-ref`, `--plugin`, `--mount`, `--offline`, `--no-png`.
+
+## Recording 3D scenes (`rur record`)
+
+`rur record` runs a Luau harness in play mode using the emulator's 3D recorder (`ree record`; see [ree's CLI docs](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md)) with `rur`'s project setup, producing `scene.rbxm`, `playback.json`, `events.json`, `camera.json`, and `summary.json` ready for [roblox-object-renderer](https://github.com/Anime-Vanguards/roblox-object-renderer).
 
 ```powershell
 node cli/rur.mjs record --harness path/to/Harness.luau --seconds 3 --fps 60 --out out/record/demo --context '{"Scenario":"rain"}'
@@ -161,56 +118,34 @@ node cli/rur.mjs record --harness path/to/Harness.luau --seconds 3 --fps 60 --ou
 
 ## Profiles (`--profile`)
 
-`rur render`, `rur sequence` and `rur record` take the emulator's profiling suite: `--profile <kinds>
-[--profile-out <dir>]`, with the kinds `work`, `caches`, `alloc`, `heap`, `timeline`, `cpu`, `phases`, `time`,
-`boundary` or `all` ([the emulator's documentation](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md#profiles-and-caches)
-says what each one records). The run's real layout and text are in it: their cost lands on the script lines that
-asked for them, and `caches` counts the layout's records and AutomaticSize sizes and the text engine's laid-out
-text, shaped paragraphs and rich text beside the engine's own caches. The profile goes to `<out>/profile`
-(`summary.txt`, also printed on stderr, `profile.json`, `report.html` and folded stacks) and the summary's `profile`
-names it. Its phases are `startup` (the mount) and `frames` (the run after it), as `ree run` marks them, so the mount's
-cost reads apart from the frames'. A profiled render or sequence runs in a process of its own, never through the render service; like every
-run it interprets every chunk, as the emulator's `record` does ([how scripts run](how-it-works.md#how-scripts-run)),
-so the instruction profile sees all of the scripts' Luau. A render that runs again with the cloud fonts it lacked is profiled once, in its
-last run; a sequence's profile is its engine half's (the mount and the frames, not the drawing).
+`rur render`, `rur sequence`, and `rur record` expose `ree`'s profiling suite via `--profile <kinds> [--profile-out <dir>]` where `<kinds>` is any comma-separated combination of `work`, `caches`, `alloc`, `heap`, `timeline`, `cpu`, `phases`, `time`, `boundary`, or `all` (see [ree's profiling docs](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md#profiles-and-caches)).
+
+- Real GUI layout and text shaping costs are attributed directly to the Luau lines that triggered them, and `caches` tracks layout records, `AutomaticSize` results, shaped paragraphs, and rich-text caches alongside engine caches.
+- Outputs go to `<out>/profile/` (`summary.txt`, `profile.json`, `report.html`, folded stacks) split into `startup` (mount) and `frames` phases.
+- Profiled runs always execute out-of-service in their own process with interpreted chunks so instruction profiling sees all Luau ([how-it-works.md](how-it-works.md#how-scripts-run)). If a render retries after downloading missing cloud fonts, only the final run is profiled; `sequence` profiles the engine half only.
 
 ```powershell
 node cli/rur.mjs render --story path/to/Shop.story.luau --time 2 --profile all
 node cli/rur.mjs sequence --story path/to/Shop.story.luau --to 4 --profile heap,alloc --no-video
 node cli/rur.mjs profile diff out/Shop/before/profile out/Shop/after/profile
-```
-
-`rur profile diff <before> <after>` compares two profiles (the emulator's `ree profile diff`: the headline figures,
-the functions and lines that moved, caches, memory by type); `rur profile report <dir>` rewrites a profile's page.
-
-`rur profile view <dir> [<dir2>]` is the emulator's profile viewer: a keyboard-driven terminal UI over a profile (or a
-before/after pair) with views a key each (Overview, Flame, Calls, Source, Allocations, Heap, Timeline, Caches, Issues,
-Diff), `m` for the metric and `?` for its keys; the Caches view lists the layout's and text's caches with the engine's.
-`rur profile render <dir> [<dir2>] --view <name|all> --out <file.png|.svg|.txt|dir|->` draws the same screens headless,
-for screenshots: `--view all --out shots` writes a PNG a view and prints each with its Markdown image line, and
-`--out -` prints a view as text ([the emulator's documentation](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md#the-profile-viewer)
-has the views, keys, issues and every option).
-
-```sh
 node cli/rur.mjs profile view out/Shop/after/profile
 node cli/rur.mjs profile render out/Shop/after/profile --view all --out out/Shop/after/views
 node cli/rur.mjs profile render out/Shop/after/profile --view issues --out -
 ```
 
-## Inspect (text first, for agents)
+- `rur profile diff <before> <after>` diffs headline metrics, changed functions/lines, caches, and heap usage by type. `rur profile report <dir>` regenerates `report.html`.
+- `rur profile view <dir> [<dir2>]` opens the interactive terminal viewer (Overview, Flame, Calls, Source, Allocations, Heap, Timeline, Caches, Issues, Diff; press `m` to switch metrics, `?` for keybindings).
+- `rur profile render` renders any view headlessly to `.png`, `.svg`, `.txt`, a directory (`--view all`), or stdout (`--out -`). See [ree's profile viewer docs](https://github.com/Anime-Vanguards/roblox-engine-emulator/blob/main/docs/cli.md#the-profile-viewer).
+
+## Inspect (text-first, for agents)
 
 ```powershell
-node cli/inspect.mjs tree out/Button --depth 6            # indented tree: class, name, rect, visuals, text
-node cli/inspect.mjs tree out/Button --filter Label       # matches with their ancestry
-node cli/inspect.mjs node out/Button "Stack.Primary"      # full JSON of matching nodes
-node cli/inspect.mjs at out/Button 60,280                 # what is drawn at a logical point, topmost first
-node cli/inspect.mjs crop out/Button "Primary" --zoom 3   # zoomed PNG crop of a node from render.png
-node cli/inspect.mjs diff out/before out/after            # layout and visual changes plus a pixel diff
+node cli/inspect.mjs tree out/Button --depth 6            # Indented hierarchy: class, name, rect, visuals, text
+node cli/inspect.mjs tree out/Button --filter Label       # Matching nodes with their ancestor chain
+node cli/inspect.mjs node out/Button "Stack.Primary"      # Full JSON for matching nodes
+node cli/inspect.mjs at out/Button 60,280                 # Elements at logical coordinate (topmost first)
+node cli/inspect.mjs crop out/Button "Primary" --zoom 3   # Zoomed PNG crop of one node from render.png
+node cli/inspect.mjs diff out/before out/after            # Layout, visual, and pixel diff of two renders
 ```
 
-Rects are logical screen pixels (`AbsolutePosition` / `AbsoluteSize`; with `--topbar-inset`, scripts read a
-ScreenGui's content `AbsolutePosition` the inset higher, as in Roblox). A Path2D's rect is the box its stroke
-reaches (`GetBoundingRect`), and its line reads `path=4#ff8000 segments=2`. Tree lines show what is not drawn as it
-reads (`[culled, not drawn: AutomaticSize, centre outside clip]`, `[2 wrapped lines dropped]`, `[missing glyph
-...]`). A typical loop: render, look at `render.png` or a crop, query the tree for the element that looks
-wrong, edit the source, render to a second directory and `diff` the two.
+Rects are reported in logical pixels (`AbsolutePosition` / `AbsoluteSize`; with `--topbar-inset`, scripts see `ScreenGui` content shifted up by the inset like Roblox). `Path2D` entries report `GetBoundingRect` and `path=<thickness>#<hex> segments=<n>`. Undrawn or clipped content is flagged inline (`[culled, not drawn: AutomaticSize, centre outside clip]`, `[2 wrapped lines dropped]`, `[missing glyph ...]`).

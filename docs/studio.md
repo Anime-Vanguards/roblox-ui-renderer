@@ -1,8 +1,8 @@
-# Comparing with Roblox Studio
+# Comparing with Roblox Studio (`rur compare`)
 
-`rur compare` mounts the same UI in a running Studio (a temporary GUI under CoreGui, removed afterwards),
-captures Studio's viewport losslessly, renders it offline at the same scale and writes the difference. It
-needs Windows, a running Roblox Studio and a Studio MCP bridge.
+`rur compare` mounts the same story or fixture inside a running Roblox Studio (temporarily under `CoreGui` or `StarterGui`, cleaned up afterward), captures Studio's viewport losslessly, renders it offline in `rur` at the same DPI scale, and diffs both layout rects and pixels.
+
+Requires Windows, Roblox Studio, and a local Studio MCP bridge.
 
 ```powershell
 $env:RUR_STUDIO_MCP_PORT = "<port>"
@@ -10,106 +10,65 @@ node cli/rur.mjs compare --story <file> --viewport 1200x900 --time 1
 node cli/rur.mjs compare --fixture fixtures/corners.luau --viewport 800x480 --time 0.2 --background 20,20,26
 ```
 
-Output in `out/compare/<name>/`: `studio.png`, `rur/` (a normal render), `diff.png`, `side-by-side.png` and
-`report.json`: pixel agreement (`pixels.exactPercent`: the share of pixels whose largest channel difference
-is at most 2 of 255), `layout` (every GuiObject's rect matched by path) and `propMismatches` (visual
-properties that differ).
+## Outputs and unstable regions
 
-`pixels.over2` is the number of pixels more than 2 levels apart and `pixels.counted` how many of them count.
-A fixture that Studio does not draw the same way twice says so in its header comment, for all of it or for
-rects in logical px, and those pixels are compared and reported (`pixels.unstable`: the reason and their
-number) but not counted:
+Results write to `out/compare/<name>/`: `studio.png`, `rur/` (standard render), `diff.png`, `side-by-side.png`, and `report.json`:
+- `pixels.exactPercent`: percentage of pixels with max channel delta <= 2/255.
+- `pixels.over2` / `pixels.counted`: total differing pixels and how many count against parity.
+- `layout`: per-path `GuiObject` rect comparison.
+- `propMismatches`: differing visual properties.
+
+If Studio itself renders a fixture non-deterministically, declare unstable regions in the fixture header comment so they are still reported (`pixels.unstable`) without failing totals:
 
 ```lua
 -- compare-unstable: Studio draws strokes of equal ZIndex in an order that changes from mount to mount
 -- compare-unstable 0,408,1200,90: the last row's strokes have one ZIndex
 ```
 
-`node tools/analysis/compare_total.mjs [name ...]` adds up the reports in `out/compare/`: a line per
-comparison, the unstable ones with their reason, and the total of what counts.
+Run `node tools/analysis/compare_total.mjs [name ...]` to aggregate reports across `out/compare/`.
 
-## Starting Studio
+## Launching a background Studio (`tools/studio/launch.mjs`)
 
-Start the Studio a comparison uses with the launcher. It runs on a Windows desktop of its own, so none of its
-windows (splash, main window, dialogs) is ever on a monitor or takes the keyboard focus:
+Use the launcher to run Studio on a hidden Windows desktop so splash screens, windows, and dialogs never appear on your monitor or steal keyboard focus:
 
 ```powershell
-node tools/studio/launch.mjs --place <file.rbxl>      # prints the pid; --studio <file name> selects it
-node tools/studio/launch.mjs --list                   # the Studios it started that still run
-node tools/studio/launch.mjs --close <pid>            # when the task is done
+node tools/studio/launch.mjs --place <file.rbxl>      # Prints PID; pass --studio <file name> to select
+node tools/studio/launch.mjs --list                   # Show running launcher-managed Studios
+node tools/studio/launch.mjs --close <pid>            # Shut down when done
 ```
 
-A running Studio of the same build, place and scale is reused instead of starting another (`--new` starts one
-anyway): keep one per task, reuse it across capture batches and close it at the end. Options: `--version` (an
-installed build, default 0.747.0.7471481) or `--exe`, `--scale 1` (display scale 1; otherwise the primary
-monitor's).
+Reuses an existing launcher Studio with matching build, place, and scale unless `--new` is passed. Options: `--version` (default `0.747.0.7471481`), `--exe`, `--scale 1` (default: primary monitor scale).
 
-Windows composes only the desktop the user sees, so PrintWindow has nothing to read from such a Studio. `rur compare`
-captures it through the engine instead: `CaptureService:CaptureScreenshot`, read back losslessly through an
-EditableImage. The screenshot leaves CoreGui out, so for this Studio the compare mounts under StarterGui (which edit
-mode draws) instead of CoreGui. Measured 2026-11-12 on Studio 0.747.0.7471481: 24 of 24 captures at 1.5x and 10 at 1x
-gave the same pixels and the same device scale as captures of an on-screen Studio (rects, corners, strokes,
-gradients, text, images, rotation, Path2D, CanvasGroup); a frame takes 0.2 to 0.3 s. `RUR_STUDIO_CAPTURE=engine` or
-`window` overrides the choice.
+**Engine capture vs. PrintWindow:**
+- Because Windows does not composite hidden desktops, `rur compare` captures hidden Studios via `CaptureService:CaptureScreenshot` read back losslessly through an `EditableImage` (mounting under `StarterGui` since `CaptureScreenshot` omits `CoreGui`). Verified on Studio 0.747.0.7471481 (24/24 captures at 1.5x and 10/10 at 1x identical to on-screen captures; 0.2–0.3 s/frame). Override with `RUR_STUDIO_CAPTURE=engine|window`.
+- Hidden Studios cannot capture play sessions (play clients reject screenshot readback) and render uncapped (~3.5 GB RAM, ~0.65 CPU core idle).
+- Pass `--user-desktop` to launch on your normal desktop for PrintWindow / play-mode captures (minimized, parked off-screen with a 4 px visible strip so Windows keeps compositing; Studio's splash still appears for ~10 s while booting). `rur` never foregrounds Studio (`--focus` and `RUR_FOCUS` are ignored).
 
-Limits: play-capture cannot capture a play session there (a play client refuses to read its screenshot back, and
-play mode has no edit datamodel); use `--user-desktop` for it, or the sim backend. A Studio there renders uncapped:
-idle it held 3.5 GB private memory and 0.65 of a core.
 
-`--user-desktop` starts Studio on the user's desktop for PrintWindow captures: minimized, every window parked above
-the primary monitor with a 4 px strip on screen as it appears (a window entirely off the monitors is not composed
-and 5 of 16 captures came out stale) and the foreground handed back. Its splash still shows on a monitor for about
-10 s: while Studio loads, its UI thread applies no move from outside, and no start option (`SW_SHOWMINNOACTIVE`,
-`STARTF_USEPOSITION`, `-qwindowgeometry`) places the splash. Nothing in rur brings Studio to the front;
-`--focus` / `RUR_FOCUS` are ignored.
+## Studio MCP bridge
 
-## The Studio MCP bridge
+`rur` communicates with Studio over a local newline-delimited JSON-RPC 2.0 TCP MCP server implementing `initialize` and `tools/call` for two tools:
 
-rur talks to Studio through an MCP server on a local TCP port: newline-delimited JSON-RPC 2.0, an
-`initialize` handshake, then `tools/call` with two tools:
-
-| Tool | Arguments | Result |
+| Tool | Arguments | Expected return |
 |---|---|---|
-| `list_roblox_studios` | none | text content holding `{ "studios": [{ "id", "name" }] }`, the open Studio windows |
-| `execute_luau` | `studio_id`, `datamodel_type` (`"Edit"`), `code` | text content holding what the chunk returned |
+| `list_roblox_studios` | *(none)* | Text content containing `{ "studios": [{ "id", "name" }] }` |
+| `execute_luau` | `studio_id`, `datamodel_type` (`"Edit"`), `code` | Text content containing the chunk's return value |
 
-Any bridge that serves these over TCP works; the maintainers run their own. Settings:
-
-| Variable | Meaning |
+| Variable | Description |
 |---|---|
-| `RUR_STUDIO_MCP_PORT` | the bridge's port on 127.0.0.1 (required) |
-| `RUR_STUDIO` | the Studio to use: its id or part of its window title (default: the only one open; `--studio` overrides) |
-| `RUR_STUDIO_LOCK` | the lock file every Studio user takes (default `<temp>/rur/studio.lock`) |
+| `RUR_STUDIO_MCP_PORT` | Localhost (`127.0.0.1`) TCP port of the MCP bridge (required) |
+| `RUR_STUDIO` | Target Studio ID or window title substring (default: the only open Studio; `--studio` overrides) |
+| `RUR_STUDIO_LOCK` | Mutual-exclusion lock file path (default `<temp>/rur/studio.lock`) |
 
-`node tools/studio-mcp.cjs list` lists the open Studios through the bridge; `node tools/studio-mcp.cjs luau
-<file.luau>` runs a probe in one.
+Helper CLI: `node tools/studio-mcp.cjs list` and `node tools/studio-mcp.cjs luau <file.luau>`.
 
-## What a compare does
+## Capture details and caching
 
-A report (`report.json`) is the result of the run that wrote it or nothing: a compare removes the old one first,
-so a run that stops (a reuse refused, a Studio error) leaves no numbers behind. It names the engine that drew the
-rur side (`engine`: the binary's sha256, when it was built, the checkout's commit) and the capture (`capture`:
-when, whether it was reused, Studio's `FFlagLegacyTextSubpixelRendering`). A capture in the other text state than
-rur's text mode is refused with the switch to use (`--text-subpixel on|off`). Tools that add reports up read them
-through `readReport` (cli/compare.mjs), which refuses a report another engine drew. For each capture Studio's mouse
-icon is hidden, so the system cursor over Studio's window does not end up in the image.
+- **Fresh reports:** `rur compare` deletes any existing `report.json` before starting so aborted runs never leave stale metrics. Reports stamp the `rur` binary SHA-256/build time/commit (`engine`) and Studio's `FFlagLegacyTextSubpixelRendering` flag (`capture`); mismatched text modes fail with the exact `--text-subpixel on|off` switch needed, and `readReport` rejects reports from other builds.
+- **Deterministic replay:** Studio's frame clock and sibling iteration order are recorded and replayed offline (`--no-clock`, `--ideal` disable). The Studio mouse cursor is hidden during capture, and `tools/wincap/` nudges the viewport to whole logical pixels to prevent fractional-pixel blur.
+- **Capture reuse:** Stored alongside `studio-capture.json` (mount, Studio build/DPI, source file hashes) and reused automatically when inputs match. Pass `--recapture` to force a fresh capture, or `--reuse-only` to run strictly offline.
+- **Shared lock:** Wrap any custom script that mounts UI in Studio with `node tools/studio-lock.mjs <command...>`.
 
-- Everything it mounts lives under `CoreGui` and is removed afterwards; nothing is saved and no script is
-  edited.
-- Studio's frame clock and the order it iterates siblings are recorded and replayed offline, so animation
-  and table iteration order don't show up as rendering differences (`--no-clock`, `--ideal`).
-- Studio's viewport is nudged to whole logical pixels (a fractional viewport blurs captures), using
-  `tools/wincap/` (PowerShell and PrintWindow).
-- Captures are reused while everything they depend on is unchanged (`studio-capture.json` beside
-  `studio.png`: the mount, the Studio instance and DPI, and a hash of every source the story loaded).
-  `--recapture` always captures; `--reuse-only` never touches Studio.
-- Only one capture can use Studio at a time: wrap other tools that mount GUI in Studio with
-  `node tools/studio-lock.mjs <command...>`.
+## Parity workflow
 
-## Parity work
-
-To measure a rule: write a fixture that shows it ([stories.md](stories.md#writing-a-fixture)), compare it,
-look at `diff.png` and `node tools/analysis/compare_crop.mjs`, change the renderer or layout, and compare
-again (the capture is reused). `tools/sweep/attribute.mjs <compare dir>` attributes differing pixels to
-causes (text, strokes, images, shadows, ...). Re-record the goldens only after Studio shows the change is
-right.
+Write a minimal single-rule fixture ([stories.md](stories.md#writing-a-fixture)) → run `rur compare` → inspect `diff.png`, `node tools/analysis/compare_crop.mjs`, and `tools/sweep/attribute.mjs <compare dir>` → fix layout or renderer → re-run `rur compare` (reuses the cached Studio capture) → re-record goldens only after Studio confirms parity.

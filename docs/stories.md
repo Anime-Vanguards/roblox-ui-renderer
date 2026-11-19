@@ -1,112 +1,86 @@
-# Stories, modules, models and fixtures
+# Stories, modules, models, and fixtures
 
-What `rur render` (and the desktop storybook, the render service and `rur compare`) can run.
+This page explains the input formats `rur` can mount, how UI Labs and Flipbook stories/controls work, how to replay timed input with `--actions`, and how to author measurement fixtures.
 
-## Sources
+## Input types
 
-| Flag | File | Mounted as |
+| Flag | Expected input | How it mounts |
 |---|---|---|
-| `--story <file.story.luau>` | a story (below) | the story mounted into the story target |
-| `--module <file.luau>` | a module returning an Instance or `function(Target, Controls)` | its Instance (or what the function builds) parented to the target |
-| `--fixture <file.luau>` | `return function(Target, Controls) ... end` | as a module; this repository's test scenes are fixtures |
-| `--model <file.rbxm[x]>` | a saved instance tree | its top-level instances parented to the target |
-| `--scene <scene.json>` | a saved or hand-edited scene | drawn without running any Luau |
+| `--story <file.story.luau>` | UI Labs, Hoarcekat, or Flipbook story | Mounted into `StoryTarget` via the matching framework adapter |
+| `--module <file.luau>` | Returns an `Instance` or `function(Target, Controls)` | Returned/created UI parented under `StoryTarget` |
+| `--fixture <file.luau>` | `return function(Target, Controls) ... end` | Mounted like a module (used by this repo's test suite) |
+| `--model <file.rbxm[x]>` | Saved Roblox model file | Top-level instances parented under `StoryTarget` |
+| `--scene <scene.json>` | Saved or hand-edited scene JSON | Rasterized directly without executing Luau |
 
-The target is a Frame named `StoryTarget` in a ScreenGui named `RURStory` under `CoreGui`, sized to the
-viewport (`--viewport WxH` logical px at `--scale`, default 1.5), or to the viewport minus `--margin` on
-each side.
+UI mounts into a `Frame` named `StoryTarget` inside `CoreGui.RURStory`, sized to `--viewport WxH` (logical pixels at `--scale`, default `1.5`) minus `--margin` on each side.
 
-## Story formats
+## Supported story formats
 
-A story module returns one of:
+A story module can return:
 
-- A UI Labs story table: `{ controls = {...}, story = function(props) ... end }`. `props` holds `target`
-  and `controls`. With `vide = <the Vide module>` in the table, every control is a Vide source and the
-  story is mounted with `vide.mount`, as the UI Labs plugin does; without it controls are plain values
-  and `story` returns (or parents) the UI itself. A module or fixture that returns such a table is
-  mounted as a story too.
-- A UI Labs generic story: `{ controls = {...}, render = function(props) ... end }`. `props` holds
-  `target`, `controls` (plain values), `converted` (the controls as the UI Labs plugin passes them,
-  for `UILabs.CreateControlStates`: a string, number, boolean or Color3 becomes the control its
-  constructor makes, a group is copied with its controls converted, any other table is passed as it
-  is, and any other value is left out with a warning) and `subscribe(listener)`, which returns an
-  unsubscribe function. A control changed in a live session (the desktop storybook,
-  `{"cmd":"control"}`) calls each listener with a new values table and `{ __old, __new }` per
-  control, as UI Labs does; a listener that errors or yields is reported with a warning, and the
-  listeners after it still run. rur has no unmount, so the cleanup `render` returns is not called.
-- A function: called with the target (a Hoarcekat story; its returned cleanup is not called).
-- A [Flipbook](https://github.com/flipbook-labs/flipbook) story (below).
+1. **UI Labs story table:** `{ controls = {...}, story = function(props) ... end }`
+   - `props` provides `target` and `controls`.
+   - If `vide = <Vide module>` is present, each control becomes a Vide source and the story mounts via `vide.mount`. Otherwise, controls are plain values and `story` returns or parents the UI directly.
+   - Modules and fixtures returning this table shape also mount as stories.
+2. **UI Labs generic story:** `{ controls = {...}, render = function(props) ... end }`
+   - `props` provides `target`, `controls` (plain values), `converted` (UI Labs-style control objects for `UILabs.CreateControlStates`: primitives wrapped in control descriptors, groups recursively converted, other tables kept as-is, unsupported values dropped with a warning), and `subscribe(listener)` returning an unsubscribe function.
+   - Changing a control in a live session calls every subscriber with the new values table and `{ __old, __new }` diffs; errors or yields in one listener emit a warning without blocking remaining listeners. Returned cleanup functions are not called because `rur` does not unmount.
+3. **Hoarcekat function:** `return function(target) ... end` (returned cleanup is not called).
+4. **Flipbook story:** see below.
 
 ### Flipbook stories and storybooks
 
-rur mounts Flipbook 2.x stories as Flipbook does through Storyteller 1.12. A story table goes to a renderer when it
-names `packages`, its `story` is not a function (a React or Roact element, or an Instance), or its storybook names
-packages:
+`rur` supports Flipbook 2.x stories following Storyteller 1.12 semantics. A story table routes through a Flipbook renderer whenever it specifies `packages`, its `story` is a non-function (React/Roact element or `Instance`), or its owning storybook defines `packages`:
 
-| Packages | Mounted with | A control change |
+| `packages` | Mount behavior | On control change |
 |---|---|---|
-| `Roact` | `Roact.mount(Roact.createElement(story, props), target)` (an element as it is) | `Roact.update` |
-| `React` and `ReactRoblox` | `ReactRoblox.createRoot(target):render(React.createElement(story, props))`: `story` is a function component, so hooks work | rendered again |
-| `Fusion` | `story(props)` parented to the target; each control a Fusion `Value` (0.3: of a scope of its own) | the one `Value` set |
-| `Vide` | `vide.mount` of `story(props)`; each control a source | the one source set |
-| none (`packages = {}`) | `story(target, props)` when it takes two arguments, else `story(props)`; a returned Instance is parented | mounted again (the returned cleanup first) |
+| `Roact` | `Roact.mount(Roact.createElement(story, props), target)` (or mounts element directly) | `Roact.update` |
+| `React` + `ReactRoblox` | `ReactRoblox.createRoot(target):render(React.createElement(story, props))` (supports hooks) | Re-renders root |
+| `Fusion` | Parents `story(props)` to `target`; controls are Fusion `Value`s (own scope in 0.3) | Updates the `Value` |
+| `Vide` | `vide.mount` of `story(props)`; controls are Vide sources | Updates the source |
+| `{}` (none) | Calls `story(target, props)` if 2 args, else `story(props)`; parents returned `Instance` | Runs previous cleanup and remounts |
 
-The legacy `react`, `reactRoblox`, `roact` and `fusion` keys count as packages, so a UI Labs React story mounts the
-same way. A story's own packages replace its storybook's. `props` holds `controls`, `container` (also as `target`),
-`story`, `theme = "Dark"`, `locale = "en-us"` and the story's `props` table. A `stories` group mounts its first story.
+Legacy lowercase keys (`react`, `reactRoblox`, `roact`, `fusion`) are also accepted (so UI Labs React stories mount the same way). A story's own `packages` overrides its storybook's. `props` includes `controls`, `container` (aliased as `target`), `story`, `theme = "Dark"`, `locale = "en-us"`, and the story's own `props` table. Multi-story `stories` tables mount their first entry.
 
-A storybook is a `*.storybook.luau` (or `.lua`) module returning `{ name, storyRoots = { ... }, packages, mapStory,
-mapDefinition }`; a story belongs to the first storybook whose `storyRoots` hold it. rur looks for storybooks among
-the files of the run's roots and mounts (not inside Wally's `_Index`), so a storybook must be in the project rur
-mounts. `mapDefinition(story)` runs once before the mount and `mapStory(story)` wraps the component, as in Flipbook.
+**Storybooks (`*.storybook.luau` / `.lua`):** Return `{ name, storyRoots = { ... }, packages, mapStory, mapDefinition }`. `rur` discovers storybooks inside mounted project roots (skipping Wally `_Index` internals) and assigns each story to the first storybook whose `storyRoots` contain it. `mapDefinition(story)` runs before mounting and `mapStory(story)` wraps the component.
 
-Flipbook's typed controls (`{ type = "Select", items = { ... }, default = ... }`, `Radio`, `Number` and `Slider` with
-a `range`, `Boolean`, `String`, `Color`, `MultiSelect`, `Check`) work like UI Labs controls: `--controls`, the
-storybook's controls panel and `node cli/controls.mjs` take them.
+### Controls
 
-Controls are the UI Labs kinds: plain values, `{ value, ... }` lists (the first is the default),
-`EntryType = "Control"` tables and `EntryType = "ControlGroup"` groups. `rur render --controls
-'{"Group.Name": 2}'` (or a JSON file) starts the story with other values: paths are dot-separated control
-names, choices take a 1-based index or the option's label, colours `[r, g, b]`. `node cli/controls.mjs`
-lists a story's controls. An unknown path fails the render.
+Supported control formats include UI Labs controls (plain values, `{ default, ... }` dropdown arrays, `EntryType = "Control"`, `EntryType = "ControlGroup"`) and Flipbook typed controls (`Select`, `Radio`, `Number`, `Slider`, `Boolean`, `String`, `Color`, `MultiSelect`, `Check`).
 
-See [examples/project](../examples/project) for one story of each common shape.
+- Inspect controls: `node cli/controls.mjs`
+- Override on CLI: `--controls '{"Group.Name": 2}'` (inline JSON or file path). Paths are dot-separated; choices accept 1-based indices or option labels; colors use `[r, g, b]`. Unknown control paths fail the render.
 
-## Time
+See [examples/project](../examples/project) for minimal examples of each story type.
 
-A run starts its virtual clock at 0 and runs scripts, tweens and springs frame by frame (1/60 s) until
-`--time` (default 1), then lays out, exports and draws. The capture is the engine frame nearest
-`--time`. Scripts that read the wall clock (`tick`, `os.time`, `DateTime`) read it from the run's start.
-`rur sequence` captures many moments of one run.
+## Virtual time
+
+Every render starts at `t = 0` and steps scripts, tweens, and springs at 60 Hz (`1/60 s` per frame) until `--time` (default `1`), capturing the nearest engine frame. Wall-clock APIs (`tick`, `os.time`, `DateTime`) advance from the start of the run. Use `rur sequence` to capture multiple frames from one run.
 
 ## Timed input (`--actions`)
 
-A JSON list of actions, each at `t` seconds of virtual time (default 0), checked before anything runs
-(a bad list exits with code 64):
+Pass a JSON array (inline or file path) of input events scheduled at `t` seconds of virtual time (default `0`). Invalid specs fail immediately with exit code `64`.
 
-| type | fields |
-| --- | --- |
-| `move` | `x`, `y` |
-| `down`, `up` | `x`, `y` (default: the pointer), `button` 1 / 2 / 3 (default 1) |
-| `click` | a point, `button`, `hold` (seconds between down and up) |
-| `drag` | `from` and `to` points, `button`, `steps` (default 10), `duration` (default 0.25 s) |
-| `wheel` | `x`, `y` (default: the pointer) or a `node` point, `notches` (+1 = one notch away from the user) or `dy` (px, 100 per notch) |
-| `leave` | the pointer leaves the viewport |
-| `key` | `key` (an `Enum.KeyCode` name), `down` (default true), `shift`, `ctrl`, `alt` |
-| `text`, `paste` | `text`, typed or pasted into the focused TextBox |
+| `type` | Fields |
+|---|---|
+| `move` | `x`, `y` (or a `node` point) |
+| `down`, `up` | `x`, `y` (default: current pointer), `button` `1` / `2` / `3` (default `1`) |
+| `click` | Point, `button`, `hold` (seconds between down and up) |
+| `drag` | `from` and `to` points, `button`, `steps` (default `10`), `duration` (default `0.25` s) |
+| `wheel` | Point (default: current pointer), `notches` (`+1` = away from user) or `dy` (`100` px per notch) |
+| `leave` | Pointer exits the viewport |
+| `key` | `key` (`Enum.KeyCode` name), `down` (default `true`), `shift`, `ctrl`, `alt` |
+| `text`, `paste` | `text` string inserted into the focused `TextBox` |
 
-A point is a `node` path (as `node cli/inspect.mjs tree` prints it, or any suffix of it that starts at a
-name) with optional `anchor` `{x, y}` (fractions of its size, default the centre) and `offset` `{x, y}`
-(px), or `x`, `y` in logical viewport px. A node is located when the timeline reaches the action, from
-its current position. A click, a drag and a wheel at a node move the pointer to their point first. A
-fixture with a sibling `<name>.actions.json` gets those actions in the golden corpus.
+**Targeting points:** Specify either logical viewport coordinates (`x`, `y`) or a `node` path (matching `inspect tree` or any name-aligned suffix) with optional `anchor` (`{x, y}`, default center) and `offset` (`{x, y}` in px). Node targets resolve dynamically from live layout at the moment the action fires. `click`, `drag`, and `wheel` move the pointer to the target point first.
+
+A fixture with a sibling `<name>.actions.json` automatically replays those actions in the golden test suite.
 
 ## Writing a fixture
 
-Fixtures are the measurement scenes: one rule per fixture, built from scratch with `Instance.new`, no
-assets you can't share. Prefer textures that ship with Studio (`rbxasset://textures/...`) or local files
-(`file://` URIs), and generic text. Keep a header comment that says what the fixture measures and which
-`rur compare` command reproduces it, for example:
+Fixtures are minimal, single-rule scenes used to measure and lock in Roblox Studio parity:
+- Build everything from scratch with `Instance.new` using only shareable content (`rbxasset://textures/...`, local `file://` files, and generic text).
+- Include a header comment stating what rule the fixture tests and the exact `rur compare` command to reproduce it:
 
 ```lua
 -- UIStroke on rounded frames at fractional sizes: where the stroke band starts and ends.
@@ -116,12 +90,8 @@ return function(Target)
 end
 ```
 
-New fixtures join the golden corpus (`node tools/engine/golden.mjs --fast`); a new one has no golden
-until a maintainer records it after checking it against Studio.
+New fixtures are picked up automatically by `node tools/engine/golden.mjs --fast`, and need a maintainer to record their golden digest after verifying against Studio.
 
 ## Output
 
-A render writes `render.png` (physical pixels, straight alpha), `scene.json` (every node's rect,
-visuals, text glyph positions and draw order), `summary.json`, `dependencies.json` and the glyph atlas
-and images the scene draws with; [render.md](render.md#render) lists what each holds, and
-`node cli/inspect.mjs` reads them ([render.md](render.md#inspect-text-first-for-agents)).
+Every render writes `render.png` (physical pixels, straight alpha), `scene.json`, `summary.json`, `dependencies.json`, `manifest.json`, `glyphs.png`, and `assets/`. See [render.md](render.md#render) for full details and [render.md](render.md#inspect-text-first-for-agents) for `cli/inspect.mjs`.

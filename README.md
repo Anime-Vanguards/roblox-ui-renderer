@@ -1,82 +1,76 @@
-# rur: an offline Roblox UI renderer
+# rur — Offline Renderer for Roblox UI
 
-rur runs Roblox UI outside Roblox (a UI Labs or Vide story, a Luau module that builds UI, a saved
-`.rbxm` / `.rbxmx` tree, or a fixture) in an emulated engine, lays it out as the engine does and draws it
-at Studio's device scale. Its layout and raster rules are measured against Roblox Studio (lossless pixel
-captures and numeric dumps), so you, or a coding agent, can preview and debug a UI without opening Studio.
+`rur` runs Roblox UI code outside Roblox—supporting UI Labs, Flipbook, Vide, React/Roact, and Fusion stories, raw Luau modules, saved `.rbxm`/`.rbxmx` trees, and test fixtures—inside an emulated engine, lays it out to match Roblox Studio, and renders it at Studio's device scale.
+
+All layout and compositing rules are calibrated against lossless Roblox Studio captures and numeric dumps, so humans and coding agents can preview, test, and debug UI without opening Studio.
 
 > [!NOTE]
-> Almost all of the code here was written by AI: Claude, Anthropic's model, at its maintainers' direction. A lot of
-> work went into making it correct, usable and fast for real projects (its layout and drawing are measured against
-> Roblox Studio and checked by tests and golden images), but in the end Claude wrote nearly all of it.
+> Nearly all of the code in this repository was written by Anthropic's Claude under maintainer direction. Layout and pixel accuracy are measured against Roblox Studio and verified by automated tests and golden images, but Claude wrote almost all of the implementation.
 
 <img src="docs/media/studio-vs-rur-settings.jpg" width="100%" alt="A game's settings window captured in Roblox Studio on the left and rendered by rur on the right; the two look the same">
 
-A live Roblox game's settings window, its own Luau and assets unchanged: Roblox Studio's capture on the
-left, rur's render on the right. `rur compare` measured 100% of pixels exact (no channel off by more than
-2 of 255) and all 206 Studio nodes at the same rect (1200x900 at 1.5x device scale, 2026-09-30).
+A live game's settings window rendered from its unmodified Luau and assets: Roblox Studio on the left, `rur` on the right. `rur compare` measured **100% exact pixels** (every channel within 2/255) and **206 / 206** identical layout rects (1200x900 at 1.5x device scale, 2026-09-30).
 
 <a href="docs/media/settings-window.mp4"><img src="docs/media/settings-window.webp" width="880" alt="The same settings window running offline: its rows fade in as it opens, the pointer opens the Graphics and Audio tabs, returns to Gameplay and switches two settings on and off"></a>
 
-The same window running its own Luau offline, 60 frames a second with timed input (`--actions`): its rows
-fade in as it opens, the pointer opens two other tabs, comes back and switches two settings on and off
-again. Each frame is what `rur render --time` draws at that moment, and `rur sequence` captures such
-frames in one call. [Full-quality MP4](docs/media/settings-window.mp4).
+The same window running offline at 60 FPS with scripted input (`--actions`): rows fade in on open, the pointer switches to Graphics and Audio, returns to Gameplay, and toggles two settings. Captured in one command via `rur sequence`. [Full-quality MP4](docs/media/settings-window.mp4).
 
 <details>
 <summary>One more window from the same game</summary>
 
 <img src="docs/media/studio-vs-rur-challenges.jpg" width="100%" alt="A challenges window with three challenge rows and Play buttons, in Roblox Studio and in rur">
 
-A challenges window: 100% of pixels exact, 319 of 319 nodes at the same rect.
+A challenges window: 100% exact pixels and 319 / 319 identical layout rects.
 
 </details>
 
 <img src="docs/media/storybook.jpg" width="100%" alt="The rur desktop storybook: a story catalog on the left, a button showcase story in the middle with one button hovered, the story's controls and a frame-time profiler on the right">
 
-The desktop storybook (`rur native`): pick a story from the project's catalog, use it with the mouse and
-keyboard, and change its UI Labs controls while it runs.
+The desktop storybook (`rur native`): browse project stories, interact with mouse and keyboard, tweak controls live, and inspect frame timings.
 
-## What it does
+## Key capabilities
 
-- **Renders** `render.png` at Studio's pixels and `scene.json` with every node's rect, visuals, text glyph
-  positions and draw order, from one command or a warm local render service.
-- **Shows** stories live in a desktop storybook, with input, controls and a profiler, and in a web page
-  (WebAssembly).
-- **Replays** timed input scripts, captures animations frame by frame as PNGs, a layout trace and videos,
-  and renders the same story before and after a commit.
-- **Compares** with a running Roblox Studio: side by side, per-node layout and per-pixel differences.
-- **Explains** a render as text, for agents: the laid-out tree, what is at a point, zoomed crops, diffs.
+- **Pixel-accurate headless renders (`rur render`)** — Outputs `render.png` and `scene.json` (every node's rect, visual styles, glyph positions, and draw order), one-shot or via a warm local render service.
+- **Interactive desktop storybook & WebAssembly build** — Preview stories live with pointer/keyboard input, reactive controls, and a built-in profiler on desktop (`rur native`) or in the browser (Wasm).
+- **Animation & before/after diffs (`rur sequence`, `rur diff`)** — Replay timed input scripts, export frame-by-frame PNGs, layout traces, and MP4 videos, or compare a story at any Git commit against your working tree.
+- **Studio parity checks (`rur compare`)** — Capture the same story in Roblox Studio and diff both layout rects and pixels side by side.
+- **Text-first inspection (`inspect`)** — Query the laid-out tree, hit-test coordinates, generate zoomed crops, and diff two renders—built for fast human and agent debugging.
 
 ## Quick start
 
-Download a prebuilt `rur-native` zip from [Releases](https://github.com/Anime-Vanguards/roblox-ui-renderer/releases)
-and extract it, or add this to `rokit.toml`:
+### Option 1: Install a release binary (`rur-native`)
+
+Download a prebuilt zip from [Releases](https://github.com/Anime-Vanguards/roblox-ui-renderer/releases) and extract `rur-native`, or add it to `rokit.toml`:
 
 ```toml
 rur-native = "Anime-Vanguards/roblox-ui-renderer@0.1.0"
 ```
 
-To try what is on main between releases, download the
-[canary](https://github.com/Anime-Vanguards/roblox-ui-renderer/releases/tag/canary) instead: a build of
-the latest tested commit of main, refreshed nightly. It is not a release and may break.
+> Use Rokit 1.0+ on Linux and macOS. Rokit 0.2.x cannot locate `rur-native` there because the executable name differs from the repository name.
 
-Run `rur-native --version` to check the install. `rur-native <your-project-folder>` opens the
-storybook, and `rur-native render --story <story.luau> --project <your-project> --dir out/render`
-renders headless; `rur-native sweep` renders every story and reports what failed, and `rur-native diff --git-ref <ref>
---story <story.luau>` compares a story at a commit with your working tree. In a Rojo project (Wally packages included) run it from the project folder and no
-project flag is needed: the folder's `default.project.json`, or its only `*.project.json`, is found and mounted, or name one with `--rojo <file>`
-([projects](docs/projects.md#rojo-projects-and-explicit-mounts)). UI Labs and [Flipbook](docs/stories.md#flipbook-stories-and-storybooks)
-stories (React, Roact, Fusion and Vide) both work. When stories fail, `rur-native debug-report` writes a report to send
-([setup](docs/setup.md#when-stories-fail-rur-native-debug-report)). The storybook and PNG renders need a graphics driver, and fonts and textures come from
-your Roblox Studio install. A release binary downloads the assets and cloud fonts a story uses by itself,
-and draws ViewportFrames' 3D content with [ror](docs/viewports.md) when ror is installed. On Linux and macOS use rokit 1.0 or later, since 0.2.x
-cannot select an executable whose name differs from this repository's. [Setup](docs/setup.md#release-binaries)
-covers the platforms, where the state goes and how to verify a download.
+For nightly builds of `main` between releases, see the [canary](https://github.com/Anime-Vanguards/roblox-ui-renderer/releases/tag/canary) prerelease (untested as a release and may break).
 
-To use the Node CLI or work on rur, build from a checkout. You need Rust 1.90+ with a C++ build
-toolchain, Node 18+ and a Roblox Studio install, whose fonts and `rbxasset://` textures rur reads (it
-ships none). [docs/setup.md](docs/setup.md) has the details.
+Verify the install and launch or render:
+
+```sh
+rur-native --version
+rur-native path/to/your-project                                                # Open desktop storybook
+rur-native render --story src/Button.story.luau --project . --dir out/Button   # Headless render
+rur-native sweep                                                               # Render all stories & group failures
+rur-native diff --git-ref HEAD --story src/Button.story.luau                   # Diff working tree vs. commit
+```
+
+What works out of the box with a release binary:
+- **Rojo & Wally auto-detection:** Run inside a Rojo project folder and `rur-native` automatically mounts `default.project.json` (or the sole `*.project.json`), or pass `--rojo <file>` ([docs/projects.md](docs/projects.md#rojo-projects-and-explicit-mounts)).
+- **Story frameworks:** UI Labs and [Flipbook](docs/stories.md#flipbook-stories-and-storybooks) stories (React, Roact, Fusion, Vide) work out of the box.
+- **Assets & 3D viewports:** Reads built-in fonts and textures from your local Roblox Studio install, downloads uncached assets and cloud fonts automatically, and renders `ViewportFrame` 3D content via [ror](docs/viewports.md) if installed. PNG renders and the storybook require a GPU driver.
+- **Bug reports:** If stories fail, run `rur-native debug-report` to generate a shareable diagnostic summary ([docs/setup.md](docs/setup.md#when-stories-fail-rur-native-debug-report)).
+
+See [docs/setup.md](docs/setup.md#release-binaries) for supported platforms, state paths, and download verification.
+
+### Option 2: Build from source (Node CLI + native binary)
+
+Required for the Node CLI (`cli/rur.mjs`), Studio comparison tools, or contributing. Needs **Rust 1.90+** with a C++ toolchain, **Node 18+**, and a **Roblox Studio install** (for fonts and `rbxasset://` textures; `rur` ships none). See [docs/setup.md](docs/setup.md).
 
 ```powershell
 git clone https://github.com/Anime-Vanguards/roblox-ui-renderer
@@ -87,70 +81,35 @@ node cli/inspect.mjs tree out/Button --depth 6
 npm run native -- --project examples/project
 ```
 
-The first command builds the native app (a few minutes). The render writes `out/Button/render.png`,
-`scene.json` and `summary.json`; `inspect tree` prints the laid-out tree; `npm run native` opens the desktop
-storybook on the example project. To use your own project, see [docs/projects.md](docs/projects.md): point
-`--project` (or `RUR_PROJECT`) at it and declare its places in a `rur.json`. `node cli/rur.mjs doctor`
-checks the toolchain, the build and the render service.
+The first run compiles `rur-native` (takes a few minutes). `render` writes `render.png`, `scene.json`, and `summary.json` into `out/Button/`; `inspect tree` prints the laid-out hierarchy; `npm run native` opens the desktop storybook. To point at your own project, use `--project` / `RUR_PROJECT` and configure places in `rur.json` ([docs/projects.md](docs/projects.md)). Run `node cli/rur.mjs doctor` to verify your toolchain and environment.
 
 
 ## Documentation
 
-- [Setup](docs/setup.md): requirements, the native build, `rur doctor`, the state dir and output root.
-- [Rendering](docs/render.md): every command; `rur render` options and output; sequences, `--git-ref`
-  before/after renders, plugin UIs, whole PlayerGuis, sweeps, `rur record` and `inspect`.
-- [Projects](docs/projects.md) and [stories](docs/stories.md): what a run mounts, story and fixture formats,
-  controls and timed input.
-- [Desktop storybook](docs/storybook.md): `rur native`, headless captures and benchmarks, memory and leaks.
-- [Comparing with Studio](docs/studio.md): `rur compare` and the Studio MCP bridge it needs.
-- [How a render runs and live sessions](docs/live-preview.md): the render service, kept runs, the session
-  protocol and the HTTP API.
-- [Browser build](docs/web.md), [assets and the cookie](docs/assets.md), [ViewportFrames](docs/viewports.md).
-- The measured rules: [layout](docs/layout.md), [text](docs/text.md), [images and compositing](docs/images.md),
-  [interaction](docs/interaction.md).
-- [How it works](docs/how-it-works.md) (the parts, the source layout, the engine dependency) and
-  [tests](docs/testing.md).
+- **Getting started:** [Setup & release binaries](docs/setup.md) · [Projects, places & Rojo](docs/projects.md) · [Stories, controls & actions](docs/stories.md)
+- **Workflows:** [CLI rendering, sequences, sweeps & profiling](docs/render.md) · [Desktop storybook](docs/storybook.md) · [Comparing with Studio](docs/studio.md) · [Browser / WebAssembly build](docs/web.md)
+- **Integrations & services:** [Live sessions & render service HTTP API](docs/live-preview.md) · [Assets, cookies & broker](docs/assets.md) · [ViewportFrames with ror](docs/viewports.md)
+- **Measured Studio rules:** [Layout](docs/layout.md) · [Text & fonts](docs/text.md) · [Images, CanvasGroups, strokes, gradients & shadows](docs/images.md) · [Input & scrolling](docs/interaction.md)
+- **Internals:** [Architecture & emulator dependency](docs/how-it-works.md) · [Testing & goldens](docs/testing.md) · [Full docs index](docs/README.md)
 
-The [documentation index](docs/README.md) also says how the rules were found.
+## Status and known limitations
 
-## Status and limitations
-
-Used daily by its maintainers; Windows is the main platform. Pixel parity with Studio is high but not
-complete, and interfaces may still change. On the maintainers' set of 44 stories from a live game, compared
-with Studio at 1.5x device scale on 2026-09-30, 99.99994% of pixels were exact and 8,384 of 8,385 Studio
-nodes were laid out at the same rect.
+`rur` is used daily by its maintainers, with Windows as the primary platform. On a benchmark of 44 live game stories compared against Studio at 1.5x scale (2026-09-30), **99.99994%** of pixels matched within 2/255 and **8,384 / 8,385** layout rects matched exactly. CLI flags and schemas may still evolve.
 
 
-Limitations:
+Current limitations:
+- **3D UI:** `ViewportFrame`s render via `ror` when installed ([docs/viewports.md](docs/viewports.md)); world-space `SurfaceGui`s and `BillboardGui`s are not rendered directly by `rur`.
+- **Interactive state:** Plain `render` captures a single timestamp (`--time`); hover/click/scroll states require `--actions` or the desktop storybook.
+- **Minor pixel differences:** Small sub-pixel edge differences remain on color emoji edges, single pixels at thin `Path2D` corners, rotated image edges within 0.01 px of a pixel center, textured images clipped by `UICorner` at 1.5x, and color steps on rotated `UIGradient`s.
+- **Text rendering modes:** Roblox switches between whole-pixel and quarter-pixel text via a server flag. `rur` implements both and defaults to production's current whole-pixel mode (`--text-subpixel on` selects quarter-pixel; see [docs/text.md](docs/text.md#text-modes)).
+- **Blurred text `UIShadow`:** `UIShadow` (`Mode = Text` with `BlurRadius > 0`) uses full-resolution glyph outlines whereas Studio 0.747 uses a coarse distance field, causing 10–50/255 differences on a few pixels near glyph corners at small radii or when `BlurRadius > 0.4 * TextSize`. `Inset`, `ShowBehindParent`, and unblurred text shadows match exactly.
+- **Partial story runs:** Stories relying on Studio-only instances, yielding mounts, or unemulated services run as far as they can; `rur sweep` classifies these separately from renderer bugs.
 
-- ViewportFrames draw their 3D content with ror, installed beside rur ([docs/viewports.md](docs/viewports.md)).
-  SurfaceGuis and BillboardGuis in
-  the world are not rendered.
-- A plain render captures the state after `--time`; interactive states need `--actions` or the desktop
-  app's input.
-- Bit-exact Studio parity is not complete: the edges of colour emoji and one pixel of a thin path corner have
-  small known differences. A rotated image can differ by a few levels in a pixel whose centre lies within
-  a hundredth of a pixel of its edge, a textured image under a UICorner by a few levels on its arcs at 1.5x,
-  and a UIGradient on a rotated element in its colour steps. Roblox draws text in one of two ways, chosen by a
-  server flag; the renderer has both and defaults to the one production serves (whole-pixel text).
-  `--text-subpixel on` selects the other, quarter-pixel text: see [docs/text.md](docs/text.md), "Text modes".
-- Stories that depend on game services or Studio-only content, yield while mounting or contain source errors
-  run as far as they can; the sweep reports these separately from rendering errors.
-- UIShadow `Mode = Text` with a BlurRadius is close to Studio 0.747 but not exact: Studio draws the glow
-  from a coarse distance-field texture of each glyph, the renderer from the glyph's outline at full
-  resolution, so a glow differs by up to 10 to 50 of 255 levels on a few pixels beside glyph corners (most
-  with small radii) and where the radius passes 0.4 of the text size (notes/images.md "UIShadow Inset,
-  ShowBehindParent and Mode = Text"). `Inset`, `ShowBehindParent` and a text shadow without blur are exact.
+## Contributing, security, and license
 
-## Contributing, security and license
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) (coding agents: [AGENTS.md](AGENTS.md))
+- **Security:** [SECURITY.md](SECURITY.md) (private vulnerability reporting & credential handling)
+- **Support & conduct:** [SUPPORT.md](SUPPORT.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- **License:** GPL-2.0-or-later ([LICENSE](LICENSE), [NOTICE](NOTICE)). Compiled binaries bundle third-party components (FreeType, Luau, Lune, Rust crates) and are distributed under GPL-3.0-or-later; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-- [CONTRIBUTING.md](CONTRIBUTING.md): how changes land (this repository is published from an internal one),
-  setup, tests and what we can't accept. Coding agents: [AGENTS.md](AGENTS.md).
-- [SECURITY.md](SECURITY.md): report vulnerabilities privately; how the Roblox cookie is handled.
-- [SUPPORT.md](SUPPORT.md): where to ask. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-- The GNU General Public License, version 2 or (at your option) any later version: see [LICENSE](LICENSE) and
-  [NOTICE](NOTICE). Third-party components and their licenses (FreeType, Luau, Lune, Rust crates), and why a
-  built binary is distributed under GPL-3.0-or-later: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-Not affiliated with or endorsed by Roblox Corporation. Roblox and Roblox Studio are trademarks of Roblox
-Corporation. Luau is a trademark of Roblox Corporation.
+Not affiliated with or endorsed by Roblox Corporation. Roblox, Roblox Studio, and Luau are trademarks of Roblox Corporation.

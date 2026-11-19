@@ -1,35 +1,28 @@
-# Documentation
+# rur documentation
 
-Short references for using and extending rur. The [README](../README.md) is the front page: what rur
-does, a quick start and the status.
+Reference guides for running `rur`, understanding its Studio parity rules, and extending the codebase. For an overview and quick start, see the [README](../README.md).
 
-| Document | What it covers |
+| Guide | Covers |
 |---|---|
-| [setup.md](setup.md) | Requirements, the native build, `rur doctor`, the state dir and output root |
-| [render.md](render.md) | The commands; `rur render` and its options and output; sequences, `--git-ref`, `--plugin`, whole PlayerGuis, sweeps, `rur record`, `inspect` |
-| [storybook.md](storybook.md) | The desktop storybook (`rur native`), headless captures and benchmarks, memory and leaks |
-| [web.md](web.md) | The browser build (WebAssembly): building, bundles, frame identity |
-| [assets.md](assets.md) | Where textures, fonts and `rbxassetid://` images come from; the Roblox cookie |
-| [how-it-works.md](how-it-works.md) | The parts and the source layout; the engine dependency and changing both at once |
-| [projects.md](projects.md) | Projects, places and roots: what a run mounts beside the story, `rur.json` |
-| [stories.md](stories.md) | Story, module, model and fixture formats; controls; timed input files |
-| [layout.md](layout.md) | Layout rules measured in Studio: AutomaticSize, lists, flex, scrolling, text boxes |
-| [text.md](text.md) | How text is measured and drawn: fonts, FreeType, placement, strokes, rich text |
-| [images.md](images.md) | Compositing: alpha, blending, edge snapping, images, CanvasGroups, gradients, strokes, shadows |
-| [interaction.md](interaction.md) | Input: hover, clicks, keys, the wheel spring, scrolling, TextBox, drag |
-| [live-preview.md](live-preview.md) | How a render runs (the render service, kept runs), the live session protocol and the service's HTTP API |
-| [studio.md](studio.md) | `rur compare`: comparing with Roblox Studio through a Studio MCP bridge |
-| [viewports.md](viewports.md) | ViewportFrames: drawing their 3D content with ror, the viewport worker protocol |
-| [testing.md](testing.md) | The checks, and what each one needs (Studio, a GPU, the network) |
+| [setup.md](setup.md) | Release binaries, verification, build requirements, `rur doctor`, state directories, and output roots |
+| [render.md](render.md) | CLI commands: `render`, `sequence`, `--git-ref`/`diff`, `--plugin`, `--all-layers`, `sweep`, `record`, `profile`, and `inspect` |
+| [storybook.md](storybook.md) | Desktop storybook (`rur native`), headless captures, benchmarks, and memory leak inspection |
+| [web.md](web.md) | WebAssembly browser build, asset bundles, and frame-identity testing |
+| [assets.md](assets.md) | Built-in textures, fonts, `rbxassetid://` downloads, cookies, account broker, and Studio image reads |
+| [how-it-works.md](how-it-works.md) | Architecture, source layout, `roblox-engine-emulator` dependency, and script execution |
+| [projects.md](projects.md) | Projects, `rur.json` places, Rojo auto-detection, explicit mounts, and environment variables |
+| [stories.md](stories.md) | UI Labs, Flipbook, module, model, and fixture formats; controls; timed `--actions` |
+| [layout.md](layout.md) | Measured Studio layout rules: float32 math, `AutomaticSize`, lists/flex/grids, scrolling, `Path2D`, and text boxes |
+| [text.md](text.md) | Text modes (whole-pixel vs. quarter-pixel), fonts, FreeType metrics, shaping, strokes, and rich text |
+| [images.md](images.md) | Compositing rules: alpha/blending, edge snapping, images, `CanvasGroup`, gradients, strokes, shadows, `Path2D`, scrollbars |
+| [interaction.md](interaction.md) | Input rules: hover, clicks, keyboard, InputActions, wheel scroll spring, `TextBox`, and drag |
+| [live-preview.md](live-preview.md) | Background render service, kept runs, live stdio session protocol, and service HTTP API |
+| [studio.md](studio.md) | `rur compare`, hidden-desktop Studio launcher, and Studio MCP bridge |
+| [viewports.md](viewports.md) | Rendering 3D `ViewportFrame`s via `ror` and the viewport worker JSON protocol |
+| [testing.md](testing.md) | Automated tests, golden corpora, renderer baselines, and per-suite requirements |
 
-## How the rules were found
+## How the Studio rules were measured
 
-Every rule here was measured, not copied: a fixture in `fixtures/` (or a probe in `tools/studio/`) builds
-a scene from scratch, Studio renders it at device scale 1.5, `rur compare` captures Studio's viewport
-losslessly and diffs it with rur's render, and the fitting scripts in `tools/analysis/` look for the
-arithmetic that reproduces Studio's numbers. The fixture names in these documents are the scenes that
-show each rule.
+Every layout, text, input, and rendering rule in `rur` is measured black-box rather than copied: a minimal fixture in `fixtures/` (or probe in `tools/studio/`) builds a scene from scratch, Roblox Studio renders it at 1.5x device scale, `rur compare` captures Studio's viewport losslessly and diffs against `rur`, and scripts in `tools/analysis/` fit the exact arithmetic. Fixture names cited throughout these guides are the scenes verifying each rule.
 
-Code comments sometimes cite the maintainers' measurement notes (`notes/*.md`, rounds 1 to 11). Those
-notes are internal working logs and are not published; these documents summarize what they established.
-A few fixtures the notes and comments mention are internal too.
+Code comments occasionally reference private measurement logs (`notes/*.md`, rounds 1–11) and internal fixtures. Those logs are not published; the guides here document the rules they established.

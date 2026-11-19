@@ -1,188 +1,102 @@
-# Setup: requirements, the build and the state dir
+# Setup, release binaries, and state directories
+
+This page covers installing prebuilt `rur-native` binaries, building from source, verifying downloads, running diagnostics, and configuring cache/output paths.
 
 ## Release binaries
 
-Each release on the [Releases page](https://github.com/Anime-Vanguards/roblox-ui-renderer/releases) has a flat
-zip per platform: `rur-native-<version>-windows-x86_64.zip`, `rur-native-<version>-linux-x86_64.zip` and
-`rur-native-<version>-macos-aarch64.zip`. Extract the executable, or install it with the README's `rokit.toml`
-entry. Rokit 1.0+ picks `rur-native` on Linux and macOS by its executable bit. Rokit 0.2.x cannot, because the
-executable's name differs from the repository's.
+Each [GitHub Release](https://github.com/Anime-Vanguards/roblox-ui-renderer/releases) includes flat zip archives for:
+- `rur-native-<version>-windows-x86_64.zip`
+- `rur-native-<version>-linux-x86_64.zip`
+- `rur-native-<version>-macos-aarch64.zip`
 
-### What it needs
+Extract `rur-native` onto your `PATH` or install it via `rokit.toml` (see [README](../README.md)). On Linux and macOS, use Rokit 1.0+; Rokit 0.2.x cannot select `rur-native` because the executable name differs from the repository name.
 
-A release binary needs no Rust, C++ compiler or Node. The desktop app and PNG renders need a graphics driver;
-`render --no-png` exports a scene without a GPU. Fonts and textures come from a Roblox Studio install, or from
-a copy of its `content` folder through `RUR_ROBLOX_CONTENT`. FreeType and egui's own UI fonts are compiled in,
-and no Roblox fonts or textures ship.
+### Runtime requirements
 
-### Without a checkout
+Release binaries require no Rust, C++ compiler, or Node.js.
+- **GPU driver:** Required for PNG rendering and the desktop storybook (`render --no-png` exports `scene.json` without a GPU).
+- **Roblox Studio install:** Supplies Roblox fonts and `rbxasset://` textures (`rur` ships none; FreeType and egui's own UI fonts are compiled in). On Linux/macOS or machines without Studio, point `RUR_ROBLOX_CONTENT` at a copied Studio `content` directory.
 
-`rur-native` opens the desktop storybook on the current project. The project is `--project <dir>`, else
-`RUR_PROJECT`, else the current directory. Relative project and explicit output paths are relative to the
-current directory. The desktop Open field resolves relative paths in the selected project. A project's
-`rur.json` declares its places, as for the Node CLI. A Rojo project works too: `--rojo <file.project.json>`,
-`--project <file.project.json>`, or a project file in the project folder or above the story when no project option
-is given: its `default.project.json`, else its only `*.project.json` ([projects](projects.md#rojo-projects-and-explicit-mounts)).
+### Running without a checkout
 
-The native `engine`, `render`, `sequence`, `serve`, `record`, `profile`, `sweep` and `diff` commands work on local
-inputs you name. `render` and `sequence` need `--dir <output>`. Sequence videos also need ffmpeg, and `diff --git-ref`
-needs git. `sweep` and `diff` are `rur sweep` and `rur diff` ([render.md](render.md#sweep)), the same options and
-output without Node. They print a summary on stderr
-(with a failed story's error and [hint](projects.md#rojo-projects-and-explicit-mounts)), and the result as one JSON
-line on stdout when stdout is a pipe or a file. On a terminal their `error:`, `warning:` and `hint:` labels and the
-run's status are colored (`NO_COLOR` turns that off, `CLICOLOR_FORCE=1` keeps it in a pipe).
+- **Desktop storybook:** `rur-native` opens the storybook on `--project <dir>`, else `RUR_PROJECT`, else the current working directory. Relative `--project` and explicit output paths resolve against your current directory; the Open field inside the GUI resolves relative to the selected project. Both `rur.json` places and Rojo projects (`--rojo`, `--project <file.project.json>`, or auto-detected `default.project.json` / sole `*.project.json`) are supported ([projects.md](projects.md#rojo-projects-and-explicit-mounts)).
+- **Standalone CLI subcommands:** `engine`, `render`, `sequence`, `serve`, `record`, `profile`, `sweep`, and `diff` all run directly without Node or a checkout (`render` and `sequence` require `--dir <output>`; `sequence` video export needs `ffmpeg`; `diff --git-ref` needs `git`). `sweep` and `diff` match `rur sweep` / `rur diff` ([render.md](render.md#sweep)): colored human summary on stderr (`NO_COLOR` disables, `CLICOLOR_FORCE=1` forces in pipes) and single-line JSON on stdout when piped or redirected.
+- **Unqualified outputs:** Anything without an explicit output path writes under `<state dir>` so a release binary never litters your current directory (for example, desktop/headless captures go to `<state dir>/out/native`).
+- **Assets and 3D viewports:** Local files, Studio `rbxasset://`, cached assets, uncached `rbxassetid://` assets, thumbnails, and cloud fonts resolve natively into `<state dir>/assets` (`--offline` disables HTTP). Release binaries never read `.env`; pass cookie or broker credentials via environment variables ([assets.md](assets.md)). `ViewportFrame`s launch `ror` automatically if installed ([viewports.md](viewports.md)). Reading private images directly from an open Studio still requires a checkout with Node (`RUR_ASSET_REPO` or `--repo <checkout>`); Studio comparisons (`rur compare`), fixtures, and build scripts also require a checkout.
 
-Output you do not name goes under the state directory, so a release binary never writes into whichever
-folder you started it in. The desktop app and `--headless` captures write to `<state dir>/out/native` and
-report the path. Where a profile goes depends on the command and on how profiling is turned on. In the
-table below, the first output that is set is used. A path you name is used as given, and a relative one is
-relative to the current directory.
+### Profile output paths
 
-| Command | Profiling is turned on by | Profile output, in order |
-| --- | --- | --- |
-| `render` | `--profile <kinds>`, including `boundary` | `--profile-out`, else `<output>/profile` |
-| `sequence` | `--profile <kinds>`, including `boundary` | `--profile-out`, else `<output>/profile` |
-| `render` or `sequence` | `REE_PROFILE=<kinds>` with no `--profile` value | `REE_PROFILE_OUT`, else `<output>/profile`. `--profile-out` is ignored. |
-| `record` | `--profile <kinds>` other than `boundary` | `--profile-out`, else `REE_PROFILE_OUT`, else `<output>/profile` |
-| `record` | `REE_PROFILE=<kinds>` with no `--profile` value | `REE_PROFILE_OUT`, else `--profile-out`, else `<output>/profile` |
-| `record` | `--profile boundary` or `RUR_BOUNDARY_PROFILE=<file>`, with no engine profile | `--profile-out`, else `RUR_BOUNDARY_PROFILE`, else `<output>/profile` |
+Explicit paths are used as given (relative to the current directory). Otherwise, release builds resolve profile outputs using the first matching row:
 
-For `render` and `sequence`, a `--profile` option means `REE_PROFILE_OUT` and `RUR_BOUNDARY_PROFILE` are
-ignored. `RUR_BOUNDARY_PROFILE` alone does not turn profiling on. A boundary profile from these two
-commands is the file `boundary.json` in the profile directory.
+| Command | How profiling was enabled | Output path (in priority order) |
+|---|---|---|
+| `render` | `--profile <kinds>` (including `boundary`) | `--profile-out`, else `<output>/profile` |
+| `sequence` | `--profile <kinds>` (including `boundary`) | `--profile-out`, else `<output>/profile` |
+| `render` / `sequence` | `REE_PROFILE=<kinds>` (no `--profile`) | `REE_PROFILE_OUT`, else `<output>/profile` (`--profile-out` ignored) |
+| `record` | `--profile <kinds>` (non-`boundary`) | `--profile-out`, else `REE_PROFILE_OUT`, else `<output>/profile` |
+| `record` | `REE_PROFILE=<kinds>` (no `--profile`) | `REE_PROFILE_OUT`, else `--profile-out`, else `<output>/profile` |
+| `record` | `--profile boundary` or `RUR_BOUNDARY_PROFILE=<file>` (no engine profile) | `--profile-out`, else `RUR_BOUNDARY_PROFILE`, else `<output>/profile` |
 
-For `record`, a boundary profile is one JSON file, even when its default name is `profile`. The other
-profile kinds write a directory. When you name neither a profile output nor a recording output, the profile
-goes to `<state dir>/out/record/profile`.
-
-The table describes release builds. Checkout builds follow the same rules for `render` and `sequence`. For
-`record` they differ in these ways:
-
-- With `--profile <kinds>`, a checkout build ignores `REE_PROFILE_OUT`. With only `REE_PROFILE`, it ignores
-  `--profile-out`.
-- An engine profile you do not name goes to `<output>/profile` when you give `--out` or `--dir`. Otherwise
-  it goes to `ree-profile` in the current directory, which is also where `--dump-scene` puts it.
-- A boundary file you do not name is `ree-boundary.json` in the current directory.
-
-In a release build, `profile diff` and `profile report` write to `<state dir>/out/profile-diff` and
-`<state dir>/out/profile-report`. Use `--out <dir>` to name another directory; a relative one is relative
-to the current directory. In a checkout build, `profile diff` accepts `--out` and otherwise writes to
-the second input's directory. `profile report` has no output option: it writes `report.html` next to
-the `profile.json` it reads.
-
-Images from Studio's content folder, cached assets and `file://` files resolve locally. The binary downloads
-uncached asset IDs, thumbnails and cloud fonts itself into the state directory's asset cache, and `--offline`
-uses the cache as it is. A release binary reads no `.env`: give it the account through the environment
-([assets.md](assets.md)). Each missing image is reported in the render diagnostics.
-
-ViewportFrames' 3D content is drawn by ror, which the binary starts itself when it is installed
-([viewports.md](viewports.md)). A private image read from an open Studio needs the rur CLI from a checkout,
-with Node and its npm packages installed. Set `RUR_ASSET_REPO` to that checkout to use it; `--repo <checkout>`
-works too. Neither changes the project or the state directory. Studio comparison, build tools, fixture
-collections and the other Node CLI commands need the checkout.
+Notes on profile outputs:
+- For `render` and `sequence`, passing `--profile` causes `REE_PROFILE_OUT` and `RUR_BOUNDARY_PROFILE` to be ignored; `RUR_BOUNDARY_PROFILE` alone does not enable profiling; boundary profiles write `boundary.json` inside the profile directory.
+- For `record`, a boundary profile is a single JSON file (even when defaulted to `profile`), while other profile kinds write a directory. If neither profile nor recording output is specified, it defaults to `<state dir>/out/record/profile`.
+- **Source-checkout differences for `record`:** `--profile` ignores `REE_PROFILE_OUT`; `REE_PROFILE` ignores `--profile-out`; unnamed engine profiles default to `<output>/profile` if `--out`/`--dir` is set, else `./ree-profile` (same for `--dump-scene`); unnamed boundary profiles default to `./ree-boundary.json`.
+- **`profile diff` and `profile report`:** Release builds write to `<state dir>/out/profile-diff` and `<state dir>/out/profile-report` (override with `--out <dir>`). Checkout builds default `profile diff` to the second input's directory (override with `--out`), while `profile report` always writes `report.html` beside its input `profile.json`.
 
 ### When stories fail: `rur-native debug-report`
 
-`rur-native debug-report` in the project folder renders every story (or the stories you name: `rur-native debug-report
-src/Button.story.luau`), each in a process of its own, and writes `rur-report.md`: rur's version and setup, and for
-each story its status, failure, traceback, errors and warnings, the engine members it used that rur doesn't emulate,
-the images and fonts that failed, drawing errors and what rur printed. Send that file when you report a problem.
+Run `rur-native debug-report` inside your project folder (optionally naming specific stories, e.g. `rur-native debug-report src/Button.story.luau`) to render each story in an isolated process and generate `rur-report.md`.
 
-It is written to share: paths are relative to the project, your user name, home folder and computer name are
-replaced, and it holds no source code, `print` output or credentials. `--source` adds the line of each frame of a
-failure's traceback (your code), `--prints` the stories' `print` output. Read it before you send it. `--help` lists
-the rest (`--out`, `--limit`, `--timeout`, and the project options `render` takes).
+The report includes your `rur` version and environment plus each story's status, failure message, traceback, errors/warnings, unemulated Roblox members used, failed images/fonts, draw errors, and logs.
 
-### State directory
+By default, the report is safe to share in public issues: paths are relativized to the project, your username/home/hostname are redacted, and source code, `print` logs, and credentials are excluded. Pass `--source` to include traceback source lines, or `--prints` to include `print` output (review the file before sharing). See `rur-native debug-report --help` for `--out`, `--limit`, `--timeout`, and project flags.
 
-The state directory is `%LOCALAPPDATA%\rur` on Windows, `$XDG_CACHE_HOME/rur` on Linux (else `~/.cache/rur`)
-and `~/Library/Caches/rur` on macOS. Set `RUR_STATE_DIR` (or its older alias `RUR_CACHE_DIR`) to move or
-share it. Services and helper processes inherit the choice. No `.env`, fixtures or scripts are read from the
-binary's folder or from the project.
+### State directory and build modes
 
-A build runs in one of two modes, and its environment variables cannot change which. A release build
-uses the standalone defaults described above. An ordinary build, such as the one the Node CLI makes,
-keeps using the checkout Cargo built it from: its `.cache` and the example project. It does so when the
-executable is copied somewhere else (for example into the state directory's `native-app` folder), when it
-is started without cache variables, and when that checkout no longer exists or lacks the CLI. Only the
-compile-time release marker selects standalone mode. The Node CLI's own defaults and build are unchanged.
+Default state directory for release binaries:
+- **Windows:** `%LOCALAPPDATA%\rur`
+- **Linux:** `$XDG_CACHE_HOME/rur` (or `~/.cache/rur`)
+- **macOS:** `~/Library/Caches/rur`
 
-A root's settings (place id, streaming radius, client GUI) come from `rur.json` in the folder
-that contains the root, just as in a checkout build. With no places declared, the project folder is
-the root, so its settings are read from the folder above the project. Roots keep their declared order,
-and explicit `--mount` arguments apply after them.
+Set `RUR_STATE_DIR` (or legacy `RUR_CACHE_DIR`) to relocate or share caches; services and child processes inherit it. Release binaries never read `.env`, fixtures, or scripts from the executable folder or project folder.
+
+Standalone mode is baked in at compile time (`RUR_RELEASE_BUILD=1`), not controlled by runtime environment variables. Ordinary source builds always default to the checkout's `.cache` and `examples/project` even if copied elsewhere.
+
+Per-root `rur.json` settings (`placeIds`, `streamingTargetRadius`, `clientGui`) are read from the directory containing each root (if no places are declared, the project folder itself is the root, so settings are read from its parent directory). Explicit `--mount` arguments apply after declared roots.
 
 ### How releases are built
 
-`.github/workflows/release.yml` builds each release from a public version tag on GitHub's runners, with
-Rust 1.90.0, the public default features and `cargo build --profile dist --locked --target <triple>`. Runs on
-main start from the dependencies an earlier run on main compiled and compile rur-native itself from its source;
-only runs on main store that cache, and a tag build starts clean (tools/release/README.md, "Build cache"). The
-cargo step sets `RUR_RELEASE_BUILD=1`. The build reads it at compile
-time, so a release binary always uses standalone defaults, even when it runs inside the checkout it was built
-in. Cargo rebuilds when the variable changes. Windows links the C runtime in with
-`-C target-feature=+crt-static`. Pushes to main that touch release files, and manual runs, build the zips
-without publishing (a dry run). A tag publishes the zips of the dry run that passed on main at the tagged
-commit, or, when there is none, builds and tests them itself first.
+`.github/workflows/release.yml` builds Windows `x86_64`, Linux `x86_64` (Ubuntu 22.04), and macOS `arm64` on GitHub runners using Rust `1.90.0`, default public features, `RUR_RELEASE_BUILD=1`, and `cargo build --profile dist --locked --target <triple>` (with `-C target-feature=+crt-static` on Windows).
 
-The release workflow builds and smoke-tests Windows x86_64, Linux x86_64 (Ubuntu 22.04) and macOS
-arm64. A release is published only after every platform passes. The maintainers develop on Windows.
-
-The smoke test unpacks each zip outside any checkout, checks `--version` and renders a story from
-`examples/project`. The Windows runners have no GPU, so there it exports the scene without drawing;
-Linux uses software Vulkan and macOS uses Metal, and both check a PNG as well. The runners have no Studio,
-so the smoke test does not cover Studio's fonts and textures.
-
-The native integration tests (`native/tests/standalone.rs`) cover both builds. The checkout tests use Cargo's
-ordinary build and run in every `cargo test --release`. The installed tests are ignored by default: build a
-release binary with `RUR_RELEASE_BUILD=1` set, set `RUR_TEST_STANDALONE_BINARY` to its absolute path and run
-`cargo test --release --test standalone -- --ignored`. Only the test code reads this variable. The installed
-tests copy the release binary into temporary installations with redirected user folders.
-`tools/release/README.md` has the full commands.
+- Main-branch runs reuse cached compiled dependencies across main runs; tagged releases build clean from scratch (`tools/release/README.md`).
+- Every platform runs a smoke test unpacking the zip outside any checkout, checking `--version`, and rendering a story from `examples/project` (Windows exports `scene.json` without a GPU; Linux uses software Vulkan and macOS uses Metal to verify PNG output as well). A release only publishes when all three platforms pass.
+- **Standalone integration tests (`native/tests/standalone.rs`):** Checkout tests run in normal `cargo test --release`. Installed release tests are ignored by default—compile with `RUR_RELEASE_BUILD=1`, set `RUR_TEST_STANDALONE_BINARY` to the absolute binary path, and run `cargo test --release --test standalone -- --ignored`.
 
 ### Verifying a download
 
-Check each file's SHA-256 against `SHA256SUMS` (`Get-FileHash <zip> -Algorithm SHA256` in PowerShell, or
-`sha256sum -c SHA256SUMS` on Linux). Verify the zip's build provenance with:
+Check SHA-256 hashes against `SHA256SUMS` (`Get-FileHash <zip> -Algorithm SHA256` on Windows, `sha256sum -c SHA256SUMS` on Linux), and verify GitHub build provenance:
 
 ```sh
 gh attestation verify <zip> -R Anime-Vanguards/roblox-ui-renderer
 ```
 
-The zip holds the GPL-3.0-or-later terms, the notices, the third-party license texts for its platform and
-`SOURCE.md`, which links the exact commit and names its version, the pinned Cargo dependencies and how to rebuild. The
-release also attaches the SHA-256-checked FreeType source archive the build used. Tool managers may install
-only the executable, so keep the zip if you need the notices or source details.
+Each zip bundles GPL-3.0-or-later license texts, notices, platform third-party licenses, and `SOURCE.md` (exact commit, version, pinned dependencies, and rebuild instructions). The release also attaches the SHA-256-verified FreeType source archive. Keep the zip if you need license notices, since tool managers like Rokit install only the binary.
 
-## Requirements
+## Building from source
 
-- **Rust 1.90+** and a C++ build toolchain (on Windows the Visual Studio C++ build tools), Git and tar. The
-  first command that runs a story builds the native app (`node tools/native-app/build.mjs`: it downloads the
-  pinned FreeType source into `<state dir>/native-app/source`, then runs `cargo build --release`, which
-  fetches the engine at the commit `native/Cargo.toml` pins). Later edits to `native/` rebuild it on the next
-  run, incrementally. On Windows run the build from PowerShell or cmd (Git Bash's GNU tar misreads `C:\...`
-  archive paths).
-- **Node 18+** with `npm install` run here (Node 22+ for the browser checks).
-- **A Roblox Studio install.** Fonts and `rbxasset://` textures are read from it; rur ships none.
-  `RUR_ROBLOX_CONTENT` can point at a copy of Studio's `content` folder instead (for example on Linux or
-  macOS).
-- Optional: a Roblox account cookie for `rbxassetid://` images that Roblox's public asset delivery refuses
-  ([assets.md](assets.md)); ffmpeg for `rur sequence` videos (`RUR_FFMPEG`); Python 3 with Pillow for the
-  fitting scripts in `tools/analysis`; Lune 0.10.4 (`rokit`, or `RUR_LUNE`) for
-  `tools/sweep/studio-assets.mjs`.
+Requirements for developing `rur` or running the Node CLI:
+- **Rust 1.90+** + C++ toolchain (Visual Studio C++ Build Tools on Windows), **Git**, and **`tar`**. On Windows, run from PowerShell or Command Prompt (Git Bash's GNU `tar` mishandles `C:\...` paths). The first render automatically runs `node tools/native-app/build.mjs`, downloading pinned FreeType sources into `<state dir>/native-app/source` and compiling `rur-native` (including `roblox-engine-emulator` at the commit pinned in `native/Cargo.toml`). Subsequent edits to `native/` trigger incremental rebuilds automatically.
+- **Node 18+** (`npm install`; Node 22+ for browser checks).
+- **Roblox Studio installed** (or `RUR_ROBLOX_CONTENT` pointing at a copied Studio `content` folder).
+- **Optional:** Roblox cookie or account broker for private `rbxassetid://` assets ([assets.md](assets.md)); `ffmpeg` (`RUR_FFMPEG`) for `rur sequence` video output; Python 3 + Pillow for `tools/analysis/`; Lune 0.10.4 (`rokit` or `RUR_LUNE`) for `tools/sweep/studio-assets.mjs`.
 
-`node cli/rur.mjs doctor` checks all of the above and reports the state dir, npm packages the
-checkout lacks (`npm install` was not run), the native build, the render service, the Studio lock and leftovers
-in the state dir (`doctor --fix` removes those).
+Run `node cli/rur.mjs doctor` to check all prerequisites, missing npm packages, native build status, render service health, Studio locks, and stale state files (`doctor --fix` cleans up stale artifacts).
 
 
-## State and output
+## State and output directories (source checkouts)
 
-Everything rur writes besides a command's output goes to the state dir: `RUR_STATE_DIR` (or `--state-dir
-<dir>`), default `.cache`: asset and font caches, hinted metrics, the native app build, Studio snapshots,
-git-ref extractions and `serve.log`. `RUR_OUT_DIR` replaces `out/` as the default output root. To share a
-checkout's caches with a worktree, point the worktree's `RUR_STATE_DIR` at them; never junction or symlink
-`.cache` folders into it (removing the worktree deletes through the links). `rur clean` shrinks the output
-root without losing anything; `rur clean --older-than <days>` also removes old frame sequences.
+In a source checkout, all caches, font/hinted metrics, native builds, Studio snapshots, git-ref extractions, and `serve.log` live in `<state dir>` (default `.cache`, override with `RUR_STATE_DIR` or `--state-dir <dir>`). Default render outputs go to `out/` (override with `RUR_OUT_DIR`).
 
-Other environment variables: [projects.md](projects.md#environment).
+To share caches with a git worktree, set `RUR_STATE_DIR` instead of symlinking or junctioning `.cache` (removing a worktree deletes through junctions). Run `rur clean` to deduplicate/shrink `out/`, or `rur clean --older-than <days>` to prune old sequences.
+
+See [projects.md](projects.md#environment) for all environment variables.

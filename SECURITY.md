@@ -2,32 +2,29 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately through GitHub: on this repository's **Security** tab, choose **Report a vulnerability** ([direct link](https://github.com/Anime-Vanguards/roblox-ui-renderer/security/advisories/new)). Only the maintainers can see the report.
+Report security vulnerabilities privately through GitHub's **Security** tab by selecting **Report a vulnerability** ([direct link](https://github.com/Anime-Vanguards/roblox-ui-renderer/security/advisories/new)). Only maintainers can view advisories.
 
-Please don't open a public issue, PR or discussion about it.
+Do not open public issues, pull requests, or discussions for security problems.
 
-Include what you found, how to reproduce it, which commit you tested, and what an attacker could do with it. A maintainer will reply within a week and keep you updated until it's fixed. We're glad to credit you in the advisory unless you'd rather stay anonymous.
+Include what you found, steps to reproduce, the commit hash tested, and potential impact. A maintainer will reply within a week and keep you updated until resolved. We will credit you in the advisory unless you prefer to stay anonymous.
 
 ## Supported versions
 
-Only the latest commit on `main` gets security fixes. There are no release branches yet.
+Only the latest commit on `main` receives security fixes. There are no release branches.
 
 ## Scope
 
-In scope: the code in this repository, its build scripts and its CI workflows. Examples:
+**In scope:** Code, build scripts, and CI workflows in this repository, including:
+- Crafted models, places, scripts, or meshes causing arbitrary code execution, writes outside the output folder, or unintended file reads.
+- Cross-site or remote access to the local render service or preview servers.
+- Credential or token leakage.
 
-- a crafted model, place, script or mesh file that makes the tool run code, write outside its output folder, or read files it shouldn't;
-- a way for the local preview or render service to be reached from other machines or websites;
-- anything that could leak a credential the tool is given.
-
-Out of scope: the Roblox platform, Roblox accounts, any Roblox game or experience, and issues in third-party dependencies that are already public (report those upstream).
+**Out of scope:** The Roblox platform, Roblox accounts or games, and already-public third-party dependency vulnerabilities (report those upstream).
 
 ## Credentials
 
-rur can use a Roblox account cookie (`.ROBLOSECURITY`) to download assets that Roblox's public asset delivery refuses. It reads the cookie only from this checkout's `.env` (a release binary reads none), the `ROBLOX_ASSET_DELIVERY_COOKIE` or `ROBLOSECURITY` environment variables, or the file `RUR_COOKIE_ENV` names, sends it only to `https://assetdelivery.roblox.com`, never prints, logs or caches it, and keeps it out of child processes that download nothing (builds, git, PowerShell, ffmpeg, browsers). Use the cookie of an account made for this, not your main account.
+- **Roblox cookie (`.ROBLOSECURITY`):** Used only for `rbxassetid://` assets that public asset delivery refuses. Read solely from `.env` in a source checkout (release binaries never read `.env`), `ROBLOX_ASSET_DELIVERY_COOKIE`, `ROBLOSECURITY`, or the file named by `RUR_COOKIE_ENV`. Sent exclusively to `https://assetdelivery.roblox.com`, never printed, logged, or cached, and stripped from child processes that don't download assets (builds, git, PowerShell, ffmpeg, browsers). Use a dedicated throwaway account.
+- **Account broker:** Keeps cookies off local machines by proxying asset delivery via personal bearer tokens ([docs/assets.md](docs/assets.md#an-account-broker-instead-of-the-cookie)). Read from `ROBLOX_BROKER_URL` + `ROBLOX_BROKER_TOKEN`, `ROBLOX_BROKER_CREDENTIALS`, or `~/.config/roblox-broker/credentials.json`. When configured, no cookie is sent; the bearer token is sent only to the broker over HTTPS (or HTTP to `127.0.0.1`/`localhost`), never across redirects, never logged or cached, and stripped from non-downloading child processes.
+- **Studio MCP bridge token:** When reading private images from Studio via `robloxstudio-mcp` 3 ([docs/assets.md](docs/assets.md#images-from-studio)), the auth token is read exclusively from `RUR_STUDIO_MCP_TOKEN`, sent only to the loopback bridge URL in `RUR_STUDIO_MCP_URL`, and never printed, logged, or cached.
 
-Instead of the cookie, rur can use an account broker: a service you configure that holds the Roblox session and forwards asset delivery's routes for a personal token ([docs/assets.md](docs/assets.md#an-account-broker-instead-of-the-cookie)). It reads the broker's address and token only from the `ROBLOX_BROKER_URL` and `ROBLOX_BROKER_TOKEN` environment variables, the file `ROBLOX_BROKER_CREDENTIALS` names, or `~/.config/roblox-broker/credentials.json`. With them it sends no cookie, sends the token only to that broker (over https, or http to this machine), never across a redirect, never prints, logs or caches it, and keeps it out of the same child processes.
-
-To read images from Roblox Studio through a robloxstudio-mcp 3 bridge, rur takes that server's local auth token from the `RUR_STUDIO_MCP_TOKEN` environment variable only, sends it only to the bridge `RUR_STUDIO_MCP_URL` names, which must be on this machine, and never prints, logs or caches it ([docs/assets.md](docs/assets.md#images-from-studio)).
-
-Never paste a cookie, token or key into an issue, PR or log. If you posted one by accident, treat it as stolen: for a Roblox cookie, sign out of all sessions in your Roblox account settings, which invalidates it, then tell us so we can delete the post.
+Never paste a cookie, token, or key into an issue, PR, or log. If you accidentally expose a `.ROBLOSECURITY` cookie, immediately sign out of all sessions in your Roblox account settings to invalidate it, then let us know so we can remove the post.

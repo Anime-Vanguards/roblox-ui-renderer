@@ -1,68 +1,59 @@
-# Tests and what they need
+# Testing and golden suites
+
+How to run `rur`'s unit tests, golden engine checks, text corpus verification, and renderer pixel baselines—plus what each suite requires.
 
 ```powershell
-npm test                                        # the selftest: the checks in cli/selftest.mjs (no Studio needed, but Studio's fonts)
-cd native; cargo test --release; cd ..          # GUI-side engine, renderer, glyph and asset unit tests
-node tools/engine/golden.mjs --fast             # engine output against recorded digests (part of npm test)
-node tools/regress/renderer.mjs                 # renderer pixel hashes of saved scenes (local artifacts)
+npm test                                        # Offline selftest (cli/selftest.mjs; needs Studio fonts)
+cd native; cargo test --release; cd ..          # Rust unit & integration tests
+node tools/engine/golden.mjs --fast             # Engine golden digests (also run by npm test)
+node tools/regress/renderer.mjs                 # Renderer frame-hash regression suite (local scenes)
 ```
 
-An intended change to engine output is re-recorded with `--write` only after `rur compare` shows it is
-right in Studio. Refactors of the renderer must keep 0 mismatches in the regression baseline.
+> Only update goldens (`--write`) or baselines after `rur compare` proves the change matches Roblox Studio. Pure refactors must produce 0 differences.
 
-| Check | Needs |
+## Test requirements matrix
+
+| Suite | Requirements |
 |---|---|
-| `cargo test --release` (unit tests in `native/src`, `native/tests/image_math.rs`, `paint.rs`) | nothing beyond the build, except `engine::input::tests::textbox_focus_caret_and_editing`, which needs Studio's fonts, and three that draw with the GPU (`render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph`, `render::gpu::tests::partial_redraws_match_whole_frames`, `render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas`); glyph tests use `RUR_TEST_FONT` or a system font and skip without one |
-| `native/tests/text_studio.rs`, `text_hinted.rs` | Studio's fonts (they fail without them) |
-| `native/tests/text_corpus.rs` | `out/golden/text-corpus.json` and `text-corpus.whole.json`, local artifacts; skips the one that is missing (see "Text corpus") |
-| `tools/tests/asset_studio*.mjs`, `native-build-lock.mjs`, `places.mjs`, `web-bundle-directories.mjs` | Node only (Studio's bridge is mocked) |
-| `tools/tests/native-assets.mjs` | the built engine (`rur-native assets`, offline) |
-| `tools/engine/golden.mjs --fast` | the built engine and Studio's fonts; the network for cloud fonts a fixture uses |
-| `tools/tests/cli.mjs`, `kept-runs.mjs`, `examples.mjs` | the built engine and Studio's fonts; `kept-runs` also a GPU (it renders through the render service) |
-| `tools/tests/viewports.mjs` | ror installed ([viewports.md](viewports.md)) |
-| `tools/regress/renderer.mjs` | saved scenes in `out/regress/` (local artifacts) and a GPU |
-| `rur compare`, `tools/interaction/*`, `tools/studio/*` | Windows, a running Studio and a Studio MCP bridge ([studio.md](studio.md)) |
+| `cargo test --release` (`native/src`, `image_math.rs`, `paint.rs`) | Build only, except: `textbox_focus_caret_and_editing` needs Studio fonts; 3 GPU tests (`native_gpu_quad_alpha_texture_groups_and_clipped_glyph`, `partial_redraws_match_whole_frames`, `native_snapped_image_pixels_match_canonical_canvas`) need a GPU; glyph tests use `RUR_TEST_FONT` or a system font (skip if missing). |
+| `native/tests/text_studio.rs`, `text_hinted.rs` | Local Roblox Studio fonts (fails without them). |
+| `native/tests/text_corpus.rs` | Local artifacts `out/golden/text-corpus.json` and `text-corpus.whole.json` (skips whichever is absent). |
+| `tools/tests/asset_studio*.mjs`, `native-build-lock.mjs`, `places.mjs`, `web-bundle-directories.mjs` | Node only (Studio bridge is mocked). |
+| `tools/tests/native-assets.mjs` | Compiled `rur-native` (runs offline). |
+| `tools/engine/golden.mjs --fast` | Compiled `rur-native`, Studio fonts, and network access for any cloud fonts used by fixtures. |
+| `tools/tests/cli.mjs`, `kept-runs.mjs`, `examples.mjs` | Compiled `rur-native` and Studio fonts (`kept-runs` also needs a GPU for the render service). |
+| `tools/tests/viewports.mjs` | `ror` installed ([viewports.md](viewports.md)). |
+| `tools/regress/renderer.mjs` | Local saved scenes in `out/regress/` and a GPU. |
+| `rur compare`, `tools/interaction/*`, `tools/studio/*` | Windows, running Roblox Studio, and a Studio MCP bridge ([studio.md](studio.md)). |
 
-## Golden engine output
+## Engine golden suite (`tools/engine/golden.mjs`)
 
-`tools/engine/golden.mjs` runs every fixture and probe and compares a digest of the engine's normalized
-output (scene, script output, diagnostics, live session replies) with `tools/engine/golden.json`. `--fast`
-mounts each fixture alone, in edit mode, plus three live sessions. The other corpora (`--corpus fixtures,live`)
-mount the fixtures beside a frozen copy of a project (`RUR_PROJECT`, frozen with `--freeze`); their recorded
-digests come from the maintainers' project, so outside it they are for your own recordings.
+Runs fixtures and probes and verifies normalized digests (scene JSON, script output, diagnostics, live-session replies) against `tools/engine/golden.json`:
+- `--fast`: runs standalone edit-mode fixtures plus three live sessions.
+- `--corpus fixtures,live`: runs against a frozen project snapshot (`RUR_PROJECT`, created with `--freeze`). Public users can record their own baselines here.
+- **Font version sensitivity:** Text digests match the Studio version recorded in `golden.json` (`fonts.studio`); another Studio build may shift a few text entries. Use `--freeze-fonts` to snapshot active font files into `out/golden/fonts`.
+- Unchanged entries are cached across runs (pass `--rerun` to force all). Use `--write` only after Studio verification, and list moved entries in your PR.
 
-- Text output depends on the fonts it was measured with. The digests were recorded with the fonts of the
-  Studio version in `golden.json`'s `fonts.studio`; another Studio version can change a few text entries.
-  `--freeze-fonts` copies the font files the engine reads into `out/golden/fonts` so later runs read those.
-- An entry already found identical is not run again while nothing it reads changed (`--rerun` runs all).
-- `--write` records; do it only after `rur compare` shows the change is right in Studio, and list what moved.
+## Text corpus (`native/tests/text_corpus.rs`)
 
-## Text corpus
+Replays **85,399** frozen text cases (layouts, rich-text parses, line pens, sizing helpers) against exact digests for both [text modes](text.md#text-modes):
+- Quarter-pixel: `out/golden/text-corpus.json` (`native/tests/text-corpus.sha256`, override path with `RUR_TEXT_CORPUS`).
+- Whole-pixel: `out/golden/text-corpus.whole.json` (`native/tests/text-corpus.whole.sha256`, override with `RUR_TEXT_CORPUS_WHOLE`).
 
-`native/tests/text_corpus.rs` replays 85 399 frozen text cases (layouts, rich text parses, line pens, size
-helpers) and requires identical output, once per text mode (docs/text.md, "Text modes"): `text-corpus.json`
-holds the quarter-pixel output and `text-corpus.whole.json` the whole-pixel output of the same cases, with
-their digests in `native/tests/text-corpus.sha256` and `text-corpus.whole.sha256`. The corpus is the engine's own output: it was first recorded from the
-Luau implementation the text engine was ported from, and a change of text measurement re-records the cases it
-moves.
+To update a corpus after a Studio-verified rule change (`text_studio.rs` / `data/studio/`), target one test explicitly:
 
-- `RUR_TEXT_CORPUS_UPDATE=<file> cargo test --release --test text_corpus` writes the corpus to `<file>` with
-  the current output of every differing layout case. Use it only for a change that Studio measurements
-  verify (`native/tests/text_studio.rs` and its datasets in `data/studio/`), say which rule moved how many
-  cases, and keep the corpus it replaces beside the new one.
-- The update variables apply to whichever corpus test runs, so name one:
-  `-- text_engine_matches_frozen_whole_pixel_corpus` or `-- text_engine_matches_frozen_corpus`.
-  `RUR_TEXT_CORPUS_WHOLE` names the whole-pixel corpus as `RUR_TEXT_CORPUS` names the other.
-- A differing case that a deliberate change does not explain is a regression, not something to record.
+```powershell
+$env:RUR_TEXT_CORPUS_UPDATE = "out/golden/text-corpus.whole.new.json"
+cargo test --release --test text_corpus -- text_engine_matches_frozen_whole_pixel_corpus
+```
 
-## Renderer regressions
+(Or `-- text_engine_matches_frozen_corpus` for quarter-pixel.) Keep the old corpus beside the new one and report how many cases moved and why. Unexplained diffs are regressions.
 
-`tools/regress/renderer.mjs` draws saved scenes with `rur-native --batch` and compares hashes of the frames.
-Refactors must keep 0 mismatches; `--shuffle <seed>` draws in another order and must agree.
+## Renderer regression suite (`tools/regress/renderer.mjs`)
+
+Renders saved scenes via `rur-native --batch` and compares output frame hashes. Refactors must maintain 0 mismatches, and `--shuffle <seed>` (randomized scene order) must match identically.
 
 
 ## Continuous integration
 
-GitHub's Windows runners have no GPU and no Studio. CI builds the binary, runs the Rust unit tests that need
-neither, and the Node checks that only need Node; the font, GPU and Studio checks run on contributors'
-machines.
+GitHub Actions Windows runners have neither a GPU nor Roblox Studio. CI compiles `rur-native`, runs the headless Rust unit tests, and executes the Node-only test scripts; font, GPU, and Studio suites run locally on contributor machines.

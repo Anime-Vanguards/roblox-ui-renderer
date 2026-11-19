@@ -1,112 +1,54 @@
-# Text
+# Text measurement and rendering
 
-How text is measured (`native/src/engine/text/`) and drawn (`native/src/glyphs.rs`,
-`native/src/render/text.rs`). Studio's numbers come from the probes in `tools/studio/` and the
-datasets in `data/studio/`, its pixels from `rur compare` captures of the `text-*` fixtures.
+How `rur` shapes, measures (`native/src/engine/text/`), rasterizes (`native/src/glyphs.rs`), and composites (`native/src/render/text.rs`) text to match Roblox Studio. Constants are verified against `data/studio/` probes and `text-*` compare fixtures.
 
 ## Text modes
 
-Roblox draws text in one of two ways, chosen by the server flag `FFlagLegacyTextSubpixelRendering`. The
-renderer implements both and one setting selects which:
+Roblox toggles between two text layout/rendering pipelines using the server flag `FFlagLegacyTextSubpixelRendering`. `rur` supports both:
 
-| Mode | Flag | What it draws |
-| --- | --- | --- |
-| whole-pixel (the default) | off | Fully hinted glyph bitmaps. Every glyph advance is rounded half up to a whole pixel on its own, so text is measured from whole advances. A size that is not a whole number of pixels draws the next smaller size on quads scaled up. |
-| quarter-pixel | on | Lightly hinted glyphs at quarter-pixel pens up to 32 GUI px. The pen adds exact advances and is rounded once per glyph position, so a line is as wide as its rounded pen. |
+| Mode | Roblox flag | Behavior |
+|---|---|---|
+| **Whole-pixel** *(default)* | Off | Fully hinted glyph bitmaps. Each glyph advance (plus kerning) rounds half-up to a whole pixel independently. Non-integer pixel sizes rasterize at the floored size and scale quads up. |
+| **Quarter-pixel** | On | Lightly hinted glyphs with quarter-pixel pens up to 32 GUI px. A continuous pen accumulates exact 26.6 advances and rounds once per glyph position, so line width equals `round(pen_end) - round(pen_start)`. |
 
-The default follows what production Roblox serves. On 2026-11-12 the flag was off for Studio and the
-desktop and mobile clients (it had been rolled out on from about 2026-11-09 and was turned off again;
-`notes/text.md` "Whole-pixel text" has the record and how to read the live value). Text sizes differ between
-the modes: `TextBounds`, wrapping, truncation and TextScaled all follow the advances.
+The default tracks production Roblox (as of 2026-11-12, whole-pixel is active on Studio, desktop, and mobile). Switching modes affects `TextBounds`, line wrapping, truncation, and `TextScaled`.
 
-To switch, pass `--text-subpixel on` (or `off`) to any `rur` command, or set `RUR_TEXT_SUBPIXEL=on` in the
-environment; `rur doctor` prints the mode in use. The web build takes it in its config's `env`. When Roblox
-flips the flag again, change the default in `native/src/engine/text/mod.rs` (`subpixel_setting`) and
-`cli/paths.mjs` (`textSubpixel`), swap which mode the `@quarter` golden entries record
-(`tools/engine/golden.mjs`), and re-record the goldens.
+- **CLI / env switch:** Pass `--text-subpixel on` (quarter-pixel) or `--text-subpixel off` (whole-pixel), or set `RUR_TEXT_SUBPIXEL=on`. Run `rur doctor` to see the active mode. The web build sets it via its config `env`.
+- **Maintaining both modes:** Every text fixture has goldens in both modes (`edit/<name>` and `edit/<name>@quarter`), separate frozen corpora (`text-corpus.whole.json` / `text-corpus.json`), and separate Studio measurement datasets (`data/studio/whole/` / `data/studio/`). If Roblox flips the production flag again, update `subpixel_setting` in `native/src/engine/text/mod.rs` and `textSubpixel` in `cli/paths.mjs`, swap the `@quarter` target in `tools/engine/golden.mjs`, and re-record goldens.
 
-Both modes are kept from rotting: the text fixtures have goldens in each mode (`edit/<name>` in the default
-mode, `edit/<name>@quarter` in the other), each mode has its frozen corpus
-(`out/golden/text-corpus.whole.json`, `out/golden/text-corpus.json`) and its measured datasets
-(`data/studio/whole/`, `data/studio/`). The sections below say where the modes differ.
+## Fonts and fallback
 
-## Fonts
-
-- Fonts come from the installed Studio's `content/fonts` (`RUR_ROBLOX_CONTENT` picks another `content`
-  folder) and from cloud fonts (`rbxassetid://` family files and faces) downloaded into the asset cache.
-  The repository ships no font files.
-- `Enum.Font` values map to Studio's family files; `rbxasset://fonts/families/Arial.json` is measured as
-  Arimo, as Studio does.
-- Missing glyphs fall back through Source Sans Pro Regular, Arimo, RobloxEmoji, Twemoji and the Noto
-  script fonts, then a cloud CJK fallback face when it is cached.
-- Emoji sequences: variation selectors, ZWJ, skin tone modifiers, keycaps and tag characters take the face
-  of the code point before them, so a sequence shapes as one run and the emoji font's ligature applies;
-  default-ignorable code points take no width.
+- Local built-in fonts load from Studio's `content/fonts` (override with `RUR_ROBLOX_CONTENT`). Cloud fonts (`rbxassetid://`) download into the asset cache. No font files ship in this repository.
+- `Enum.Font` maps to Studio family files (`rbxasset://fonts/families/Arial.json` measures as Arimo, matching Studio).
+- Missing glyphs fall back through: Source Sans Pro Regular → Arimo → RobloxEmoji → Twemoji → Noto script fonts → cached cloud CJK fallback.
+- **Emoji sequences:** Variation selectors, ZWJ, skin-tone modifiers, keycaps, and tag characters inherit the preceding code point's face so emoji ligatures shape in a single run. Default-ignorable code points have zero advance.
 
 ## Metrics and shaping
 
-- A face is sized so that its hhea line height, line gap included (`ascender - descender + lineGap`), is
-  S + 1 px for pixel size S. Of Studio's faces Arimo, Ubuntu, Permanent Marker, AccanthisADFStd and Guru have
-  a line gap, and so do cloud families such as Poppins.
-- The scale is FreeType's for a size request of `ascender - descender` in 26.6 pixels. Without a line gap
-  that is the whole line, `(S + 1) x 64`. With one it is the line's share without the gap cut to a whole
-  unit, `floor((S + 1) x 64 x (ascender - descender) / (ascender - descender + lineGap))`, so the face is a
-  hair smaller than the plain ratio gives.
-- Whole-pixel mode: each advance (kerning included) is rounded half up to a whole pixel, and a glyph's pen is
-  the sum of the advances before it. The truncation ellipsis is as wide as FreeType's hinted advance of "…".
-  The rest of this list describes the pen of the quarter-pixel mode.
-- Glyph advances are FreeType's in 26.6 fixed point, `FT_MulFix(advance, x_scale)` plus the GPOS (or legacy
-  `kern` table) adjustment. The pen adds these exact advances and is rounded half up to a whole pixel at
-  each glyph, so a span of text is round(pen at its end) - round(pen at its start) px wide. One pen runs
-  through the whole text: across rich text runs, wrapped lines and newlines. (Studio 0.746; earlier
-  versions rounded each advance on its own.)
-- Rich text runs are shaped separately: no kerning across run boundaries.
-- Rich text sizes: `<font size=N>` is `floor(f32(f32(N * UIScale) * DPI))`. The base size of rich text takes
-  the scaled size back to unscaled units and scales it again in float32, so some sizes come out one pixel
-  smaller than plain text at the same TextSize (30 at UIScale 0.885 is 44 px rich, 45 px plain).
-- The ellipsis of TextTruncate starts a pen of its own: a truncated line is the kept text's whole-pixel
-  width plus the ellipsis's advance rounded half up. (Earlier Studio versions used FreeType's *hinted*
-  advance; the engine can still generate those metrics, cached in `<state dir>/hinted`.)
-- A rich text line cut by TextTruncate is drawn with an ellipsis too, in the label's face at the size, colour
-  and weight of the last kept glyph, while its `TextBounds` stay the longest prefix that fits the box.
-- A character and the combining mark after it are shaped as the composed character when the font has it.
-- A line's baseline comes from the face of the label (of the run, in rich text), also when its glyphs fall
-  back to another face, such as emoji.
+- **Face sizing:** Faces scale so their `hhea` line height including line gap (`ascender - descender + lineGap`) equals `S + 1` pixels for pixel size `S` (faces with non-zero line gaps include Arimo, Ubuntu, Permanent Marker, AccanthisADFStd, Guru, and cloud fonts like Poppins).
+  - Without a line gap, FreeType requests `(S + 1) * 64` in 26.6 fixed point.
+  - With a line gap, it requests `floor((S + 1) * 64 * (ascender - descender) / (ascender - descender + lineGap))`.
+- **Whole-pixel mode:** Each advance (including kerning) rounds half-up individually; the truncation ellipsis (`…`) uses its FreeType hinted advance.
+- **Quarter-pixel mode:** Advances use 26.6 fixed point (`FT_MulFix(advance, x_scale) + GPOS/kern`). One continuous pen runs across rich-text runs, wrapped lines, and newlines, rounding half-up at each glyph (Studio 0.746+).
+- **Rich text:** Runs shape independently (no cross-run kerning). `<font size=N>` resolves to `floor(f32(f32(N * UIScale) * DPI))`. The base rich-text size round-trips through unscaled units in `f32`, which can yield 1 px smaller than plain text at identical `TextSize` (e.g., `30` at `UIScale 0.885` is 44 px rich vs. 45 px plain).
+- **Truncation ellipsis:** Starts its own pen: total width equals kept whole-pixel width + rounded ellipsis advance. (Legacy hinted-ellipsis metrics remain cached under `<state dir>/hinted`.) Truncated rich-text lines draw the ellipsis in the label's face matching the last kept glyph's size, color, and weight, while `TextBounds` stays the longest fitting prefix.
+- **Combining marks & baselines:** Base + combining marks compose when the font contains the precomposed glyph. Line baselines come from the label's (or rich-text run's) primary face even when individual glyphs fall back to emoji or other fonts.
 
 ## Rasterization
 
-- Glyphs are FreeType 2.14.2 grayscale bitmaps at whole device pixels (`native/build.rs` compiles FreeType
-  into the binary, `src/glyphs/rur_glyph.c` drives it).
-- Synthetic bold: when the requested weight is 600 or more and the chosen face is lighter than 600, the
-  hinted outline is emboldened with `FT_Outline_EmboldenXY(s, s)`, `s = 2 * S` in 26.6 for pixel size S.
-  Advances do not change.
-- UIStroke on text: the FreeType stroker's band, radius `floor(10 t) / 10` px with `t = thickness * DPI`
-  in float32; its alpha is `alpha8(1 - stroke transparency)`, not faded by TextTransparency.
-- Legacy TextStroke: the glyphs drawn again at the four diagonal offsets (+-1, +-1) before the fill.
+- Uses compiled-in **FreeType 2.14.2** (`native/build.rs`, `src/glyphs/rur_glyph.c`) producing grayscale bitmaps at whole device pixels.
+- **Synthetic bold:** Applied when requested weight >= 600 and the resolved face is < 600 via `FT_Outline_EmboldenXY(2*S, 2*S)` in 26.6 units (advances unchanged).
+- **`UIStroke` on text:** FreeType stroker band with radius `floor(10 * t) / 10` px (`t = f32(thickness * DPI)`) and opacity `alpha8(1 - stroke_transparency)` (independent of `TextTransparency`).
+- **Legacy `TextStroke`:** Renders glyph fills four times at diagonal offsets `(±1, ±1)` behind the fill.
 
-## Placement
+## Placement and compositing
 
-- A line's pen starts at a whole device pixel: the alignment anchor of the content box is snapped half up,
-  then Left = `round(x)`, Right = `round(x + w) - width`, Center = `round(x + w / 2) - floor(width / 2)`.
-  Rich text centres an odd-width line one pixel further right.
-- Glyphs sit at the line's pen plus the whole-pixel advances before them, on the line's baseline (the
-  ascender's share of the line, line gap included, of its largest pixel size). Glyphs from fallback fonts
-  and `<font size>` runs share that baseline.
-- Rotated text: the pen and line top are not rounded; the upright glyph bitmaps are rotated about the
-  label centre and resampled bilinearly with 8-bit weights.
-- A fractional text size (rich text under some UIScales) draws the glyphs rasterized at the floored size,
-  each quad scaled by unfloored / floored about the glyph's pen point.
+- **Line start:** Content alignment anchor snaps half-up: `Left = round(x)`, `Right = round(x + w) - width`, `Center = round(x + w/2) - floor(width/2)` (rich text shifts odd-width centered lines 1 px right).
+- **Glyph positions:** Placed at `line_pen + prior_advances` along the line baseline (determined by the largest pixel size on the line, shared by fallback glyphs and `<font size>` runs).
+- **Rotated & fractional text:** Rotated text skips pen/line-top rounding, rotating upright bitmaps around the label center with 8-bit bilinear resampling. Fractional text sizes (rich text under certain `UIScale`s) draw floored-size bitmaps scaled by `unfloored / floored` around each glyph's pen point.
+- **Draw order:** `<mark>` highlights → `UIStroke` → rich `<stroke>` → legacy `TextStroke` → glyph fills → `<u>` / `<s>` decorations.
+- **Blending:** Straight alpha per glyph quad: `A = gpu8(g/255 * alpha8(1 - TextTransparency)/255)`, blended with `round((c * A + D * (255 - A)) / 255)` ([images.md](images.md)).
+- **`<u>` and `<s>`:** Whole-pixel rects of thickness `ceil(S / DPI / 20)` logical px; underline aligns to the bottom rows of the run box, strikethrough starts at `ceil(S / 2) + 1`.
+- **`UIGradient` on text:** Evaluates across the label's rect per texel ([images.md](images.md#uigradient)), also tinting strokes that don't have their own gradient.
 
-## Compositing
-
-- Each glyph quad blends on its own (straight alpha), in this order: `<mark>` boxes, UIStroke glyphs,
-  rich `<stroke>` bands, the legacy TextStroke, the fill glyphs, then `<u>` / `<s>`.
-- Glyph alpha: `A = gpu8(g / 255 * Av / 255)` with `Av = alpha8(1 - TextTransparency)`; the blend is
-  `round((c * A + D * (255 - A)) / 255)` ([images.md](images.md) defines `alpha8` and `gpu8`).
-- `<u>` and `<s>` are whole-pixel rects: thickness `ceil(S / DPI / 20)` logical px; underline is the run
-  box's last rows, strike starts at `ceil(S / 2) + 1`.
-- UIGradient on text is the fill's gradient (images.md "UIGradient") over the label's rect, evaluated at
-  each texel's place; it also tints strokes without a gradient of their own.
-
-Fixtures: `text-raster`, `text-probe-blend`, `text-probe-rich`, `text-probe-decor*`, `text-probe-synth`,
-`text-probe-rotate`, `text-probe-gradient*`, `text-probe-uiscale`, `layout-textpen*`, `layout-truncate*`.
+Fixtures: `text-raster`, `text-probe-blend`, `text-probe-rich`, `text-probe-decor*`, `text-probe-synth`, `text-probe-rotate`, `text-probe-gradient*`, `text-probe-uiscale`, `layout-textpen*`, `layout-truncate*`.
