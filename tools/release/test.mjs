@@ -13,6 +13,7 @@ import { canaryNotes, notes } from "./notes.mjs";
 import { fileStates, outsideFileStates } from "./file-states.mjs";
 // The choice of the dry run a tag publishes from has tests of its own, run with these
 import "./dry-run.test.mjs";
+import "./nightly.test.mjs";
 
 // Runs `run` with an empty temporary folder and removes it afterwards
 function temporary(run) {
@@ -326,7 +327,13 @@ test("installer ZIP is flat, binary first, only one executable, with license and
 		assert.equal(entries[0].mode & 0o777, 0o755);
 		assert.ok(entries.slice(1).every(entry => (entry.mode & 0o111) === 0));
 		assert.equal(entries[0].bytes.toString(), "MZtest-binary");
-		assert.ok(entries.at(-1).bytes.includes(Buffer.from("a".repeat(40))));
+		// SOURCE.md links the exact commit, which for the canary is not its version tag's, and names the version as text
+		const sourceNotes = entries.at(-1).bytes.toString();
+		const site = "https://github.com/Anime-Vanguards/roblox-ui-renderer";
+		assert.ok(sourceNotes.includes(`Source: ${site}/tree/${"a".repeat(40)}\n`));
+		assert.ok(sourceNotes.includes(`Commit: ${"a".repeat(40)} (version v${version(ROOT)})\n`));
+		assert.ok(sourceNotes.includes(`GitHub source archive: ${site}/archive/${"a".repeat(40)}.tar.gz\n`));
+		assert.doesNotMatch(sourceNotes, /refs\/tags|tree\/v\d/);
 		assert.ok(entries.at(-1).bytes.includes(Buffer.from("RUR_RELEASE_BUILD=1")));
 		// An independent reader checks the central directory and the payloads we wrote
 		listWithSystemReader(zipFile);

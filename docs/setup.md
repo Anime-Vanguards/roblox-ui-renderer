@@ -131,7 +131,7 @@ gh attestation verify <zip> -R Anime-Vanguards/roblox-ui-renderer
 ```
 
 The zip holds the GPL-3.0-or-later terms, the notices, the third-party license texts for its platform and
-`SOURCE.md`, which names the exact tag and commit, the pinned Cargo dependencies and how to rebuild. The
+`SOURCE.md`, which links the exact commit and names its version, the pinned Cargo dependencies and how to rebuild. The
 release also attaches the SHA-256-checked FreeType source archive the build used. Tool managers may install
 only the executable, so keep the zip if you need the notices or source details.
 

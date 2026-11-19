@@ -1,7 +1,9 @@
 # Prebuilt rur-native releases. A push to main that touches release files, or a manual run, is a
 # dry run: it builds, tests and smoke-tests every platform and leaves the zips as workflow artifacts.
-# The nightly run does the same for main's head, unless that commit already has a passing run that
-# kept its zips; then it builds nothing.
+# The nightly run does the same for main's head, unless nothing that ships changed since the newest
+# commit of main with a passing run that kept its zips: the head itself, or an older commit when only
+# docs, tests, CI or tools changed since (tools/release/README.md says which paths ship). Then it
+# builds and uploads nothing, and its summary names that run.
 # A version tag publishes a GitHub release: the zips of the dry run that passed on main at the tagged
 # commit when there is one (tools/release/dry-run.mjs; the release command tags only such a commit),
 # so the same source is not built twice; otherwise the tag run does everything a dry run does first.
@@ -66,14 +68,15 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
-      actions: read # to find a passing dry run of the commit
+      actions: read # to find a passing dry run of the commit, or for the nightly run the newest on main
     outputs:
       version: ${{ steps.version.outputs.version }}
-      # The dry run whose zips a tag publishes, or that spares the nightly run its build; empty when
-      # this run builds them
+      # The dry run whose zips a tag publishes; empty when this run builds them
       dry-run: ${{ steps.dry-run.outputs.run-id }}
       # When that run started, for the canary's notes
       dry-run-date: ${{ steps.dry-run.outputs.run-date }}
+      # false when a nightly run has nothing to build; empty on every other run
+      nightly-build: ${{ steps.nightly.outputs.build }}
     steps:
       # Full history, for the check that a tag is on main
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -106,16 +109,29 @@ jobs:
       # A tag publishes the zips (and the FreeType source) of the passing dry run of the same
       # commit, which built, tested and smoke-tested every platform; the build and test jobs below
       # then have nothing to do. Without one they run, except on the canary tag, which never builds:
-      # --required fails this job instead. The nightly run builds nothing when main's head has such
-      # a run already, and builds it when it has none or that run's zips have expired.
+      # --required fails this job instead.
       - name: Find a passing dry run of this commit
         id: dry-run
-        if: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || github.event_name == 'schedule' }}
+        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REQUIRED: ${{ github.event_name == 'push' && github.ref == 'refs/tags/canary' && '--required' || '' }}
         # $REQUIRED is unquoted so that, empty, it adds no argument
         run: node tools/release/dry-run.mjs --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --artifacts binary-windows-x86_64,binary-linux-x86_64,binary-macos-aarch64,freetype-source $REQUIRED >> "$GITHUB_OUTPUT"
+      # The nightly run builds main's head unless nothing that ships changed since the newest commit
+      # of main with a passing run that kept its zips (tools/release/nightly.mjs). Then the build and
+      # test jobs below have nothing to do, and the run uploads nothing.
+      - name: Decide whether the nightly run builds
+        id: nightly
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release/nightly.mjs --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --artifacts binary-windows-x86_64,binary-linux-x86_64,binary-macos-aarch64,freetype-source >> "$GITHUB_OUTPUT"
+      - name: Say what the nightly run builds and why
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          REASON: ${{ steps.nightly.outputs.reason }}
+        run: printf '%s\n' "$REASON" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Windows takes about ten minutes per build, so the two builds each get their own runner instead
   # of running one after the other:
@@ -125,7 +141,7 @@ jobs:
   # windows-validation then runs the installed tests on a fresh runner. Linux and macOS keep one
   # build job each: a second macOS job would only add another wait for a scarce macOS runner.
   windows-build:
-    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' }}
+    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' && needs.version.outputs.nightly-build != 'false' }}
     needs: version
     runs-on: windows-latest
     timeout-minutes: 90
@@ -248,7 +264,7 @@ jobs:
   # zip that smoke tests and publish ships, not against the build job's own output. Nothing is
   # compiled here: the unmarked binary and the test program come from windows-build.
   windows-validation:
-    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' }}
+    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' && needs.version.outputs.nightly-build != 'false' }}
     needs: [version, windows-build]
     runs-on: windows-latest
     timeout-minutes: 15
@@ -318,7 +334,7 @@ jobs:
   # Linux and macOS build the marked binary and package it, then build the unmarked one and the test
   # program, and run the installed tests against the binary in the zip, in one job each
   build:
-    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' }}
+    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' && needs.version.outputs.nightly-build != 'false' }}
     needs: version
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -415,7 +431,7 @@ jobs:
           if-no-files-found: error
 
   smoke:
-    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' }}
+    if: ${{ !github.event.repository.private && needs.version.outputs.dry-run == '' && needs.version.outputs.nightly-build != 'false' }}
     # windows-validation: the Windows zip is smoke-tested only after its installed tests passed
     needs: [version, build, windows-validation]
     runs-on: ${{ matrix.runner }}

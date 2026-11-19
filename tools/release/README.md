@@ -11,22 +11,36 @@ node tools/release/package.mjs --binary native/target/x86_64-pc-windows-msvc/dis
 node tools/release/notes.mjs --tag v0.1.0 --out release-notes.md
 node tools/release/notes.mjs --tag canary --run <run id> --run-date <run start time> --out release-notes.md
 node tools/release/dry-run.mjs --repository <owner/name> --sha <commit> --artifacts <name,...> [--required]
+node tools/release/nightly.mjs --repository <owner/name> --sha <main's head> --artifacts <name,...>
 node --test tools/release/test.mjs
 ```
 
 - `version.mjs` reads `package.json`, `package-lock.json`, `native/Cargo.toml` and `native/Cargo.lock`.
 - `licenses.mjs` writes the license texts of the crates the target compiles in, with the vendored C and
   C++ notices, the embedded fonts and FreeType.
-- `package.mjs` writes `SOURCE.md` and the zip.
+- `package.mjs` writes `SOURCE.md` and the zip. `SOURCE.md` links the exact commit and its source archive,
+  and names the version as text: a canary is a build of a later commit than its version's tag.
 - `notes.mjs` writes the release notes, or the canary's.
 - `dry-run.mjs` finds the passing dry run of a commit whose zips a tag publishes (see below).
+- `nightly.mjs` decides whether the nightly run builds main's head (see below).
 
 ## Dry runs, the nightly build and the canary
 
 A push to main that touches the release files, a manual run and the nightly run (scheduled for 01:51
 UTC; GitHub may start it later) are dry runs: they build, test and smoke-test every platform and keep the zips and the FreeType source as
-workflow artifacts. The nightly run first asks `dry-run.mjs` whether main's head already has a passing
-dry run that kept its artifacts; if it has, the nightly run builds nothing.
+workflow artifacts. The nightly run first asks `nightly.mjs` whether there is anything new to build. It
+takes the newest commit of main's first-parent history with a passing dry run that kept its artifacts
+(as `dry-run.mjs` chooses one), and builds nothing when that commit is the head or when no path that
+ships changed since it (`git diff --name-only`, a renamed file counted under both names). Otherwise, or
+with no such commit among the newest passing runs, it builds. A nightly run that builds nothing uploads
+nothing, and its summary names the run that built that commit; one that builds names the changed paths
+that ship. Any failure to decide builds, with a warning.
+
+A path ships unless it is under `.github/`, a dot-file or in a dot-folder, Markdown, or under `docs/`,
+`notes/`, `tools/` or a `tests`, `benches`, `examples`, `fixtures` or `goldens` folder. The paths a push
+to main starts a dry run for (`on.push.paths` in the workflow, such as `tools/release/**`,
+`tools/native-host/**` and `native/tests/standalone.rs`) always ship, except the workflow itself. This
+is the same rule that decides when a release is due.
 
 A version tag (`vMAJOR.MINOR.PATCH`) publishes a release from the passing dry run of its commit, or
 builds first when there is none. The `canary` tag, moved by the export to the newest commit of main

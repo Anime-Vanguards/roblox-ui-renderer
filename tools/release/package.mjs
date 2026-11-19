@@ -113,7 +113,8 @@ function gitDependencies(root) {
 	return [...new Set(pins)];
 }
 
-// SOURCE.md: where the Corresponding Source of this binary is, for the GPL
+// SOURCE.md: where the Corresponding Source of this binary is, for the GPL. It links the exact commit: a canary is a
+// build of a later commit than its version tag's.
 export function source(root, tag, commit) {
 	if (!/^v\d+\.\d+\.\d+$/.test(tag) || !/^[a-f0-9]{40}$/.test(commit)) throw new Error("the source tag must look like v1.2.3 and the commit must be a full SHA-1");
 	const git = gitDependencies(root);
@@ -121,10 +122,10 @@ export function source(root, tag, commit) {
 
 This rur-native binary is distributed under GPL-3.0-or-later.
 
-Source: https://github.com/Anime-Vanguards/roblox-ui-renderer/tree/${tag}
-Commit: ${commit}
-GitHub source archive: https://github.com/Anime-Vanguards/roblox-ui-renderer/archive/refs/tags/${tag}.tar.gz
-For a dry run, the commit above identifies the source; the version tag may not exist yet.
+Source: https://github.com/Anime-Vanguards/roblox-ui-renderer/tree/${commit}
+Commit: ${commit} (version ${tag})
+GitHub source archive: https://github.com/Anime-Vanguards/roblox-ui-renderer/archive/${commit}.tar.gz
+For a dry run or the canary, the commit above identifies the source; the version tag may not exist yet, or name an older commit.
 
 Rust crates are pinned by native/Cargo.lock. Crates.io packages include their SHA-256 checksums there.
 Git dependencies (including their vendored sources):
@@ -134,7 +135,7 @@ FreeType 2.14.2: the exact SHA-256-checked freetype-2.14.2.tar.gz used for the b
 
 Rebuild with Rust 1.90.0 and a C++ toolchain: npm ci; node tools/native-app/build.mjs --prepare; then, in native/, cargo build --profile dist --locked --bin rur-native --target <triple>.
 Set RUR_RELEASE_BUILD=1 for that cargo build, which makes the binary use standalone defaults, and set RUR_FREETYPE_SRC to the prepared freetype-2.14.2 directory. The public default features are used.
-Target triples: x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu, aarch64-apple-darwin. On Windows set RUSTFLAGS=-C target-feature=+crt-static before building, to include the C runtime. See .github/workflows/release.yml at the source tag for system build packages.
+Target triples: x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu, aarch64-apple-darwin. On Windows set RUSTFLAGS=-C target-feature=+crt-static before building, to include the C runtime. See .github/workflows/release.yml at that commit for system build packages.
 `;
 }
 
