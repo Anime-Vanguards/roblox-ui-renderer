@@ -513,18 +513,24 @@ pub(crate) fn model_texture(text: &str) -> Option<String> {
     best.map(|(_, id)| id)
 }
 
-/// The Studio install fonts and built-in textures come from (the best of [`content_roots`])
-pub fn studio_content() -> Option<PathBuf> {
-    content_roots().into_iter().next()
+/// The Studio install rur finds when `RUR_ROBLOX_CONTENT` names none (the best of [`content_roots`] after it; the
+/// doctor's `studio` check)
+pub fn studio_install() -> Option<PathBuf> {
+    content_roots_from(None).into_iter().next()
 }
 
 /// cli/assets.mjs studioContentRoots
 fn content_roots() -> Vec<PathBuf> {
+    content_roots_from(std::env::var_os("RUR_ROBLOX_CONTENT").map(PathBuf::from))
+}
+
+/// [`content_roots_with`] this machine's installs, `content` first
+fn content_roots_from(content: Option<PathBuf>) -> Vec<PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).or_else(|| {
         std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("AppData").join("Local"))
     });
     content_roots_with(
-        std::env::var_os("RUR_ROBLOX_CONTENT").map(PathBuf::from),
+        content,
         || roblox_install::RobloxStudio::locate().ok().map(|studio| studio.content_path().to_path_buf()),
         local,
         crate::paths::is_standalone(),

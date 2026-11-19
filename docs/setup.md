@@ -15,7 +15,7 @@ Extract `rur-native` onto your `PATH` or install it via `rokit.toml` (see [READM
 
 Release binaries require no Rust, C++ compiler, or Node.js.
 - **GPU driver:** Required for PNG rendering and the desktop storybook (`render --no-png` exports `scene.json` without a GPU).
-- **Roblox Studio install:** Supplies Roblox fonts and `rbxasset://` textures (`rur` ships none; FreeType and egui's own UI fonts are compiled in). On Linux/macOS or machines without Studio, point `RUR_ROBLOX_CONTENT` at a copied Studio `content` directory.
+- **Roblox Studio install:** Supplies Roblox fonts and `rbxasset://` textures (`rur` ships none; FreeType and egui's own UI fonts are compiled in). On Linux/macOS or machines without Studio, point `RUR_ROBLOX_CONTENT` at a copied Studio `content` directory (the one holding `fonts/` and `textures/`). Without Studio's fonts, text in Roblox's built-in fonts is not drawn, and each render lists those fonts in its summary's `missingFonts`.
 
 ### Running without a checkout
 
@@ -90,7 +90,7 @@ Requirements for developing `rur` or running the Node CLI:
 - **Roblox Studio installed** (or `RUR_ROBLOX_CONTENT` pointing at a copied Studio `content` folder).
 - **Optional:** an Open Cloud API key, Roblox cookie or account broker for private `rbxassetid://` assets ([assets.md](assets.md)); `ffmpeg` (`RUR_FFMPEG`) for `rur sequence` video output; Python 3 + Pillow for `tools/analysis/`; Lune 0.10.4 (`rokit` or `RUR_LUNE`) for `tools/sweep/studio-assets.mjs`.
 
-Run `node cli/rur.mjs doctor` to check all prerequisites, missing npm packages, native build status, render service health, Studio locks, and stale state files (`doctor --fix` cleans up stale artifacts).
+Run `node cli/rur.mjs doctor` to check all prerequisites (it warns when no Studio is found, or when `RUR_ROBLOX_CONTENT` names a folder that doesn't exist or lacks `fonts/` or `textures/`), missing npm packages, native build status, render service health, Studio locks, and stale state files (`doctor --fix` cleans up stale artifacts).
 
 
 ## State and output directories (source checkouts)

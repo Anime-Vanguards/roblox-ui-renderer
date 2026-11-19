@@ -8,6 +8,9 @@
 //!   dropped lines    `text.droppedLines`: wrapped lines the box height left out
 //!   missing glyphs   glyph id 0 (.notdef, drawn as an empty box): a character in neither the label's font nor any
 //!                    fallback font
+//!   missing fonts    diagnostics.missingFontAssets (cloud fonts not downloaded) and diagnostics.unavailableFonts
+//!                    (families with no face to draw with, not even the Source Sans Pro fallback: no Studio fonts;
+//!                    their labels draw no text)
 //!   script output    diagnostics.output (print / warn / error)
 //!   paths            instance names holding "." (or "[", "]", '"') are written Holder["Item.Name"].Label
 use std::{
@@ -248,6 +251,19 @@ fn node_missing_glyphs(node: &Json, fonts: &[Json], cache: &mut FontCache) -> Ve
     missing
 }
 
+/// The summary's `missingFonts` from a scene's diagnostics (cli/diagnostics.mjs missingFonts): the cloud font assets
+/// that are not downloaded, then the font families whose text is not drawn at all (no face of them nor the Source
+/// Sans Pro fallback could be read, as on a machine without Studio's fonts)
+pub fn missing_fonts(diagnostics: &Json) -> Vec<Json> {
+    let mut fonts = diagnostics.get("missingFontAssets").items().to_vec();
+    for family in diagnostics.get("unavailableFonts").items() {
+        if !fonts.contains(family) {
+            fonts.push(family.clone());
+        }
+    }
+    fonts
+}
+
 /// The scene's diagnostics: per-node notes for `inspect`-style descriptions, unambiguous paths, and the summary's
 /// `culled`, `textLinesDropped`, `missingGlyphs` and `output` (cli/diagnostics.mjs sceneDiagnostics)
 pub fn scene_diagnostics(scene: &Json) -> Diagnostics {
@@ -257,6 +273,8 @@ pub fn scene_diagnostics(scene: &Json) -> Diagnostics {
     let ids = by_id(nodes);
     let paths = node_paths(nodes, &ids);
     let fonts = scene.get("fonts").items();
+    // (a label with text and no lines draws nothing when some family had no face to draw with)
+    let unavailable = scene.get("diagnostics").get("unavailableFonts").items();
     let mut notes: HashMap<usize, Vec<String>> = HashMap::new();
     let mut culled_roots = Vec::new();
     let mut culled_nodes = 0;
@@ -280,6 +298,12 @@ pub fn scene_diagnostics(scene: &Json) -> Diagnostics {
             let count = crate::glyphs::js_number_string(dropped_lines);
             note(format!("{count} wrapped line{} dropped ({shown} shown; box too short)", if dropped_lines == 1.0 { "" } else { "s" }));
             dropped.push(format!("{} ({count} of {} lines dropped)", paths[index], crate::glyphs::js_number_string(shown as f64 + dropped_lines)));
+        }
+        if text.truthy() && !unavailable.is_empty() && text.get("lines").items().is_empty() && dropped_lines == 0.0 {
+            let shown = node.get("props").get("text");
+            if !matches!(shown, Json::Null) && !shown.text().chars().all(crate::js::is_space) {
+                note(format!("text not drawn: no face of its font to draw with (missingFonts: {})", unavailable.iter().map(Json::text).collect::<Vec<_>>().join(", ")));
+            }
         }
         if text.truthy() {
             for (c, code, font, count) in node_missing_glyphs(node, fonts, &mut cache) {
@@ -365,7 +389,7 @@ pub fn render_summary(out: &Path, png: bool, result: &Json, seconds: f64, git_re
     summary.set("warnings", count("warn"));
     summary.set("unemulated", diagnostics.get("unemulated").items().iter().map(|entry| entry.get("member").clone()).collect::<Vec<_>>());
     summary.set("missingImages", missing_images);
-    summary.set("missingFonts", diagnostics.get("missingFontAssets").items().to_vec());
+    summary.set("missingFonts", missing_fonts(diagnostics));
     for (key, value) in scene_diagnostics(&scene).summary.entries() {
         summary.set(key, value.clone());
     }
@@ -430,5 +454,24 @@ mod tests {
         .unwrap();
         assert_eq!(scene_diagnostics(&scene).summary.get("missingGlyphs").stringify(0), r#"[{"char":null,"code":null,"font":"Font-Regular","labels":1,"paths":["Label"]}]"#);
         assert_eq!(plain_rich_text("<b>a&amp;lt;</b> &lt;c&gt;"), "a&lt; <c>");
+    }
+
+    /// A family with no face to draw with (no Studio fonts) is a missing font, after the cloud assets, and a label in it
+    /// that has text but no lines says why it draws nothing
+    #[test]
+    fn fonts_with_no_face_are_missing_fonts_and_their_labels_say_so() {
+        let diagnostics = Json::parse(r#"{"missingFontAssets": ["123"], "unavailableFonts": ["rbxasset://fonts/families/Ubuntu.json", "123"]}"#).unwrap();
+        assert_eq!(Json::Array(missing_fonts(&diagnostics)).stringify(0), r#"["123","rbxasset://fonts/families/Ubuntu.json"]"#);
+        assert_eq!(missing_fonts(&Json::object()).len(), 0);
+        let scene = Json::parse(
+            r#"{"nodes": [
+                {"id": 1, "name": "Button", "rect": [0, 0, 1, 1], "props": {"text": "Play"}, "text": {"lines": {}}},
+                {"id": 2, "name": "Empty", "rect": [0, 0, 1, 1], "props": {"text": " "}, "text": {"lines": {}}}
+            ], "diagnostics": {"unavailableFonts": ["rbxasset://fonts/families/Ubuntu.json"]}}"#,
+        )
+        .unwrap();
+        let notes = scene_diagnostics(&scene).notes;
+        assert_eq!(notes[&0], ["text not drawn: no face of its font to draw with (missingFonts: rbxasset://fonts/families/Ubuntu.json)"]);
+        assert!(!notes.contains_key(&1), "{notes:?}");
     }
 }

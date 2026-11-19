@@ -218,6 +218,9 @@ pub struct FontRegistry {
     pub diagnostics: BTreeMap<String, String>,
     /// `Fonts.MissingAssets`: cloud asset ids that were needed but are not cached.
     pub missing_assets: BTreeSet<String>,
+    /// Families no face could be read for, not even the Source Sans Pro fallback (no Studio fonts): their text
+    /// has no glyphs and is not drawn (the scene's `diagnostics.unavailableFonts`).
+    pub unavailable: BTreeSet<String>,
 }
 
 impl FontRegistry {
@@ -249,6 +252,7 @@ impl FontRegistry {
             hinted,
             diagnostics: BTreeMap::new(),
             missing_assets: BTreeSet::new(),
+            unavailable: BTreeSet::new(),
         };
         registry.preload();
         registry
@@ -440,7 +444,7 @@ impl FontRegistry {
     }
 
     /// `Fonts.GetFace`: the closest face of a family (style first, then CSS weight distance), else
-    /// Source Sans Pro Regular.
+    /// Source Sans Pro Regular; None, with the family in [`Self::unavailable`], when neither can be read.
     pub fn get_face(&mut self, family: &str, weight: f64, style: &str) -> Option<FaceId> {
         let key = (family.to_string(), weight.to_bits(), style.to_string());
         if let Some(cached) = self.face_cache.get(&key) {
@@ -481,6 +485,15 @@ impl FontRegistry {
                     result = Some(self.add_face(path, font, 400.0, "normal".into(), family.to_string(), true));
                 }
             }
+        }
+        if result.is_none() {
+            // (in the place of load_family's "using Source Sans Pro metrics": there is no Source Sans Pro either)
+            let reason = match &self.font_content {
+                None => "no Roblox Studio fonts were found (install Studio, or set RUR_ROBLOX_CONTENT to a Studio content folder)".to_string(),
+                Some(content) => format!("{content}/fonts/SourceSansPro-Regular.ttf can't be read"),
+            };
+            self.diagnostics.insert(family.to_string(), format!("text in {family} is not drawn: no face of it and no Source Sans Pro fallback is available; {reason}"));
+            self.unavailable.insert(family.to_string());
         }
         self.face_cache.insert(key, result);
         result

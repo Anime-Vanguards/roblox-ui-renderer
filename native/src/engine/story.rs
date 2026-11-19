@@ -782,13 +782,15 @@ pub fn diagnostics(engine: &Rc<Engine>, project: &Project, story: &Story, run_ti
     studio.insert("count".into(), json!(project_state.studio_only_count));
     studio.insert("used".into(), json!(project_state.studio_only_used));
     studio.insert("gui".into(), json!(project_state.studio_only_gui));
-    // Fonts.Diagnostics / Fonts.MissingAssets (the app downloads the missing font assets)
-    let (fonts, missing_fonts): (Vec<Json>, Vec<Json>) = {
+    // Fonts.Diagnostics / Fonts.MissingAssets (the app downloads the missing font assets), and the families whose
+    // text is not drawn because no face of them nor the fallback could be read
+    let (fonts, missing_fonts, unavailable): (Vec<Json>, Vec<Json>, Vec<Json>) = {
         let mut text = engine.text().borrow_mut();
         let text = text.get_or_insert_with(|| super::text::TextEngine::new(super::text::FontPaths::for_repo(&engine.options.repo.to_string_lossy())));
         (
             text.fonts.diagnostics.iter().map(|(key, message)| json!({ "key": key, "message": message })).collect(),
             text.fonts.missing_assets.iter().map(|id| json!(id)).collect(),
+            text.fonts.unavailable.iter().map(|family| json!(family)).collect(),
         )
     };
     let mut result = json!({
@@ -804,6 +806,10 @@ pub fn diagnostics(engine: &Rc<Engine>, project: &Project, story: &Story, run_ti
             "total": project.started.elapsed().as_secs_f64(),
         },
     });
+    // (only when there are any: a machine with Studio's fonts writes the scene it always did)
+    if !unavailable.is_empty() {
+        result["unavailableFonts"] = Json::Array(unavailable);
+    }
     if let Some(order) = &story.order {
         result["order"] = order.clone();
     }

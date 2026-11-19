@@ -2155,3 +2155,69 @@ mod loopback_tests {
         let _ = std::fs::remove_dir_all(&directory);
     }
 }
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+    use crate::engine::{
+        GuiEngine,
+        text::{FontPaths, TextEngine},
+    };
+    use crate::js::Json as Value;
+
+    const FAMILY: &str = "rbxasset://fonts/families/Ubuntu.json";
+    const FIXTURE: &str = "return function(Target)\n\tlocal Button = Instance.new(\"TextButton\")\n\tButton.Name = \"Play\"\n\tButton.Size = UDim2.fromOffset(200, 50)\n\tButton.FontFace = Font.new(\"rbxasset://fonts/families/Ubuntu.json\")\n\tButton.Text = \"Play\"\n\tButton.Parent = Target\nend\n";
+
+    /// The button's text node: what it says and how many lines it draws
+    fn button(output: &SceneOutput) -> (String, usize) {
+        let node = output.scene["nodes"].as_array().into_iter().flatten().find(|node| node["path"].as_str().is_some_and(|path| path.ends_with(".Play"))).expect("the button");
+        (node["props"]["text"].as_str().unwrap_or("").to_string(), node["text"]["lines"].as_array().map_or(0, Vec::len))
+    }
+
+    /// With no font file to read (no Studio fonts, no cached cloud fonts: a machine without Studio and
+    /// RUR_ROBLOX_CONTENT unset) a button's family and the Source Sans Pro fallback have no face, so its text is not
+    /// drawn. The scene names the family (`diagnostics.unavailableFonts`, and a font diagnostic saying so), the summary
+    /// `rur render` writes lists it in `missingFonts` and the button's note says why it is blank, instead of a summary
+    /// with nothing missing. With the fallback face to read, the same button draws and nothing is unavailable.
+    #[test]
+    fn text_with_no_face_to_draw_with_is_a_missing_font() {
+        let directory = std::env::temp_dir().join(format!("rur-no-fonts-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let (fixture, fonts, out) = (directory.join("button.luau"), directory.join("fonts"), directory.join("out"));
+        std::fs::create_dir_all(&fonts).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(&fixture, FIXTURE).unwrap();
+        let repo = crate::engine::default_repo();
+        let args = parse(&[
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--fixture".into(), fixture.to_string_lossy().into_owned(),
+            "--viewport".into(), "400x200".into(), "--time".into(), "0.1".into(), "--no-snapshots".into(),
+        ])
+        .unwrap();
+        // (a frozen font set, as RUR_FONT_ROOT names one, with nothing in it)
+        let paths = FontPaths { fonts: Some(fonts.to_string_lossy().replace('\\', "/")), ..FontPaths::for_repo(&repo.to_string_lossy()) };
+        let run = |paths: &FontPaths| run_once_with(&args, |engine| *engine.text().borrow_mut() = Some(TextEngine::new(paths.clone()))).unwrap();
+
+        let output = run(&paths);
+        let diagnostics = &output.scene["diagnostics"];
+        assert_eq!(button(&output), ("Play".to_string(), 0));
+        assert_eq!(diagnostics["unavailableFonts"], serde_json::json!([FAMILY]), "{diagnostics}");
+        let said = diagnostics["fonts"].as_array().into_iter().flatten().find(|entry| entry["key"] == FAMILY).and_then(|entry| entry["message"].as_str()).unwrap_or("");
+        assert!(said.contains("is not drawn") && !said.contains("using Source Sans Pro metrics"), "{diagnostics}");
+        std::fs::write(out.join("scene.json"), &output.text).unwrap();
+        let summary = crate::summary::render_summary(&out, false, &Value::parse(r#"{"status": "ok", "renderErrors": []}"#).unwrap(), 0.0, None).unwrap();
+        assert!(summary.get("missingFonts").items().contains(&Value::from(FAMILY)), "{}", summary.stringify(0));
+        assert_eq!(summary.get("missingGlyphs").items().len(), 0, "(no glyph was laid out to be missing)");
+        let notes = crate::summary::scene_diagnostics(&Value::parse(&output.text).unwrap()).notes;
+        assert!(notes.values().flatten().any(|note| note.starts_with("text not drawn") && note.contains(FAMILY)), "{notes:?}");
+
+        if let Some(font) = crate::assets::tests::test_font() {
+            let faces = fonts.join("studio").join("content").join("fonts");
+            std::fs::create_dir_all(&faces).unwrap();
+            std::fs::copy(font, faces.join("SourceSansPro-Regular.ttf")).unwrap();
+            let output = run(&paths);
+            assert_eq!(button(&output), ("Play".to_string(), 1));
+            assert!(output.scene["diagnostics"].get("unavailableFonts").is_none(), "{}", output.scene["diagnostics"]);
+        }
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+}

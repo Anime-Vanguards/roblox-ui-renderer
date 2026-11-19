@@ -81,7 +81,7 @@ import { accountAccess, studioContentRoots, withoutCookie, CACHE_DIR } from "./a
 import { engineBaseArgs, ensureEngine } from "./engine.mjs";
 import { detectRojoProject, mountArgs, rojoFileOf, runMounts } from "./rojo.mjs";
 import { readActions, UsageError } from "./actions.mjs";
-import { diagnosticLines, sceneDiagnostics } from "./diagnostics.mjs";
+import { diagnosticLines, missingFonts, sceneDiagnostics } from "./diagnostics.mjs";
 import { emulatorLink, pinnedCommit } from "../tools/emulator.mjs";
 import { isMain } from "./entry.mjs";
 import { placeOf, placeRoots, readPlaces } from "./places.mjs";
@@ -421,7 +421,8 @@ export async function render(args, { service = false, env = process.env } = {}) 
 		warnings: output.filter(entry => entry.kind === "warn").length,
 		unemulated: asArray(scene.diagnostics && scene.diagnostics.unemulated).map(entry => entry.member),
 		missingImages: missingImages.map(([uri, entry]) => `${uri}: ${entry.error}`),
-		missingFonts: asArray(scene.diagnostics && scene.diagnostics.missingFontAssets),
+		// Cloud fonts not downloaded, and the families whose text is not drawn (no face, not even the fallback)
+		missingFonts: missingFonts(scene.diagnostics),
 		// What the render left out or could not draw (cli/diagnostics.mjs): culled nodes, wrapped text
 		// lines the box dropped, glyphs no font has, and the script's print / warn output
 		...sceneDiagnostics(scene).summary,
@@ -541,7 +542,7 @@ export async function sequence(args, { service = false, env = process.env } = {}
 		warnings: output.filter(entry => entry.kind === "warn").length,
 		unemulated: asArray(diagnostics.unemulated).map(entry => entry.member),
 		missingImages: [...new Set([...asArray(result.missingImages), ...asArray(result.assetErrors)])],
-		missingFonts: asArray(diagnostics.missingFontAssets),
+		missingFonts: missingFonts(diagnostics),
 		output: sceneDiagnostics({ diagnostics }).summary.output,
 		seconds: (Date.now() - started) / 1000,
 		phases: result.phases || {},
@@ -633,13 +634,19 @@ async function doctor({ fix = false } = {}) {
 	// The engine's downloader reads the cookie or the broker and the API key; it says only which (never a value)
 	const credentials = await accountAccess();
 	const access = credentials?.access;
-	// ror, which draws ViewportFrames: as the engine finds it (`rur-native doctor`)
+	// ror, which draws ViewportFrames, and the Studio install fonts and textures come from (with what is wrong with
+	// RUR_ROBLOX_CONTENT): as the engine finds them (`rur-native doctor`)
 	const { findEngine } = await import("./engine.mjs");
 	const engine = findEngine();
 	let viewports = "unknown until the native engine is built";
+	let studio = null;
 	if (engine) {
 		const native = spawnSync(engine, ["doctor", "--json"], { cwd: ROOT, encoding: "utf8", windowsHide: true });
-		try { viewports = JSON.parse(native.stdout).viewports ?? viewports; } catch { /* an engine from before the doctor command */ }
+		try {
+			const checks = JSON.parse(native.stdout);
+			viewports = checks.viewports ?? viewports;
+			studio = checks.studio ?? null;
+		} catch { /* an engine from before the doctor command */ }
 	}
 	return {
 		root: ROOT,
@@ -666,7 +673,7 @@ async function doctor({ fix = false } = {}) {
 		studioLock: holder ? `held by pid ${holder.pid} (${holder.owner}) since ${new Date(holder.since).toISOString()}: ${holder.file}` : `free (${LOCK_FILE})`,
 		rust: rust.status === 0 ? rust.stdout.trim() : "missing: the engine is native (install Rust: https://rustup.rs)",
 		freetype: "2.14.2, compiled into the engine (native/build.rs; the release Studio's glyphs match it)",
-		studioInstall: content[0] || "missing (fonts/textures need a local Roblox Studio install)",
+		studioInstall: studio || content[0] || "missing (fonts/textures need a local Roblox Studio install)",
 		assetCookie: { broker: "an account broker is used instead (its token is never printed)", cookie: "available (never printed)" }[access]
 			|| (credentials === undefined ? "unknown until the native engine is built (it reads the cookie)" : "not configured (public assets only)"),
 		assetApiKey: credentials === undefined ? "unknown until the native engine is built (it reads the key)"

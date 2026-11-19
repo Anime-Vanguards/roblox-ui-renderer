@@ -8,6 +8,9 @@
 //                    TextBounds counts only the lines shown)
 //   missing glyphs   glyph id 0 (.notdef, drawn as an empty box): the character is in neither the
 //                    label's font nor any fallback font
+//   missing fonts    diagnostics.missingFontAssets (cloud fonts not downloaded) and
+//                    diagnostics.unavailableFonts (families with no face to draw with, not even the
+//                    Source Sans Pro fallback: no Studio fonts; their labels draw no text)
 //   script output    diagnostics.output (print / warn / error)
 //   unambiguous paths  instance names holding "." (or "[", "]", '"') are written Holder["Item.Name"].Label
 
@@ -141,6 +144,8 @@ export function sceneDiagnostics(scene, { examples = 5, outputLines = 20 } = {})
 	const byId = new Map(nodes.map(node => [node.id, node]));
 	const paths = nodePaths(nodes, byId);
 	const fonts = asArray(scene && scene.fonts);
+	// (a label with text and no lines draws nothing when some family had no face to draw with)
+	const unavailable = asArray(scene && scene.diagnostics && scene.diagnostics.unavailableFonts);
 	const notes = new Map();
 	const note = (node, text) => {
 		if (!notes.has(node.id)) notes.set(node.id, []);
@@ -163,6 +168,10 @@ export function sceneDiagnostics(scene, { examples = 5, outputLines = 20 } = {})
 			const text = `${node.text.droppedLines} wrapped line${node.text.droppedLines === 1 ? "" : "s"} dropped (${shown} shown; box too short)`;
 			note(node, text);
 			dropped.push(`${paths.get(node.id)} (${node.text.droppedLines} of ${shown + node.text.droppedLines} lines dropped)`);
+		}
+		if (node.text && unavailable.length && !asArray(node.text.lines).length && !(node.text.droppedLines > 0)) {
+			const shown = node.props && node.props.text;
+			if (shown != null && String(shown).trim() !== "") note(node, `text not drawn: no face of its font to draw with (missingFonts: ${unavailable.join(", ")})`);
 		}
 		if (node.text) {
 			const missing = nodeMissingGlyphs(node, fonts);
@@ -193,6 +202,16 @@ export function sceneDiagnostics(scene, { examples = 5, outputLines = 20 } = {})
 	};
 }
 
+// The summary's `missingFonts` from a scene's diagnostics (native/src/summary.rs missing_fonts): the
+// cloud font assets that are not downloaded, then the families whose text is not drawn at all
+export function missingFonts(diagnostics) {
+	const fonts = [...asArray(diagnostics && diagnostics.missingFontAssets)];
+	for (const family of asArray(diagnostics && diagnostics.unavailableFonts)) {
+		if (!fonts.includes(family)) fonts.push(family);
+	}
+	return fonts;
+}
+
 // One-line texts of the summary's diagnostics (stderr after a render, sweep reports)
 export function diagnosticLines(summary) {
 	const lines = [];
@@ -205,6 +224,7 @@ export function diagnosticLines(summary) {
 		const { count, examples } = summary.textLinesDropped;
 		lines.push(`text lines dropped: ${count} (${examples.join("; ")}${more(examples.length, count)})`);
 	}
+	if (asArray(summary.missingFonts).length) lines.push(`missing fonts: ${summary.missingFonts.join(", ")}`);
 	for (const glyph of asArray(summary.missingGlyphs)) {
 		const what = glyph.char ? `'${glyph.char}' ${glyph.code}` : "glyphs";
 		lines.push(`missing glyphs: ${what} in ${glyph.font} (${glyph.labels} label${glyph.labels === 1 ? "" : "s"}: ${glyph.paths.join("; ")}${more(glyph.paths.length, glyph.labels)})`);

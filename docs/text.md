@@ -21,6 +21,7 @@ The default tracks production Roblox (as of 2026-11-12, whole-pixel is active on
 - Local built-in fonts load from Studio's `content/fonts` (override with `RUR_ROBLOX_CONTENT`). Cloud fonts (`rbxassetid://`) download into the asset cache. No font files ship in this repository.
 - `Enum.Font` maps to Studio family files (`rbxasset://fonts/families/Arial.json` measures as Arimo, matching Studio).
 - Missing glyphs fall back through: Source Sans Pro Regular → Arimo → RobloxEmoji → Twemoji → Noto script fonts → cached cloud CJK fallback.
+- **Without Studio's fonts** (no Studio install, or `RUR_ROBLOX_CONTENT` unset or naming a folder without `fonts/`), a built-in family and its Source Sans Pro fallback have no face, so text in it is not drawn. rur has no font of its own to stand in; a cloud font still draws once it is downloaded. Such a render says so: `summary.json`'s `missingFonts` lists the family (`scene.json`: `diagnostics.unavailableFonts`, and a `diagnostics.fonts` message), `rur inspect` notes each label that drew no text, and `rur doctor` warns about the Studio folder.
 - **Emoji sequences:** Variation selectors, ZWJ, skin-tone modifiers, keycaps, and tag characters inherit the preceding code point's face so emoji ligatures shape in a single run. Default-ignorable code points have zero advance.
 
 ## Metrics and shaping

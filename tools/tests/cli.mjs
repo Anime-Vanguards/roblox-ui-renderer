@@ -288,6 +288,40 @@ end
 	console.log("CLI render diagnostics: PASS (culled rows, dropped lines, missing glyphs, script output, dotted paths)");
 }
 
+// A button whose font has no face to draw with (no Studio fonts: here a frozen font set with nothing in it, as
+// RUR_FONT_ROOT names one) draws no text, and the render says so instead of reporting nothing missing: the family
+// in summary.missingFonts (the scene's diagnostics.unavailableFonts), a "missing fonts" line on stderr and the
+// button's note in `inspect`. The status stays ok, as with missing glyphs.
+noFonts: {
+	const { treeLines } = await import("../../cli/inspect.mjs");
+	const os = await import("node:os");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-cli-nofonts-"));
+	fs.mkdirSync(path.join(dir, "fonts"));
+	fs.writeFileSync(path.join(dir, "button.luau"), `return function(Target)
+	local Button = Instance.new("TextButton")
+	Button.Name = "Play"
+	Button.Size = UDim2.fromOffset(200, 50)
+	Button.Text = "Play"
+	Button.Parent = Target
+end
+`);
+	const out = path.join(dir, "out");
+	const result = spawnSync(process.execPath, ["cli/rur.mjs", "render", "--fixture", path.join(dir, "button.luau"), "--viewport", "400x200", "--no-png", "--offline", "--json", "--out", out],
+		{ cwd: root, encoding: "utf8", windowsHide: true, env: { ...process.env, RUR_STATE_DIR: path.join(dir, "state"), RUR_NO_SERVICE: "1", RUR_FONT_ROOT: path.join(dir, "fonts") } });
+	assert.equal(result.status, 0, result.stderr);
+	const summary = JSON.parse(result.stdout);
+	assert.equal(summary.status, "ok");
+	const scene = JSON.parse(fs.readFileSync(path.join(out, "scene.json"), "utf8"));
+	const unavailable = scene.diagnostics.unavailableFonts;
+	assert.ok(Array.isArray(unavailable) && unavailable.length > 0, JSON.stringify(scene.diagnostics));
+	for (const family of unavailable) assert.ok(summary.missingFonts.includes(family), `${family} in ${JSON.stringify(summary.missingFonts)}`);
+	assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, "summary.json"), "utf8")).missingFonts, summary.missingFonts);
+	assert.match(result.stderr, /rur: missing fonts: .*rbxasset:\/\/fonts\/families\//);
+	assert.match(treeLines(out).join("\n"), /TextButton Play .*\[text not drawn: no face of its font/);
+	fs.rmSync(dir, { recursive: true, force: true });
+	console.log("CLI render without fonts: PASS (the button's font in missingFonts, on stderr and in its note)");
+}
+
 // `inspect crop`: the node the query names before nodes whose path only contains it, one inside the image
 // before one outside, and a node wholly outside the image is an error naming its rect, not an empty PNG.
 {

@@ -419,8 +419,11 @@ fn story_section(run: &Run, name: &str, options: &Options, redact: &Redactor) ->
     }
     let fonts: Vec<String> = diagnostics["fonts"].as_array().into_iter().flatten().map(|entry| format!("- {}: {}", entry["key"].as_str().unwrap_or("?"), entry["message"].as_str().unwrap_or(""))).collect();
     let missing_fonts = diagnostics["missingFontAssets"].as_array().map(Vec::len).unwrap_or(0);
-    if !fonts.is_empty() || missing_fonts > 0 {
-        out.push_str(&format!("**Fonts:** {missing_fonts} cloud font assets missing\n{}\n\n", redact.apply(&fonts.join("\n"))));
+    // (families with no face to draw with, not even the fallback: their text is not drawn)
+    let unavailable: Vec<&str> = diagnostics["unavailableFonts"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !fonts.is_empty() || missing_fonts > 0 || !unavailable.is_empty() {
+        let undrawn = if unavailable.is_empty() { String::new() } else { format!("; text not drawn in {} (no face to draw with)", unavailable.join(", ")) };
+        out.push_str(&format!("**Fonts:** {missing_fonts} cloud font assets missing{undrawn}\n{}\n\n", redact.apply(&fonts.join("\n"))));
     }
     let drawing: Vec<String> = run.result.as_ref().map(|result| result["renderErrors"].as_array().into_iter().flatten().filter_map(|error| error.as_str().map(str::to_string)).collect()).unwrap_or_default();
     if !drawing.is_empty() {

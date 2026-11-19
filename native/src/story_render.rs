@@ -372,7 +372,8 @@ pub fn headless_gpu() -> Result<GpuRenderer> {
 
 /// What cli/rur.mjs's summary reports of a render, for a client that takes its pixels and reads no
 /// file: the scene's status, whether it has a background, the images that failed (manifest.json's
-/// `images` entries with an error, as `uri: error`), the missing cloud fonts and the script errors
+/// `images` entries with an error, as `uri: error`), the missing fonts (cloud fonts not downloaded, then the families
+/// with no face to draw with: crate::summary::missing_fonts) and the script errors
 fn pixels_summary(scene: &Value, images: &Map<String, Value>) -> Value {
     let missing_images: Vec<String> = images
         .iter()
@@ -391,11 +392,17 @@ fn pixels_summary(scene: &Value, images: &Map<String, Value>) -> Value {
         .collect();
     let diagnostics = &scene["diagnostics"];
     let script_errors = diagnostics["output"].as_array().into_iter().flatten().filter(|entry| entry["kind"] == "error").count();
+    let mut missing_fonts = diagnostics["missingFontAssets"].as_array().cloned().unwrap_or_default();
+    for family in diagnostics["unavailableFonts"].as_array().into_iter().flatten() {
+        if !missing_fonts.contains(family) {
+            missing_fonts.push(family.clone());
+        }
+    }
     json!({
         "status": scene["status"],
         "transparent": scene.get("background").is_some_and(Value::is_null),
         "missingImages": missing_images,
-        "missingFonts": diagnostics["missingFontAssets"].as_array().cloned().unwrap_or_default(),
+        "missingFonts": missing_fonts,
         "scriptErrors": script_errors,
     })
 }

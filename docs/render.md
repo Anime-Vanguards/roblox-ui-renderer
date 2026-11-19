@@ -53,7 +53,7 @@ node cli/rur.mjs render --story path/to/Button.story.luau --viewport 1200x900 --
 Every render writes into `--out` (and prints diagnostics to stderr):
 - `render.png`: physical-pixel RGBA8 image (straight alpha).
 - `scene.json`: full laid-out tree, visual properties, glyph placements, and draw order.
-- `summary.json`: status, script errors, unemulated APIs, missing images/fonts, per-stage timings, `culled` AutomaticSize nodes, `textLinesDropped`, `missingGlyphs`, and script `output`.
+- `summary.json`: status, script errors, unemulated APIs, missing images/fonts, per-stage timings, `culled` AutomaticSize nodes, `textLinesDropped`, `missingGlyphs`, and script `output`. `missingFonts` lists the cloud fonts that could not be downloaded, then the font families whose text was not drawn at all: neither the family nor the Source Sans Pro fallback had a face, as on a machine without Studio's fonts ([text.md](text.md#fonts-and-fallback)); `scene.json` names those in `diagnostics.unavailableFonts`. Like missing glyphs, missing fonts leave `status` as it is and don't make a sweep's story unclean; the sweep lists them per story and counts them under "Missing fonts".
 - `dependencies.json`: every source file required during the run.
 - `manifest.json`, `glyphs.png`, and `assets/`: bundled glyph atlas and hard links to cached images.
 
