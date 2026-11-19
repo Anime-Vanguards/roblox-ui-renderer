@@ -6,8 +6,13 @@
 //   `$className` nodes without a `$path` below a service become instances of that class.
 // - Any other tree (a plugin or model project: the root is `src` as a bare Folder under no service)
 //   is mounted at `ReplicatedStorage/<project name>`, or where `--rojo-at Service/Name` says.
-// - `$path` to another *.project.json nests that project's tree; `{ "optional": path }` is skipped
-//   when missing; `$properties`, `$attributes` and `$ignoreUnknownInstances` are ignored.
+// - A node whose `$path` names another *.project.json is that project's tree, as Rojo builds it: the
+//   tree's class, `$path` and children (paths relative to that file), then the node's own children;
+//   the node's `$className` wins only over a Folder, and any other pair is refused. The tree's root
+//   too, so a root that is a `$path` to a DataModel project, with more services beside it, is a
+//   DataModel tree. Chains are followed; project files whose `$path`s form a cycle are refused.
+// - `{ "optional": path }` is skipped when missing; `$properties`, `$attributes` and
+//   `$ignoreUnknownInstances` are ignored.
 //
 // `--mount Service/Name=<dir|file>` (repeatable, `;`-separated too) adds explicit mounts.
 // native/src/rojo.rs is the same in Rust (`rur-native render --rojo`, and `rur-native rojo-mounts <file>`, which
@@ -56,48 +61,125 @@ export function isRojoProject(file) {
 	return typeof file === "string" && /\.project\.json$/i.test(file);
 }
 
+// How many project files deep a `$path` chain can go (the engine's MAX_PROJECT_NESTING)
+const MAX_PROJECT_NESTING = 32;
+
+// A JSON object: not an array or null
+const isObject = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+// `file` relative to `dir` when it is inside it (the engine's rojo.rs shown)
+function shown(file, dir) {
+	const relative = path.relative(dir, file);
+	return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : file;
+}
+
+// `file` as the cycle check compares it: its real path, when it has one
+function identity(file) {
+	try {
+		return fs.realpathSync.native(file);
+	} catch {
+		return file;
+	}
+}
+
+function readProject(file) {
+	const text = fs.readFileSync(file, "utf8");
+	try {
+		return JSON.parse(text);
+	} catch (error) {
+		throw new Error(`${file}: ${error.message}`);
+	}
+}
+
 // [{ kind: "mount" | "instance", path: "Service/Name", value }] for a project file
 // (`onPath(source)` sees every $path before it is checked: --git-ref extracts it there)
+//
+// The tree is built first, then placed (the engine's rojo.rs walk): a node is { className, source, children },
+// its source { kind: "found" | "missing" | "skipped", path } for a `$path` that isn't a project file, else null.
 export function rojoMounts(projectFile, { at, onPath } = {}) {
 	const file = path.resolve(projectFile);
-	const project = JSON.parse(fs.readFileSync(file, "utf8"));
-	if (!project || typeof project.tree !== "object") throw new Error(`${file}: not a Rojo project (no "tree")`);
-	const mounts = [];
-	const visit = (node, segments, base, depth = 0) => {
-		if (depth > 32) throw new Error(`${file}: project nesting too deep`);
-		let pathValue = node.$path;
-		if (pathValue && typeof pathValue === "object") pathValue = pathValue.optional;
+	const project = readProject(file);
+	if (!isObject(project) || !isObject(project.tree)) throw new Error(`${file}: not a Rojo project (no "tree")`);
+	// The project files the node being built sits in, the outermost first
+	const files = [{ file, real: identity(file) }];
+	// Node `name` (its `$path`s relative to `base`) as Rojo builds it (snapshot_project_node in Rojo's
+	// src/snapshot_middleware/project.rs): a `$path` to another project file makes the node that project's tree, and
+	// the node's own children follow its children
+	const build = (node, name, base) => {
+		const built = { className: typeof node.$className === "string" ? node.$className : undefined, source: null, children: [] };
+		const optional = isObject(node.$path);
+		const pathValue = optional ? node.$path.optional : node.$path;
 		if (typeof pathValue === "string") {
 			const source = path.resolve(base, pathValue);
 			if (onPath) onPath(source);
 			if (!fs.existsSync(source)) {
-				if (typeof node.$path !== "object") process.stderr.write(`rur: warning: ${missingPath(file, segments.join("/") || "tree", source)}\n`);
+				built.source = { kind: optional ? "skipped" : "missing", path: source };
 			} else if (isRojoProject(source)) {
-				const nested = JSON.parse(fs.readFileSync(source, "utf8"));
-				if (nested && typeof nested.tree === "object") visit(nested.tree, segments, path.dirname(source), depth + 1);
-			} else if (segments.length) {
-				mounts.push({ kind: "mount", path: segments.join("/"), value: source });
+				const referenced = buildProject(source);
+				built.className = combinedClass(name, built.className, referenced.className, source);
+				built.source = referenced.source;
+				built.children = referenced.children;
+			} else {
+				built.source = { kind: "found", path: source };
 			}
-		} else if (typeof node.$className === "string" && segments.length > 1) {
-			mounts.push({ kind: "instance", path: segments.join("/"), value: node.$className });
 		}
-		for (const [name, child] of Object.entries(node)) {
-			if (name.startsWith("$") || !child || typeof child !== "object") continue;
-			visit(child, [...segments, name], base, depth);
+		for (const [childName, child] of Object.entries(node)) {
+			if (childName.startsWith("$") || !isObject(child)) continue;
+			built.children.push([childName, build(child, childName, base)]);
+		}
+		return built;
+	};
+	// The tree of project file `source`, which a `$path` names; nothing for a file without a tree. A file already
+	// among `files` is refused: a project can't include itself.
+	const buildProject = source => {
+		const real = identity(source);
+		const first = files.findIndex(seen => seen.real === real);
+		if (first >= 0) {
+			const cycle = [...files.slice(first).map(seen => seen.file), source].map(seen => shown(seen, path.dirname(file)));
+			throw new Error(`${file}: the project files' $paths form a cycle (${cycle.join(" -> ")}): a project can't include itself`);
+		}
+		if (files.length > MAX_PROJECT_NESTING) throw new Error(`${file}: project nesting too deep`);
+		const referenced = readProject(source);
+		if (!isObject(referenced) || !isObject(referenced.tree)) return { className: undefined, source: null, children: [] };
+		files.push({ file: source, real });
+		try {
+			return build(referenced.tree, "tree", path.dirname(source));
+		} finally {
+			files.pop();
 		}
 	};
-	const base = path.dirname(file);
-	if (project.tree.$className === "DataModel") {
-		for (const [name, child] of Object.entries(project.tree)) {
-			if (name.startsWith("$") || !child || typeof child !== "object") continue;
+	// Rojo's rule for a node whose `$path` names a project: the project root's class, or the node's own `$className`
+	// when the root's is a Folder or names none; both with another root class is refused
+	const combinedClass = (name, own, fromPath, source) => {
+		if (own !== undefined && fromPath !== undefined && fromPath !== "Folder") {
+			const inFile = files[files.length - 1].file;
+			throw new Error(`${inFile}: ${name} has "$className": "${own}" and a $path to ${shown(source, path.dirname(inFile))}, whose tree is a ${fromPath}: Rojo takes both only when the $path is a Folder`);
+		}
+		return own ?? fromPath;
+	};
+	const mounts = [];
+	const missing = [];
+	// The mounts of built node `node` at instance path `segments`, then its children's below it
+	const place = (node, segments) => {
+		const at = segments.join("/");
+		if (node.source?.kind === "found") mounts.push({ kind: "mount", path: at, value: node.source.path });
+		else if (node.source?.kind === "missing") missing.push([at, node.source.path]);
+		else if (!node.source && node.className !== undefined && segments.length > 1) mounts.push({ kind: "instance", path: at, value: node.className });
+		for (const [name, child] of node.children) place(child, [...segments, name]);
+	};
+	// (the root's class is the one its project files give: a tree that is a `$path` to a DataModel project is one)
+	const tree = build(project.tree, "tree", path.dirname(file));
+	if (tree.className === "DataModel") {
+		for (const [name, child] of tree.children) {
 			if (!isService(name)) throw new Error(`${file}: ${name} at the top of a DataModel tree is not a service`);
-			visit(child, [name], base);
+			place(child, [name]);
 		}
 	} else {
-		const place = at && at !== true ? String(at).split(/[/\\]/).filter(Boolean) : ["ReplicatedStorage", String(project.name || "Project")];
-		if (place.length < 2) throw new Error(`--rojo-at ${at}: needs Service/Name`);
-		visit(project.tree, place, base);
+		const segments = at && at !== true ? String(at).split(/[/\\]/).filter(Boolean) : ["ReplicatedStorage", String(project.name || "Project")];
+		if (segments.length < 2) throw new Error(`--rojo-at ${at}: needs Service/Name`);
+		place(tree, segments);
 	}
+	for (const [where, source] of missing) process.stderr.write(`rur: warning: ${missingPath(file, where, source)}\n`);
 	return mounts;
 }
 

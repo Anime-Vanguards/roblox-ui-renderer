@@ -55,7 +55,8 @@ Project-wide setting:
 
 Pass a Rojo project file via `--rojo <file.project.json>` or `--project <file.project.json>` instead of `rur.json` places:
 - A `DataModel` tree mounts each `$path` at its target service path (so Wally's `Packages/` mapped to `ReplicatedStorage.Packages` works out of the box).
-- `$className` nodes without `$path` create empty instances of that class; `{ "optional": ... }` paths are skipped if absent; nested `*.project.json` `$path`s are resolved recursively.
+- `$className` nodes without `$path` create empty instances of that class; `{ "optional": ... }` paths are skipped if absent.
+- A `$path` to another `*.project.json` makes the node that project's tree, as Rojo builds it: its class and children, then the node's own children (a node's own `$className` replaces only a `Folder` root). The tree's root works the same way, so a root that is a `$path` to a `DataModel` project, with more services beside it, is a `DataModel` tree. Chains of project files are followed; a cycle is refused with its files named.
 - Non-`DataModel` trees (plugins or models) mount under `ReplicatedStorage/<project name>` (override with `--rojo-at Service/Name`).
 
 Add extra mounts with repeatable `--mount Service/Name=<dir|file>` (applied after project mounts). When `--rojo` or `--mount` is passed without `--roots`, default project roots are not mounted. Each run logs what it mounted:

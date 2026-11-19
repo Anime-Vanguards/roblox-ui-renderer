@@ -98,15 +98,72 @@ end
 		{ kind: "instance", path: "StarterGui/Hud", value: "ScreenGui" },
 	]);
 
-	// native/src/rojo.rs gives the same mounts as cli/rojo.mjs (`rur-native rojo-mounts`), in the same order
+	// A $path to a project file, as Rojo builds it. A root that is a $path to a DataModel project, with a service
+	// beside it (a code project and a separately synced world, combined by a root project), is that DataModel tree:
+	// the referenced project's nodes first, their paths relative to its file, then the root's own
+	const nested = path.join(dir, "nested");
+	const writeProject = (file, tree) => write(path.join("nested", file), JSON.stringify({ name: path.basename(file, ".project.json"), tree }));
+	write("nested/src/shared/init.luau", "return {}");
+	write("nested/src/server/Main.server.luau", "print('server')");
+	write("nested/world/map/Spawn.model.json", JSON.stringify({ className: "SpawnLocation" }));
+	writeProject("default.project.json", { $className: "DataModel",
+		ReplicatedStorage: { Shared: { $path: "src/shared" }, Remotes: { $className: "Folder" } }, ServerScriptService: { Server: { $path: "src/server" } } });
+	writeProject("world/workspace.project.json", { $className: "Workspace", Map: { $path: "map" } });
+	writeProject("game.project.json", { $path: "default.project.json", Workspace: { $path: "world/workspace.project.json" } });
+	assert.deepEqual(rojoMounts(path.join(nested, "game.project.json")), [
+		{ kind: "mount", path: "ReplicatedStorage/Shared", value: path.join(nested, "src", "shared") },
+		{ kind: "instance", path: "ReplicatedStorage/Remotes", value: "Folder" },
+		{ kind: "mount", path: "ServerScriptService/Server", value: path.join(nested, "src", "server") },
+		{ kind: "mount", path: "Workspace/Map", value: path.join(nested, "world", "map") },
+	]);
+	writeProject("full.project.json", { $className: "DataModel",
+		ReplicatedStorage: { Shared: { $path: "src/shared" }, Remotes: { $className: "Folder" } }, ServerScriptService: { Server: { $path: "src/server" } },
+		Workspace: { $path: "world/workspace.project.json" } });
+	assert.deepEqual(rojoMounts(path.join(nested, "full.project.json")), rojoMounts(path.join(nested, "game.project.json")), "the same tree written out");
+	// A chain of project files is followed, and a model project at its end stays one
+	write("nested/lib/inner/a.luau", "return 1");
+	writeProject("lib/outer.project.json", { $path: "inner.project.json" });
+	writeProject("lib/inner.project.json", { $path: "inner" });
+	writeProject("chain.project.json", { $path: "lib/outer.project.json" });
+	assert.deepEqual(rojoMounts(path.join(nested, "chain.project.json")), [{ kind: "mount", path: "ReplicatedStorage/chain", value: path.join(nested, "lib", "inner") }]);
+	// The node's $className replaces only a Folder root
+	writeProject("kit.project.json", { $className: "Folder", Handle: { $className: "Part" } });
+	writeProject("tool.project.json", { $className: "Tool" });
+	writeProject("classes.project.json", { $className: "DataModel", ReplicatedStorage: { Kit: { $className: "Model", $path: "kit.project.json" }, Tool: { $path: "tool.project.json" } } });
+	assert.deepEqual(rojoMounts(path.join(nested, "classes.project.json")), [
+		{ kind: "instance", path: "ReplicatedStorage/Kit", value: "Model" },
+		{ kind: "instance", path: "ReplicatedStorage/Kit/Handle", value: "Part" },
+		{ kind: "instance", path: "ReplicatedStorage/Tool", value: "Tool" },
+	]);
+	// Refused: a child beside a DataModel root's $path that is no service, any other mix of classes, a cycle
+	writeProject("lower.project.json", { $path: "default.project.json", lower: {} });
+	writeProject("clash.project.json", { $className: "DataModel", ReplicatedStorage: { Kit: { $className: "Model", $path: "tool.project.json" } } });
+	writeProject("cycle/a.project.json", { $className: "DataModel", ReplicatedStorage: { B: { $path: "b/b.project.json" } } });
+	writeProject("cycle/b/b.project.json", { $path: "../a.project.json" });
+	const refused = {
+		"lower.project.json": "lower at the top of a DataModel tree is not a service",
+		"clash.project.json": `Kit has "$className": "Model" and a $path to tool.project.json, whose tree is a Tool: Rojo takes both only when the $path is a Folder`,
+		"cycle/a.project.json": `the project files' $paths form a cycle (${["a.project.json", path.join("b", "b.project.json"), "a.project.json"].join(" -> ")}): a project can't include itself`,
+	};
+	for (const [file, reason] of Object.entries(refused)) assert.throws(() => rojoMounts(path.join(nested, file)), { message: `${path.join(nested, file)}: ${reason}` });
+
+	// native/src/rojo.rs gives the same mounts as cli/rojo.mjs (`rur-native rojo-mounts`), in the same order, and refuses
+	// the same projects with the same reasons
 	{
 		const { ensureEngine } = await import("../../cli/engine.mjs");
 		const engine = await ensureEngine();
 		const example = path.join(root, "examples", "rojo-wally", "default.project.json");
-		for (const [file, at] of [[path.join(dir, "plugin.project.json")], [path.join(dir, "plugin.project.json"), "ServerStorage/P"], [path.join(dir, "game.project.json")], [example]]) {
+		const projects = [[path.join(dir, "plugin.project.json")], [path.join(dir, "plugin.project.json"), "ServerStorage/P"], [path.join(dir, "game.project.json")], [example],
+			...["game", "full", "chain", "classes"].map(name => [path.join(nested, `${name}.project.json`)])];
+		for (const [file, at] of projects) {
 			const result = spawnSync(engine, ["rojo-mounts", file, ...(at ? ["--rojo-at", at] : [])], { encoding: "utf8", windowsHide: true });
 			assert.equal(result.status, 0, result.stderr);
 			assert.deepEqual(JSON.parse(result.stdout), rojoMounts(file, { at }), `${path.basename(file)} ${at || ""}`);
+		}
+		for (const [file, reason] of Object.entries(refused)) {
+			const result = spawnSync(engine, ["rojo-mounts", path.join(nested, file)], { encoding: "utf8", windowsHide: true });
+			assert.equal(result.status, 1, result.stderr);
+			assert.equal(result.stderr.trim(), `rur-native rojo-mounts: ${path.join(nested, file)}: ${reason}`);
 		}
 	}
 
@@ -205,7 +262,7 @@ end
 		assert.match(fs.readFileSync(path.join(dir, "out/sweep-unclean/summary.md"), "utf8"), /^# Story sweep\n/);
 	}
 	fs.rmSync(dir, { recursive: true, force: true });
-	console.log("CLI project options: PASS (rojo, native rojo parity, outside stories, fixture controls, @physical, --json, --git-ref, diff, sweep and its exit code, --plugin, tree ancestry)");
+	console.log("CLI project options: PASS (rojo, $path to project files at and below the root, native rojo parity, outside stories, fixture controls, @physical, --json, --git-ref, diff, sweep and its exit code, --plugin, tree ancestry)");
 }
 
 // Render diagnostics (cli/diagnostics.mjs): AutomaticSize-culled rows, wrapped lines a short box drops,
