@@ -190,21 +190,30 @@ jobs:
       # The build cache (see the top of this file): the dependencies an earlier run on main compiled
       # for this build. Restored only on main, never by a tag run, so the only caches it can find
       # are ones that runs of main's own workflows stored; pull requests' runs store theirs apart.
-      # The key names what the compiled crates depend on: the target, C runtime, toolchain, this
-      # build, and the Cargo files with rur-native's own version left out. When the key is not
-      # stored, the newest cache of this build is restored instead, and Cargo compiles again only
-      # what changed, usually the engine after a new pin; its checks of each crate's inputs decide,
-      # as in any local build. The paths are what Cargo needs to find a crate already built: the
-      # host's build scripts and proc macros (target/dist), the target's crates
-      # (target/<triple>/dist), and ~/.cargo/git, the git dependencies' checkouts with their
-      # original file times (a fresh checkout would run the engine's C++ build scripts again).
+      # The key names what the compiled crates depend on: the target, C runtime, runner image (its
+      # C compilers), toolchain, this build, and the Cargo files with rur-native's own version left
+      # out. When the key is not stored, the newest cache of this build and image is restored
+      # instead, and Cargo compiles again only what changed, usually the engine after a new pin;
+      # its checks of each crate's inputs decide, as in any local build. The paths are what Cargo
+      # needs to find a crate already built: the host's build scripts and proc macros
+      # (target/dist), the target's crates (target/<triple>/dist), and ~/.cargo/git, the git
+      # dependencies' checkouts with their original file times (a fresh checkout would run the
+      # engine's C++ build scripts again).
+      # The runner image, which the cache key names: the C and C++ objects in a cache (the engine's
+      # Luau VM, mimalloc, zstd) were compiled by its compilers, and the build links them with its C
+      # runtime. A cache from another image is never restored, so a build mixes no two toolchains.
+      - name: Name the runner image for the build cache
+        id: image
+        if: ${{ github.ref == 'refs/heads/main' && vars.RELEASE_BUILD_CACHE != 'off' && !inputs.clean-build }}
+        shell: bash
+        run: echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
       - name: Restore the compiled dependencies of an earlier run on main
         id: cache
         if: ${{ github.ref == 'refs/heads/main' && vars.RELEASE_BUILD_CACHE != 'off' && !inputs.clean-build }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: rur-release-v1-windows-x86_64-pc-windows-msvc-crt-static-1.90.0-${{ matrix.profile }}-${{ needs.version.outputs.build-cache }}
-          restore-keys: rur-release-v1-windows-x86_64-pc-windows-msvc-crt-static-1.90.0-${{ matrix.profile }}-
+          key: rur-release-v2-windows-x86_64-pc-windows-msvc-crt-static-${{ steps.image.outputs.name }}-1.90.0-${{ matrix.profile }}-${{ needs.version.outputs.build-cache }}
+          restore-keys: rur-release-v2-windows-x86_64-pc-windows-msvc-crt-static-${{ steps.image.outputs.name }}-1.90.0-${{ matrix.profile }}-
           # The anchor lets the save step use exactly these paths
           path: &windows-cache-paths |
             ~/.cargo/git
@@ -424,13 +433,21 @@ jobs:
       # The build cache, as in windows-build: one per platform, holding the dependencies of both
       # builds below (the marked binary, then the unmarked one with the test program), which share
       # the dist profile
+      # The runner image, which the cache key names: the C and C++ objects in a cache (the engine's
+      # Luau VM, mimalloc, zstd) were compiled by its compilers, and the build links them with its C
+      # runtime. A cache from another image is never restored, so a build mixes no two toolchains.
+      - name: Name the runner image for the build cache
+        id: image
+        if: ${{ github.ref == 'refs/heads/main' && vars.RELEASE_BUILD_CACHE != 'off' && !inputs.clean-build }}
+        shell: bash
+        run: echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
       - name: Restore the compiled dependencies of an earlier run on main
         id: cache
         if: ${{ github.ref == 'refs/heads/main' && vars.RELEASE_BUILD_CACHE != 'off' && !inputs.clean-build }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: rur-release-v1-${{ matrix.os }}-${{ matrix.target }}-1.90.0-${{ needs.version.outputs.build-cache }}
-          restore-keys: rur-release-v1-${{ matrix.os }}-${{ matrix.target }}-1.90.0-
+          key: rur-release-v2-${{ matrix.os }}-${{ matrix.target }}-${{ steps.image.outputs.name }}-1.90.0-${{ needs.version.outputs.build-cache }}
+          restore-keys: rur-release-v2-${{ matrix.os }}-${{ matrix.target }}-${{ steps.image.outputs.name }}-1.90.0-
           # The anchor lets the save step use exactly these paths
           path: &cache-paths |
             ~/.cargo/git

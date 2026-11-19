@@ -73,12 +73,17 @@ an earlier run on main compiled for the same build: GitHub's Actions cache, one 
 every run, so a cache holds only the dependencies, and `build-cache.mjs --prune` leaves rur-native's
 crate, binaries and test program out before one is stored.
 
-The key names the target, the C runtime, the toolchain, the build and `build-cache.mjs`'s hash of
-`native/Cargo.toml`, `native/Cargo.lock` and `native/.cargo/config.toml` with rur-native's own version
-left out. A version bump changes nothing else in them, so the release commit finds the cache its dry
+The key names the target, the C runtime, the runner image, the toolchain, the build and
+`build-cache.mjs`'s hash of `native/Cargo.toml`, `native/Cargo.lock` and `native/.cargo/config.toml` with
+rur-native's own version left out. A version bump changes nothing else in them, so the release commit finds the cache its dry
 runs before it stored. When the key is not stored (a new engine pin, a changed dependency), the newest
 cache of the same build is restored and Cargo compiles what changed, by the same checks of each crate's
 inputs as in any local build; the run then stores its own. A run that found its key stores nothing.
+The runner image (`ImageOS` and `ImageVersion`) is in the key and in the prefix restored from, because
+the cached C and C++ objects were compiled by that image's compilers and the build links them with its
+C runtime: a build never mixes two images' toolchains, and the first run on a new image compiles
+everything. Linux and macOS zips built from a cache are byte for byte those of a clean build on the same
+image; a Windows binary differs from a clean build on another image (the C runtime and compiler change).
 
 Only runs on main restore or store a cache. A pull request's runs keep their caches apart (GitHub scopes
 them to the pull request), so they cannot reach a binary. A tag run that builds, because its commit has
