@@ -357,6 +357,7 @@ impl SceneStore {
                 "background",
                 "status",
                 "failure",
+                "waiting",
                 "presentation",
             ] {
                 next.remove(key);

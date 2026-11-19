@@ -175,13 +175,13 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/story_render.rs",
         "pub fn cli(",
-        0xdb21c1828dedbb3d,
+        0x8f4b3471c6402caf,
     ),
     (
         Crate::Native,
         "src/story_render.rs",
         "pub fn sequence_cli(",
-        0x32dbf5537431b44b,
+        0xc75c5c2a6e67038a,
     ),
     (
         Crate::Native,

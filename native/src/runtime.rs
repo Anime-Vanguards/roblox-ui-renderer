@@ -178,6 +178,24 @@ impl RuntimeOptions {
         Ok(Launch { repo, place, story })
     }
 
+    /// The roots and mounts a run of this story gets, for a failure's hint (crate::hints)
+    pub fn sources(&self) -> crate::hints::Sources {
+        let Ok(launch) = self.launch() else { return Default::default() };
+        let mut sources = crate::hints::Sources::default();
+        for pair in launch.place.windows(2) {
+            match pair[0].as_str() {
+                "--roots" => sources.roots.extend(pair[1].split(';').filter(|root| !root.is_empty()).map(PathBuf::from)),
+                "--mount" => {
+                    if let Some((at, path)) = pair[1].split_once('=') {
+                        sources.mounts.push((at.to_string(), PathBuf::from(path)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        sources
+    }
+
     /// Stories with equal keys can share a preloaded engine and project.
     pub fn standby_key(&self) -> Option<StandbyKey> {
         let launch = self.launch().ok()?;

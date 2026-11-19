@@ -54,8 +54,8 @@ pub struct Project {
     pub started: Instant,
     /// `--plugin`: the dock widgets the plugin stand-in created (exported after the story gui)
     pub plugin_widgets: Option<LuaTable>,
-    /// The roots and mounts the project came from, as a failure's hint lists them (crate::rojo::describe_sources)
-    pub sources: Vec<String>,
+    /// The roots and mounts the project came from, for a failure's hint (crate::hints)
+    pub sources: crate::hints::Sources,
 }
 
 /// Where the project comes from.
@@ -132,7 +132,7 @@ pub fn mount_project(lua: &Lua, engine: &Rc<Engine>, spec: &ProjectSpec, started
     }
 
     let core = mounting.finish(engine, &core)?;
-    let sources = crate::rojo::describe_sources(&spec.roots, &spec.mounts);
+    let sources = crate::hints::Sources::new(&spec.roots, &spec.mounts);
     Ok(Project { host, hierarchy: core.hierarchy, mount_time: core.mount_time, started: core.started, plugin_widgets, sources })
 }
 
@@ -196,6 +196,10 @@ pub struct Story {
     pub story_time: f64,
     /// Engine.Order.Summary of the RUR_ORDER replay
     pub order: Option<Json>,
+    /// The story's file (a `--story` or `--module`), for a failure's hint
+    pub source: Option<std::path::PathBuf>,
+    /// Where a mount that still yields waits: the first frame of its traceback outside rur's own chunks
+    pub waiting_at: Option<String>,
 }
 
 impl Story {
@@ -209,6 +213,8 @@ impl Story {
             state: lua.create_table()?,
             story_time: 0.0,
             order: None,
+            source: None,
+            waiting_at: None,
         })
     }
 
@@ -249,6 +255,12 @@ impl Story {
                     if !entry.reported {
                         entry.reported = true;
                         let trace = engine_lua::traceback(lua, &entry.call.thread);
+                        let source = self.source.clone();
+                        self.waiting_at.get_or_insert_with(|| {
+                            let frames = trace.as_deref().unwrap_or_default().lines();
+                            let frame = frames.map(str::trim).find(|frame| !frame.is_empty() && !frame.starts_with("rur."));
+                            frame.map_or_else(|| "the story's require".to_string(), |frame| crate::hints::story_frame(frame, source.as_deref()))
+                        });
                         engine.output("warn", "story mount is still yielding (waiting on something that never arrives offline)", trace);
                     }
                     still.push(entry);
@@ -394,6 +406,8 @@ pub fn mount(
         state: lua.create_table().map_err(lua_error)?,
         story_time: 0.0,
         order: None,
+        source: source.filter(|source| matches!(source.kind, SourceKind::Story | SourceKind::Module)).map(|source| std::path::PathBuf::from(&source.path)),
+        waiting_at: None,
     };
     if let Some(controls) = controls {
         let options = LuaSerializeOptions::new().serialize_none_to_null(false).serialize_unit_to_null(false).set_array_metatable(false);
@@ -743,9 +757,18 @@ pub fn diagnostics(engine: &Rc<Engine>, project: &Project, story: &Story, run_ti
     if let Some(order) = &story.order {
         result["order"] = order.clone();
     }
-    // A failure on a service's missing child (a Packages folder no project mounted): what was mounted, and how to mount it
+    // A failure that reads an instance nothing mounted (a Packages folder), or a mount that still waits: the cause rur
+    // finds in the project files on disk (crate::hints)
     let errors = state.output.entries.iter().filter(|entry| entry.kind == "error").map(|entry| entry.message.as_str());
-    if let Some(hint) = story.failure.as_deref().into_iter().chain(errors).find_map(|message| crate::rojo::missing_child_hint(message, &project.sources)) {
+    let source = story.source.as_deref();
+    let hint = story
+        .failure
+        .as_deref()
+        .into_iter()
+        .chain(errors)
+        .find_map(|message| crate::hints::missing_child_hint(message, &project.sources, source))
+        .or_else(|| (story.status == "yielded").then(|| crate::hints::waiting_hint(&project.sources, source)).flatten());
+    if let Some(hint) = hint {
         result["hint"] = json!(hint);
     }
     result

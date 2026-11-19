@@ -19,6 +19,38 @@ import path from "node:path";
 // Services a DataModel tree names at its top level (the engine checks the rest)
 const isService = name => /^[A-Z]/.test(name);
 
+// The folders Wally installs packages into
+const WALLY_FOLDERS = ["Packages", "ServerPackages", "DevPackages"];
+
+// What to say about a $path that does not exist (native/src/rojo.rs missing_path)
+function missingPath(file, at, source) {
+	const dir = path.dirname(file);
+	const relative = path.relative(dir, source);
+	const shown = relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : source;
+	const wally = WALLY_FOLDERS.includes(path.basename(source)) && fs.existsSync(path.join(dir, "wally.toml")) ? `: run \`wally install\` in ${dir}` : "";
+	return `${path.basename(file)} maps ${at.replaceAll("/", ".")} to ${shown}, which doesn't exist${wally}`;
+}
+
+// The *.project.json files in a folder, by name
+function projectFilesIn(dir) {
+	let names = [];
+	try {
+		names = fs.readdirSync(dir);
+	} catch {
+		return [];
+	}
+	return names.filter(name => isRojoProject(name)).map(name => path.join(dir, name)).filter(file => fs.statSync(file, { throwIfNoEntry: false })?.isFile()).sort();
+}
+
+// The project a folder names by itself (native/src/rojo.rs project_file_in): { file } for its default.project.json,
+// else its only *.project.json; { several } when it has more and none is default.project.json; {} for none
+export function projectFileIn(dir) {
+	const fallback = path.join(dir, "default.project.json");
+	if (fs.statSync(fallback, { throwIfNoEntry: false })?.isFile()) return { file: fallback };
+	const files = projectFilesIn(dir);
+	return files.length === 1 ? { file: files[0] } : files.length > 1 ? { several: files } : {};
+}
+
 export function isRojoProject(file) {
 	return typeof file === "string" && /\.project\.json$/i.test(file);
 }
@@ -38,7 +70,7 @@ export function rojoMounts(projectFile, { at, onPath } = {}) {
 			const source = path.resolve(base, pathValue);
 			if (onPath) onPath(source);
 			if (!fs.existsSync(source)) {
-				if (typeof node.$path !== "object") process.stderr.write(`rur: ${path.basename(file)}: ${segments.join("/") || "tree"} $path ${source} does not exist\n`);
+				if (typeof node.$path !== "object") process.stderr.write(`rur: warning: ${missingPath(file, segments.join("/") || "tree", source)}\n`);
 			} else if (isRojoProject(source)) {
 				const nested = JSON.parse(fs.readFileSync(source, "utf8"));
 				if (nested && typeof nested.tree === "object") visit(nested.tree, segments, path.dirname(source), depth + 1);
@@ -90,10 +122,10 @@ export function runMounts(args, { onPath } = {}) {
 // The options that choose a run's project: with any of them no project is detected
 const PROJECT_OPTIONS = ["rojo", "project", "roots", "mount", "place", "rojo-at", "git-ref"];
 
-// The default.project.json a run with no project options mounts (native/src/rojo.rs detect): with no --rojo,
+// The project file a run with no project options mounts (native/src/rojo.rs detect): with no --rojo,
 // --project, --roots, --mount, --place and no RUR_PROJECT, a --story or --module outside the default project
-// mounts the default.project.json nearest it (its folder or a parent), else the current directory's. Sets
-// args.rojo and returns the line saying so, or null.
+// mounts the project file nearest it (its folder or a parent: projectFileIn), else the current directory's. Sets
+// args.rojo and returns the line saying so; a nearest folder with several project files is named instead; else null.
 export function detectRojoProject(args, defaultProject) {
 	if (PROJECT_OPTIONS.some(key => args[key] !== undefined && args[key] !== false)) return null;
 	if (process.env.RUR_PROJECT) return null;
@@ -118,17 +150,21 @@ export function detectRojoProject(args, defaultProject) {
 		return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 	};
 	if (inside(file, project)) return null;
-	const candidates = [];
+	const dirs = [];
 	for (let dir = path.dirname(file); ; dir = path.dirname(dir)) {
-		candidates.push(path.join(dir, "default.project.json"));
+		dirs.push(dir);
 		if (path.dirname(dir) === dir) break;
 	}
-	candidates.push(path.join(process.cwd(), "default.project.json"));
-	const found = candidates.find(candidate => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
-	if (!found) return null;
-	args.rojo = found;
-	const mounted = rojoMounts(found).map(mount => mount.path);
-	return `rur: Rojo project ${found} (found beside the story; --rojo, --project or --roots picks another): mounted ${mounted.length ? mounted.join(", ") : "nothing"}`;
+	dirs.push(process.cwd());
+	for (const dir of dirs) {
+		const { file: found, several } = projectFileIn(dir);
+		if (several) return `rur: warning: ${dir} has several Rojo projects (${several.map(file => path.basename(file)).join(", ")}), so none was mounted: pass --rojo <file> to mount one`;
+		if (!found) continue;
+		args.rojo = found;
+		const mounted = rojoMounts(found).filter(mount => mount.kind === "mount").map(mount => mount.path.replaceAll("/", "."));
+		return `rur: Rojo project ${found} (found beside the story; --rojo picks another): mounted ${mounted.length ? mounted.join(", ") : "nothing"}`;
+	}
+	return null;
 }
 
 // Engine arguments for the mounts

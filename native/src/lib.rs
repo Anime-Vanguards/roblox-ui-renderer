@@ -27,7 +27,9 @@ pub mod microprofiler_ui;
 #[cfg(feature = "desktop")]
 pub mod placeholder;
 pub mod places;
+pub mod hints;
 pub mod rojo;
+pub mod term;
 pub mod paths;
 pub mod presentation;
 #[cfg(feature = "desktop")]
@@ -127,6 +129,10 @@ pub struct NativeOptions {
     /// (mailbox where the driver has it, else immediate).
     #[arg(long)]
     pub vsync: bool,
+    /// What [`NativeOptions::resolve`] found about the project (the Rojo project it mounts, `$path`s that don't
+    /// exist, project files it would not choose between), for the storybook to show
+    #[arg(skip)]
+    pub notes: Vec<String>,
 }
 
 impl NativeOptions {
@@ -163,15 +169,15 @@ impl NativeOptions {
                 .join(";")
         });
         self.rojo = self.rojo.map(|path| absolute(&cwd, &path));
-        // A Rojo project: `--project <file.project.json>`, or (release builds) a project folder holding a
-        // default.project.json and no rur.json places (rojo.rs)
+        // A Rojo project: `--project <file.project.json>`, or (release builds) a project folder holding a project file
+        // (its default.project.json, else its only *.project.json) and no rur.json places (rojo.rs)
         if self.rojo.is_none() && rojo::is_project_file(&self.project.to_string_lossy()) {
             self.rojo = Some(self.project.clone());
             self.project = self.project.parent().map(Path::to_path_buf).unwrap_or_default();
-        } else if self.rojo.is_none() && self.roots.is_none() && (paths::is_standalone() || named.is_some()) {
-            let found = self.project.join(rojo::DEFAULT_PROJECT_FILE);
-            if found.is_file() && !rojo::declares_places(&self.project) {
-                self.rojo = Some(found);
+        } else if self.rojo.is_none() && self.roots.is_none() && (paths::is_standalone() || named.is_some()) && !rojo::declares_places(&self.project) {
+            match rojo::project_file_in(&self.project) {
+                Ok(found) => self.rojo = found,
+                Err(several) => self.notes.push(format!("rur: {}", rojo::several_projects(&several))),
             }
         }
         // A project at a drive or filesystem root (`rur-native /`, `--project \`) would make the whole drive its
@@ -184,13 +190,11 @@ impl NativeOptions {
             );
         }
         if let (Some(file), None) = (&self.rojo, &self.roots) {
-            let mut warnings = Vec::new();
-            let mounts = rojo::mounts(file, None, &mut warnings).map_err(anyhow::Error::msg)?;
-            for warning in warnings {
-                eprintln!("{warning}");
-            }
-            let listed: Vec<&str> = mounts.iter().map(|mount| mount.path.as_str()).collect();
-            eprintln!("rur: Rojo project {}: mounted {}", file.display(), if listed.is_empty() { "nothing".to_string() } else { listed.join(", ") });
+            let mounts = rojo::mounts(file, None, &mut self.notes).map_err(anyhow::Error::msg)?;
+            self.notes.insert(0, format!("rur: Rojo project {}: mounted {}", file.display(), rojo::mounted_list(&mounts)));
+        }
+        for note in &self.notes {
+            term::project_line(note);
         }
         self.headless |= self.benchmark.is_some() || self.batch.is_some();
         if self.headless && self.story.is_none() && self.scene.is_none() && self.batch.is_none() {

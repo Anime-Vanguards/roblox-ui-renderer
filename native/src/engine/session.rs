@@ -200,12 +200,18 @@ impl Session {
         Ok((self.story.status.clone(), self.story.failure.clone()))
     }
 
-    /// The session's scene header fields (background, status, failure).
+    /// The session's scene header fields (background, status, failure, waiting).
     fn header_fields(&mut self, lua: &Lua) -> LuaResult<Map<String, Json>> {
         let (status, failure) = self.status(lua)?;
         let mut extra = Map::new();
         let background = if self.transparent { Json::Null } else { Json::Array(self.background.iter().map(|v| super::export::number(*v)).collect()) };
         extra.insert("background".into(), background);
+        // Where a mount that still yields waits (the storybook shows it with crate::hints::waiting_hint)
+        if status == "yielded" {
+            if let Some(at) = &self.story.waiting_at {
+                extra.insert("waiting".into(), Json::String(at.clone()));
+            }
+        }
         extra.insert("status".into(), Json::String(status));
         if let Some(failure) = failure {
             extra.insert("failure".into(), Json::String(failure));

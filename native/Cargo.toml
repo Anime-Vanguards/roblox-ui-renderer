@@ -42,6 +42,9 @@ memtrace = []
 anyhow = "=1.0.100"
 bytemuck = { version = "=1.24.0", features = ["derive"] }
 clap = { version = "=4.5.50", features = ["derive"] }
+# Colors on rur-native's own stderr lines (term.rs); both already came with clap
+anstream = "=0.6.21"
+anstyle = "=1.0.14"
 eframe = { version = "=0.33.3", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"], optional = true }
 egui = { version = "=0.33.3", optional = true }
 egui-wgpu = { version = "=0.33.3", default-features = false, optional = true }

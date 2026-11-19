@@ -14,8 +14,70 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 
-/// The file name a Rojo project is found by when no project is named
+/// The file name a folder's Rojo project has when it has several
 pub const DEFAULT_PROJECT_FILE: &str = "default.project.json";
+
+/// The folders Wally installs packages into (realms shared, server and dev)
+const WALLY_FOLDERS: [&str; 3] = ["Packages", "ServerPackages", "DevPackages"];
+
+/// The *.project.json files in `dir`, by name
+pub fn project_files_in(dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| is_project_file(&entry.file_name().to_string_lossy()) && entry.path().is_file())
+        .map(|entry| entry.path())
+        .collect();
+    files.sort();
+    files
+}
+
+/// The Rojo project a folder names by itself: its default.project.json, else its only *.project.json. `Err` lists
+/// the folder's project files when there are several and none is default.project.json.
+pub fn project_file_in(dir: &Path) -> Result<Option<PathBuf>, Vec<PathBuf>> {
+    let default = dir.join(DEFAULT_PROJECT_FILE);
+    if default.is_file() {
+        return Ok(Some(default));
+    }
+    let mut files = project_files_in(dir);
+    match files.len() {
+        0 => Ok(None),
+        1 => Ok(files.pop()),
+        _ => Err(files),
+    }
+}
+
+/// What to say about a folder with several project files and no default.project.json
+pub fn several_projects(files: &[PathBuf]) -> String {
+    let names: Vec<String> = files.iter().filter_map(|file| file.file_name()).map(|name| name.to_string_lossy().into_owned()).collect();
+    let dir = files.first().and_then(|file| file.parent()).map(Path::display);
+    format!("{} has several Rojo projects ({}), so none was mounted: pass --rojo <file> to mount one", dir.map(|dir| dir.to_string()).unwrap_or_default(), names.join(", "))
+}
+
+/// `wally install` when `source` is a Wally package folder of a project beside a wally.toml
+pub fn wally_advice(project_dir: &Path, source: &Path) -> Option<String> {
+    let name = source.file_name()?.to_string_lossy();
+    (WALLY_FOLDERS.contains(&name.as_ref()) && project_dir.join("wally.toml").is_file()).then(|| format!("run `wally install` in {}", project_dir.display()))
+}
+
+/// `a/b` as an instance path (`a.b`)
+pub fn dotted(path: &str) -> String {
+    path.replace('/', ".")
+}
+
+/// `path` relative to `dir` when it is inside it
+fn shown(path: &Path, dir: &Path) -> String {
+    path.strip_prefix(dir).ok().filter(|rest| !rest.as_os_str().is_empty()).unwrap_or(path).display().to_string()
+}
+
+/// What to say about a `$path` that does not exist (and, for a Wally folder, how to make it)
+pub fn missing_path(file: &Path, at: &str, source: &Path) -> String {
+    let dir = file.parent().unwrap_or(Path::new(""));
+    let name = file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let advice = wally_advice(dir, source).map(|advice| format!(": {advice}")).unwrap_or_default();
+    format!("{name} maps {} to {}, which doesn't exist{advice}", dotted(at), shown(source, dir))
+}
 
 /// A JSON value with its objects' keys in file order (serde_json's own map sorts them, and the mount order is the
 /// order instances are created in, which `GetChildren` shows)
@@ -153,13 +215,25 @@ fn is_service(name: &str) -> bool {
 /// The mounts of a project file, in the order cli/rojo.mjs gives them. `at` is `--rojo-at Service/Name` (for a tree
 /// that is not a DataModel). A non-optional `$path` that is missing is skipped and reported in `warnings`.
 pub fn mounts(project_file: &Path, at: Option<&str>, warnings: &mut Vec<String>) -> Result<Vec<Mount>, String> {
+    let walk = walk(project_file, at)?;
+    warnings.extend(walk.missing.iter().map(|mount| format!("rur: {}", missing_path(&walk.file, &mount.path, Path::new(&mount.value)))));
+    Ok(walk.mounts)
+}
+
+/// Every `$path` of a project file, also the ones that do not exist: (instance path `a/b`, file or folder, exists)
+pub fn mappings(project_file: &Path) -> Result<Vec<(String, PathBuf, bool)>, String> {
+    let walk = walk(project_file, None)?;
+    let present = walk.mounts.into_iter().filter(|mount| !mount.instance).map(|mount| (mount.path, PathBuf::from(mount.value), true));
+    Ok(present.chain(walk.missing.into_iter().map(|mount| (mount.path, PathBuf::from(mount.value), false))).collect())
+}
+
+fn walk(project_file: &Path, at: Option<&str>) -> Result<Walk, String> {
     let file = resolve(Path::new(""), &project_file.to_string_lossy());
     let project = read_project(&file)?;
     let Some(tree @ Node::Object(_)) = project.get("tree") else {
         return Err(format!("{}: not a Rojo project (no \"tree\")", file.display()));
     };
-    let file_name = file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut walk = Walk { file: &file, file_name, mounts: Vec::new(), warnings };
+    let mut walk = Walk { file: file.clone(), mounts: Vec::new(), missing: Vec::new() };
     let base = file.parent().map(Path::to_path_buf).unwrap_or_default();
     if tree.string("$className") == Some("DataModel") {
         for (name, child) in tree.children() {
@@ -178,17 +252,17 @@ pub fn mounts(project_file: &Path, at: Option<&str>, warnings: &mut Vec<String>)
         }
         walk.visit(tree, &mut place, &base, 0)?;
     }
-    Ok(walk.mounts)
+    Ok(walk)
 }
 
-struct Walk<'a> {
-    file: &'a Path,
-    file_name: String,
+struct Walk {
+    file: PathBuf,
     mounts: Vec<Mount>,
-    warnings: &'a mut Vec<String>,
+    /// The non-optional `$path`s that do not exist
+    missing: Vec<Mount>,
 }
 
-impl Walk<'_> {
+impl Walk {
     fn visit(&mut self, node: &Node, segments: &mut Vec<String>, base: &Path, depth: u32) -> Result<(), String> {
         if depth > 32 {
             return Err(format!("{}: project nesting too deep", self.file.display()));
@@ -204,7 +278,7 @@ impl Walk<'_> {
             if !source.exists() {
                 if !optional {
                     let at = if segments.is_empty() { "tree".to_string() } else { segments.join("/") };
-                    self.warnings.push(format!("rur: {}: {at} $path {source_text} does not exist", self.file_name));
+                    self.missing.push(Mount { instance: false, path: at, value: source_text });
                 }
             } else if is_project_file(&source_text) {
                 if let Some(nested_tree @ Node::Object(_)) = read_project(&source)?.get("tree") {
@@ -275,7 +349,7 @@ pub fn mounts_cli(argv: &[String]) -> i32 {
 pub enum Chosen {
     /// `--rojo <file>` or `--project <file.project.json>`
     Named,
-    /// No project options: the `default.project.json` nearest the story (or in the current directory)
+    /// No project options: the project file nearest the story (or in the current directory)
     Found,
 }
 
@@ -284,7 +358,7 @@ pub enum Chosen {
 pub struct Resolved {
     pub arguments: Vec<String>,
     pub project: Option<(PathBuf, Chosen, Vec<Mount>)>,
-    /// `$path`s of the project that do not exist
+    /// `$path`s of the project that do not exist, or the project files rur would not choose between
     pub warnings: Vec<String>,
 }
 
@@ -294,12 +368,16 @@ impl Resolved {
         let (file, chosen, mounts) = self.project.as_ref()?;
         let how = match chosen {
             Chosen::Named => "",
-            Chosen::Found => " (found beside the story; --rojo, --project or --roots picks another)",
+            Chosen::Found => " (found beside the story; --rojo picks another)",
         };
-        let places: Vec<&str> = mounts.iter().map(|mount| mount.path.as_str()).collect();
-        let listed = if places.is_empty() { "nothing".to_string() } else { places.join(", ") };
-        Some(format!("rur: Rojo project {}{how}: mounted {listed}", file.display()))
+        Some(format!("rur: Rojo project {}{how}: mounted {}", file.display(), mounted_list(mounts)))
     }
+}
+
+/// The instance paths a project's files and folders mount at, as a note lists them
+pub fn mounted_list(mounts: &[Mount]) -> String {
+    let places: Vec<String> = mounts.iter().filter(|mount| !mount.instance).map(|mount| dotted(&mount.path)).collect();
+    if places.is_empty() { "nothing".to_string() } else { places.join(", ") }
 }
 
 /// The value after `key`, split from `--key=value` too
@@ -314,7 +392,7 @@ const PROJECT_OPTIONS: [&str; 6] = ["--roots", "--mount", "--instance", "--proje
 /// mounts: `--rojo <file>` [`--rojo-at Service/Name`], or `--project <file.project.json>` (then `--project` names the
 /// project's folder, for content paths relative to it). Without any project option (`--roots`, `--mount`,
 /// `--instance`, `--project`, `--place`) and without RUR_PROJECT, a run of a `--story` or `--module` mounts the
-/// `default.project.json` nearest the source (its folder or a parent of it), else the current directory's, unless the
+/// project file nearest the source (its folder or a parent of it: [`project_file_in`]), else the current directory's, unless the
 /// folder rur would take as the project already describes the run: a checkout build's default project holding the
 /// source, or a `rur.json` that declares places in the current directory (a release build's project).
 /// The project's mounts come before the `--mount`s of the command line, as in cli/rojo.mjs.
@@ -355,7 +433,10 @@ pub fn resolve_arguments(argv: &[String]) -> Result<Resolved, String> {
     let (file, chosen) = match rojo {
         Some(file) => (Some(resolve(Path::new(""), &file)), Chosen::Named),
         None if at.is_some() => return Err("--rojo-at places a Rojo project: it needs --rojo <file.project.json>".into()),
-        None => (detect(&rest), Chosen::Found),
+        None => match detect(&rest) {
+            Ok(file) => (file, Chosen::Found),
+            Err(several) => return Ok(Resolved { arguments: rest, project: None, warnings: vec![format!("rur: {}", several_projects(&several))] }),
+        },
     };
     let Some(file) = file else {
         return Ok(Resolved { arguments: rest, project: None, warnings: Vec::new() });
@@ -381,22 +462,23 @@ pub fn resolve_arguments(argv: &[String]) -> Result<Resolved, String> {
     Ok(Resolved { arguments, project: Some((file, chosen, mounts)), warnings })
 }
 
-/// The `default.project.json` a run without project options mounts ([`resolve_arguments`])
-fn detect(argv: &[String]) -> Option<PathBuf> {
+/// The project file a run without project options mounts ([`resolve_arguments`]); `Err` lists the project files of
+/// the nearest folder that has several and no default.project.json (rur mounts none of them then)
+fn detect(argv: &[String]) -> Result<Option<PathBuf>, Vec<PathBuf>> {
     if PROJECT_OPTIONS.iter().any(|key| argv.iter().any(|arg| arg == key)) {
-        return None;
+        return Ok(None);
     }
     if std::env::var_os("RUR_PROJECT").is_some_and(|value| !value.is_empty()) {
-        return None;
+        return Ok(None);
     }
-    let source = option(argv, "--story").or_else(|| option(argv, "--module"))?;
+    let Some(source) = option(argv, "--story").or_else(|| option(argv, "--module")) else { return Ok(None) };
     let source = resolve(Path::new(""), source);
     let source = crate::paths::canonical_path(&source).unwrap_or(source);
-    let cwd = std::env::current_dir().ok()?;
+    let Ok(cwd) = std::env::current_dir() else { return Ok(None) };
     if crate::paths::is_standalone() {
         // A release build's project is the current directory: its rur.json places, when it declares them, are the run's
         if declares_places(&cwd) {
-            return None;
+            return Ok(None);
         }
     } else {
         // A checkout build's default project mounts the stories inside it
@@ -404,10 +486,15 @@ fn detect(argv: &[String]) -> Option<PathBuf> {
         let project = crate::paths::default_project(&repo);
         let project = crate::paths::canonical_path(&project).unwrap_or(project);
         if source.starts_with(&project) {
-            return None;
+            return Ok(None);
         }
     }
-    source.ancestors().skip(1).chain([cwd.as_path()]).map(|dir| dir.join(DEFAULT_PROJECT_FILE)).find(|file| file.is_file())
+    for dir in source.ancestors().skip(1).chain([cwd.as_path()]) {
+        if let Some(file) = project_file_in(dir)? {
+            return Ok(Some(file));
+        }
+    }
+    Ok(None)
 }
 
 /// Whether `dir`'s rur.json declares places
@@ -416,45 +503,6 @@ pub fn declares_places(dir: &Path) -> bool {
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .is_some_and(|config| config.get("places").is_some_and(|places| places.as_array().is_some_and(|places| !places.is_empty())))
-}
-
-/// A hint for a failure that reads a missing child of a service (`Packages is not a valid member of ReplicatedStorage
-/// "ReplicatedStorage"`): what the run mounted, and how to mount the rest. `sources` lists the run's roots and mounts.
-pub fn missing_child_hint(message: &str, sources: &[String]) -> Option<String> {
-    const MARKER: &str = " is not a valid member of ";
-    let at = message.find(MARKER)?;
-    let child = message[..at].rsplit([':', ' ']).next().filter(|child| !child.is_empty())?;
-    let after = &message[at + MARKER.len()..];
-    let (class, rest) = after.split_once(' ')?;
-    let full_name = rest.strip_prefix('"')?.split('"').next()?;
-    // Only a child of a service: game.<Service>, whose full name is the service's own
-    if full_name != class || !is_service(class) {
-        return None;
-    }
-    let mounted = if sources.is_empty() {
-        "nothing but the story".to_string()
-    } else {
-        const SHOWN: usize = 8;
-        let mut listed = sources.iter().take(SHOWN).cloned().collect::<Vec<_>>().join("; ");
-        if sources.len() > SHOWN {
-            listed.push_str(&format!("; and {} more", sources.len() - SHOWN));
-        }
-        listed
-    };
-    Some(format!(
-        "{class}.{child} was not mounted. The run mounted {mounted}. If {child} comes from a Rojo project (Wally packages, say), pass --rojo <default.project.json> or run beside it; else mount it with --mount {class}/{child}=<dir>"
-    ))
-}
-
-/// The roots and mounts of a run as [`missing_child_hint`] lists them
-pub fn describe_sources(roots: &[String], mounts: &[roblox_engine_emulator::project::Mount]) -> Vec<String> {
-    use roblox_engine_emulator::project::MountTarget;
-    let roots = roots.iter().map(|root| format!("root {root}"));
-    let mounts = mounts.iter().map(|mount| match &mount.target {
-        MountTarget::Path(path) => format!("{} = {path}", mount.segments.join("/")),
-        MountTarget::Class(class) => format!("{} ({class})", mount.segments.join("/")),
-    });
-    roots.chain(mounts).collect()
 }
 
 #[cfg(test)]
@@ -504,8 +552,7 @@ mod tests {
                 (true, "ReplicatedStorage/Remotes", "Folder".into()),
             ]
         );
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("ServerStorage/Gone $path") && warnings[0].contains("does not exist"), "{warnings:?}");
+        assert_eq!(warnings, ["rur: default.project.json maps ServerStorage.Gone to missing, which doesn't exist"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -542,14 +589,47 @@ mod tests {
             assert_eq!((arguments[2].as_str(), arguments[3].as_str()), ("--roots", ""));
             assert_eq!((arguments[4].as_str(), arguments[5].as_str()), ("--project", dir.to_string_lossy().as_ref()));
             assert_eq!(&arguments[6..], &strings(&["--mount", "Workspace/X=y"])[..]);
-            assert!(resolved.note().unwrap().contains("mounted ReplicatedStorage/Packages"));
+            assert!(resolved.note().unwrap().ends_with(": mounted ReplicatedStorage.Packages"), "{:?}", resolved.note());
         }
         assert!(resolve_arguments(&strings(&["--rojo-at", "ServerStorage/X"])).unwrap_err().contains("needs --rojo"));
         assert!(resolve_arguments(&strings(&["--rojo", &dir.join("nope.project.json").to_string_lossy()])).unwrap_err().contains("no such file"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A story with no project options finds the default.project.json above it; any project option turns that off
+    /// A folder's project file is its default.project.json, else its only *.project.json; several others are named
+    #[test]
+    fn a_folder_names_its_project_file_by_itself_unless_it_has_several() {
+        let dir = temp_dir("project-file");
+        assert_eq!(project_file_in(&dir), Ok(None));
+        write(&dir.join("place.project.json"), "{}");
+        assert_eq!(project_file_in(&dir), Ok(Some(dir.join("place.project.json"))));
+        write(&dir.join("dev.project.json"), "{}");
+        assert_eq!(project_file_in(&dir), Err(vec![dir.join("dev.project.json"), dir.join("place.project.json")]));
+        assert_eq!(
+            several_projects(&project_files_in(&dir)),
+            format!("{} has several Rojo projects (dev.project.json, place.project.json), so none was mounted: pass --rojo <file> to mount one", dir.display())
+        );
+        write(&dir.join("default.project.json"), "{}");
+        assert_eq!(project_file_in(&dir), Ok(Some(dir.join("default.project.json"))));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Wally folder that doesn't exist yet says how to make it
+    #[test]
+    fn a_missing_wally_folder_says_to_run_wally_install() {
+        let dir = temp_dir("wally");
+        write(&dir.join("game.project.json"), r#"{"name":"g","tree":{"$className":"DataModel","ReplicatedStorage":{"Packages":{"$path":"Packages"}}}}"#);
+        let mut warnings = Vec::new();
+        mounts(&dir.join("game.project.json"), None, &mut warnings).unwrap();
+        assert_eq!(warnings, ["rur: game.project.json maps ReplicatedStorage.Packages to Packages, which doesn't exist"]);
+        write(&dir.join("wally.toml"), "[package]");
+        warnings.clear();
+        mounts(&dir.join("game.project.json"), None, &mut warnings).unwrap();
+        assert_eq!(warnings, [format!("rur: game.project.json maps ReplicatedStorage.Packages to Packages, which doesn't exist: run `wally install` in {}", dir.display())]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A story with no project options finds the project file above it; any project option turns that off
     #[test]
     fn a_story_beside_a_rojo_project_mounts_it() {
         let dir = temp_dir("detect");
@@ -569,6 +649,16 @@ mod tests {
             let resolved = resolve_arguments(&strings(&["--story", &story, option[0], option[1]])).unwrap();
             assert!(resolved.project.is_none(), "{option:?}");
         }
+        if std::env::var_os("RUR_PROJECT").is_none() {
+            // A lone place.project.json is found too; with two, neither is mounted and the note names them
+            std::fs::rename(dir.join("default.project.json"), dir.join("place.project.json")).unwrap();
+            let resolved = resolve_arguments(&strings(&["--story", &story])).unwrap();
+            assert!(resolved.project.as_ref().unwrap().0.ends_with("place.project.json"));
+            std::fs::copy(dir.join("place.project.json"), dir.join("dev.project.json")).unwrap();
+            let resolved = resolve_arguments(&strings(&["--story", &story])).unwrap();
+            assert!(resolved.project.is_none());
+            assert!(resolved.warnings[0].contains("has several Rojo projects (dev.project.json, place.project.json), so none was mounted"), "{:?}", resolved.warnings);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -582,17 +672,5 @@ mod tests {
         assert!(parse(&["--story", "a.luau", "b.luau"]).unwrap_err().contains("unexpected argument \"b.luau\""));
         // (the requests the Node CLI builds still parse leniently)
         assert_eq!(crate::engine::cli::parse(&strings(&["--rojoo", "x"])).unwrap().unknown.as_deref(), Some("--rojoo"));
-    }
-
-    #[test]
-    fn a_missing_child_of_a_service_gets_a_hint() {
-        let sources = vec!["root C:/game/src".to_string()];
-        let hint = missing_child_hint(r#"Packages is not a valid member of ReplicatedStorage "ReplicatedStorage""#, &sources).unwrap();
-        assert!(hint.starts_with("ReplicatedStorage.Packages was not mounted. The run mounted root C:/game/src."), "{hint}");
-        assert!(hint.contains("--rojo") && hint.contains("--mount ReplicatedStorage/Packages=<dir>"));
-        let traced = missing_child_hint(r#"ReplicatedStorage.Story:3: Packages is not a valid member of ReplicatedStorage "ReplicatedStorage""#, &[]).unwrap();
-        assert!(traced.contains("mounted nothing but the story"), "{traced}");
-        assert!(missing_child_hint(r#"Fusion is not a valid member of Folder "ReplicatedStorage.Packages""#, &sources).is_none());
-        assert!(missing_child_hint("attempt to index nil", &sources).is_none());
     }
 }

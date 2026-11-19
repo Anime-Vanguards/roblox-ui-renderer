@@ -58,7 +58,7 @@ try {
 	};
 	const named = native("rojo", "--rojo", "default.project.json");
 	assert.equal(named.result.status, 0, named.result.stderr);
-	assert.match(named.result.stderr, /rur: Rojo project .*default\.project\.json: mounted ReplicatedStorage\/Packages, ReplicatedStorage\/Shared/);
+	assert.match(named.result.stderr, /rur: Rojo project .*default\.project\.json: mounted ReplicatedStorage\.Packages, ReplicatedStorage\.Shared, StarterPlayer\.StarterPlayerScripts\.Client\r?\n/);
 	checkSmoke(named.dir, "rur-native render --rojo");
 	if (!process.env.RUR_PROJECT) {
 		const found = native("found");
@@ -78,12 +78,13 @@ try {
 	const typo = native("typo", "--rojoo", "default.project.json");
 	assert.equal(typo.result.status, 2, typo.result.stderr);
 	assert.match(typo.result.stderr, /unknown option --rojoo/);
-	// Without the project the failure says what was mounted and how to mount the package
+	// Without the project the failure is printed with the project file that maps the package, and how to use it
 	const missing = native("missing", "--mount", "ReplicatedStorage/Shared=src/shared");
 	assert.equal(missing.result.status, 0, missing.result.stderr);
 	const missingScene = JSON.parse(fs.readFileSync(path.join(missing.dir, "scene.json"), "utf8"));
 	assert.equal(missingScene.status, "error");
-	assert.match(missingScene.diagnostics.hint, /^ReplicatedStorage\.Packages was not mounted\. The run mounted ReplicatedStorage\/Shared = .*--rojo/);
+	assert.match(missingScene.diagnostics.hint, /^default\.project\.json maps ReplicatedStorage\.Packages, but this run didn't mount it: pass --rojo .*default\.project\.json$/);
+	assert.match(missing.result.stderr, /rur: error: Packages is not a valid member of ReplicatedStorage "ReplicatedStorage"\r?\nrur: hint: default\.project\.json maps/);
 	console.log("Rojo + Wally example: rur-native render --rojo, with default.project.json found, and rur render mount its Packages; unknown options fail; a missing Packages gets a hint");
 } finally {
 	assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));

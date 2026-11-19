@@ -7,8 +7,13 @@ npm run native -- --story path/to/Button.story.luau
 ```
 
 A release binary takes the project folder on its own: `rur-native path/to/project` opens it as running `rur-native`
-inside it does, Rojo project included ([projects](projects.md#rojo-projects-and-explicit-mounts)). If the catalog
-cannot finish looking for stories (a folder far larger than a project), it says so in the Stories panel.
+inside it does, Rojo project included ([projects](projects.md#rojo-projects-and-explicit-mounts)). The Stories panel
+names the project file it mounted and warns about `$path`s that don't exist. If the catalog finds no stories, or
+cannot finish looking (a folder far larger than a project), it says so there.
+
+A story that fails, or whose mount still waits (a `WaitForChild` for something nothing mounted), shows the error or
+where it waits above the preview, with a [hint](projects.md#rojo-projects-and-explicit-mounts) when rur finds the
+cause in the project files.
 
 On Windows, `start.cmd` installs the npm dependencies when missing and launches the storybook. Stories run
 on the engine in process and draw on the window's GPU surface. Pick a story in the searchable catalog (every

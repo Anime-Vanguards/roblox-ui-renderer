@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -98,6 +98,11 @@ fn run_window(
     if std::env::var("RUR_NO_ACTIVATE").as_deref() == Ok("1") {
         viewport = viewport.with_active(false);
     }
+    // RUR_TEST_SCREENSHOT: the window opens in the background, off the screen and out of the taskbar, and never
+    // takes the focus
+    if std::env::var_os("RUR_TEST_SCREENSHOT").is_some_and(|path| !path.is_empty()) {
+        viewport = viewport.with_active(false).with_taskbar(false).with_position([-20000.0, 0.0]);
+    }
     let mut native_options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport,
@@ -170,6 +175,10 @@ pub struct NativeApp {
     error: Option<String>,
     draw_error: Option<String>,
     runtime_failed: bool,
+    /// What a failed or waiting story's project files say about it (crate::hints), and the failure (true) or the
+    /// place a mount waits at (false) it is for
+    hint: Option<String>,
+    explained: Option<(bool, String)>,
     font_reloads: u8,
     pending_fonts: Option<Value>,
     status: String,
@@ -196,6 +205,23 @@ pub struct NativeApp {
     frames: u64,
     /// `--actions` in the desktop app: timed input played into the preview once the story is shown
     replay: Option<DesktopReplay>,
+    /// RUR_TEST_SCREENSHOT=<png>: the window's own frame, saved once the stories and the story have settled
+    screenshot: Option<TestScreenshot>,
+}
+
+/// RUR_TEST_SCREENSHOT=<png>: once the story list and the story have settled for a second, the window's frame is
+/// saved there and the window closes. The picture comes from the app's own frame, never the screen.
+struct TestScreenshot {
+    path: PathBuf,
+    settled: Option<Instant>,
+    requested: bool,
+}
+
+impl TestScreenshot {
+    fn from_env() -> Option<Self> {
+        let path = std::env::var_os("RUR_TEST_SCREENSHOT").filter(|path| !path.is_empty())?;
+        Some(TestScreenshot { path: PathBuf::from(path), settled: None, requested: false })
+    }
 }
 
 /// Timed input events (a `--actions` file of {t, type, ...} live session events in canvas logical
@@ -318,6 +344,8 @@ impl NativeApp {
             error: None,
             draw_error: None,
             runtime_failed: false,
+            hint: None,
+            explained: None,
             font_reloads: 0,
             pending_fonts: None,
             status: "Choose a story to begin".into(),
@@ -335,6 +363,7 @@ impl NativeApp {
             restart,
             frames: 0,
             replay: None,
+            screenshot: TestScreenshot::from_env(),
         };
         if let Some(path) = app.options.actions.clone() {
             match DesktopReplay::load(&path) {
@@ -407,6 +436,8 @@ impl NativeApp {
         self.error = None;
         self.draw_error = None;
         self.runtime_failed = false;
+        self.hint = None;
+        self.explained = None;
         self.loading = true;
         self.dirty = false;
         self.paused = false;
@@ -725,6 +756,84 @@ impl NativeApp {
         }
     }
 
+    /// Where a yielding story's mount waits (the session header's `waiting`)
+    fn waiting(&self) -> Option<String> {
+        let header = self.scene.header();
+        (header.get("status").and_then(Value::as_str) == Some("yielded"))
+            .then(|| header.get("waiting").and_then(Value::as_str).unwrap_or("the story's require").to_string())
+    }
+
+    /// The hint for the story's failure or wait, worked out again when either changes (it reads project files)
+    fn update_hint(&mut self) {
+        let subject = match (&self.error, self.runtime_failed) {
+            (Some(error), true) => Some((true, error.clone())),
+            _ => self.waiting().map(|at| (false, at)),
+        };
+        if subject == self.explained {
+            return;
+        }
+        self.explained = subject;
+        self.hint = match (&self.explained, &self.options.story) {
+            (Some((failed, message)), Some(story)) => {
+                let sources = RuntimeOptions::from_native(&self.options, story.clone()).sources();
+                if *failed {
+                    crate::hints::missing_child_hint(message, &sources, Some(story))
+                } else {
+                    crate::hints::waiting_hint(&sources, Some(story))
+                }
+            }
+            _ => None,
+        };
+    }
+
+    /// A failed or waiting story: what happened and the hint, above the preview (which shows nothing useful then)
+    fn problem_card(&self, ui: &mut egui::Ui) {
+        let (headline, color) = match (&self.explained, &self.error) {
+            (Some((true, _)), Some(error)) => (error.clone(), Color32::LIGHT_RED),
+            (Some((false, at)), _) => (format!("The story's mount is still waiting, at {at}"), Color32::from_rgb(240, 200, 90)),
+            _ => return,
+        };
+        egui::Frame::group(ui.style()).stroke(egui::Stroke::new(1.0_f32, color.gamma_multiply(0.6))).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(egui::Label::new(egui::RichText::new(headline).monospace().color(color)).wrap());
+            if let Some(hint) = &self.hint {
+                ui.add_space(6.0);
+                ui.add(egui::Label::new(hint).wrap());
+            }
+        });
+        ui.add_space(8.0);
+    }
+
+    /// RUR_TEST_SCREENSHOT: asks for the window's frame once everything has settled for a second, saves it and closes
+    fn step_screenshot(&mut self, ctx: &egui::Context) {
+        let settled = !self.catalog.loading && !self.loading && self.assets.pending_count() == 0;
+        let Some(shot) = self.screenshot.as_mut() else {
+            return;
+        };
+        let image = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        if let Some(image) = image {
+            let rgba: Vec<u8> = image.pixels.iter().flat_map(|pixel| pixel.to_array()).collect();
+            match crate::story_render::write_png(&shot.path, &rgba, image.size[0] as u32, image.size[1] as u32) {
+                Ok(()) => eprintln!("rur-native: RUR_TEST_SCREENSHOT: saved {}", shot.path.display()),
+                Err(error) => eprintln!("rur-native: RUR_TEST_SCREENSHOT: {error:#}"),
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if !settled {
+            shot.settled = None;
+        } else if !shot.requested && shot.settled.get_or_insert_with(Instant::now).elapsed() >= Duration::from_secs(1) {
+            shot.requested = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+        }
+        ctx.request_repaint();
+    }
+
     /// Feeds the desktop replay's due events (DesktopReplay); exports the trace when it has finished
     fn step_replay(&mut self, ctx: &egui::Context) {
         let Some(replay) = self.replay.as_mut() else {
@@ -896,6 +1005,23 @@ impl NativeApp {
                         ui.label(format!("Looking for stories ({folders} folders)"));
                     });
                 }
+                for note in &self.options.notes {
+                    let note = note.strip_prefix("rur: ").unwrap_or(note);
+                    if self.hint.as_deref() == Some(note) {
+                        continue;
+                    }
+                    match note.strip_prefix("Rojo project ") {
+                        // "Rojo project <file>: mounted ...": the file's name, the rest on hover
+                        Some(rest) => {
+                            let file = rest.split(": mounted ").next().unwrap_or(rest);
+                            let name = Path::new(file).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| file.to_string());
+                            ui.add(egui::Label::new(egui::RichText::new(format!("Project: {name}")).weak()).truncate()).on_hover_text(note);
+                        }
+                        None => {
+                            ui.add(egui::Label::new(egui::RichText::new(note).color(Color32::from_rgb(240, 200, 90))).wrap());
+                        }
+                    }
+                }
                 if let Some(error) = &self.catalog.error {
                     ui.colored_label(Color32::LIGHT_RED, error);
                 }
@@ -905,7 +1031,18 @@ impl NativeApp {
                     &self.search,
                     &self.place,
                 );
-                ui.label(format!("{} stories", self.catalog_view.story_count));
+                let count = self.catalog_view.story_count;
+                if count == 0 && !self.catalog.loading && self.catalog.error.is_none() && self.catalog.entries.is_empty() {
+                    ui.add(
+                        egui::Label::new(format!(
+                            "No *.story.luau or *.story.lua files in {}. Start rur-native in your project's folder, or name it: rur-native <project folder>",
+                            self.options.project.display()
+                        ))
+                        .wrap(),
+                    );
+                } else {
+                    ui.label(if count == 1 { "1 story".to_string() } else { format!("{count} stories") });
+                }
                 let row_height = ui
                     .spacing()
                     .interact_size
@@ -1084,6 +1221,7 @@ impl NativeApp {
             self.receive(ctx);
             self.receive_ms = received.elapsed().as_secs_f64() * 1000.0;
         }
+        self.update_hint();
         let panels = Instant::now();
         {
             let _scope = crate::microprofile::scope("UI panels");
@@ -1111,7 +1249,9 @@ impl NativeApp {
                 if self.loading {
                     ui.spinner();
                 }
-                if let Some(error) = self.error.as_ref().or(self.draw_error.as_ref()) {
+                // (a story's failure is in the card above the preview)
+                let shown = matches!(self.explained, Some((true, _)));
+                if let Some(error) = self.error.as_ref().filter(|_| !shown).or(self.draw_error.as_ref()) {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(error.lines().next().unwrap_or(error))
@@ -1130,6 +1270,7 @@ impl NativeApp {
         });
         let mut resized_viewport = None;
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.problem_card(ui);
             if let Some((texture, _, size)) = self.texture {
                 let actual_size =
                     Vec2::new(size[0] as f32, size[1] as f32) / ctx.pixels_per_point();
@@ -1223,7 +1364,7 @@ impl NativeApp {
                     modifiers,
                 );
                 self.add_events(events);
-            } else {
+            } else if self.explained.is_none() {
                 ui.centered_and_justified(|ui| {
                     ui.label(if self.loading {
                         "Loading story…"
@@ -1240,6 +1381,7 @@ impl NativeApp {
             }
         }
         self.step_replay(ctx);
+        self.step_screenshot(ctx);
         self.request_frame();
         let scrolling = self
             .drawn_motion

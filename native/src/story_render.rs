@@ -255,7 +255,7 @@ impl StoryRenderer {
             fonts_changed();
             output = crate::engine::cli::run_once(&args).map_err(|error| anyhow!("runtime failed: {error}"))?;
         }
-        output.write(&args, Instant::now()).map_err(|error| anyhow!(error))?;
+        output.save(&args).map_err(|error| anyhow!(error))?;
         phase("runtime", &mut phases);
 
         // Glyph atlas: every glyph variant the scene draws (glyphs.rs)
@@ -611,8 +611,8 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
     });
     let code = match result {
         Ok(result) => {
-            eprintln!("rur: sequence {}; {} frames; {:.3}s -> {}", result["status"].as_str().unwrap_or("?"), result["frames"], started.elapsed().as_secs_f64(), out.display());
-            println!("{result}");
+            crate::term::note(&format!("sequence {}; {} frames; {:.3}s -> {}", crate::term::status(result["status"].as_str().unwrap_or("?")), result["frames"], started.elapsed().as_secs_f64(), out.display()));
+            print_result(&result);
             0
         }
         Err(error) => {
@@ -626,12 +626,46 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
     std::process::exit(code)
 }
 
+/// The result's JSON line on stdout for a program reading it (a pipe or a file); a terminal gets the summary on stderr
+fn print_result(result: &Value) {
+    use std::io::IsTerminal;
+    if !std::io::stdout().is_terminal() {
+        println!("{result}");
+    }
+}
+
+/// What to print for a scene whose story failed or still waits: the failure (an error), or where the mount waits (a
+/// warning), and the hint (crate::hints) unless one of the `printed` lines already said it
+fn problem_lines(scene: &Value, printed: &[String], story: Option<&Path>) -> Vec<(fn(&str), String)> {
+    let mut lines: Vec<(fn(&str), String)> = Vec::new();
+    if let Some(failure) = scene["failure"].as_str() {
+        lines.push((crate::term::error, failure.to_string()));
+    } else if scene["status"] == "yielded" {
+        // (engine/story.rs settle: the warning for a mount that still yields, with its traceback)
+        let waiting = scene.pointer("/diagnostics/output").and_then(Value::as_array).into_iter().flatten().find(|entry| {
+            entry["kind"] == "warn" && entry["message"].as_str().is_some_and(|message| message.starts_with("story mount is still yielding"))
+        });
+        let at = waiting
+            .and_then(|entry| entry["trace"].as_str())
+            .and_then(|trace| trace.lines().map(str::trim).find(|frame| !frame.is_empty() && !frame.starts_with("rur.")))
+            .map_or_else(|| "the story's require".to_string(), |frame| crate::hints::story_frame(frame, story));
+        lines.push((crate::term::warning, format!("the story's mount is still waiting, at {at}")));
+    }
+    if let Some(hint) = scene.pointer("/diagnostics/hint").and_then(Value::as_str) {
+        if !printed.iter().any(|line| line.strip_prefix("rur: ") == Some(hint)) {
+            lines.push((crate::term::hint, hint.to_string()));
+        }
+    }
+    lines
+}
+
 /// `rur-native render --dir <out> [--no-png] [--offline] [--placeholders] [--profile <kinds> [--profile-out <dir>]] <engine arguments>`:
-/// one render in this process. Prints the result as one JSON line on stdout (with `profile`, the profile's directory,
-/// default `<out>/profile`, whose summary goes to stderr: [`profile_options`]); returns the exit code.
+/// one render in this process. Prints the result as one JSON line on stdout when stdout is not a terminal (with
+/// `profile`, the profile's directory, default `<out>/profile`, whose summary goes to stderr: [`profile_options`]);
+/// returns the exit code.
 pub fn cli(argv: &[String]) -> i32 {
-    let argv = match crate::engine::cli::with_rojo_project(argv) {
-        Ok(argv) => argv,
+    let (argv, printed) = match crate::engine::cli::with_rojo_project_noted(argv) {
+        Ok(resolved) => resolved,
         Err(error) => {
             eprintln!("rur-native render: {error}");
             return 2;
@@ -709,9 +743,8 @@ pub fn cli(argv: &[String]) -> i32 {
         ),
     };
     let result = result.and_then(|(mut result, scene, _)| {
-        // What to mount for a failure on a service's missing child (rojo.rs missing_child_hint), said again on stderr
-        if let Some(hint) = scene.pointer("/diagnostics/hint").and_then(Value::as_str) {
-            eprintln!("rur: hint: {hint}");
+        for (print, text) in problem_lines(&scene, &printed, source_file(&args).as_deref().map(Path::new)) {
+            print(&text);
         }
         if let Some(gpu) = gpu {
             let gpu = gpu.join().map_err(|_| anyhow!("GPU start panicked"))??;
@@ -748,8 +781,8 @@ pub fn cli(argv: &[String]) -> i32 {
     };
     let code = match result {
         Ok(result) => {
-            eprintln!("rur: {}; {} nodes; {:.3}s -> {}", result["status"].as_str().unwrap_or("?"), result["nodes"], started.elapsed().as_secs_f64(), out.display());
-            println!("{result}");
+            crate::term::summary(result["status"].as_str().unwrap_or("?"), &format!("{} nodes; {:.3}s -> {}", result["nodes"], started.elapsed().as_secs_f64(), out.display()));
+            print_result(&result);
             0
         }
         Err(error) => {

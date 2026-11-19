@@ -223,14 +223,17 @@ pub fn parse_command(args: &[String]) -> Result<Args, String> {
 /// The command line of a native story command with its Rojo project resolved ([`crate::rojo::resolve_arguments`]):
 /// a project given or found becomes mounts, and a line on stderr says which project was mounted where
 pub fn with_rojo_project(args: &[String]) -> Result<Vec<String>, String> {
+    with_rojo_project_noted(args).map(|(arguments, _)| arguments)
+}
+
+/// [`with_rojo_project`], also returning the lines it printed (a failure's hint that repeats one is not printed again)
+pub fn with_rojo_project_noted(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
     let resolved = crate::rojo::resolve_arguments(args)?;
-    for warning in &resolved.warnings {
-        eprintln!("{warning}");
+    let printed: Vec<String> = resolved.warnings.iter().cloned().chain(resolved.note()).collect();
+    for line in &printed {
+        crate::term::project_line(line);
     }
-    if let Some(note) = resolved.note() {
-        eprintln!("{note}");
-    }
-    Ok(resolved.arguments)
+    Ok((resolved.arguments, printed))
 }
 
 use launch::absolute;
@@ -811,16 +814,22 @@ pub struct SceneOutput {
 impl SceneOutput {
     /// Writes `--dependencies` and `--out` (else prints the scene) with the CLI's status line.
     pub fn write(&self, args: &Args, started: Instant) -> Result<(), String> {
+        self.save(args)?;
+        match &args.dump_scene {
+            Some(path) => eprintln!("rur: {}; {} nodes; {} output lines; {}s -> {path}", self.status, self.nodes, self.lines, started.elapsed().as_secs_f64()),
+            None => println!("{}", self.text),
+        }
+        Ok(())
+    }
+
+    /// Writes `--dependencies` and `--out`, for a command that reports the run itself (`rur-native render`)
+    pub fn save(&self, args: &Args) -> Result<(), String> {
         if let Some(path) = &args.dependencies {
             std::fs::write(path, serde_json::to_string(&json!({ "files": self.dependencies })).map_err(|e| e.to_string())?)
                 .map_err(|e| format!("{path}: {e}"))?;
         }
-        match &args.dump_scene {
-            Some(path) => {
-                std::fs::write(path, &self.text).map_err(|e| format!("{path}: {e}"))?;
-                eprintln!("rur: {}; {} nodes; {} output lines; {}s -> {path}", self.status, self.nodes, self.lines, started.elapsed().as_secs_f64());
-            }
-            None => println!("{}", self.text),
+        if let Some(path) = &args.dump_scene {
+            std::fs::write(path, &self.text).map_err(|e| format!("{path}: {e}"))?;
         }
         Ok(())
     }

@@ -77,12 +77,14 @@ A Rojo project (`*.project.json`) can stand in for the project's places. Name it
 or mounts and no `--roots`, no project roots are mounted. The render prints which project it mounted where:
 
 ```
-rur: Rojo project C:\game\default.project.json: mounted ReplicatedStorage/Packages, ReplicatedStorage/Shared
+rur: Rojo project C:\game\default.project.json: mounted ReplicatedStorage.Packages, ReplicatedStorage.Shared
 ```
 
 **Found by itself.** With no project options at all (`--rojo`, `--project`, `--roots`, `--mount`, `--place`,
-`RUR_PROJECT`), a `--story` or `--module` run mounts the `default.project.json` nearest the story (its folder or
-a parent), else the current directory's. Run from a Rojo project, a story needs no flags:
+`RUR_PROJECT`), a `--story` or `--module` run mounts the project file nearest the story (its folder or a parent),
+else the current directory's. A folder's project file is its `default.project.json`, else its only `*.project.json`.
+A folder with several and no `default.project.json` mounts none of them, and rur names them so you can pass one with
+`--rojo`. Run from a Rojo project, a story needs no flags:
 
 ```powershell
 cd my-game        # default.project.json, Packages/ (Wally), src/
@@ -91,7 +93,7 @@ rur-native                     # the storybook on the same project (a release bu
 ```
 
 **Naming the project folder.** `rur-native <project folder>` opens the storybook as running `rur-native` inside that
-folder does: it mounts the folder's `default.project.json` (when its `rur.json` declares no places) and lists the same
+folder does: it mounts the folder's project file (when its `rur.json` declares no places) and lists the same
 stories, in any build. The path is relative to the current directory (`rur-native .` for the current folder,
 `rur-native ../my-game` for another); a `*.project.json` file works too, as `--rojo` does. It replaces `--project`.
 
@@ -117,9 +119,22 @@ small Rojo + Wally project whose story requires a package through `ReplicatedSto
 node cli/rur.mjs render --rojo ../my-plugin/default.project.json --story ../my-plugin/stories/App.story.luau --plugin
 ```
 
-**When a require fails.** A story that reads a service's missing child (`Packages is not a valid member of
-ReplicatedStorage "ReplicatedStorage"`) gets a hint in `scene.json` (`diagnostics.hint`) and on stderr: what the
-run mounted, and the `--rojo` or `--mount` that would mount the rest.
+**A `$path` that doesn't exist** is skipped with a warning; when it is a Wally folder (`Packages`, `ServerPackages`,
+`DevPackages`) beside a `wally.toml`, the warning says to run `wally install`.
+
+**When a require fails.** A story that reads an instance nothing mounted (`Packages is not a valid member of
+ReplicatedStorage "ReplicatedStorage"`), or whose mount still waits when the run ends (a `WaitForChild` for it),
+gets a hint from what rur finds on disk ([native/src/hints.rs](../native/src/hints.rs)):
+
+- a project file maps the instance to a path that doesn't exist (`wally install` when it is a Wally folder);
+- a project file maps it, but the run used another project, `rur.json` places, or none of several project files:
+  the `--rojo` that mounts it;
+- inside a mounted folder: the folder on disk, which has no such file (`wally install` when wally.toml lists it);
+- a child of a service no project file maps: what the nearest project file has under that service, or the folder of
+  that name beside it and how to map it.
+
+`rur-native render` prints the failure (or where the mount waits) and the hint on stderr; `scene.json` has the hint
+as `diagnostics.hint`; the storybook shows both above the preview. When rur finds no cause there is no hint.
 
 **Options are checked.** `rur-native render`, `sequence` and `engine` stop with `unknown option --x` (exit 2) on
 an option they don't know, rather than skipping it with its value.

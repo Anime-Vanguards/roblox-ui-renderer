@@ -64,7 +64,7 @@ the latest tested commit of main, refreshed nightly. It is not a release and may
 Run `rur-native --version` to check the install. `rur-native <your-project-folder>` opens the
 storybook, and `rur-native render --story <story.luau> --project <your-project> --dir out/render`
 renders headless. In a Rojo project (Wally packages included) run it from the project folder and no
-project flag is needed: `default.project.json` is found and mounted, or name one with `--rojo <file>`
+project flag is needed: the folder's `default.project.json`, or its only `*.project.json`, is found and mounted, or name one with `--rojo <file>`
 ([projects](docs/projects.md#rojo-projects-and-explicit-mounts)). The storybook and PNG renders need a graphics driver, and fonts and textures come from
 your Roblox Studio install. A release binary downloads the assets and cloud fonts a story uses by itself,
 and draws ViewportFrames' 3D content with [ror](docs/viewports.md) when ror is installed. On Linux and macOS use rokit 1.0 or later, since 0.2.x
