@@ -13,7 +13,8 @@
 //!   Studio MCP bridge configured, the checkout's `node cli/studio-images.mjs store` reads the refused
 //!   ids once and stores them in the cache (docs/assets.md "Images from Studio").
 //!
-//! The account is an account broker or a cookie ([`Account`]); an Open Cloud API key ([`ApiKey`]) can come
+//! The account is an account broker or a cookie ([`Account`]), the cookie's last source the account signed in to
+//! Roblox Studio when `ROR_STUDIO_COOKIE` is `1` ([`studio_cookie`]); an Open Cloud API key ([`ApiKey`]) can come
 //! before either. The cookie is only ever placed in the Cookie header of requests to
 //! `https://assetdelivery.roblox.com`, the broker's token only in the Authorization header of requests to
 //! that broker, the API key only in the `x-api-key` header of requests to
@@ -42,6 +43,10 @@ use serde_json::{Value, json};
 
 use crate::resolve::{Sniffed, sniff};
 
+/// Roblox Studio's signed-in account, the cookie's last source
+pub mod studio_cookie;
+use studio_cookie::StudioCookie;
+
 pub const USER_AGENT: &str = "rur/0.1 (offline Roblox UI renderer)";
 const DELIVERY_HOST: &str = "assetdelivery.roblox.com";
 /// Open Cloud: the only host the API key is sent to
@@ -52,8 +57,9 @@ const OPEN_CLOUD_ROUTE: &str = "/asset-delivery-api/v1/assetId/";
 /// The variable (and RUR_COOKIE_ENV file entry) that holds an Open Cloud API key for private assets. Not a
 /// `RUR_*` name: those are a batch job's settings (engine/cli.rs), which the key must never travel in.
 pub const API_KEY_VARIABLE: &str = "ROBLOX_ASSET_DELIVERY_API_KEY";
-/// The variables that hold a credential (any case): the cookie, the broker's token and the API key
-pub const CREDENTIAL_VARIABLES: [&str; 4] = ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "ROBLOX_BROKER_TOKEN", API_KEY_VARIABLE];
+/// The variables that hold a credential or open one (any case): the cookie, the broker's token, the API key, and the
+/// switch that reads Roblox Studio's account (it holds none itself, and a process that downloads nothing needs none)
+pub const CREDENTIAL_VARIABLES: [&str; 5] = ["ROBLOX_ASSET_DELIVERY_COOKIE", "ROBLOSECURITY", "ROBLOX_BROKER_TOKEN", API_KEY_VARIABLE, studio_cookie::SWITCH];
 /// Requests with the API key for one asset: the first, and the retries after a rate limit (HTTP 429)
 const KEY_ATTEMPTS: u32 = 5;
 /// The longest one rate limit holds requests with the key (Open Cloud counts requests per minute)
@@ -244,12 +250,16 @@ fn is_https(url: &str) -> bool {
 ///   `ROBLOX_BROKER_CREDENTIALS` names, else `~/.config/roblox-broker/credentials.json` (`{ "url", "token" }`).
 /// - The cookie (`ROBLOX_ASSET_DELIVERY_COOKIE` or `ROBLOSECURITY`, a `.ROBLOSECURITY` value): a checkout
 ///   build's `.env`, then the environment, then the file `RUR_COOKIE_ENV` names.
+/// - Last, only when `ROR_STUDIO_COOKIE` is `1`: the cookie of the account signed in to Roblox Studio on this
+///   machine, read from where Studio keeps it ([`studio_cookie`]).
 #[derive(Clone, PartialEq, Eq)]
 pub enum Account {
     Broker { url: String, token: String },
     /// A broker is configured but its address is refused: why
     BrokerRefused(String),
     Cookie(String),
+    /// The cookie of Roblox Studio's signed-in account, and where Studio keeps it ("Windows Credential Manager"...)
+    Studio { cookie: String, store: &'static str },
     Public,
 }
 
@@ -260,6 +270,7 @@ impl std::fmt::Debug for Account {
             Account::Broker { url, .. } => write!(formatter, "Broker({url})"),
             Account::BrokerRefused(error) => write!(formatter, "BrokerRefused({error})"),
             Account::Cookie(_) => formatter.write_str("Cookie"),
+            Account::Studio { store, .. } => write!(formatter, "Studio({store})"),
             Account::Public => formatter.write_str("Public"),
         }
     }
@@ -269,19 +280,41 @@ impl Account {
     /// The account `env` (a variable's value, None when unset) configures. `checkout`: the checkout a
     /// checkout build runs from, whose `.env` is read; None for a release build.
     pub fn load(env: &dyn Fn(&str) -> Option<String>, checkout: Option<&Path>) -> Account {
+        Self::load_with(env, checkout, &|| studio_cookie::lookup(env))
+    }
+
+    /// [`Account::load`] with Roblox Studio's account from `studio` ([`studio_cookie::lookup`]: Off unless
+    /// `ROR_STUDIO_COOKIE` is `1`), asked only when neither a broker nor a cookie is configured
+    fn load_with(env: &dyn Fn(&str) -> Option<String>, checkout: Option<&Path>, studio: &dyn Fn() -> StudioCookie) -> Account {
         match load_broker(env) {
             Some(Ok((url, token))) => Account::Broker { url, token },
             Some(Err(error)) => Account::BrokerRefused(error),
-            None => load_cookie(env, checkout).map_or(Account::Public, Account::Cookie),
+            None => match load_cookie(env, checkout) {
+                Some(cookie) => Account::Cookie(cookie),
+                None => match studio() {
+                    StudioCookie::Found { cookie, store } => Account::Studio { cookie, store },
+                    _ => Account::Public,
+                },
+            },
         }
     }
 
-    /// "broker", "cookie", or None (public assets only, or a broker address that is refused)
+    /// "broker", "cookie" (Roblox Studio's account too), or None (public assets only, or a broker address that is
+    /// refused)
     pub fn access(&self) -> Option<&'static str> {
         match self {
             Account::Broker { .. } => Some("broker"),
-            Account::Cookie(_) => Some("cookie"),
+            Account::Cookie(_) | Account::Studio { .. } => Some("cookie"),
             Account::BrokerRefused(_) | Account::Public => None,
+        }
+    }
+
+    /// Where the account comes from: "broker", "cookie", "studio (<store>)" for Roblox Studio's account (e.g.
+    /// `studio (Windows Credential Manager)`), or None. Never a value.
+    pub fn source(&self) -> Option<String> {
+        match self {
+            Account::Studio { store, .. } => Some(format!("studio ({store})")),
+            other => other.access().map(str::to_string),
         }
     }
 }
@@ -827,6 +860,11 @@ impl Downloader {
         self.account().access()
     }
 
+    /// Where the account comes from ([`Account::source`]): "broker", "cookie", "studio (<store>)", or None
+    pub fn account_source(&self) -> Option<String> {
+        self.account().source()
+    }
+
     fn api_key(&self) -> Option<&Result<ApiKey, String>> {
         self.api_key.get_or_init(|| (self.load_api_key)()).as_ref()
     }
@@ -889,7 +927,7 @@ impl Downloader {
             Account::Broker { url: base, token } => {
                 Some(Target { url: format!("{base}/rbx/{DELIVERY_HOST}{route}"), headers: vec![("Authorization", format!("Bearer {token}"))], broker: true })
             }
-            Account::Cookie(cookie) => Some(Target { url, headers: vec![("Cookie", format!(".ROBLOSECURITY={cookie}"))], broker: false }),
+            Account::Cookie(cookie) | Account::Studio { cookie, .. } => Some(Target { url, headers: vec![("Cookie", format!(".ROBLOSECURITY={cookie}"))], broker: false }),
             Account::Public => None,
         })
     }
@@ -1514,9 +1552,11 @@ const USAGE: &str = "usage: rur-native assets fetch [--repo <dir>] [--offline] [
 /// arguments are cloud font asset ids (a run's missingFontAssets). `--stdin`: more URIs, one per line.
 /// `--json`: an array of `{uri, file, kind, mime}` / `{uri, error}`. Exits 1 when any failed.
 ///
-/// `rur-native assets account`: how private assets are asked for: "broker", "cookie" or "none", after "api
-/// key, then " when an Open Cloud API key comes first (`--json`: `{"access": ..., "apiKey": true|false}`).
-/// Neither the cookie, the token nor the key is printed.
+/// `rur-native assets account`: how private assets are asked for: "broker", "cookie", "studio (<store>)" (the cookie
+/// of Roblox Studio's signed-in account, `ROR_STUDIO_COOKIE=1`) or "none", after "api key, then " when an Open Cloud
+/// API key comes first. `--json`: `{"access": "broker" | "cookie" | null, "apiKey": true | false, "source": "broker" |
+/// "cookie" | "studio (<store>)" | null, "studio": <Studio's account: "off (set ROR_STUDIO_COOKIE=1)", "not found",
+/// "found (<store>)" or "unreadable: <why>">}`. Neither the cookie, the token nor the key is printed.
 pub fn cli(args: &[String]) -> i32 {
     let (mut repo, mut offline, mut fonts, mut studio, mut json_output, mut stdin) = (None, false, false, true, false, false);
     let mut uris = Vec::new();
@@ -1548,14 +1588,16 @@ pub fn cli(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         Some("account") => {
             let access = resolver.account_access();
+            let source = resolver.downloads_mut().account_source();
             let api_key = matches!(resolver.downloads_mut().api_key_state(), Some(Ok(())));
             if json_output {
-                println!("{}", json!({ "access": access, "apiKey": api_key }));
+                let studio = studio_cookie::lookup(&env_variable).status();
+                println!("{}", json!({ "access": access, "apiKey": api_key, "source": source, "studio": studio }));
             } else {
-                match (api_key, access) {
-                    (true, Some(access)) => println!("api key, then {access}"),
+                match (api_key, source) {
+                    (true, Some(source)) => println!("api key, then {source}"),
                     (true, None) => println!("api key"),
-                    (false, access) => println!("{}", access.unwrap_or("none")),
+                    (false, source) => println!("{}", source.as_deref().unwrap_or("none")),
                 }
             }
             0
@@ -1868,6 +1910,40 @@ pub(crate) mod tests {
         let refused = public.fetch_asset_id("2", true, false, None).unwrap_err();
         assert!(refused.contains("HTTP 403"), "{refused}");
         assert_eq!(fake.seen().len(), 1);
+    }
+
+    /// Roblox Studio's account (ROR_STUDIO_COOKIE=1): the cookie's last source, asked only when nothing else is
+    /// configured, and sent where the cookie goes. Synthetic values only: the real store is never read here.
+    #[test]
+    fn studios_account_is_the_cookies_last_source() {
+        let studio = || StudioCookie::Found { cookie: "dummy-studio-cookie".into(), store: "Windows Credential Manager" };
+        let unread = || -> StudioCookie { panic!("Studio's store was read with another account configured") };
+        let on = (studio_cookie::SWITCH, "1");
+        // A cookie or a broker wins, and Studio's store is then not read
+        assert_eq!(Account::load_with(&env_of(&[on, ("ROBLOSECURITY", "dummy-env-cookie")]), None, &unread), Account::Cookie("dummy-env-cookie".into()));
+        let broker = [on, ("ROBLOX_BROKER_URL", "https://env.example"), ("ROBLOX_BROKER_TOKEN", "dummy-env-token")];
+        assert_eq!(Account::load_with(&env_of(&broker), None, &unread).access(), Some("broker"));
+        // Without either: Studio's account, a cookie named by its store
+        let account = Account::load_with(&env_of(&[on]), None, &studio);
+        assert_eq!((account.access(), account.source().as_deref()), (Some("cookie"), Some("studio (Windows Credential Manager)")));
+        assert_eq!(format!("{account:?}"), "Studio(Windows Credential Manager)");
+        // Switched off, not found or unreadable: public assets only
+        for lookup in [StudioCookie::Off, StudioCookie::NotFound, StudioCookie::Unreadable("Windows Credential Manager error 5".into())] {
+            assert_eq!(Account::load_with(&env_of(&[on]), None, &|| lookup.clone()), Account::Public);
+        }
+        assert_eq!(Account::load(&env_of(&[(studio_cookie::SWITCH, "0")]), None), Account::Public);
+        // It goes where the cookie goes: asset delivery's request with the account, not the public one or the CDN
+        let fake = Fake::new(|seen| match seen.url.as_str() {
+            url if url.starts_with("https://assetdelivery.roblox.com/") && seen.cookie.is_none() => status(403, &[], ""),
+            url if url.starts_with("https://assetdelivery.roblox.com/") => ok(r#"{"location":"https://cdn.example/image"}"#),
+            _ => ok(png()),
+        });
+        let temp = Temp::new("studio-cookie");
+        let downloader = Downloader::for_tests(&temp.0.join("assets"), fake.clone()).with_account(account);
+        assert_eq!(downloader.account_source().as_deref(), Some("studio (Windows Credential Manager)"));
+        downloader.fetch_asset_id("1", true, false, None).unwrap();
+        let cookies: Vec<Option<String>> = fake.seen().into_iter().map(|seen| seen.cookie).collect();
+        assert_eq!(cookies, [None, Some(".ROBLOSECURITY=dummy-studio-cookie".to_string()), None]);
     }
 
     /// The former tools/tests/asset_broker.mjs: an account broker replaces the cookie

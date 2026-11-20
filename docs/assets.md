@@ -1,13 +1,13 @@
 # Assets, cookies, and Studio image reads
 
-This page covers where `rur` loads textures, fonts, and thumbnails from, how authentication works for private assets (an Open Cloud API key, a cookie, or an account broker), and how to read private game images directly from an open Roblox Studio.
+This page covers where `rur` loads textures, fonts, and thumbnails from, how authentication works for private assets (an Open Cloud API key, a cookie, Roblox Studio's signed-in account, or an account broker), and how to read private game images directly from an open Roblox Studio.
 
 ## Asset sources and caching
 
 - **Built-in assets (`rbxasset://`):** Loaded from your local Roblox Studio installation (override with `RUR_ROBLOX_CONTENT`).
-- **Uploaded assets (`rbxassetid://`):** Downloaded by `rur-native` (`native/src/download.rs`) from Roblox asset delivery and cached in `<state dir>/assets/<id>.<ext>` alongside a download record. The public route is tried first; for an asset it refuses as private (401 or 403), the [Open Cloud API key](#open-cloud-api-key) comes next, then the [cookie](#roblox-cookie-roblosecurity) or [broker](#an-account-broker-instead-of-the-cookie). Files without a valid record are re-downloaded before use. Pass `--offline` to disable network access. Never drop placeholder files into the cache—use `file://` URIs for local images instead.
+- **Uploaded assets (`rbxassetid://`):** Downloaded by `rur-native` (`native/src/download.rs`) from Roblox asset delivery and cached in `<state dir>/assets/<id>.<ext>` alongside a download record. The public route is tried first; for an asset it refuses as private (401 or 403), the [Open Cloud API key](#open-cloud-api-key) comes next, then the [cookie](#roblox-cookie-roblosecurity) (its last source [Roblox Studio's account](#roblox-studios-account), when switched on) or [broker](#an-account-broker-instead-of-the-cookie). Files without a valid record are re-downloaded before use. Pass `--offline` to disable network access. Never drop placeholder files into the cache—use `file://` URIs for local images instead.
 - **Thumbnails (`rbxthumb://`):** Fetched as WebP from Roblox's thumbnail service (matching Studio), decoded, and cached as PNG.
-- **CLI helpers:** `rur-native assets fetch <uri>...` (`--offline`, `--json`) resolves and caches URIs using the exact render path; `rur-native assets account` reports which credentials are active (`api key, then cookie`, `broker`, `none`...; `--json`: `{"access": "broker" | "cookie" | null, "apiKey": true | false}`), never their values.
+- **CLI helpers:** `rur-native assets fetch <uri>...` (`--offline`, `--json`) resolves and caches URIs using the exact render path; `rur-native assets account` reports which credentials are active (`api key, then cookie`, `broker`, `studio (Windows Credential Manager)`, `none`...; `--json`: `{"access": "broker" | "cookie" | null, "apiKey": true | false, "source": "broker" | "cookie" | "studio (<store>)" | null, "studio": "<Roblox Studio's account: off, not found, found or unreadable>"}`), never their values.
 
 ### Open Cloud API key
 
@@ -29,9 +29,25 @@ For assets that Roblox's public asset delivery rejects, configure a `.ROBLOSECUR
 1. `ROBLOX_ASSET_DELIVERY_COOKIE` or `ROBLOSECURITY` environment variables
 2. The file named by `RUR_COOKIE_ENV`
 3. `.env` in a source checkout (copy `.env.example`; **release binaries never read `.env`**)
+4. Only with `ROR_STUDIO_COOKIE=1` and none of the above: [Roblox Studio's signed-in account](#roblox-studios-account)
 
 The cookie is sent exclusively to `https://assetdelivery.roblox.com`, never logged or cached, and stripped from child processes that don't download assets. With an [Open Cloud API key](#open-cloud-api-key) configured, the key is asked first and the cookie only for what the key can't read. Use a dedicated account ([SECURITY.md](../SECURITY.md)), the narrower API key, or an [account broker](#an-account-broker-instead-of-the-cookie) so no developer holds the cookie.
 
+
+### Roblox Studio's account
+
+With `ROR_STUDIO_COOKIE=1`, `rur` uses the account signed in to Roblox Studio on this machine when no other account is configured: no broker and no cookie in the sources above. It is off by default, and any value other than `1` leaves it off. roblox-object-renderer reads the same variable, so one setting covers both, the ViewportFrames it draws for `rur` included.
+
+`rur` reads that account's `.ROBLOSECURITY` cookie from where Studio keeps it:
+- **Windows:** Windows Credential Manager, in the generic credentials Studio writes under `https://www.roblox.com:RobloxStudioAuth` (the signed-in account's user id, then that account's cookie). Older Studio builds kept it in the registry (`HKCU\Software\Roblox\RobloxStudioBrowser\roblox.com`), which is read when the Credential Manager has none.
+- **macOS:** Studio's cookie file, `~/Library/HTTPStorages/com.Roblox.RobloxStudio.binarycookies`.
+- **Other platforms:** not available.
+
+From there it is handled like the cookie: sent only to `https://assetdelivery.roblox.com`, never printed, logged, or cached. `rur-native assets account` names it (`studio (Windows Credential Manager)`), and its `--json` answer, `rur doctor` (`assetStudioCookie`) and `rur-native doctor` (`studioAccount`) give the source's status: `off (set ROR_STUDIO_COOKIE=1)`, `not found`, `found (<store>)` or `unreadable: <reason>`, never the value.
+
+The switch goes where the cookie's variables go: the render service, the ViewportFrame worker and `rur`'s own render processes keep it and read the account themselves, while the Node CLI and `rur-native` strip it from every child that doesn't download (`withoutCookie`). The cookie never leaves the process that read it.
+
+The cookie is your own account, with all its access: turn this on only on a machine you alone use, and prefer an [Open Cloud API key](#open-cloud-api-key) where one is enough.
 
 ## An account broker instead of the cookie
 
@@ -50,7 +66,7 @@ Lookup priority:
 - Unauthenticated initial attempts, CDN asset downloads, and thumbnails still go directly to Roblox without the bearer token. The token is sent only to the broker, never across redirects, never logged or cached, and stripped from non-downloading child processes.
 - URLs must use `https://`, or `http://` only for `127.0.0.1` / `localhost`. Other URLs are rejected without falling back to a cookie.
 - Broker-generated errors (`X-Broker-Error` header + JSON `message`) surface directly in asset diagnostics.
-- `rur doctor` reports active auth (`assetCookie`) as broker, cookie, or none, and the Open Cloud API key (`assetApiKey`) as configured or not.
+- `rur doctor` reports active auth (`assetCookie`) as broker, cookie, Roblox Studio's account, or none, the Open Cloud API key (`assetApiKey`) as configured or not, and [Roblox Studio's account](#roblox-studios-account) (`assetStudioCookie`) as off, not found, found or unreadable.
 
 ## Images from Studio
 

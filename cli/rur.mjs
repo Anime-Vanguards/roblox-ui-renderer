@@ -675,8 +675,11 @@ async function doctor({ fix = false } = {}) {
 		rust: rust.status === 0 ? rust.stdout.trim() : "missing: the engine is native (install Rust: https://rustup.rs)",
 		freetype: "2.14.2, compiled into the engine (native/build.rs; the release Studio's glyphs match it)",
 		studioInstall: studio || content[0] || "missing (fonts/textures need a local Roblox Studio install)",
-		assetCookie: { broker: "an account broker is used instead (its token is never printed)", cookie: "available (never printed)" }[access]
+		assetCookie: credentials?.source?.startsWith("studio (") ? `the account signed in to Roblox Studio, from the ${credentials.source.slice("studio (".length, -1)} (never printed)`
+			: { broker: "an account broker is used instead (its token is never printed)", cookie: "available (never printed)" }[access]
 			|| (credentials === undefined ? "unknown until the native engine is built (it reads the cookie)" : "not configured (public assets only)"),
+		assetStudioCookie: credentials === undefined ? "unknown until the native engine is built (it reads Roblox Studio's account)"
+			: credentials.studio ?? "unknown: the native engine predates ROR_STUDIO_COOKIE (rebuild it)",
 		assetApiKey: credentials === undefined ? "unknown until the native engine is built (it reads the key)"
 			: credentials.apiKey ? `an Open Cloud API key (never printed), asked for private assets before ${access ? `the ${access}` : "nothing else"}`
 			: "not configured",

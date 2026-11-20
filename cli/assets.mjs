@@ -24,13 +24,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const CACHE_DIR = stateDir();
 const ASSET_DIR = path.join(CACHE_DIR, "assets");
 
-// The environment without the asset cookie variables, the broker token and the Open Cloud API key (any
-// case), for child processes that never download assets: cargo and its build scripts, git, rustc,
-// PowerShell, browsers, the sim, the selftest's checks. The render service and `rur-native assets` still
-// inherit them, because they download.
+// The environment without the asset cookie variables, the broker token, the Open Cloud API key and the switch
+// that reads Roblox Studio's account (ROR_STUDIO_COOKIE; any case), for child processes that never download
+// assets: cargo and its build scripts, git, rustc, PowerShell, browsers, the sim, the selftest's checks. The
+// render service and `rur-native assets` still inherit them, because they download.
 export function withoutCookie(env = process.env) {
 	const copy = { ...env };
-	for (const key of Object.keys(copy)) if (/^(?:ROBLOX_ASSET_DELIVERY_COOKIE|ROBLOSECURITY|ROBLOX_BROKER_TOKEN|ROBLOX_ASSET_DELIVERY_API_KEY)$/i.test(key)) delete copy[key];
+	for (const key of Object.keys(copy)) if (/^(?:ROBLOX_ASSET_DELIVERY_COOKIE|ROBLOSECURITY|ROBLOX_BROKER_TOKEN|ROBLOX_ASSET_DELIVERY_API_KEY|ROR_STUDIO_COOKIE)$/i.test(key)) delete copy[key];
 	return copy;
 }
 
@@ -81,8 +81,8 @@ export async function accountAccess() {
 	if (!engine) return undefined;
 	const result = spawnSync(engine, ["assets", "account", "--json", "--repo", ROOT], { cwd: ROOT, encoding: "utf8", windowsHide: true });
 	try {
-		const { access, apiKey } = JSON.parse(result.stdout);
-		return { access: access ?? null, apiKey: apiKey === true };
+		const { access, apiKey, source, studio } = JSON.parse(result.stdout);
+		return { access: access ?? null, apiKey: apiKey === true, source: source ?? null, studio: studio ?? null };
 	} catch {
 		return undefined;
 	}

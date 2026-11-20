@@ -143,7 +143,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/download.rs",
         "pub fn cli(",
-        0x02c66db86efd2088,
+        0x1ed200b0d92e770c,
     ),
     // `rur-native doctor`: no positionals and no path options; it reads the state directory, the Studio
     // install and the worker it finds, and writes nothing

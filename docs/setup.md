@@ -88,7 +88,7 @@ Requirements for developing `rur` or running the Node CLI:
 - **Rust 1.90+** + C++ toolchain (Visual Studio C++ Build Tools on Windows), **Git**, and **`tar`**. On Windows, run from PowerShell or Command Prompt (Git Bash's GNU `tar` mishandles `C:\...` paths). The first render automatically runs `node tools/native-app/build.mjs`, downloading pinned FreeType sources into `<state dir>/native-app/source` and compiling `rur-native` (including `roblox-engine-emulator` at the commit pinned in `native/Cargo.toml`). Subsequent edits to `native/` trigger incremental rebuilds automatically.
 - **Node 18+** (`npm install`; Node 22+ for browser checks).
 - **Roblox Studio installed** (or `RUR_ROBLOX_CONTENT` pointing at a copied Studio `content` folder).
-- **Optional:** an Open Cloud API key, Roblox cookie or account broker for private `rbxassetid://` assets ([assets.md](assets.md)); `ffmpeg` (`RUR_FFMPEG`) for `rur sequence` video output; Python 3 + Pillow for `tools/analysis/`; Lune 0.10.4 (`rokit` or `RUR_LUNE`) for `tools/sweep/studio-assets.mjs`.
+- **Optional:** an Open Cloud API key, Roblox cookie (or, with `ROR_STUDIO_COOKIE=1`, the account signed in to Roblox Studio) or account broker for private `rbxassetid://` assets ([assets.md](assets.md)); `ffmpeg` (`RUR_FFMPEG`) for `rur sequence` video output; Python 3 + Pillow for `tools/analysis/`; Lune 0.10.4 (`rokit` or `RUR_LUNE`) for `tools/sweep/studio-assets.mjs`.
 
 Run `node cli/rur.mjs doctor` to check all prerequisites (it warns when no Studio is found, or when `RUR_ROBLOX_CONTENT` names a folder that doesn't exist or lacks `fonts/` or `textures/`), missing npm packages, native build status, render service health, Studio locks, and stale state files (`doctor --fix` cleans up stale artifacts).
 

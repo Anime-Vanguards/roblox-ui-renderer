@@ -1,10 +1,13 @@
 //! `rur-native doctor [--json]`: what this install uses and what it is missing, each with how to fix it:
 //! the build, the state directory, the Roblox Studio install fonts and textures come from, the account
-//! private assets are downloaded with (never its secret), and ror, which draws ViewportFrames.
+//! private assets are downloaded with (never its secret), whether Roblox Studio's signed-in account can be that
+//! account (`ROR_STUDIO_COOKIE=1`), and ror, which draws ViewportFrames.
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
+
+use crate::download::{Account, studio_cookie::StudioCookie};
 
 /// The checks, as `(name, value, problem)`: a problem says what is missing and how to get it
 pub(crate) fn checks() -> Vec<(&'static str, String, bool)> {
@@ -15,11 +18,13 @@ pub(crate) fn checks() -> Vec<(&'static str, String, bool)> {
     let content = std::env::var_os("RUR_ROBLOX_CONTENT").filter(|content| !content.is_empty()).map(PathBuf::from);
     checks.push(studio_check(content.as_deref(), crate::resolve::studio_install()));
     let mut resolver = crate::resolve::Resolver::new(&repo, true);
-    let account = match resolver.account_access() {
-        Some("broker") => Some("an account broker (its token is never shown)"),
-        Some(_) => Some("the account cookie (never shown)"),
-        None => None,
+    let account = match resolver.downloads_mut().account() {
+        Account::Broker { .. } => Some("an account broker (its token is never shown)".to_owned()),
+        Account::Studio { store, .. } => Some(format!("the account signed in to Roblox Studio, from the {store} (its cookie is never shown)")),
+        Account::Cookie(_) => Some("the account cookie (never shown)".to_owned()),
+        Account::BrokerRefused(_) | Account::Public => None,
     };
+    let account = account.as_deref();
     checks.push((
         "account",
         match (resolver.downloads_mut().api_key_state(), account) {
@@ -31,6 +36,10 @@ pub(crate) fn checks() -> Vec<(&'static str, String, bool)> {
         },
         false,
     ));
+    // Roblox Studio's account (ROR_STUDIO_COOKIE=1): a problem when it is switched on but can't be used
+    let studio_account = crate::download::studio_cookie::lookup(&|name| std::env::var(name).ok());
+    let unusable = !matches!(studio_account, StudioCookie::Off | StudioCookie::Found { .. });
+    checks.push(("studioAccount", studio_account.status(), unusable));
     checks.push(match crate::viewports::executable(&repo) {
         Ok(worker) => match worker_version(&worker) {
             Ok(version) => ("viewports", format!("{} ({version})", worker.display()), false),

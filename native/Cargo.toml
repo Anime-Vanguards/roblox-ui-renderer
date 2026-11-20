@@ -83,6 +83,11 @@ flate2 = { version = "=1.1.10", optional = true }
 md-5 = { version = "=0.10.6", optional = true }
 wgpu = { version = "=27.0.1", default-features = false, features = ["std", "parking_lot", "gles", "wgsl", "glsl"] }
 
+# The account signed in to Roblox Studio (src/download/studio_cookie.rs, ROR_STUDIO_COOKIE=1): the Credential Manager
+# and the registry of older Studio builds. The version Cargo.lock already holds for other crates: no new crate
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Registry"] }
+
 # The web build's canvas surface (wgpu's GLES backend presents to Emscripten's WebGL2 canvas)
 [target.'cfg(target_os = "emscripten")'.dependencies]
 raw-window-handle = "=0.6.2"
