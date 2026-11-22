@@ -2352,9 +2352,13 @@ impl<'a> Pass<'a> {
                 }
             };
             self.set_vector(id, n_bounds, info.absolute_x, info.absolute_y);
+            let box_w = record.content.w / record.scale;
+            let box_h = record.content.h / record.scale;
+            let slack_w = lmax(1e-6, box_w * 4.0 * f64::from(f32::EPSILON));
+            let slack_h = lmax(1e-6, box_h * 4.0 * f64::from(f32::EPSILON));
             let fits = info.layout.fits
-                && info.bounds_x <= record.content.w / record.scale + 1e-6
-                && info.bounds_y <= record.content.h / record.scale + 1e-6;
+                && info.bounds_x <= box_w + slack_w
+                && info.bounds_y <= box_h + slack_h;
             self.set_bool(id, n_fits, fits);
             record.text = Some(info);
         }
@@ -2489,6 +2493,12 @@ impl<'a> Pass<'a> {
                 let (extent_x, extent_y) = self.layout_children(id, &probe, true, None);
                 self.l.carry_capture = outer_capture;
                 carried = Some(captured);
+                // Measured (Studio 0.747, layout-probe-autocanvas5 and constraint probes):
+                // UISizeConstraint and UIAspectRatioConstraint on the ScrollingFrame constrain the
+                // measured extent before UIPadding offsets and any inset scrollbar thickness are
+                // added (ScaleWithParentSize clamps against the frame's own local box).
+                let (extent_x, extent_y) = self.apply_size_constraint(id, extent_x, extent_y);
+                let (extent_x, extent_y) = self.apply_aspect_ratio(id, extent_x, extent_y, frame_w / scale, frame_h / scale);
                 if auto_x {
                     content_w = lmax(raw_w, (extent_x + offset_left + offset_right) * scale + cut_w);
                 }

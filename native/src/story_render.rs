@@ -648,7 +648,19 @@ fn problem_lines(scene: &Value, printed: &[String], story: Option<&Path>) -> Vec
     let output = scene.pointer("/diagnostics/output").and_then(Value::as_array).cloned().unwrap_or_default();
     let script_errors: Vec<&str> = output.iter().filter(|entry| entry["kind"] == "error").filter_map(|entry| entry["message"].as_str()).collect();
     if let Some(failure) = scene["failure"].as_str() {
-        lines.push((crate::term::error, failure.to_string()));
+        // When require() fails, Roblox logs the module's own error to output and raises a generic
+        // wrapper to the caller; surface the logged cause on stderr instead of hiding it behind
+        // the wrapper.
+        let shown = if failure.ends_with("Requested module experienced an error while loading") {
+            script_errors
+                .iter()
+                .copied()
+                .find(|message| !message.ends_with("Requested module experienced an error while loading"))
+                .unwrap_or(failure)
+        } else {
+            failure
+        };
+        lines.push((crate::term::error, shown.to_string()));
     } else if let Some(first) = scene["status"].as_str().filter(|status| *status == "ok").and(script_errors.first()) {
         // A mount that went well with script errors after it (React catches a tree's render errors): the first one
         // (React's message: the scheduler's positions, then the error after its "Error caught by React" line)
@@ -845,5 +857,24 @@ mod tests {
             let (config, rest) = profile_options(&strings(&["--story", "a.luau"]), &out).unwrap();
             assert!(config.is_none() && rest == strings(&["--story", "a.luau"]));
         }
+    }
+
+    #[test]
+    fn problem_lines_surfaces_logged_module_error_behind_require_wrapper() {
+        let scene = json!({
+            "status": "error",
+            "failure": "Requested module experienced an error while loading",
+            "diagnostics": {
+                "output": [
+                    { "kind": "error", "message": "Packages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"" },
+                    { "kind": "error", "message": "Requested module experienced an error while loading" }
+                ],
+                "hint": "default.project.json maps ReplicatedStorage.Packages"
+            }
+        });
+        let lines = problem_lines(&scene, &[], None);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].1, "Packages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"");
+        assert_eq!(lines[1].1, "default.project.json maps ReplicatedStorage.Packages");
     }
 }

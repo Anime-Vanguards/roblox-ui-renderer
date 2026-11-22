@@ -353,7 +353,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
-			"digest": "51aa7d3f2d3f2a93fbd31c912e04e4fd3d663e8c17bb8a418aa60f3e5893054f",
+			"digest": "6f4493447e1a2d823bbca17353793bb9099d6d63b8f451d6df81c6a6aea0b757",
 			"status": "ok"
 		},
 		"fast/edit/rects": {
@@ -1461,7 +1461,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
-			"digest": "4bb59e15536c3fb0d54180db2bd3c3cde1a03a02022801b93b65bfec62991629",
+			"digest": "14320ebfdf816314d15a7a66fc0259b0392f9e079bd000a36803a9029eaaf70a",
 			"status": "ok"
 		},
 		"fixtures/edit/rects": {
@@ -2521,7 +2521,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "b30407fa5699360a1d6405b67ab7772907c817fd672ffdbd2ee3a542e26af50d",
+			"digest": "bd2d885d4595f2e821f8dfc124fd3beda1bef67c784a5090ed03858899582890",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
@@ -3289,7 +3289,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-21T19:02:37.801Z",
+	"recorded": "2026-11-22T12:52:11.590Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

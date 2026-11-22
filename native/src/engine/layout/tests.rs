@@ -319,6 +319,7 @@ fn an_automatic_label_keeps_the_lines_its_automatic_frame_was_sized_for() {
                 end
             end
             local Short = 0
+            local Unfit = 0
             for _, Case in Cases do
                 local Value, Lines, Inner, Holder, Reference = table.unpack(Case)
                 local Kept = math.abs(Inner.TextBounds.Y - Reference.TextBounds.Y) < 0.01
@@ -327,14 +328,97 @@ fn an_automatic_label_keeps_the_lines_its_automatic_frame_was_sized_for() {
                     Short += 1
                     print(`short {Value} x{Lines}: bounds {Inner.TextBounds.Y} of {Reference.TextBounds.Y}, label {Inner.AbsoluteSize.Y} in {Holder.AbsoluteSize.Y}`)
                 end
+                if not Inner.TextFits then
+                    Unfit += 1
+                    print(`unfit {Value} x{Lines}: bounds {Inner.TextBounds.Y}, size {Inner.AbsoluteSize.Y}`)
+                end
             end
-            print(`checked {#Cases}, short {Short}`)
+            print(`checked {#Cases}, short {Short}, unfit {Unfit}`)
         end
     "#;
     for pixel_scale in [1.0, 1.25, 1.3333, 1.5, 2.0] {
         let lines = run(script, pixel_scale, 0.1);
-        assert_eq!(lines.last().map(String::as_str), Some("print: checked 248, short 0"), "DPI {pixel_scale}: {lines:#?}");
+        assert_eq!(lines.last().map(String::as_str), Some("print: checked 248, short 0, unfit 0"), "DPI {pixel_scale}: {lines:#?}");
     }
+}
+
+/// A ScrollingFrame's own UISizeConstraint and UIAspectRatioConstraint constrain its
+/// AutomaticCanvasSize extent before UIPadding offsets and inset scrollbar thickness are added
+/// (measured in Roblox Studio 0.747.0.7471481 across MaxSize, MinSize, UIScale, FitWithinMaxSize,
+/// ScaleWithParentSize, inset scrollbars and combined constraints).
+#[test]
+fn automatic_canvas_size_applies_size_and_aspect_constraints() {
+    let script = r#"
+        return function(Target)
+            local function Make(Opts)
+                local H = Instance.new("Frame")
+                H.Size = UDim2.fromOffset(Opts.hw or 200, Opts.hh or 140)
+                H.Parent = Target
+                if Opts.uiscale then
+                    local U = Instance.new("UIScale")
+                    U.Scale = Opts.uiscale
+                    U.Parent = H
+                end
+                local S = Instance.new("ScrollingFrame")
+                S.Size = Opts.size or UDim2.fromOffset(180, 100)
+                S.AutomaticCanvasSize = Enum.AutomaticSize[Opts.axis or "Y"]
+                S.CanvasSize = Opts.canvas or UDim2.new()
+                S.ScrollBarThickness = Opts.thickness or 0
+                S.BorderSizePixel = 0
+                if Opts.hinset then S.HorizontalScrollBarInset = Opts.hinset end
+                S.Parent = H
+                if Opts.minsize or Opts.maxsize then
+                    local C = Instance.new("UISizeConstraint")
+                    if Opts.minsize then C.MinSize = Opts.minsize end
+                    if Opts.maxsize then C.MaxSize = Opts.maxsize end
+                    C.Parent = S
+                end
+                if Opts.aspect then
+                    local A = Instance.new("UIAspectRatioConstraint")
+                    A.AspectRatio = Opts.aspect
+                    if Opts.atype then A.AspectType = Opts.atype end
+                    if Opts.dom then A.DominantAxis = Opts.dom end
+                    A.Parent = S
+                end
+                if Opts.pad then
+                    local P = Instance.new("UIPadding")
+                    P.PaddingTop = UDim.new(0, Opts.pad[1])
+                    P.PaddingBottom = UDim.new(0, Opts.pad[2])
+                    P.PaddingLeft = UDim.new(0, Opts.pad[3])
+                    P.PaddingRight = UDim.new(0, Opts.pad[4])
+                    P.Parent = S
+                end
+                local F = Instance.new("Frame")
+                F.Size = Opts.child or UDim2.fromOffset(50, 300)
+                F.Parent = S
+                return S
+            end
+            local Cases = {
+                { "maxY", Make({ hw = 110, size = UDim2.new(0.9, 0, 0.7, 4), maxsize = Vector2.new(1000, 70), child = UDim2.fromOffset(200, 220) }), 99, 70 },
+                { "maxY_pad", Make({ hw = 110, size = UDim2.new(0.9, 0, 0.7, 4), maxsize = Vector2.new(1000, 70), pad = { 2, 1, 2, 1 }, child = UDim2.fromOffset(200, 220) }), 99, 73 },
+                { "maxY_uiscale_pad", Make({ hw = 110, size = UDim2.new(0.9, 0, 0.7, 4), maxsize = Vector2.new(1000, 70), uiscale = 1.25, pad = { 2, 1, 2, 1 }, child = UDim2.fromOffset(200, 220) }), 123.75, 91.25 },
+                { "maxY_inset_pad", Make({ size = UDim2.fromOffset(100, 100), maxsize = Vector2.new(1000, 80), thickness = 10, canvas = UDim2.fromOffset(300, 0), hinset = Enum.ScrollBarInset.ScrollBar, pad = { 2, 1, 0, 0 }, child = UDim2.fromOffset(50, 200) }), 300, 93 },
+                { "minY_pad", Make({ size = UDim2.fromOffset(100, 80), minsize = Vector2.new(0, 150), pad = { 2, 1, 0, 0 }, child = UDim2.fromOffset(20, 60) }), 100, 153 },
+                { "aspectY_w100", Make({ aspect = 0.5, child = UDim2.fromOffset(100, 400) }), 50, 200 },
+                { "aspectY_padY", Make({ aspect = 0.5, pad = { 10, 5, 0, 0 }, child = UDim2.fromOffset(50, 300) }), 50, 115 },
+                { "aspectXY_pad", Make({ axis = "XY", aspect = 0.5, pad = { 10, 5, 8, 4 }, child = UDim2.fromOffset(120, 400) }), 132, 255 },
+                { "aspectXY_scaleH", Make({ hh = 200, axis = "XY", aspect = 0.5, atype = Enum.AspectType.ScaleWithParentSize, dom = Enum.DominantAxis.Height, child = UDim2.fromOffset(60, 180) }), 50, 100 },
+                { "both_XY", Make({ axis = "XY", aspect = 2.0, maxsize = Vector2.new(160, 150), child = UDim2.fromOffset(300, 300) }), 160, 80 },
+            }
+            local Bad = 0
+            for _, Case in Cases do
+                local Name, S, WantX, WantY = table.unpack(Case)
+                local Got = S.AbsoluteCanvasSize
+                if math.abs(Got.X - WantX) > 0.01 or math.abs(Got.Y - WantY) > 0.01 then
+                    Bad += 1
+                    print(`bad {Name}: got ({Got.X}, {Got.Y}), want ({WantX}, {WantY})`)
+                end
+            end
+            print(`checked {#Cases}, bad {Bad}`)
+        end
+    "#;
+    let lines = run(script, 1.0, 0.1);
+    assert_eq!(lines.last().map(String::as_str), Some("print: checked 10, bad 0"), "{lines:#?}");
 }
 
 
