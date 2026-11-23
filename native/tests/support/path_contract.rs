@@ -257,7 +257,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Engine,
         "src/launch.rs",
         "pub fn accept(",
-        0x553fa98e05c3b803,
+        0xe8d2ee49813eefcc,
     ),
     (
         Crate::Engine,
@@ -496,6 +496,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--max-wall-seconds",
     "--metric",
     "--mode",
+    "--native",
     "--no-parent-watch",
     "--no-png",
     "--no-service",
