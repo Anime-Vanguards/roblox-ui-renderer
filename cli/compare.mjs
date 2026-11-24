@@ -1001,7 +1001,7 @@ export async function compare(args) {
 	// The run's roots (cli/rur.mjs projectRoots; none beside a Rojo project or --mount)
 	const roots = args.rootsResolved ? String(args.rootsResolved).split(";").filter(Boolean) : [];
 	const source = args.story || args.model || args.fixture;
-	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$/, "");
+	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$|\.rbx$/, "");
 	const backend = "studio";
 	const outDir = path.resolve(args.out || path.join(OUT_DIR, "compare", name));
 	// The report is this run's result or nothing: an earlier one must not outlive a run that stops

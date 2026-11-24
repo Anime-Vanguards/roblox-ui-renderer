@@ -1317,7 +1317,7 @@ impl Downloader {
 
     /// A decal / texture model asset (e.g. a Decal id used as an image) -> the image it references
     fn model_texture(&self, asset: &AssetRef, file: &Path, offline: bool) -> Result<Fetched, String> {
-        let text: String = std::fs::read(file).map_err(|error| error.to_string())?.iter().map(|&byte| byte as char).collect();
+        let text = crate::resolve::model_text(&std::fs::read(file).map_err(|error| error.to_string())?).map_err(|error| format!("asset {asset}: {error}"))?;
         match crate::resolve::model_texture(&text) {
             Some(inner) if inner.id() != asset.id() => {
                 let mut fetched = self.fetch_asset(&inner, false, offline, None)?;
@@ -2689,7 +2689,8 @@ pub(crate) mod tests {
     }
 
     /// cli/assets.mjs's in-place migrations: a pre-unwrap `.bin` entry becomes its real file, a gzip body is
-    /// unwrapped, a cached font is listed in fonts.json, and a decal model resolves to its texture
+    /// unwrapped, a cached font is listed in fonts.json, and a decal model resolves to its texture, also one that
+    /// arrives as a Roblox archive (.rbx), and a damaged archive says why it does not
     #[test]
     fn bin_entries_gzip_bodies_fonts_and_decals() {
         let temp = Temp::new("migrations");
@@ -2707,6 +2708,8 @@ pub(crate) mod tests {
             "/v1/assetId/8" => ok(r#"{"location":"https://cdn.example/8"}"#),
             "/v1/assetId/9" => ok(r#"{"location":"https://cdn.example/9"}"#),
             "/8" => ok(gzip(b"<roblox><Content name=\"Texture\"><url>http://www.roblox.com/asset/?id=9</url></Content></roblox>")),
+            "/v1/assetId/11" => ok(r#"{"location":"https://cdn.example/11"}"#),
+            "/11" => ok(ror_archive::Builder::model(b"<roblox><Content name=\"Texture\"><url>http://www.roblox.com/asset/?id=9</url></Content></roblox>".to_vec()).build().unwrap()),
             "/9" => ok(png()),
             other => panic!("unexpected request {other}"),
         });
@@ -2728,6 +2731,16 @@ pub(crate) mod tests {
         // A model without a texture of its own
         std::fs::write(assets.join("10.rbxmx"), "<roblox><url>rbxassetid://10</url></roblox>").unwrap();
         assert_eq!(downloader.fetch_asset_id("10", true, true, None).unwrap_err(), "asset 10 is a model without an image texture");
+        // A decal model that arrives as an archive: kept as one, and read as the model it holds
+        let archived = downloader.fetch_asset_id("11", true, false, None).unwrap();
+        assert_eq!((archived.file.clone(), archived.via.as_deref()), (assets.join("9.png"), Some("11")));
+        assert!(ror_archive::is_archive(&std::fs::read(assets.join("11.rbx")).unwrap()));
+        let mut damaged = std::fs::read(assets.join("11.rbx")).unwrap();
+        let at = damaged.windows(7).position(|window| window == b"<roblox").unwrap();
+        damaged[at + 1] ^= 1;
+        std::fs::write(assets.join("12.rbx"), damaged).unwrap();
+        let error = downloader.fetch_asset_id("12", true, true, None).unwrap_err();
+        assert!(error.starts_with("asset 12: Roblox archive: invalid .rbx container"), "{error}");
     }
 
     /// A font request: a font face or a family's JSON counts as arrived;

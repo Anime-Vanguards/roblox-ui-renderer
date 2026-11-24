@@ -362,8 +362,8 @@ impl Context {
                 return Err(Failure::Usage(format!("--load {item}: expected Service/Name=<file.rbxm>")));
             }
             let lower = file.to_string_lossy().to_lowercase();
-            if !(lower.ends_with(".rbxm") || lower.ends_with(".rbxmx")) {
-                return Err(Failure::Usage(format!("--load {item}: not an .rbxm / .rbxmx file")));
+            if !(lower.ends_with(".rbxm") || lower.ends_with(".rbxmx") || lower.ends_with(".rbx")) {
+                return Err(Failure::Usage(format!("--load {item}: not an .rbxm / .rbxmx / .rbx file")));
             }
             if !file.exists() {
                 return Err(Failure::Usage(format!("--load {item}: {} does not exist", file.display())));
@@ -754,11 +754,11 @@ fn check_actions(actions: &Opt, time: f64) -> Result<(), Failure> {
         .map_err(|error| Failure::Usage(if inline { error } else { format!("{error} (in {})", &source["--actions ".len()..]) }))
 }
 
-/// A source file's name without its extension: `.story.luau`, `.luau`, `.rbxm` / `.rbxmx` (and `.json` for a render's
+/// A source file's name without its extension: `.story.luau`, `.luau`, `.rbxm` / `.rbxmx` / `.rbx` (and `.json` for a render's
 /// own directory)
 pub fn source_name(source: &str, json: bool) -> String {
     let name = source.rsplit(['/', '\\']).next().unwrap_or(source);
-    for suffix in [".story.luau", ".luau", ".rbxmx", ".rbxm"].into_iter().chain(json.then_some(".json")) {
+    for suffix in [".story.luau", ".luau", ".rbxmx", ".rbxm", ".rbx"].into_iter().chain(json.then_some(".json")) {
         if let Some(stem) = name.strip_suffix(suffix) {
             return stem.to_string();
         }

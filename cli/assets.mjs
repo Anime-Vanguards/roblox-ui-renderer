@@ -104,6 +104,8 @@ export function sniff(buffer) {
 	const head = buffer.subarray(0, 64).toString("utf8").trimStart();
 	if (head.startsWith("{") || head.startsWith("[")) return { ext: ".json", kind: "json", mime: "application/json" };
 	if (head.startsWith("<roblox!")) return { ext: ".rbxm", kind: "model", mime: "application/octet-stream" };
+	// a Roblox archive: a ZIP holding a place or model (native/src/resolve.rs sniff)
+	if (buffer.length >= 4 && ["PK\x03\x04", "PK\x05\x06"].includes(buffer.subarray(0, 4).toString("latin1"))) return { ext: ".rbx", kind: "model", mime: "application/zip" };
 	if (head.startsWith("<roblox") || head.startsWith("<?xml")) return { ext: ".rbxmx", kind: "model", mime: "application/xml" };
 	return { ext: ".bin", kind: "unknown", mime: "application/octet-stream" };
 }
@@ -169,7 +171,7 @@ function downloaded(file, bytes) {
 
 function cachedFile(assetId) {
 	if (!fs.existsSync(ASSET_DIR)) return null;
-	for (const ext of [".png", ".jpg", ".gif", ".webp", ".bmp", ".ttf", ".otf", ".ttc", ".json", ".rbxm", ".rbxmx", ".bin"]) {
+	for (const ext of [".png", ".jpg", ".gif", ".webp", ".bmp", ".ttf", ".otf", ".ttc", ".json", ".rbxm", ".rbxmx", ".rbx", ".bin"]) {
 		const file = path.join(ASSET_DIR, `${assetId}${ext}`);
 		if (fs.existsSync(file)) return file;
 	}

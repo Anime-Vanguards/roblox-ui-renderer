@@ -9,8 +9,10 @@ This page explains the input formats `rur` can mount, how UI Labs and Flipbook s
 | `--story <file.story.luau>` | UI Labs, Hoarcekat, or Flipbook story | Mounted into `StoryTarget` via the matching framework adapter |
 | `--module <file.luau>` | Returns an `Instance` or `function(Target, Controls)` | Returned/created UI parented under `StoryTarget` |
 | `--fixture <file.luau>` | `return function(Target, Controls) ... end` | Mounted like a module (used by this repo's test suite) |
-| `--model <file.rbxm[x]>` | Saved Roblox model file | Top-level instances parented under `StoryTarget` |
+| `--model <file.rbxm[x]>` or `<file.rbx>` | Saved Roblox model file, or a Roblox archive holding one | Top-level instances parented under `StoryTarget` |
 | `--scene <scene.json>` | Saved or hand-edited scene JSON | Rasterized directly without executing Luau |
+
+A Roblox archive (`.rbx`, the save format that holds a place or model with its content beside it) is read wherever a model file is (`--model`, `--load`, `--snapshot-dir`, `--mount`), as the model it holds with the values its writer kept outside the scene (script sources, long text) put back. An archive that cannot be read fails `--model` and `--load` with the reason, and is a warning naming the file elsewhere. Rojo project trees mount only what Rojo reads, so a `.rbx` inside one is left out. The format: roblox-object-renderer's `docs/archives.md`.
 
 UI mounts into a `Frame` named `StoryTarget` inside `CoreGui.RURStory`, sized to `--viewport WxH` (logical pixels at `--scale`, default `1.5`) minus `--margin` on each side.
 

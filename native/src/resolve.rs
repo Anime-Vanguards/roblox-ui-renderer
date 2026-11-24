@@ -39,8 +39,8 @@ pub struct Resolver {
 }
 
 /// The extensions a cache entry can have, in the order cli/assets.mjs cachedFile looked for them
-pub(crate) const EXTENSIONS: [&str; 12] = [
-    ".png", ".jpg", ".gif", ".webp", ".bmp", ".ttf", ".otf", ".ttc", ".json", ".rbxm", ".rbxmx", ".bin",
+pub(crate) const EXTENSIONS: [&str; 13] = [
+    ".png", ".jpg", ".gif", ".webp", ".bmp", ".ttf", ".otf", ".ttc", ".json", ".rbxm", ".rbxmx", ".rbx", ".bin",
 ];
 
 impl Resolver {
@@ -266,7 +266,10 @@ impl Resolver {
             return None;
         }
         if allow_decal && sniff(&bytes).kind == "model" {
-            let text: String = bytes.iter().map(|&byte| byte as char).collect();
+            let text = match model_text(&bytes) {
+                Ok(text) => text,
+                Err(error) => return Some(Err(format!("asset {asset}: {error}"))),
+            };
             let Some(inner) = model_texture(&text).filter(|inner| inner.id() != asset.id()) else {
                 return Some(Err(format!("asset {asset} is a model without an image texture")));
             };
@@ -660,10 +663,22 @@ pub fn sniff(bytes: &[u8]) -> Sniffed {
     if head.starts_with("<roblox!") {
         return is(".rbxm", "model", "application/octet-stream");
     }
+    // a Roblox archive: a ZIP holding a place or model (and the values it keeps outside the scene)
+    if ror_archive::is_archive(bytes) {
+        return is(".rbx", "model", "application/zip");
+    }
     if head.starts_with("<roblox") || head.starts_with("<?xml") {
         return is(".rbxmx", "model", "application/xml");
     }
     is(".bin", "unknown", "application/octet-stream")
+}
+
+/// A model asset's bytes as the text model_texture reads, each byte a character; a Roblox archive (.rbx) as the standalone
+/// model it holds, with the values kept outside its scene put back (the engine reads it the same way: its
+/// project::decode_model). An archive the reader refuses is an error.
+pub(crate) fn model_text(bytes: &[u8]) -> Result<String, String> {
+    let scene = if ror_archive::is_archive(bytes) { ror_archive::unwrap(bytes).map_err(|error| format!("Roblox archive: {error}"))?.bytes } else { std::borrow::Cow::Borrowed(bytes) };
+    Ok(scene.iter().map(|&byte| byte as char).collect())
 }
 
 /// cli/assets.mjs resolveModelTexture: /(?:rbxassetid:\/\/|[?&]id=)(\d+)/i, the latest version of the id (a
@@ -875,6 +890,8 @@ pub(crate) mod tests {
         assert_eq!(kinds(b"<roblox!\x89\xff"), (".rbxm", "model"));
         assert_eq!(kinds(b"<roblox version=\"4\">"), (".rbxmx", "model"));
         assert_eq!(kinds(b"<?xml version"), (".rbxmx", "model"));
+        assert_eq!(kinds(b"PK\x03\x04\x14\x00"), (".rbx", "model"));
+        assert_eq!(kinds(b"PK\x05\x06"), (".rbx", "model"));
         assert_eq!(kinds(b"plain"), (".bin", "unknown"));
     }
 

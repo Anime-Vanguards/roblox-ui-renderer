@@ -308,7 +308,8 @@ fn is_valid_rbxm(file: &Path) -> bool {
         return false;
     };
     let mut magic = [0u8; 8];
-    handle.read_exact(&mut magic).is_ok() && &magic == b"<roblox!"
+    // (or a Roblox archive, a ZIP, which the engine reads as the model it holds)
+    handle.read_exact(&mut magic).is_ok() && (&magic == b"<roblox!" || magic.starts_with(b"PK\x03\x04"))
 }
 
 #[cfg(feature = "desktop")]

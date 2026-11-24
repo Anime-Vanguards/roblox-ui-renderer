@@ -3,14 +3,14 @@
 //! service (story_render.rs, serve.rs: [`run_once`], [`Preloaded`]) and the desktop app ([`Host`]) use:
 //!
 //!   rur-native engine --fixture <file.luau> --out <scene.json>
-//!       [--module <file>] [--story <file>] [--model <file.rbxm>] [--roots "<dir>;<dir>"]
+//!       [--module <file>] [--story <file>] [--model <file.rbxm|.rbxmx|.rbx>] [--roots "<dir>;<dir>"]
 //!       [--project <dir>] [--place <name>] (the engine's launch options)
 //!       [--viewport WxH] [--scale S] [--time T] [--mode edit|play] [--player Name] [--place-id N]
 //!       [--camera WxH] [--margin M] [--background R,G,B|transparent] [--rotation-clipping enabled|disabled]
 //!       [--controls <json|file>] [--actions <json|file>] [--snapshot <file.rbxm>]...
 //!       [--snapshot-dir <dir>] [--no-snapshots] [--session 1] [--verbose] [--repo <dir>]
 //!       [--mount Service/Name=<dir|file>]... [--instance Service/Name=<ClassName>]...
-//!       [--plugin 1|<settings JSON|file>] [--all-layers 1] [--load Service/Name=<file.rbxm>]...
+//!       [--plugin 1|<settings JSON|file>] [--all-layers 1] [--load Service/Name=<file.rbxm|.rbxmx|.rbx>]...
 //!       [--topbar-inset px] [--device desktop|touch|gamepad]
 //!
 //! `--mount` / `--instance` (in order, after the roots) place a directory, file or instance at an
@@ -2129,6 +2129,49 @@ mod layer_tests {
         assert_eq!(drawn(&output.scene), ["First", "Second", "RURStory"]);
         let bad = format!("Saved/Blob={}", model.to_string_lossy());
         assert!(run_once(&args(&fixture, &["--load", &bad])).err().unwrap().contains("not a service"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// `--load` and `--model` read a Roblox archive (.rbx) as the model it holds, with the values its writer kept outside
+    /// the scene put back (here a label's long Text, which the stored scene alone reads as empty)
+    #[test]
+    fn load_and_model_read_an_archive_with_its_values() {
+        use rbx_dom_weak::{InstanceBuilder, WeakDom, types::{UDim, UDim2}};
+        let directory = std::env::temp_dir().join(format!("rur-load-archive-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let text = "abcdefghij".repeat(30);
+        let label = || InstanceBuilder::new("TextLabel").with_name("Long").with_property("Text", text.clone()).with_property("Size", UDim2::new(UDim::new(0., 300), UDim::new(0., 40)));
+        let archive = |dom: WeakDom, file: &str| {
+            let mut bytes = Vec::new();
+            rbx_binary::to_writer(&mut bytes, &dom, dom.root().children()).unwrap();
+            let file = directory.join(file);
+            std::fs::write(&file, ror_archive::Builder::model(bytes).externalize(256).build().unwrap()).unwrap();
+            file
+        };
+        let model = archive(WeakDom::new(InstanceBuilder::new("DataModel").with_child(InstanceBuilder::new("ScreenGui").with_name("Saved").with_child(label()))), "blob.rbx");
+        let alone = archive(WeakDom::new(InstanceBuilder::new("DataModel").with_child(label())), "label.rbx");
+        let fixture = directory.join("check.luau");
+        std::fs::write(&fixture, format!("return function()
+	local Long = game:GetService('ServerStorage').Saved.Blob.Saved.Long
+	assert(#Long.Text == {}, 'Text read as ' .. #Long.Text .. ' characters')
+end
+", text.len())).unwrap();
+        let load = format!("ServerStorage/Saved/Blob={}", model.to_string_lossy());
+        let output = run_once(&args(&fixture, &["--load", &load])).unwrap();
+        assert_eq!(output.status, "ok", "{}", output.text);
+        let mut model_args = args(&fixture, &[]);
+        (model_args.fixture, model_args.model) = (None, Some(alone.to_string_lossy().into_owned()));
+        let output = run_once(&model_args).unwrap();
+        assert_eq!(output.status, "ok", "{}", output.text);
+        let glyphs: usize = output.scene["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|node| node["path"].as_str().is_some_and(|path| path.ends_with(".Long")))
+            .flat_map(|node| node["text"]["lines"].as_array().cloned().unwrap_or_default())
+            .map(|line| line["glyphs"].as_array().map_or(0, Vec::len))
+            .sum();
+        assert!(glyphs > 0, "the label draws its text: {}", output.text);
         std::fs::remove_dir_all(directory).unwrap();
     }
 }

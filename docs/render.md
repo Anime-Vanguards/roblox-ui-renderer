@@ -91,7 +91,7 @@ Pass `--plugin` (or `--plugin '{"Theme":"Dark"}'` / JSON file to seed plugin set
 ## Full PlayerGuis (`--all-layers`, `--load`)
 
 - **`--all-layers`:** Renders every enabled `ScreenGui` under `LocalPlayer.PlayerGui` and `CoreGui` in Roblox's exact draw order (`native/src/engine/layers.rs`): `PlayerGui` below `CoreGui`, sorted by `DisplayOrder`, then by most recently parented or enabled (verified against lossless 9-ScreenGui Studio captures).
-- **`--load Service/Name=<file.rbxm>`:** Loads a saved model's top-level instances into a `Folder` at `Service/Name` before the story executes (handy for cloning a serialized playtest `PlayerGui`).
+- **`--load Service/Name=<file.rbxm>`** (`.rbxmx` or a `.rbx` archive too)**:** Loads a saved model's top-level instances into a `Folder` at `Service/Name` before the story executes (handy for cloning a serialized playtest `PlayerGui`).
 
 ```powershell
 node cli/rur.mjs render --fixture clone-playergui.luau --load "ServerStorage/Saved=playergui.rbxm" --all-layers --viewport 844x390 --scale 1

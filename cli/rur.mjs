@@ -2,7 +2,7 @@
 // rur — offline Roblox UI renderer.
 //
 //   rur render --story <file.story.luau> [--out dir] [--viewport 1920x1080] [--scale 1.5] [--time 1]
-//   rur render --model <file.rbxm|.rbxmx> ...          render a saved instance tree
+//   rur render --model <file.rbxm|.rbxmx|.rbx> ...      render a saved instance tree (.rbx: a Roblox archive)
 //   rur render --module <file.luau> ...                 require a module (function(target) or Instance)
 //   rur sequence --story <file> [--from 0] [--to 4 | --frames 240 | --duration 4] [--fps 60] [--crop <node>|x,y,w,h]
 //             [--pad px] [--no-png] [--no-video] [--scenes] [--cost]  the story mounted once and captured frame by frame at
@@ -64,7 +64,7 @@
 // (Studio-only templates exported from Studio, loaded only when given; see snapshotDir) / --no-snapshots.
 // Rojo projects: --rojo <file.project.json> (or --project <file.project.json>) [--rojo-at Service/Name],
 // --mount Service/Name=<dir|file> (repeatable). --git-ref <ref>: the sources as they are at a commit.
-// --load Service/Name=<file.rbxm> (repeatable): a saved model's top-level instances (a SerializationService
+// --load Service/Name=<file.rbxm|.rbxmx|.rbx> (repeatable): a saved model's top-level instances (a SerializationService
 // blob) in a Folder at that path for the story to clone, keeping the default project. --all-layers: draw every enabled
 // ScreenGui the run leaves under the PlayerGui and CoreGui (DisplayOrder, then the order they were
 // parented or enabled), not only the story gui. --topbar-inset <px>: GuiService's top inset (default 0, as
@@ -193,7 +193,7 @@ export function snapshotDir(args) {
 	return fs.existsSync(dir) ? dir : undefined;
 }
 
-// --load Service/Name=<file.rbxm|.rbxmx> (repeatable, or ";"-separated) as engine arguments: a saved
+// --load Service/Name=<file.rbxm|.rbxmx|.rbx> (repeatable, or ";"-separated) as engine arguments: a saved
 // model, such as a SerializationService blob, whose top-level instances the engine puts in a Folder at
 // that path before the story runs, for a fixture to clone (story.rs load_models). Unlike --mount it
 // keeps the default project and its Studio snapshots.
@@ -204,7 +204,7 @@ export function loadArgs(args) {
 		const at = index > 0 ? item.slice(0, index).split(/[/\\]/).filter(Boolean) : [];
 		const file = index > 0 ? path.resolve(item.slice(index + 1)) : "";
 		if (at.length < 2) throw new UsageError(`--load ${item}: expected Service/Name=<file.rbxm>`);
-		if (!/\.rbxmx?$/i.test(file)) throw new UsageError(`--load ${item}: not an .rbxm / .rbxmx file`);
+		if (!/\.(rbxmx?|rbx)$/i.test(file)) throw new UsageError(`--load ${item}: not an .rbxm / .rbxmx / .rbx file`);
 		if (!fs.existsSync(file)) throw new UsageError(`--load ${item}: ${file} does not exist`);
 		return ["--load", `${at.join("/")}=${file}`];
 	});
@@ -371,7 +371,7 @@ export async function render(args, { service = false, env = process.env } = {}) 
 	if (!source) throw new Error("render needs --story, --module, --model, --fixture or --scene");
 	// A bad --actions list is a usage error before anything runs or is written (cli/actions.mjs)
 	if (args.actions !== undefined && !args.scene) readActions(args.actions, { time: args.time !== undefined && args.time !== true ? Number(args.time) : 1 });
-	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$|\.json$/, "");
+	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$|\.rbx$|\.json$/, "");
 	const outDir = renderOutDir(args, name);
 	fs.mkdirSync(outDir, { recursive: true });
 
@@ -519,7 +519,7 @@ export async function sequence(args, { service = false, env = process.env } = {}
 	const from = options.from === undefined ? 0 : Number(options.from);
 	// Actions happen by the last frame's moment at the latest (cli/actions.mjs checks them against it)
 	if (args.actions !== undefined) readActions(args.actions, { time: from + (frames - 1) / fps });
-	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$/, "");
+	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$|\.rbx$/, "");
 	const outDir = renderOutDir(args, `${name}-sequence`);
 	fs.mkdirSync(outDir, { recursive: true });
 	const started = Date.now();
