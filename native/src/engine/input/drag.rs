@@ -30,7 +30,7 @@ fn udim2_of(value: Option<Value>) -> dom::UDim2 {
 }
 
 fn first_detector(cx: &Cx, id: InstanceId) -> Option<InstanceId> {
-    let children = cx.engine.state.borrow().dom.get(id)?.children.clone();
+    let children = cx.engine.state.borrow().dom.get(id)?.children.to_vec();
     children
         .into_iter()
         .find(|&child| cx.class_name_is(child, cx.i.c.UIDragDetector) && !cx.is_false(child, cx.i.n.Enabled))

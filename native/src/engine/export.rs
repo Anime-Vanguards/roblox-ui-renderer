@@ -28,6 +28,7 @@ use serde_json::{Map, Value as Json, json};
 use crate::engine::GuiEngine;
 use super::{
     ClassId, Engine, InstanceId, K, NameId, Reflection, State,
+    dom::Children,
     layout::{BoxSlots, Layout, Record, absolute_position, record::{Transform, compose, rotation_about}},
     path2d::{self, Segment},
     path2d_layout,
@@ -291,7 +292,7 @@ impl Ctx<'_> {
         }
     }
 
-    fn children(&self, id: InstanceId) -> &[InstanceId] {
+    fn children(&self, id: InstanceId) -> &Children {
         &self.state.dom.at(id).children
     }
 

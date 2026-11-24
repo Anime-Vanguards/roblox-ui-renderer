@@ -299,19 +299,23 @@ impl Context<'_> {
                     state.dom.at(id).children.iter().map(|&c| self.is_listed(c)).collect()
                 };
                 let mut state = self.engine.state.borrow_mut();
-                let instance = state.dom.at_mut(id);
+                let mut order = state.dom.at(id).children.to_vec();
                 let mut slot = 0;
                 for (index, is_listed) in listed.into_iter().enumerate() {
                     if is_listed {
                         let wanted = pairs[&children[slot]];
                         slot += 1;
-                        if wanted != instance.children[index] {
+                        if wanted != order[index] {
                             moved += 1;
                         }
-                        instance.children[index] = wanted;
+                        order[index] = wanted;
                     }
                 }
                 if moved > 0 {
+                    // (the dom keeps each child's place in its parent's list, so the new order goes
+                    // through it rather than into the list)
+                    state.dom.reorder_children(id, &order);
+                    let instance = state.dom.at_mut(id);
                     instance.child_version = instance.child_version.wrapping_add(1);
                     state.dom.structure_version += 1;
                 }

@@ -420,7 +420,7 @@ impl Retained {
             let mut stack = vec![root];
             while let Some(node) = stack.pop() {
                 self.entries.take(node);
-                stack.extend_from_slice(&state.dom.at(node).children);
+                state.dom.at(node).children.copy_to(&mut stack);
             }
         }
         let layout_guard = engine.layout().borrow();
