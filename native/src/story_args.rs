@@ -215,6 +215,12 @@ fn global_options(argv: &[String]) -> Result<(Vec<String>, Vec<(&'static str, Op
     Ok((rest, env))
 }
 
+/// A command line's arguments as [`Context::new`] reads them, its global options taken out
+pub fn arguments(argv: &[String]) -> Result<Args, Failure> {
+    let (argv, _) = global_options(argv)?;
+    Ok(Args::parse(&argv))
+}
+
 /// The Studio snapshot each place loads implicitly (named after the Studio it is exported from)
 const IMPLICIT_SNAPSHOTS: &[(&str, &str)] = &[];
 

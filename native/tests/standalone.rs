@@ -2094,6 +2094,101 @@ fn checkout_profile_empty_inputs_keep_the_current_folder() {
     }
 }
 
+/// The smallest report `cost compare` accepts.
+fn write_cost_report(file: &Path) {
+    std::fs::write(
+        file,
+        r#"{"schema":"rur-cost/1","mode":"single","status":"ok","viewport":{"width":800,"height":600,"scale":1},"totals":{"hiddenInShown":{"complete":true}}}"#,
+    )
+    .unwrap();
+}
+
+/// `cost compare` reads its two reports without an option name. An unusable or missing one is
+/// refused with the plain error before state is created, while the working folder holds a valid
+/// report. `--out` goes before, between and after the inputs.
+#[test]
+#[ignore = "requires RUR_TEST_STANDALONE_BINARY from a marked release build"]
+fn installed_cost_compare_rejects_unusable_inputs_before_work() {
+    // Empty, blank, and flag-like: none can name a report
+    const UNUSABLE_INPUTS: [&str; 3] = ["", " \t ", "-x"];
+    let install = Installation::new("unusable-cost-inputs");
+    let cwd = install.dir.join("cwd");
+    let state = install.cache.join("state");
+    let out = install.dir.join("output");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let report = cwd.join("cost.json");
+    write_cost_report(&report);
+    let original = std::fs::read(&report).unwrap();
+    let compare = |arguments: &[String]| {
+        install
+            .command()
+            .current_dir(&cwd)
+            .env("RUR_STATE_DIR", &state)
+            .args(["cost", "compare"])
+            .args(arguments)
+            .output_locked()
+            .unwrap()
+    };
+    let out_option = ["--out".to_string(), out.to_string_lossy().into_owned()];
+    for (position, name) in ["before", "after"].iter().enumerate() {
+        for value in UNUSABLE_INPUTS {
+            for out_position in 0..=2 {
+                let mut arguments = vec!["cost.json".to_string(); 2];
+                arguments[position] = value.to_string();
+                arguments.splice(out_position..out_position, out_option.clone());
+                assert_option_error(&compare(&arguments), &format!("cost compare {name}"));
+            }
+        }
+    }
+    assert_option_error(&compare(&[]), "cost compare before");
+    assert_option_error(&compare(&["cost.json".to_string()]), "cost compare after");
+    // Nothing was created or written: no state or output folder, the report as it was, and no
+    // other file in the working folder, the user cache or the folder of the binary.
+    assert!(!state.exists());
+    assert!(!out.exists());
+    assert_eq!(std::fs::read(&report).unwrap(), original);
+    assert_eq!(std::fs::read_dir(&cwd).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(&install.cache).unwrap().count(), 0);
+    assert_eq!(
+        std::fs::read_dir(install.exe.parent().unwrap())
+            .unwrap()
+            .count(),
+        1
+    );
+    // The same report, named, is compared
+    let mut arguments = vec!["cost.json".to_string(); 2];
+    arguments.extend(out_option);
+    let output = compare(&arguments);
+    assert!(output.status.success(), "{output:?}");
+    assert!(out.join("compare.json").is_file());
+}
+
+/// Ordinary builds keep their own handling of `cost compare` inputs: a named report is compared,
+/// and an empty input is a path that cannot be read, not the release check's refusal.
+#[test]
+fn checkout_cost_compare_keeps_its_own_input_handling() {
+    let install = Installation::checkout("checkout-cost-inputs");
+    write_cost_report(&install.project.join("cost.json"));
+    let compare = |inputs: [&str; 2]| {
+        install
+            .command()
+            .env("RUR_STATE_DIR", &install.cache)
+            .args(["cost", "compare"])
+            .args(inputs)
+            .arg("--json")
+            .output_locked()
+            .unwrap()
+    };
+    let output = compare(["cost.json", "cost.json"]);
+    assert!(output.status.success(), "{output:?}");
+    let comparison: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_ne!(comparison["verdict"], "refused", "{comparison}");
+    let output = compare(["", "cost.json"]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(!error.contains("needs a nonempty value"), "{error}");
+}
+
 /// Values that a request or manifest field must not accept as a path: not a string, empty,
 /// blank, a flag, or containing a NUL character.
 fn unusable_path_values() -> Vec<serde_json::Value> {
@@ -2218,7 +2313,7 @@ fn installed_commands_reject_incomplete_path_flags() {
     let cwd = install.dir.join("cwd");
     let state = install.cache.join("state");
     std::fs::create_dir_all(&cwd).unwrap();
-    for subcommand in ["engine", "render", "sequence", "serve", "--headless"] {
+    for subcommand in ["engine", "render", "sequence", "serve", "cost", "--headless"] {
         for flag in path_contract::path_flags() {
             for arguments in incomplete_options(flag) {
                 let output = install

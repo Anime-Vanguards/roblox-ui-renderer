@@ -180,9 +180,9 @@ started from the arguments would already be writing there.
 
 These options take a path, and each must be followed by a value:
 
-- Inputs: `--repo`, `--project`, `--place`, `--story`, `--scene`, `--batch`, `--fixture`,
-  `--module`, `--model`, `--harness`, `--actions`, `--plugin`, `--load`, `--animations`,
-  `--frame-times`, `--snapshot`, `--snapshot-dir`, `--mount` and `--instance`.
+- Inputs: `--repo`, `--project`, `--place`, `--story`, `--scene`, `--compare`, `--batch`,
+  `--fixture`, `--module`, `--model`, `--harness`, `--actions`, `--plugin`, `--load`,
+  `--animations`, `--frame-times`, `--snapshot`, `--snapshot-dir`, `--mount` and `--instance`.
 - Outputs: `--out`, `--dir`, `--profile-out`, `--dump-scene` and `--dependencies`.
 - File or inline JSON: `--controls` and `--context`. Inline JSON stays accepted, because the same
   value can be a file name or the JSON itself.
@@ -193,10 +193,10 @@ A missing, empty, blank, flag-like or NUL-containing value is refused with a pla
 `--out needs a nonempty value`.
 
 Positional paths follow the same rule: the input of `profile report`, both inputs of `profile diff`,
-and the first and optional second input of `profile view` and `profile render`. A required input
-must be present. An empty input is refused because it would select the `profile.json` in the
-current folder, a profile the user never named. Ordinary checkout builds keep the pinned engine's
-handling of these arguments.
+the first and optional second input of `profile view` and `profile render`, and both inputs of
+`cost compare`. A required input must be present. An empty profile input is refused because it
+would select the `profile.json` in the current folder, a profile the user never named. Ordinary
+checkout builds keep their earlier handling of these arguments.
 
 The same check runs on every route into the binary that does not come through the command line
 parser:

@@ -2406,6 +2406,35 @@ fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
     Ok((report, args.truthy("--json"), failed))
 }
 
+/// The reports `rur-native cost compare <before> <after>` reads, named without an option
+const COMPARE_INPUTS: [&str; 2] = ["before", "after"];
+
+/// Refuses an unusable `cost compare` input in a release binary, as every other path is refused:
+/// empty, blank, flag-like or missing. Startup calls it before the state directory is made
+/// (`paths::initialize`); without it, an empty input fails only once it is read, and a blank or
+/// flag-like one is read as a file of that name in the current folder. A checkout build keeps its
+/// own handling. A help request reads no report, and a command line its parser refuses reports that
+/// itself.
+pub(crate) fn validate_arguments(argv: &[String]) -> Result<(), String> {
+    if !crate::paths::is_standalone() || argv.iter().any(|arg| arg == "--help" || arg == "-h") {
+        return Ok(());
+    }
+    let Ok(args) = crate::story_args::arguments(argv) else {
+        return Ok(());
+    };
+    if args.positional.first().map(String::as_str) != Some("compare") {
+        return Ok(());
+    }
+    for (position, name) in COMPARE_INPUTS.iter().enumerate() {
+        let label = format!("cost compare {name}");
+        match args.positional.get(position + 1) {
+            Some(input) => crate::paths::validate_path_value(&label, input)?,
+            None => return Err(format!("{label} needs a nonempty value")),
+        }
+    }
+    Ok(())
+}
+
 /// Entrypoint for `rur-native cost ...`.
 pub fn cli(argv: &[String]) -> i32 {
     if argv.iter().any(|a| a == "--help" || a == "-h") {

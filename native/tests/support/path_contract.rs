@@ -131,11 +131,28 @@ enum Crate {
 /// a change to any of these fails the inventory until someone reviews it again. That includes a
 /// new command, and a positional read in a parser that used to accept only options.
 const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
+    // Every command it dispatches before the storybook's parser must be in paths.rs COMMANDS
+    // (`assert_dispatched_commands_skip_the_project_check`); `cost` hands its arguments to cost.rs
     (
         Crate::Native,
         "src/main.rs",
         "fn main()",
-        0x4a76f3953228243b,
+        0xb96250d73c063ee1,
+    ),
+    // `rur-native cost`: its positionals are `compare <before> <after>`, the two reports it reads, which
+    // startup checks (`cost::validate_arguments`); any other word is collected and never read. Its other
+    // paths are options in PATH_OPTIONS, `--compare` (a report it reads) and `--out` among them
+    (
+        Crate::Native,
+        "src/cost.rs",
+        "pub fn cli(",
+        0x1091f03b2a6b1e8f,
+    ),
+    (
+        Crate::Native,
+        "src/cost.rs",
+        "fn run_cli(",
+        0x600fb7d5907acb54,
     ),
     // `rur-native assets`: its positionals are content URIs, read and never written; it writes only into
     // the state directory, and its one path option, `--repo`, is in PATH_OPTIONS
@@ -165,7 +182,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/engine/cli.rs",
         "pub fn dispatch()",
-        0xb8a05947b2639aa7,
+        0x9dc3703058e1b15d,
     ),
     (
         Crate::Native,
@@ -177,7 +194,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/serve.rs",
         "pub fn cli(",
-        0x6fbded127a6d931e,
+        0xc3f2a2311e9c7dd0,
     ),
     (
         Crate::Native,
@@ -189,7 +206,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/story_render.rs",
         "pub fn sequence_cli(",
-        0xc75c5c2a6e67038a,
+        0x7cfcb81d696d032f,
     ),
     (
         Crate::Native,
@@ -340,14 +357,56 @@ fn assert_startup_checks_the_profile_commands() {
     assert!(startup.contains("crate::profile_cli::validate_arguments(command, &argv[3..])"));
 }
 
+/// `cost compare`'s two reports are its only positional paths, and startup checks them.
+fn assert_startup_checks_the_cost_compare_inputs() {
+    let cost = include_str!("../../src/cost.rs");
+    assert!(cost.contains("const COMPARE_INPUTS: [&str; 2] = [\"before\", \"after\"];"));
+    let startup = include_str!("../../src/paths.rs");
+    assert!(startup.contains("crate::cost::validate_arguments(&argv[2..])"));
+}
+
+/// The commands `main` dispatches read their own command lines, so the storybook's project check
+/// (`validate_storybook_project`) must leave them alone: for a command missing from its list, a
+/// blank word such as `--tag ""` is refused as an empty project folder.
+fn assert_dispatched_commands_skip_the_project_check() {
+    let main = include_str!("../../src/main.rs");
+    // The arms of main's command match, one level in from the function body
+    let dispatched: Vec<&str> = parser_body(main, "fn main()")
+        .lines()
+        .filter(|line| line.starts_with("        Some(\""))
+        .flat_map(|line| quoted(line.split_once("=>").unwrap().0))
+        .collect();
+    assert!(dispatched.contains(&"render") && dispatched.contains(&"cost"), "{dispatched:?}");
+    let paths = include_str!("../../src/paths.rs");
+    let commands: Vec<&str> = quoted(
+        paths
+            .split_once("const COMMANDS:")
+            .unwrap()
+            .1
+            .split_once("];")
+            .unwrap()
+            .0,
+    )
+    .collect();
+    for command in dispatched {
+        assert!(
+            commands.contains(&command),
+            "src/paths.rs: COMMANDS lacks {command}, which main dispatches"
+        );
+    }
+}
+
 #[test]
 fn every_parser_positional_has_a_path_classification() {
-    // The profile paths are the only positional paths. Every other reviewed parser ignores
-    // unknown words, rejects them (Clap), or passes them to one of the inventoried parsers.
+    // The profile and cost compare paths are the only positional paths. Every other reviewed
+    // parser ignores unknown words, rejects them (Clap), or passes them to one of the inventoried
+    // parsers.
     assert_profile_commands_are_the_positional_paths();
     assert_clap_declares_only_the_project_positional();
     assert_reviewed_parsers_are_unchanged();
     assert_startup_checks_the_profile_commands();
+    assert_startup_checks_the_cost_compare_inputs();
+    assert_dispatched_commands_skip_the_project_check();
 }
 
 /// Every `--option` spelled as a word between quotes in `source`.
@@ -466,6 +525,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--benchmark",
     "--camera",
     "--code",
+    "--cost",
     "--crop",
     "--device",
     "--dt",
@@ -622,6 +682,7 @@ const FIELD_READS: &[FieldReads] = &[
         readers: &["value.get(\"", "number(\"", "flag(\""],
         non_paths: &[
             "fps", "from", "frames", "to", "duration", "crop", "pad", "png", "scenes", "video",
+            "cost",
         ],
     },
 ];

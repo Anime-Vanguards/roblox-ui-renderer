@@ -198,6 +198,7 @@ const PATH_OPTIONS: &[&str] = &[
     "--snapshot",
     "--story",
     "--scene",
+    "--compare",
     "--batch",
     "--fixture",
     "--module",
@@ -280,7 +281,7 @@ pub(crate) fn validate_arguments(argv: &[String]) -> Result<(), String> {
 }
 
 /// The commands `main` dispatches before the storybook's own parser (NativeOptions) sees the arguments
-const COMMANDS: &[&str] = &["engine", "engine-batch", "render", "rojo-mounts", "sequence", "serve", "record", "profile", "assets", "doctor", "debug-report", "sweep", "diff", "git-ref"];
+const COMMANDS: &[&str] = &["engine", "engine-batch", "render", "rojo-mounts", "sequence", "serve", "record", "profile", "assets", "doctor", "debug-report", "sweep", "diff", "cost", "git-ref"];
 
 /// Refuses an empty project folder given to the storybook without an option name (`rur-native ""`), which would
 /// otherwise open the current folder. A blank word can only be that positional: a blank value of a path option is
@@ -364,6 +365,11 @@ pub unsafe fn initialize() -> anyhow::Result<()> {
             crate::profile_cli::validate_arguments(command, &argv[3..])
                 .map_err(anyhow::Error::msg)?;
         }
+    }
+    // `cost compare` reads its two reports without an option name
+    #[cfg(feature = "desktop")]
+    if argv.get(1).is_some_and(|arg| arg == "cost") {
+        crate::cost::validate_arguments(&argv[2..]).map_err(anyhow::Error::msg)?;
     }
     // The storybook's project folder is a positional path too (`rur-native <project folder>`)
     #[cfg(feature = "desktop")]
