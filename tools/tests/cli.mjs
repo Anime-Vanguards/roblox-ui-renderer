@@ -739,10 +739,39 @@ console.log(JSON.stringify({ summary, contacted }));
 		assert.equal(costA.predicted["phone-mid"].gpuUiMs.status, "refused");
 		assert.equal(costA.predicted["phone-mid"].gpuUiMs.ms, null);
 
-		// `rur cost compare`: identical reports -> unchanged; higher-cost vs lower-cost -> improved
+		// `rur cost compare`: identical reports -> unchanged; equivalence gate refuses incomparable reports
 		const sameCmp = runRur("cost", "compare", outA, outB, "--json");
 		assert.equal(sameCmp.status, 0, sameCmp.stderr);
-		assert.equal(JSON.parse(sameCmp.stdout).verdict, "unchanged");
+		const sameJson = JSON.parse(sameCmp.stdout);
+		assert.equal(sameJson.verdict, "unchanged");
+		assert.equal(sameJson.equivalence.passed, true);
+
+		// Non-cost file (scene.json) passed to compare -> non-zero error identifying scene.json
+		const scenePath = path.join(dir, "cg.scene.json");
+		const rEng = runRur("render", "--fixture", path.join(root, "fixtures", "canvasgroup.luau"), "--no-snapshots", "--no-png", "--out", path.join(dir, "cg-render"));
+		assert.equal(rEng.status, 0, rEng.stderr);
+		fs.copyFileSync(path.join(dir, "cg-render", "scene.json"), scenePath);
+		const badSceneCmp = runRur("cost", "compare", scenePath, outA);
+		assert.notEqual(badSceneCmp.status, 0, "scene.json must be rejected by cost compare");
+		assert.match(badSceneCmp.stderr, /scene\.json/i);
+
+		// Live vs --scene -> refused (non-zero)
+		const outSceneCost = path.join(dir, "cg-scene-cost");
+		const rSceneCost = runRur("cost", "--scene", scenePath, "--out", outSceneCost);
+		assert.equal(rSceneCost.status, 0, rSceneCost.stderr);
+		const liveVsScene = runRur("cost", "compare", outA, outSceneCost, "--json");
+		assert.notEqual(liveVsScene.status, 0, "live vs --scene must be refused");
+		assert.equal(JSON.parse(liveVsScene.stdout).verdict, "refused");
+		assert.match(liveVsScene.stderr, /hiddenInShown\.complete|--scene/i);
+
+		// Different viewport -> refused (non-zero)
+		const outSmallVp = path.join(dir, "cg-small-vp");
+		const rSmallVp = runRur("cost", "--fixture", path.join(root, "fixtures", "canvasgroup.luau"), "--no-snapshots", "--viewport", "800x400", "--out", outSmallVp);
+		assert.equal(rSmallVp.status, 0, rSmallVp.stderr);
+		const vpMismatch = runRur("cost", "compare", outA, outSmallVp, "--json");
+		assert.notEqual(vpMismatch.status, 0, "viewport mismatch must be refused");
+		assert.equal(JSON.parse(vpMismatch.stdout).verdict, "refused");
+		assert.match(vpMismatch.stderr, /viewport/i);
 
 		// Sequence cost mode: static fixture incurs 0 layout churn on frames 1..N
 		const outSeq = path.join(dir, "seq-cost");
@@ -756,6 +785,12 @@ console.log(JSON.stringify({ summary, contacted }));
 			assert.equal(frame.layout.passes, 0);
 			assert.equal(frame.layout.stored + frame.layout.moved, 0);
 		}
+
+		// Single vs sequence -> refused (non-zero)
+		const singleVsSeq = runRur("cost", "compare", outA, outSeq, "--json");
+		assert.notEqual(singleVsSeq.status, 0, "single vs sequence must be refused");
+		assert.equal(JSON.parse(singleVsSeq.stdout).verdict, "refused");
+		assert.match(singleVsSeq.stderr, /mode/i);
 
 		// `rur sequence --cost --no-png --no-video`: writes cost.json alongside trace.json
 		const outSeqFlag = path.join(dir, "seq-with-cost");

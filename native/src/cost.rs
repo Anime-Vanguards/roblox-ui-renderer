@@ -1267,6 +1267,7 @@ pub fn analyze_scene(
         "schema": "rur-cost/1",
         "status": status,
         "mode": "single",
+        "input": if dom_hidden.is_some() { "live" } else { "scene" },
         "viewport": {
             "width": vp.width,
             "height": vp.height,
@@ -1294,8 +1295,221 @@ pub fn analyze_scene(
     }))
 }
 
+fn describe_non_cost_report(value: &Value) -> String {
+    let Some(obj) = value.as_object() else {
+        return "not a JSON object (expected a rur-cost/1 cost report)".into();
+    };
+    if let Some(schema) = obj.get("schema").and_then(Value::as_str) {
+        if schema == "rrr-ab/1" {
+            return "a rur cost compare (rrr-ab/1) diff report, not a rur-cost/1 cost report".into();
+        }
+        return format!("schema \"{schema}\", not a rur-cost/1 cost report");
+    }
+    if obj.get("nodes").is_some_and(Value::is_array) && obj.get("layers").is_some_and(Value::is_array) {
+        return "a scene.json export, not a rur-cost/1 cost report (run `rur cost --scene <file>` first)".into();
+    }
+    if obj.get("units").is_some_and(Value::is_string) && obj.get("nodes").is_some_and(Value::is_array) {
+        return "a sequence trace.json file, not a rur-cost/1 cost report".into();
+    }
+    if obj.contains_key("renderErrors") || obj.contains_key("framesDir") || obj.contains_key("png") {
+        return "a summary.json file, not a rur-cost/1 cost report".into();
+    }
+    "a JSON object without \"schema\": \"rur-cost/1\" (not a rur cost report)".into()
+}
+
+/// Validates that `value` is a well-formed `rur-cost/1` cost report before comparison.
+pub fn validate_cost_report(value: &Value, role: &str, path: Option<&Path>) -> Result<(), String> {
+    let prefix = match path {
+        Some(p) => format!("{role} ({})", p.display()),
+        None => role.to_string(),
+    };
+    if value.get("schema").and_then(Value::as_str) != Some("rur-cost/1") {
+        return Err(format!("{prefix}: {}", describe_non_cost_report(value)));
+    }
+    let Some(mode) = value.get("mode").and_then(Value::as_str) else {
+        return Err(format!("{prefix}: malformed rur-cost/1 report (missing string \"mode\")"));
+    };
+    if !matches!(mode, "single" | "sequence") {
+        return Err(format!("{prefix}: malformed rur-cost/1 report (unknown mode \"{mode}\")"));
+    }
+    if value.get("status").and_then(Value::as_str).is_none() {
+        return Err(format!("{prefix}: malformed rur-cost/1 report (missing string \"status\")"));
+    }
+    let vp = value.get("viewport").and_then(Value::as_object);
+    let vp_ok = vp.is_some_and(|v| {
+        v.get("width").and_then(Value::as_f64).is_some_and(f64::is_finite)
+            && v.get("height").and_then(Value::as_f64).is_some_and(f64::is_finite)
+            && v.get("scale").and_then(Value::as_f64).is_some_and(f64::is_finite)
+    });
+    if !vp_ok {
+        return Err(format!("{prefix}: malformed rur-cost/1 report (missing numeric viewport width/height/scale)"));
+    }
+    if !value.get("totals").is_some_and(Value::is_object) {
+        return Err(format!("{prefix}: malformed rur-cost/1 report (missing object \"totals\")"));
+    }
+    if value.pointer("/totals/hiddenInShown/complete").and_then(Value::as_bool).is_none() {
+        return Err(format!("{prefix}: malformed rur-cost/1 report (missing boolean \"totals.hiddenInShown.complete\")"));
+    }
+    Ok(())
+}
+
+struct EquivalenceMismatch {
+    field: &'static str,
+    before: Value,
+    after: Value,
+    reason: String,
+    remedy: String,
+}
+
+fn check_compare_equivalence(before: &Value, after: &Value) -> Vec<EquivalenceMismatch> {
+    let mut mismatches = Vec::new();
+
+    let b_status = before["status"].as_str().unwrap_or("");
+    let a_status = after["status"].as_str().unwrap_or("");
+    if b_status != a_status {
+        mismatches.push(EquivalenceMismatch {
+            field: "status",
+            before: json!(b_status),
+            after: json!(a_status),
+            reason: format!("status differs (before=\"{b_status}\", after=\"{a_status}\")"),
+            remedy: "Fix the failing run so both reports have status \"ok\" before comparing.".into(),
+        });
+    } else if b_status != "ok" {
+        mismatches.push(EquivalenceMismatch {
+            field: "status",
+            before: json!(b_status),
+            after: json!(a_status),
+            reason: format!("cannot compare reports with non-ok status (\"{b_status}\")"),
+            remedy: "Fix the failing runs so both reports have status \"ok\" before comparing.".into(),
+        });
+    }
+
+    let b_mode = before["mode"].as_str().unwrap_or("");
+    let a_mode = after["mode"].as_str().unwrap_or("");
+    if b_mode != a_mode {
+        mismatches.push(EquivalenceMismatch {
+            field: "mode",
+            before: json!(b_mode),
+            after: json!(a_mode),
+            reason: format!("mode differs (before=\"{b_mode}\", after=\"{a_mode}\")"),
+            remedy: "Compare two single-moment reports (`rur cost ...`) or two matching sequence reports (`rur cost --from ... --frames ... --fps ...`).".into(),
+        });
+    } else if b_mode == "sequence" {
+        if let (Some(bf), Some(af)) = (
+            before.pointer("/sequence/summary/frameCount").and_then(Value::as_u64),
+            after.pointer("/sequence/summary/frameCount").and_then(Value::as_u64),
+        ) {
+            if bf != af {
+                mismatches.push(EquivalenceMismatch {
+                    field: "sequence.frameCount",
+                    before: json!(bf),
+                    after: json!(af),
+                    reason: format!("sequence frameCount differs (before={bf}, after={af})"),
+                    remedy: "Re-run both sequence arms with the same --from, --frames, and --fps.".into(),
+                });
+            }
+        }
+        if let (Some(bfps), Some(afps)) = (
+            before.pointer("/sequence/summary/fps").and_then(Value::as_f64),
+            after.pointer("/sequence/summary/fps").and_then(Value::as_f64),
+        ) {
+            if (bfps - afps).abs() > 1e-6 {
+                mismatches.push(EquivalenceMismatch {
+                    field: "sequence.fps",
+                    before: json!(bfps),
+                    after: json!(afps),
+                    reason: format!("sequence fps differs (before={bfps}, after={afps})"),
+                    remedy: "Re-run both sequence arms with the same --fps.".into(),
+                });
+            }
+        }
+    }
+
+    let b_complete = before.pointer("/totals/hiddenInShown/complete").and_then(Value::as_bool).unwrap_or(false);
+    let a_complete = after.pointer("/totals/hiddenInShown/complete").and_then(Value::as_bool).unwrap_or(false);
+    let b_input = before.get("input").and_then(Value::as_str).unwrap_or(if b_complete { "live" } else { "scene" });
+    let a_input = after.get("input").and_then(Value::as_str).unwrap_or(if a_complete { "live" } else { "scene" });
+    if b_input != a_input || b_complete != a_complete {
+        mismatches.push(EquivalenceMismatch {
+            field: "hiddenInShown.complete",
+            before: json!({"input": b_input, "complete": b_complete}),
+            after: json!({"input": a_input, "complete": a_complete}),
+            reason: format!(
+                "input mode / hiddenInShown.complete differs (before: input=\"{b_input}\" complete={b_complete}, after: input=\"{a_input}\" complete={a_complete})"
+            ),
+            remedy: "Run both arms live (`rur cost --story/--fixture/--module/--model ...`) or both from saved scenes (`rur cost --scene ...`).".into(),
+        });
+    }
+
+    let bw = before.pointer("/viewport/width").and_then(Value::as_f64).unwrap_or(0.0);
+    let bh = before.pointer("/viewport/height").and_then(Value::as_f64).unwrap_or(0.0);
+    let aw = after.pointer("/viewport/width").and_then(Value::as_f64).unwrap_or(0.0);
+    let ah = after.pointer("/viewport/height").and_then(Value::as_f64).unwrap_or(0.0);
+    if (bw - aw).abs() > 1e-6 || (bh - ah).abs() > 1e-6 {
+        mismatches.push(EquivalenceMismatch {
+            field: "viewport",
+            before: json!(format!("{bw}x{bh}")),
+            after: json!(format!("{aw}x{ah}")),
+            reason: format!("viewport differs (before={bw}x{bh}, after={aw}x{ah})"),
+            remedy: "Re-run both arms with the same --viewport WxH.".into(),
+        });
+    }
+
+    let bs = before.pointer("/viewport/scale").and_then(Value::as_f64).unwrap_or(0.0);
+    let as_ = after.pointer("/viewport/scale").and_then(Value::as_f64).unwrap_or(0.0);
+    if (bs - as_).abs() > 1e-6 {
+        mismatches.push(EquivalenceMismatch {
+            field: "scale",
+            before: json!(bs),
+            after: json!(as_),
+            reason: format!("scale differs (before={bs}, after={as_})"),
+            remedy: "Re-run both arms with the same --scale S.".into(),
+        });
+    }
+
+    mismatches
+}
+
 /// Deterministic A/B comparison between two `rur-cost/1` reports (`rrr-ab/1`).
-pub fn compare_reports(before: &Value, after: &Value) -> Value {
+/// Rejects non-cost-report inputs with `Err` and refuses incomparable arms with `verdict: "refused"`.
+pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
+    validate_cost_report(before, "before", None)?;
+    validate_cost_report(after, "after", None)?;
+
+    let checks = json!(["schema", "status", "mode", "input", "hiddenInShown.complete", "viewport", "scale"]);
+    let mismatches = check_compare_equivalence(before, after);
+    if !mismatches.is_empty() {
+        let reasons: Vec<String> = mismatches.iter().map(|m| m.reason.clone()).collect();
+        let mut remedies: Vec<String> = Vec::new();
+        for m in &mismatches {
+            if !remedies.contains(&m.remedy) {
+                remedies.push(m.remedy.clone());
+            }
+        }
+        let items: Vec<Value> = mismatches
+            .iter()
+            .map(|m| {
+                json!({
+                    "field": m.field,
+                    "before": m.before,
+                    "after": m.after,
+                    "reason": m.reason,
+                    "remedy": m.remedy,
+                })
+            })
+            .collect();
+        return Ok(sort_json(json!({
+            "schema": "rrr-ab/1",
+            "verdict": "refused",
+            "equivalence": {
+                "passed": false,
+                "checks": checks,
+                "mismatches": items,
+            },
+            "reason": reasons.join("; "),
+            "remedy": remedies.join(" "),
+        })));
+    }
     const COUNT_KEYS: [&str; 12] = [
         "screenGuis",
         "disabledScreenGuis",
@@ -1428,9 +1642,13 @@ pub fn compare_reports(before: &Value, after: &Value) -> Value {
         }
     }
 
-    sort_json(json!({
+    Ok(sort_json(json!({
         "schema": "rrr-ab/1",
         "verdict": verdict,
+        "equivalence": {
+            "passed": true,
+            "checks": checks,
+        },
         "measurementNoise": 0.0,
         "counts": {
             "before": before_counts,
@@ -1448,7 +1666,7 @@ pub fn compare_reports(before: &Value, after: &Value) -> Value {
         },
         "screenGuiMovers": movers,
         "unmodeled": unmodeled_list(),
-    }))
+    })))
 }
 
 /// Writes a deterministic sorted JSON cost report to `path`.
@@ -1881,15 +2099,33 @@ fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
         let after_path = resolve_cost_file(&context.resolve(&args.positional[2]));
         let before = read_json_file(&before_path)?;
         let after = read_json_file(&after_path)?;
-        let diff = compare_reports(&before, &after);
+        validate_cost_report(&before, "before", Some(&before_path)).map_err(Failure::Error)?;
+        validate_cost_report(&after, "after", Some(&after_path)).map_err(Failure::Error)?;
+        let diff = compare_reports(&before, &after).map_err(Failure::Error)?;
+        let refused = diff["verdict"].as_str() == Some("refused");
         if args.value("--out").is_some() {
             let out = resolve_output_file(&context, &args, "cost-compare", "compare.json");
             write_json_file(&out, &diff)?;
-            eprintln!("rur cost compare: {} -> {}", diff["verdict"].as_str().unwrap_or("?"), out.display());
+            if refused {
+                eprintln!(
+                    "rur cost compare: refused — {} | Remedy: {} -> {}",
+                    diff["reason"].as_str().unwrap_or("incomparable reports"),
+                    diff["remedy"].as_str().unwrap_or(""),
+                    out.display()
+                );
+            } else {
+                eprintln!("rur cost compare: {} -> {}", diff["verdict"].as_str().unwrap_or("?"), out.display());
+            }
+        } else if refused {
+            eprintln!(
+                "rur cost compare: refused — {} | Remedy: {}",
+                diff["reason"].as_str().unwrap_or("incomparable reports"),
+                diff["remedy"].as_str().unwrap_or("")
+            );
         } else {
             eprintln!("rur cost compare: {}", diff["verdict"].as_str().unwrap_or("?"));
         }
-        return Ok((diff, args.truthy("--json"), false));
+        return Ok((diff, args.truthy("--json"), refused));
     }
 
     let is_sequence = ["--from", "--to", "--frames", "--duration", "--fps"].iter().any(|k| args.present(k));
@@ -1962,16 +2198,27 @@ fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
     if let Some(before_arg) = args.value("--compare") {
         let before_path = resolve_cost_file(&context.resolve(&before_arg));
         let before = read_json_file(&before_path)?;
-        let diff = compare_reports(&before, &report);
+        validate_cost_report(&before, "before", Some(&before_path)).map_err(Failure::Error)?;
+        let diff = compare_reports(&before, &report).map_err(Failure::Error)?;
+        let refused = diff["verdict"].as_str() == Some("refused");
         if let Some(parent) = dest.parent() {
             let cmp_path = parent.join("compare.json");
             write_json_file(&cmp_path, &diff)?;
-            eprintln!("rur cost compare: {} -> {}", diff["verdict"].as_str().unwrap_or("?"), cmp_path.display());
+            if refused {
+                eprintln!(
+                    "rur cost compare: refused — {} | Remedy: {} -> {}",
+                    diff["reason"].as_str().unwrap_or("incomparable reports"),
+                    diff["remedy"].as_str().unwrap_or(""),
+                    cmp_path.display()
+                );
+            } else {
+                eprintln!("rur cost compare: {} -> {}", diff["verdict"].as_str().unwrap_or("?"), cmp_path.display());
+            }
         }
         return Ok((
             sort_json(json!({ "cost": report, "comparison": diff })),
             args.truthy("--json"),
-            failed,
+            failed || refused,
         ));
     }
 
@@ -2134,46 +2381,119 @@ mod tests {
         }
     }
 
-    #[test]
-    fn compare_reports_classifies_improvements_and_regressions() {
-        let before = json!({
-            "totals": {
-                "screenGuis": 1, "disabledScreenGuis": 0, "drawnNodes": 10, "quads": 10,
-                "glyphQuads": 20, "drawCalls": 6, "batchBreaks": 5,
-                "canvasGroupTargets": 2, "canvasRtBytes": 400000, "canvasRtSwitches": 4,
-                "screenOverdrawViewports": 0.5, "offscreenOverdrawViewports": 0.2,
-                "hiddenInShown": {"guiObjects": 10}
+    fn sample_cost_report(
+        mode: &str,
+        input: &str,
+        status: &str,
+        width: f64,
+        height: f64,
+        scale: f64,
+        complete: bool,
+        quads: u64,
+        canvas_rt_bytes: u64,
+        hidden_gui: u64,
+    ) -> Value {
+        json!({
+            "schema": "rur-cost/1",
+            "status": status,
+            "mode": mode,
+            "input": input,
+            "viewport": {
+                "width": width,
+                "height": height,
+                "scale": scale,
+                "physicalWidth": (width * scale).round() as u32,
+                "physicalHeight": (height * scale).round() as u32,
             },
-            "layout": {"passes": 1, "computed": 10, "stored": 10, "moved": 0, "scrollMoved": 0},
+            "totals": {
+                "screenGuis": 1, "disabledScreenGuis": 0, "drawnNodes": quads, "quads": quads,
+                "glyphQuads": 20, "drawCalls": 6, "batchBreaks": 5,
+                "canvasGroupTargets": if canvas_rt_bytes > 0 { 1 } else { 0 },
+                "canvasRtBytes": canvas_rt_bytes, "canvasRtSwitches": if canvas_rt_bytes > 0 { 2 } else { 0 },
+                "screenOverdrawViewports": 0.5, "offscreenOverdrawViewports": 0.2,
+                "hiddenInShown": {"complete": complete, "roots": if hidden_gui > 0 { 1 } else { 0 }, "guiObjects": hidden_gui, "instances": hidden_gui}
+            },
+            "layout": {"passes": 1, "computed": quads, "stored": quads, "moved": 0, "scrollMoved": 0},
             "predicted": {
                 "desktop-ref": {"layoutCpuMs": {"ms": 0.005}},
                 "phone-mid": {"layoutCpuMs": {"ms": 0.015}}
             },
-            "screenGuis": [{"name": "Hud", "quads": 10, "glyphQuads": 20, "batchBreaks": 5, "canvasRtBytes": 400000, "screenOverdrawViewports": 0.5, "hiddenGuiObjects": 10}]
-        });
-        let after = json!({
-            "totals": {
-                "screenGuis": 1, "disabledScreenGuis": 0, "drawnNodes": 8, "quads": 8,
-                "glyphQuads": 20, "drawCalls": 4, "batchBreaks": 3,
-                "canvasGroupTargets": 1, "canvasRtBytes": 200000, "canvasRtSwitches": 2,
-                "screenOverdrawViewports": 0.4, "offscreenOverdrawViewports": 0.1,
-                "hiddenInShown": {"guiObjects": 0}
-            },
-            "layout": {"passes": 1, "computed": 8, "stored": 8, "moved": 0, "scrollMoved": 0},
-            "predicted": {
-                "desktop-ref": {"layoutCpuMs": {"ms": 0.004}},
-                "phone-mid": {"layoutCpuMs": {"ms": 0.012}}
-            },
-            "screenGuis": [{"name": "Hud", "quads": 8, "glyphQuads": 20, "batchBreaks": 3, "canvasRtBytes": 200000, "screenOverdrawViewports": 0.4, "hiddenGuiObjects": 0}]
-        });
-        let diff = compare_reports(&before, &after);
+            "screenGuis": [{"name": "Hud", "path": "PlayerGui.Hud", "quads": quads, "glyphQuads": 20, "batchBreaks": 5, "canvasRtBytes": canvas_rt_bytes, "screenOverdrawViewports": 0.5, "hiddenGuiObjects": hidden_gui}]
+        })
+    }
+
+    #[test]
+    fn compare_reports_classifies_improvements_and_regressions() {
+        let before = sample_cost_report("single", "live", "ok", 1920.0, 1080.0, 1.5, true, 10, 400_000, 10);
+        let after = sample_cost_report("single", "live", "ok", 1920.0, 1080.0, 1.5, true, 8, 200_000, 0);
+        let diff = compare_reports(&before, &after).unwrap();
         assert_eq!(diff["schema"], "rrr-ab/1");
         assert_eq!(diff["verdict"], "improved");
+        assert_eq!(diff["equivalence"]["passed"], true);
         assert_eq!(diff["measurementNoise"], 0.0);
-        assert_eq!(diff["counts"]["delta"]["canvasRtBytes"], -200000.0);
-        assert_eq!(diff["counts"]["delta"]["batchBreaks"], -2.0);
+        assert_eq!(diff["counts"]["delta"]["canvasRtBytes"], -200_000.0);
         assert_eq!(diff["counts"]["delta"]["hiddenGuiObjects"], -10.0);
         assert_eq!(diff["screenGuiMovers"].as_array().unwrap().len(), 1);
+
+        let regressed = compare_reports(&after, &before).unwrap();
+        assert_eq!(regressed["verdict"], "regressed");
+        assert_eq!(regressed["equivalence"]["passed"], true);
+        assert_eq!(regressed["counts"]["delta"]["canvasRtBytes"], 200_000.0);
+    }
+
+    #[test]
+    fn compare_reports_rejects_non_cost_files_and_refuses_incomparable_arms() {
+        let live_single = sample_cost_report("single", "live", "ok", 1920.0, 1080.0, 1.5, true, 10, 0, 6);
+        let scene_single = sample_cost_report("single", "scene", "ok", 1920.0, 1080.0, 1.5, false, 10, 0, 2);
+        let live_seq = sample_cost_report("sequence", "live", "ok", 1920.0, 1080.0, 1.5, true, 10, 0, 6);
+        let diff_vp = sample_cost_report("single", "live", "ok", 1280.0, 720.0, 1.5, true, 10, 0, 6);
+        let diff_scale = sample_cost_report("single", "live", "ok", 1920.0, 1080.0, 1.0, true, 10, 0, 6);
+        let err_rep = sample_cost_report("single", "live", "error", 1920.0, 1080.0, 1.5, true, 0, 0, 0);
+
+        // 1. scene.json passed as a cost report -> error naming scene.json
+        let scene_json = json!({"viewport": {"width": 800, "height": 600, "scale": 1}, "nodes": [], "layers": []});
+        let err = compare_reports(&scene_json, &live_single).unwrap_err();
+        assert!(err.contains("scene.json"), "expected scene.json error, got: {err}");
+
+        // 2. compare diff report (rrr-ab/1) or arbitrary JSON -> error naming what it is
+        let cmp_json = json!({"schema": "rrr-ab/1", "verdict": "unchanged"});
+        let err_cmp = compare_reports(&live_single, &cmp_json).unwrap_err();
+        assert!(err_cmp.contains("rrr-ab/1"), "expected rrr-ab/1 error, got: {err_cmp}");
+        let err_obj = compare_reports(&json!({"hello": 1}), &live_single).unwrap_err();
+        assert!(err_obj.contains("rur-cost/1"), "expected missing schema error, got: {err_obj}");
+
+        // 3. Live vs --scene -> refused on hiddenInShown.complete / input
+        let ref_ls = compare_reports(&live_single, &scene_single).unwrap();
+        assert_eq!(ref_ls["verdict"], "refused");
+        assert_eq!(ref_ls["equivalence"]["passed"], false);
+        assert!(ref_ls["reason"].as_str().unwrap().contains("hiddenInShown.complete"));
+        assert!(ref_ls["remedy"].as_str().unwrap().contains("--scene"));
+
+        // 4. Single vs sequence -> refused on mode
+        let ref_ss = compare_reports(&live_single, &live_seq).unwrap();
+        assert_eq!(ref_ss["verdict"], "refused");
+        assert!(ref_ss["reason"].as_str().unwrap().contains("mode"));
+        assert!(ref_ss["remedy"].as_str().unwrap().contains("--from"));
+
+        // 5. Viewport mismatch -> refused on viewport
+        let ref_vp = compare_reports(&live_single, &diff_vp).unwrap();
+        assert_eq!(ref_vp["verdict"], "refused");
+        assert!(ref_vp["reason"].as_str().unwrap().contains("viewport"));
+        assert!(ref_vp["remedy"].as_str().unwrap().contains("--viewport"));
+
+        // 6. Scale mismatch -> refused on scale
+        let ref_sc = compare_reports(&live_single, &diff_scale).unwrap();
+        assert_eq!(ref_sc["verdict"], "refused");
+        assert!(ref_sc["reason"].as_str().unwrap().contains("scale"));
+        assert!(ref_sc["remedy"].as_str().unwrap().contains("--scale"));
+
+        // 7. Status mismatch or both error -> refused on status
+        let ref_st = compare_reports(&live_single, &err_rep).unwrap();
+        assert_eq!(ref_st["verdict"], "refused");
+        assert!(ref_st["reason"].as_str().unwrap().contains("status"));
+        let ref_both_err = compare_reports(&err_rep, &err_rep).unwrap();
+        assert_eq!(ref_both_err["verdict"], "refused");
+        assert!(ref_both_err["reason"].as_str().unwrap().contains("non-ok"));
     }
 
     #[test]

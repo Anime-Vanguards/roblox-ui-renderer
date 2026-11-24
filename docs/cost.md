@@ -86,9 +86,13 @@ In sequence mode (`rur cost --from/--to/--frames/--duration/--fps` or `rur seque
 
 ## A/B comparison (`rur cost compare`)
 
-`rur cost compare <before> <after>` outputs a deterministic `rrr-ab/1` report with:
+`rur cost compare <before> <after>` runs an **equivalence gate** before emitting any verdict:
 
-- `verdict`: `improved`, `regressed`, `mixed`, or `unchanged` (with `measurementNoise: 0.0`).
-- `counts`: `before`, `after`, and `delta` across draw calls, batch breaks, quads, glyph quads, CanvasGroup RT bytes/targets/switches, screen/offscreen overdraw, and hidden-in-shown `GuiObject`s.
-- `layout` and `predicted`: before/after/delta layout counters and calibrated layout CPU ms.
-- `screenGuiMovers`: per-`ScreenGui` deltas for every layer whose counts changed.
+- **Input validation:** Both inputs must be well-formed `rur-cost/1` cost reports. Passing a non-cost file (such as `scene.json`, `summary.json`, `trace.json`, or a previous `rrr-ab/1` diff) exits non-zero with an error naming what the file is and what to run instead.
+- **Equivalence checks:** `schema`, `status` (both `"ok"`), `mode` (`single` vs. `sequence`, plus matching `frameCount` and `fps` for sequences), `input` (`live` vs. `scene`) and `totals.hiddenInShown.complete`, `viewport` (`width` and `height`), and `scale`. Any mismatch returns `verdict: "refused"` with `equivalence.passed: false`, lists every mismatch and remediation command, and exits non-zero.
+- **Comparable arms (`rrr-ab/1`):**
+  - `verdict`: `improved`, `regressed`, `mixed`, or `unchanged` (with `measurementNoise: 0.0`).
+  - `equivalence`: `{ "passed": true, "checks": [...] }`.
+  - `counts`: `before`, `after`, and `delta` across draw calls, batch breaks, quads, glyph quads, CanvasGroup RT bytes/targets/switches, screen/offscreen overdraw, and hidden-in-shown `GuiObject`s.
+  - `layout` and `predicted`: before/after/delta layout counters and calibrated layout CPU ms.
+  - `screenGuiMovers`: per-`ScreenGui` deltas for every layer whose counts changed.
