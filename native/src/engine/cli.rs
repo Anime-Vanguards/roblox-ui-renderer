@@ -843,6 +843,44 @@ pub fn run_once(args: &Args) -> Result<SceneOutput, String> {
     run_once_with(args, |_| {})
 }
 
+/// A one-shot run with the final layout-pass counters and live-DOM hidden-in-shown accounting (`rur cost`).
+#[cfg(feature = "desktop")]
+pub struct CostRunOutput {
+    pub scene: SceneOutput,
+    pub layout: super::layout::Stats,
+    pub dom_hidden: crate::cost::DomHiddenSummary,
+}
+
+/// [`run_once`] for `rur cost`: also captures the deterministic full layout-pass counters and walks
+/// the live DOM under enabled ScreenGuis to count `Visible = false` subtrees before teardown.
+#[cfg(feature = "desktop")]
+pub fn run_once_with_cost(args: &Args) -> Result<CostRunOutput, String> {
+    let started = Instant::now();
+    if let Some(spec) = &args.actions {
+        story::read_actions(spec)?;
+    }
+    let prepared = prepare(args)?;
+    let spec = project_spec(args, &prepared)?;
+    let target = prepared.target;
+    let server = loopback_server(args, &prepared, &spec)?;
+    let engine = story_engine(&prepared, &server)?;
+    let lua = Lua::new();
+    interpret(&lua, &engine);
+    let result = (|| {
+        let project = mount_story_project(&lua, &engine, args, &spec, started, server)?;
+        let source = source_of(args);
+        let (mounted, exec_start) = mount_and_run(&lua, &engine, &project, args, source.as_ref(), target)?;
+        let layout_before = super::layout::stats_snapshot(&engine);
+        let scene = scene_output(&engine, args, &project, &mounted, source.as_ref(), exec_start)?;
+        let layout = super::layout::stats_snapshot(&engine).delta_since(&layout_before);
+        let dom_hidden = crate::cost::collect_dom_hidden(&engine, &mounted.roots);
+        Ok(CostRunOutput { scene, layout, dom_hidden })
+    })();
+    drop(lua);
+    engine.teardown();
+    result
+}
+
 /// [`run_once`], with `ready` given the story's engine before anything mounts in it (a test gives it fonts of its own)
 fn run_once_with(args: &Args, ready: impl FnOnce(&Engine)) -> Result<SceneOutput, String> {
     let started = Instant::now();
@@ -1386,6 +1424,8 @@ pub struct SequenceSpec {
     pub from: f64,
     pub frames: u32,
     pub fps: f64,
+    /// Collect per-frame `Layout.Stats` deltas and live-DOM hidden-in-shown counts (`rur cost`, `rur sequence --cost`)
+    pub collect_cost: bool,
 }
 
 /// One captured moment of a sequence: the session's reply (the first, "ready", holds the whole scene and
@@ -1394,6 +1434,9 @@ pub struct SequenceFrame {
     pub index: u32,
     pub time: f64,
     pub reply: Json,
+    pub layout: super::layout::Stats,
+    #[cfg(feature = "desktop")]
+    pub dom_hidden: Option<crate::cost::DomHiddenSummary>,
 }
 
 /// What a sequence's engine half sends its draw half, in order: every frame, then the end
@@ -1428,6 +1471,7 @@ fn run_sequence(
         return Err(format!("a sequence needs frames (got {}) and a positive fps (got {})", spec.frames, spec.fps));
     }
     let run_started = Instant::now();
+    let layout_start = super::layout::stats_snapshot(engine);
     let source = source_of(args);
     let mut mounted = mount_story(lua, engine, &project, args, source.as_ref(), target)?;
     // (a profile's phase from here: the frames, apart from the mount, as `ree run` marks them)
@@ -1458,8 +1502,18 @@ fn run_sequence(
     session.transparent = args.transparent;
     session.run_time = run_started.elapsed().as_secs_f64();
     let ready = session.ready(lua).map_err(lua_error)?;
+    let layout_0 = super::layout::stats_snapshot(engine).delta_since(&layout_start);
+    #[cfg(feature = "desktop")]
+    let dom_hidden_0 = spec.collect_cost.then(|| crate::cost::collect_dom_hidden(engine, &session.story.roots));
     let now = |engine: &Rc<Engine>| engine.state.borrow().sched.now;
-    if !sink(SequenceMessage::Frame(SequenceFrame { index: 0, time: now(engine), reply: ready })) {
+    if !sink(SequenceMessage::Frame(SequenceFrame {
+        index: 0,
+        time: now(engine),
+        reply: ready,
+        layout: layout_0,
+        #[cfg(feature = "desktop")]
+        dom_hidden: dom_hidden_0,
+    })) {
         return Ok(());
     }
     // The frames' own work (stepping and capturing), apart from the time the drawing kept them waiting
@@ -1468,6 +1522,7 @@ fn run_sequence(
     for index in 1..spec.frames {
         let until = moment(index);
         let last = index + 1 == spec.frames;
+        let layout_before = super::layout::stats_snapshot(engine);
         let steps_before = engine.state.borrow().sched.frame;
         let result = if whole {
             timeline.advance(lua, engine, until, last, &mut story::input_dispatch, &mut whole_frames)
@@ -1489,8 +1544,20 @@ fn run_sequence(
         }
         let steps = engine.state.borrow().sched.frame.saturating_sub(steps_before) as u32;
         let reply = session.capture(lua, steps);
+        let layout_delta = super::layout::stats_snapshot(engine).delta_since(&layout_before);
+        let unchanged = reply["unchanged"] == true;
+        #[cfg(feature = "desktop")]
+        let dom_hidden = (spec.collect_cost && !unchanged)
+            .then(|| crate::cost::collect_dom_hidden(engine, &session.story.roots));
         let sent = Instant::now();
-        if !sink(SequenceMessage::Frame(SequenceFrame { index, time: now(engine), reply })) {
+        if !sink(SequenceMessage::Frame(SequenceFrame {
+            index,
+            time: now(engine),
+            reply,
+            layout: layout_delta,
+            #[cfg(feature = "desktop")]
+            dom_hidden,
+        })) {
             return Ok(());
         }
         blocked += sent.elapsed();

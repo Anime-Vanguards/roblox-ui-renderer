@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub use install::{displayed_roots, ensure, ensure_with_state, install, invalidate, mark_changed, pages, update_all};
+pub use install::{displayed_roots, ensure, ensure_with_state, install, invalidate, mark_changed, pages, stats_snapshot, update_all};
 pub use record::{Rect, Record, ScrollBars, TextInfo, Transform, absolute_position};
 
 use crate::engine::GuiEngine;
@@ -232,7 +232,7 @@ pub(crate) struct Scratch {
 }
 
 /// `Layout.Stats` (RUR_LAYOUT_STATS=1 prints them after every UpdateAll that ran a pass).
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Stats {
     pub time: f64,
     pub passes: u64,
@@ -245,6 +245,36 @@ pub struct Stats {
     pub texts: u64,
     /// Records a scroll moved (`Pass::moved` while pending scrolls are applied)
     pub scroll_moved: u64,
+}
+
+impl Stats {
+    pub fn add(&mut self, other: &Stats) {
+        self.time += other.time;
+        self.passes += other.passes;
+        self.computed += other.computed;
+        self.memo += other.memo;
+        self.measures += other.measures;
+        self.stored += other.stored;
+        self.skipped += other.skipped;
+        self.moved += other.moved;
+        self.texts += other.texts;
+        self.scroll_moved += other.scroll_moved;
+    }
+
+    pub fn delta_since(&self, before: &Stats) -> Stats {
+        Stats {
+            time: (self.time - before.time).max(0.0),
+            passes: self.passes.saturating_sub(before.passes),
+            computed: self.computed.saturating_sub(before.computed),
+            memo: self.memo.saturating_sub(before.memo),
+            measures: self.measures.saturating_sub(before.measures),
+            stored: self.stored.saturating_sub(before.stored),
+            skipped: self.skipped.saturating_sub(before.skipped),
+            moved: self.moved.saturating_sub(before.moved),
+            texts: self.texts.saturating_sub(before.texts),
+            scroll_moved: self.scroll_moved.saturating_sub(before.scroll_moved),
+        }
+    }
 }
 
 /// The layout's persistent state (the module-level tables of runtime/layout/init.luau).
@@ -277,6 +307,8 @@ pub struct Layout {
     carry_capture: Option<usize>,
     carry_apply: Option<usize>,
     pub stats: Stats,
+    /// Counters already flushed by `print_stats` so [`Self::total_stats`] stays monotonic
+    cumulative: Stats,
     pub print_stats: bool,
     /// The layout clock at the frame's layout point (`mark_frame_layout`): a tree whose last change is later has changed since a
     /// client laid it out, and the read that lays it out pays the pass (install.rs `ensure`)
@@ -326,6 +358,7 @@ impl Layout {
             carry_capture: None,
             carry_apply: None,
             stats: Stats::default(),
+            cumulative: Stats::default(),
             frame_layout_clock: 0,
             scroll_marks: FxHashMap::default(),
             scroll_seq: 0,
@@ -343,6 +376,13 @@ impl Layout {
     #[inline]
     pub fn record(&self, id: InstanceId) -> Option<&Record> {
         self.records.get(id)
+    }
+
+    /// Monotonic lifetime layout pass counters (unaffected by `RUR_LAYOUT_STATS=1` resets)
+    pub fn total_stats(&self) -> Stats {
+        let mut total = self.cumulative;
+        total.add(&self.stats);
+        total
     }
 
     /// Stored (records, size memos, sticky texts) (diagnostics)

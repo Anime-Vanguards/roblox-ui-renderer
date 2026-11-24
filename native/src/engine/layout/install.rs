@@ -169,9 +169,15 @@ pub fn update_all(engine: &Engine) {
                 stats.moved,
                 stats.texts
             );
+            pass.l.cumulative.add(&pass.l.stats);
             pass.l.stats = Default::default();
         }
     });
+}
+
+/// Monotonic lifetime layout pass counters (unaffected by `RUR_LAYOUT_STATS=1` resets).
+pub fn stats_snapshot(engine: &Engine) -> super::Stats {
+    engine.layout().borrow().as_ref().map(|layout| layout.total_stats()).unwrap_or_default()
 }
 
 /// The LayerCollectors that are displayed (`Pass::displayed_roots`), in draw order.

@@ -54,6 +54,8 @@ pub struct SequenceOutput {
     pub scenes: bool,
     /// video.mp4 and video-quarter.mp4 (when ffmpeg is there)
     pub video: bool,
+    /// cost.json: deterministic per-frame Roblox UI cost and layout churn (`rur sequence --cost`)
+    pub cost: bool,
     /// No downloads: images and fonts from the caches only
     pub offline: bool,
 }
@@ -119,9 +121,10 @@ pub fn parse_options(value: &Value, offline: bool) -> Result<(SequenceSpec, Sequ
     let crop = value.get("crop").and_then(Value::as_str).filter(|text| !text.trim().is_empty()).map(Crop::parse);
     let pad = number("pad")?.unwrap_or(0.0).max(0.0);
     let flag = |key: &str, default: bool| value.get(key).and_then(Value::as_bool).unwrap_or(default);
+    let cost = flag("cost", false);
     Ok((
-        SequenceSpec { from, frames: frames as u32, fps },
-        SequenceOutput { fps, crop, pad, png: flag("png", true), scenes: flag("scenes", false), video: flag("video", true), offline },
+        SequenceSpec { from, frames: frames as u32, fps, collect_cost: cost },
+        SequenceOutput { fps, crop, pad, png: flag("png", true), scenes: flag("scenes", false), video: flag("video", true), cost, offline },
     ))
 }
 
@@ -616,6 +619,7 @@ pub fn draw_frames(
     let mut scene = SceneStore::default();
     let mut presentation = ScrollPresentation::default();
     let mut trace = Trace::default();
+    let mut cost_acc = options.cost.then(|| crate::cost::SequenceAccumulator::new(options.fps));
     let mut writers: Option<Writers> = None;
     let mut crop: Option<([u32; 4], Option<String>)> = None;
     let mut resolved: std::collections::HashSet<String> = Default::default();
@@ -649,12 +653,24 @@ pub fn draw_frames(
         };
         let drawn_at = Instant::now();
         waits.push(drawn_at.duration_since(waited_at).as_secs_f64());
-        let SequenceFrame { index, time, mut reply } = frame;
+        let SequenceFrame { index, time, mut reply, layout, dom_hidden } = frame;
         if reply["type"] == "error" {
             bail!("frame {index}: {}", reply["message"].as_str().unwrap_or("the engine failed"));
         }
         let still = index > 0 && reply["unchanged"] == true;
-        scene.apply_owned(&mut reply).map_err(|error| anyhow!("frame {index}: {error}"))?;
+        let outcome = scene.apply_owned(&mut reply).map_err(|error| anyhow!("frame {index}: {error}"))?;
+        if let Some(acc) = cost_acc.as_mut() {
+            acc.record_frame(
+                index,
+                time,
+                still,
+                outcome.changed_nodes.len(),
+                outcome.removed_nodes.len(),
+                &scene,
+                layout,
+                dom_hidden,
+            );
+        }
         if index == 0 {
             assets.begin_scene(&scene);
             presentation.update(&scene, None);
@@ -747,14 +763,28 @@ pub fn draw_frames(
         sorted.len()
     };
     let assets_missing = assets.diagnostics().to_vec();
+    let status_str = end["status"]
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| ready.pointer("/delta/header/status").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| "ok".into());
+    let cost_file = if let Some(acc) = cost_acc {
+        let report = acc.finish(Some(&status_str));
+        let path = out.join("cost.json");
+        crate::cost::write_report(&path, &report).map_err(|e| anyhow!("writing {}: {e}", path.display()))?;
+        Some(path)
+    } else {
+        None
+    };
     Ok(json!({
-        "status": end["status"].as_str().map(str::to_string).or_else(|| ready.pointer("/delta/header/status").and_then(Value::as_str).map(str::to_string)).unwrap_or_else(|| "ok".into()),
+        "status": status_str,
         "failure": end["failure"],
         "frames": count,
         "fps": options.fps,
         "times": {"first": times.first(), "last": times.last(), "distinct": distinct_times},
         "framesDir": if options.png { Some(out.join("frames")) } else { None },
         "trace": out.join("trace.json"),
+        "cost": cost_file,
         "scenesDir": if options.scenes { Some(out.join("scenes")) } else { None },
         "video": video,
         "crop": {"node": node, "pixels": region, "rect": region.iter().map(|value| f64::from(*value) / scale).collect::<Vec<_>>()},
@@ -863,7 +893,7 @@ mod tests {
     fn a_profiled_sequence_writes_its_profile_before_it_ends() {
         let _profile = one_profile_at_a_time();
         let args = fixture_args(&[]);
-        let spec = SequenceSpec { from: 0.0, frames: 12, fps: 60.0 };
+        let spec = SequenceSpec { from: 0.0, frames: 12, fps: 60.0, collect_cost: false };
         let dir = temp_profile("sequence");
         let config = profiler::Config::new(profiler::Kinds::parse("work,heap,caches").unwrap(), dir.clone());
         let frames = start_fresh_profiled(&args, &spec, Some(config)).unwrap();
@@ -923,11 +953,11 @@ mod tests {
         let args = fixture_args(&[]);
         for (from, fps, frames, first_frame, step) in [(0.0167, 60.0, 8u32, 1u32, 1u32), (0.5, 30.0, 4, 30, 2)] {
             let mut scene = SceneStore::default();
-            let messages = capture(&args, &SequenceSpec { from, frames, fps });
+            let messages = capture(&args, &SequenceSpec { from, frames, fps, collect_cost: false });
             assert_eq!(messages.len(), frames as usize + 1, "every frame, then the end");
             for message in messages {
                 match message {
-                    SequenceMessage::Frame(SequenceFrame { index, time, mut reply }) => {
+                    SequenceMessage::Frame(SequenceFrame { index, time, mut reply, .. }) => {
                         let engine_frame = first_frame + index * step;
                         assert!((time - f64::from(engine_frame) / 60.0).abs() < 1e-9, "frame {index} at {time}");
                         scene.apply_owned(&mut reply).unwrap();
@@ -940,7 +970,7 @@ mod tests {
                 }
             }
         }
-        let times: Vec<f64> = capture(&args, &SequenceSpec { from: 0.0, frames: 5, fps: 144.0 })
+        let times: Vec<f64> = capture(&args, &SequenceSpec { from: 0.0, frames: 5, fps: 144.0, collect_cost: false })
             .into_iter()
             .filter_map(|message| match message {
                 SequenceMessage::Frame(frame) => Some(frame.time),

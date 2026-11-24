@@ -9,6 +9,10 @@ pub mod app;
 pub mod assets;
 #[cfg(feature = "desktop")]
 pub mod catalog;
+/// `rur cost` (`rur-native cost`): deterministic Roblox UI render-cost pass, CanvasGroup RT accounting,
+/// hidden-in-shown DOM accounting, multi-frame layout churn, and calibrated/refused timing estimates
+#[cfg(feature = "desktop")]
+pub mod cost;
 /// Asset downloads, the account and Studio reads (`rur-native assets`); the web build only draws its bundle
 #[cfg(feature = "desktop")]
 pub mod download;

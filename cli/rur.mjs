@@ -5,8 +5,8 @@
 //   rur render --model <file.rbxm|.rbxmx> ...          render a saved instance tree
 //   rur render --module <file.luau> ...                 require a module (function(target) or Instance)
 //   rur sequence --story <file> [--from 0] [--to 4 | --frames 240 | --duration 4] [--fps 60] [--crop <node>|x,y,w,h]
-//             [--pad px] [--no-png] [--no-video] [--scenes]  the story mounted once and captured frame by frame at
-//                                                       exact moments: frames/, trace.json, video.mp4, video-quarter.mp4
+//             [--pad px] [--no-png] [--no-video] [--scenes] [--cost]  the story mounted once and captured frame by frame at
+//                                                       exact moments: frames/, trace.json, video.mp4, video-quarter.mp4, cost.json
 //   rur stories [--filter a|b] [--place <name>|all]     list storybook stories in the project
 //   rur sweep [--filter a|b] [--jobs N] [--timeout s] [--no-png] [--out out/sweep]
 //                                                       render every story (every place), report failures;
@@ -26,6 +26,10 @@
 //   rur native [--story <file>]                         the desktop storybook (native/, wgpu)
 //   rur native --headless --scene <scene.json>           a saved scene to PNG (--batch: many)
 //   rur diff --git-ref <ref> --story <file> [--out dir]  render at <ref> and in the working tree, diff them (rur-native diff)
+//   rur cost --story <file> | --fixture <file> | --scene <scene.json> [--out dir] [--json]
+//             [--all-layers] [--from 0 --frames 60 --fps 60] [--compare <before>]
+//                                                       deterministic Roblox UI draw, CanvasGroup RT, hidden-DOM and layout cost
+//   rur cost compare <before> <after> [--out dir] [--json]  compare two cost.json reports (rur-native cost)
 //   rur record --harness <file.luau> [--place <name>] [--seconds 3] [--fps 60] [--out dir]
 //             [--context <json|file>] [--assets-at <Service.Path>] [--assets <prefix>,...] [--mode play|edit]
 //                                                       run a harness on the project frame by frame and record
@@ -466,6 +470,7 @@ export async function sequenceNative(argv, outDir, options, { offline = false, e
 	if (options.png === false) flags.push("--no-png");
 	if (options.video === false) flags.push("--no-video");
 	if (options.scenes) flags.push("--scenes");
+	if (options.cost) flags.push("--cost");
 	if (offline) flags.push("--offline");
 	return new Promise((resolve, reject) => {
 		const child = spawn(executable, ["sequence", "--dir", outDir, ...flags, ...argv], { cwd: ROOT, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -507,6 +512,7 @@ export async function sequence(args, { service = false, env = process.env } = {}
 	if (args["no-png"]) options.png = false;
 	if (args["no-video"]) options.video = false;
 	if (args.scenes) options.scenes = true;
+	if (args.cost) options.cost = true;
 	const frames = sequenceFrames(options);
 	if (!(frames >= 1 && frames <= 99999)) throw new UsageError(`a sequence takes 1 to 99999 frames (got ${frames}: check --to / --frames / --duration)`);
 	const fps = options.fps === undefined ? 60 : Number(options.fps);
@@ -555,6 +561,7 @@ export async function sequence(args, { service = false, env = process.env } = {}
 		phases: result.phases || {},
 		perFrame: result.perFrame || {},
 	};
+	if (result.cost) summary.cost = result.cost;
 	if (result.profile) summary.profile = result.profile;
 	fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
 	return summary;
@@ -740,8 +747,8 @@ async function main() {
 			return sequence(args, { service: !serviceDisabled() });
 		});
 		if (summary.status === "error") process.exitCode = 2;
-	} else if (command === "sweep" || command === "diff") {
-		// `rur-native sweep` / `rur-native diff` (native/src/sweep.rs, diff.rs): the same arguments, with this checkout as
+	} else if (command === "sweep" || command === "diff" || command === "cost") {
+		// `rur-native sweep` / `rur-native diff` / `rur-native cost` (native/src/sweep.rs, diff.rs, cost.rs): the same arguments, with this checkout as
 		// the renderer; their output, files and exit code are the command's
 		const executable = await ensureEngine();
 		const result = spawnSync(executable, [command, "--repo", ROOT, ...process.argv.slice(3)], { cwd: process.cwd(), stdio: "inherit", windowsHide: true });

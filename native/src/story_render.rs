@@ -572,11 +572,12 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
             "--from" | "--to" | "--frames" | "--duration" | "--fps" | "--crop" | "--pad" => {
                 options.insert(key[2..].to_string(), value.map(Value::String).unwrap_or(Value::Null));
             }
-            "--no-png" | "--no-video" | "--scenes" | "--offline" => {
+            "--no-png" | "--no-video" | "--scenes" | "--cost" | "--offline" => {
                 match key {
                     "--no-png" => options.insert("png".into(), Value::Bool(false)),
                     "--no-video" => options.insert("video".into(), Value::Bool(false)),
                     "--scenes" => options.insert("scenes".into(), Value::Bool(true)),
+                    "--cost" => options.insert("cost".into(), Value::Bool(true)),
                     _ => {
                         offline = true;
                         None

@@ -64,6 +64,8 @@ fn main() -> anyhow::Result<()> {
         // ref and in the working tree and compared (diff.rs); `rur sweep` and `rur diff` forward to them
         Some("sweep") => std::process::exit(rur_native::sweep::cli(&argv[2..])),
         Some("diff") => std::process::exit(rur_native::diff::cli(&argv[2..])),
+        // `rur-native cost ...`: deterministic Roblox UI cost accounting and A/B diff (cost.rs); `rur cost` forwards here
+        Some("cost") => std::process::exit(rur_native::cost::cli(&argv[2..])),
         // `rur-native git-ref ...`: a run's sources extracted at a git ref, for `rur render --git-ref` (gitref.rs)
         Some("git-ref") => std::process::exit(rur_native::gitref::cli(&argv[2..])),
         // `rur-native serve ...`: the render service cli/client.mjs starts (serve.rs)
