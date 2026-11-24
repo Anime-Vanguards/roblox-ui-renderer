@@ -1,7 +1,7 @@
 {
 	"entries": {
 		"fast/edit/anim-mount": {
-			"digest": "adefaeb8299cc231bdb4346f72728babcb27a9052567058e32c4e1f9561eda0a",
+			"digest": "84025929acc9772e89e9da0287198de420bc40fc9796d6bd40c0a37db6bf0777",
 			"status": "ok"
 		},
 		"fast/edit/anim-probe-springs": {
@@ -361,7 +361,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
-			"digest": "6528179054ee44925720ef00458e9f62ccd11e0c74fe603ea3978021301adc65",
+			"digest": "6b50e45b4cb862b9ea6918aaa1d0c700f931d7cdeec65817539b76ac8e44665a",
 			"status": "ok"
 		},
 		"fast/edit/rects": {
@@ -1117,7 +1117,7 @@
 			"status": "live"
 		},
 		"fixtures/edit/anim-mount": {
-			"digest": "2584cd446007a3b5d84bfd897b4276df4f6e44f976827d64a1893a77becbb278",
+			"digest": "fd8ff29c03476a12c3123306f1c955b4edb1040d45e9764508a8032bde5abd40",
 			"status": "ok"
 		},
 		"fixtures/edit/anim-probe-springs": {
@@ -1477,7 +1477,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
-			"digest": "3ff98f1fbd9dd89edd03cb6ab50fae9eabdb0fba993c0b6a734c7a7b0eaa74f9",
+			"digest": "58922f5b338cc1329e8bdd0307af035f82cc27320d1df23b781533e24bef5998",
 			"status": "ok"
 		},
 		"fixtures/edit/rects": {
@@ -2221,7 +2221,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/anim-mount": {
-			"digest": "effcb835f2b589f1d50c304aff5bd72d5e5cda23c943df304d30b78be95813ec",
+			"digest": "d60c060c4e6484e8e2139ed380a112f4c5f4de956a8ebc2d3158326488ab6e18",
 			"status": "ok"
 		},
 		"fixtures/play/anim-probe-springs": {
@@ -2541,11 +2541,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-scheduler": {
-			"digest": "762d45d851a8cca633d66daf9744838be425dcd937268f051066c2aae17bf812",
+			"digest": "3aac845275bf6f72929b7c7bc525dc06ee4d9f38301c3821da1db79b87ab7370",
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "e114ad6af5ab348216135e072db719ae273117773e19b5648db9bcdc1b0b7937",
+			"digest": "cbb343b75003272c1e674b2de81ae0d1c216d497b9177bdb7213b49cd8ea4f4b",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
@@ -3313,7 +3313,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-24T19:38:11.849Z",
+	"recorded": "2026-11-24T22:35:35.056Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
