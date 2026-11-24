@@ -10,6 +10,13 @@ node cli/rur.mjs compare --story <file> --viewport 1200x900 --time 1
 node cli/rur.mjs compare --fixture fixtures/corners.luau --viewport 800x480 --time 0.2 --background 20,20,26
 ```
 
+Studio is asked for a story's module where the run's project mounts it, as `rur render` mounts it: below a root
+(`<root>/<Service>/...`: `--roots`, a project's places) or at the instance path a Rojo project (`--rojo`,
+`--project <file.project.json>`, the one found beside the story) or `--mount` gives its folder. A story none of them
+holds is refused before Studio is asked (exit 64). When Studio's side fails (the module is not in that Studio, the
+story or a module it requires raises an error there, no capture comes back), nothing is scored: the reason goes to
+stderr and `rur compare` exits 2 without a report.
+
 ## Outputs and unstable regions
 
 Results write to `out/compare/<name>/`: `studio.png`, `rur/` (standard render), `diff.png`, `side-by-side.png`, and `report.json`:

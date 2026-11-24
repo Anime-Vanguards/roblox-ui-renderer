@@ -13,7 +13,9 @@
 //                                                       exits 1 when a story is not clean (docs/render.md)
 //             [--failed]  re-run the non-clean stories of the last report, [--limit N], [--retries 1],
 //             [--summarize]  rebuild report totals + summary.md without rendering (rur-native sweep)
-//   rur compare --story <file> [--studio <name>]       render in Studio + offline, diff layout & pixels
+//   rur compare --story <file> [--studio <name>]       render in Studio + offline, diff layout & pixels; the story is
+//                                                       asked for where the project mounts it; exits 2 when Studio's
+//                                                       side fails (no report), 64 for a story outside the project
 //   rur doctor [--fix]                                  check the toolchain (--fix: remove build leftovers)
 //   rur clean [--older-than <days>] [--dry-run]         shrink the output root: copied images to hard links,
 //                                                       retired files out; --older-than: stale frames/ and
@@ -742,15 +744,16 @@ async function main() {
 		if (result.error) throw result.error;
 		process.exitCode = result.status ?? 1;
 	} else if (command === "compare") {
-		const { compare, CaptureNeeded } = await import("./compare.mjs");
+		const { compare, CaptureNeeded, StudioFailed } = await import("./compare.mjs");
 		try {
 			await jsonResult(args, () => compare({ ...args, viewport: resolveViewport(args), rootsResolved: projectRoots(args).join(";") }), report => ({ ...report, layout: { ...report.layout, rows: report.layout.rows.slice(0, 15) } }));
 		} catch (error) {
+			// Studio's side failed (the story did not mount there, no capture): exit code 2, no report;
 			// --reuse-only and no reusable Studio capture: exit code 3, nothing else touched
-			if (!(error instanceof CaptureNeeded)) throw error;
+			if (!(error instanceof CaptureNeeded) && !(error instanceof StudioFailed)) throw error;
 			process.stderr.write(`rur compare: ${error.message}
 `);
-			process.exitCode = 3;
+			process.exitCode = error instanceof StudioFailed ? 2 : 3;
 		}
 	} else if (command === "record") {
 		const summary = await jsonResult(args, () => record(args));

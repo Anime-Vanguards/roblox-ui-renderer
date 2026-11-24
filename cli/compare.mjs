@@ -17,20 +17,41 @@ import { assetKeyFromUri, withoutCookie } from "./assets.mjs";
 import { execFileSync } from "node:child_process";
 import { render } from "./rur.mjs";
 import { CLOCK_LUAU, writeClock, clockSummary, withRecordedClock } from "./clock.mjs";
+import { instancePathOf, runMounts } from "./rojo.mjs";
+import { UsageError } from "./actions.mjs";
 
-function storyInstancePath(file, roots) {
-	const normalized = path.resolve(file).replace(/\\/g, "/");
-	for (const root of roots) {
-		const base = path.resolve(root).replace(/\\/g, "/") + "/";
-		if (normalized.toLowerCase().startsWith(base.toLowerCase())) {
-			const relative = normalized.slice(base.length);
-			const parts = relative.split("/");
-			const last = parts.pop().replace(/\.(server|client)?\.?luau?$/i, "").replace(/\.luau$/i, "");
-			if (last !== "init") parts.push(last.replace(/\.lua$/, ""));
-			return parts;
-		}
+// The instance path Studio is asked for a story at: where the run's project mounts the file, as the offline run mounts
+// it (cli/rojo.mjs instancePathOf over the roots and the mounts of --rojo, --project <file.project.json>, the project
+// found beside the story, --mount). A story none of them holds is refused before Studio is asked (render runs such a
+// file as a fixture, which Studio has no module for).
+export function storyInstancePath(file, { roots = [], mounts = [] } = {}) {
+	const parts = instancePathOf(file, { roots, mounts });
+	if (parts) return parts;
+	const held = [...roots.map(root => `root ${path.resolve(root)}`), ...mounts.filter(mount => mount.kind === "mount").map(mount => `${mount.path.replaceAll("/", ".")} = ${mount.value}`)];
+	const listed = held.length ? `${held.slice(0, 6).join("; ")}${held.length > 6 ? `; ${held.length - 6} more` : ""}` : "it has no roots or mounts";
+	throw new UsageError(`compare: ${path.resolve(String(file))} is not in the run's project (${listed}), so Studio has no module of it to mount: name the project that holds it (--rojo <file.project.json>, --mount Service/Name=<dir> or --roots <dir>)`);
+}
+
+// Studio's side of a compare failed: the story did not mount there (its module is missing, it or a module it requires
+// raised an error) or no capture came back. Nothing is scored against that: `rur compare` exits 2 with the reason.
+export class StudioFailed extends Error {}
+
+// The mount script's answer, refused unless the story mounted (`where` names the side, `hint` says what to check when
+// the module is missing there)
+export function checkStudioMount(result, { where = "Studio", source, hint = "is the project synced into that Studio?" } = {}) {
+	if (result && result.status === "ok") return result;
+	const failure = String(result?.failure || `the mount ended with status ${result?.status ?? "(none)"}`);
+	const missing = /^story module not found/.test(failure) && hint ? ` (${hint})` : "";
+	throw new StudioFailed(`${where} could not mount ${source}: ${failure}${missing}; nothing was compared`);
+}
+
+// The mount script's JSON answer, or a failed mount when it returned something else
+function mountAnswer(text) {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return { status: "error", failure: `the mount script returned no result (${String(text).slice(0, 200) || "nothing"})` };
 	}
-	throw new Error(`${file} is not under any project root`);
 }
 
 // Windows display scales tried, in order, when --dpi is not given (1.5 first: the usual one here)
@@ -831,6 +852,7 @@ let calibrationRoots = null;
 
 // rur.json at the project root (the parent of the roots): { "compareProbes": { name: { luau, fresh } } }
 function compareProbes(roots) {
+	if (!roots.length) return {};
 	try {
 		const config = JSON.parse(fs.readFileSync(path.join(path.dirname(path.resolve(roots[0])), "rur.json"), "utf8"));
 		return config && typeof config.compareProbes === "object" ? config.compareProbes : {};
@@ -976,12 +998,12 @@ export async function compare(args) {
 	const background = args.background ? String(args.background).split(",").map(Number) : [46, 46, 46];
 	const time = Number(args.time || 1);
 	const studio = args.studio || DEFAULT_STUDIO;
-	const roots = String(args.rootsResolved).split(";");
+	// The run's roots (cli/rur.mjs projectRoots; none beside a Rojo project or --mount)
+	const roots = args.rootsResolved ? String(args.rootsResolved).split(";").filter(Boolean) : [];
 	const source = args.story || args.model || args.fixture;
 	const name = path.basename(String(source)).replace(/\.(story\.)?luau$|\.rbxmx?$/, "");
 	const backend = "studio";
 	const outDir = path.resolve(args.out || path.join(OUT_DIR, "compare", name));
-	fs.mkdirSync(outDir, { recursive: true });
 	// The report is this run's result or nothing: an earlier one must not outlive a run that stops
 	fs.rmSync(path.join(outDir, "report.json"), { force: true });
 
@@ -990,7 +1012,8 @@ export async function compare(args) {
 	let fixtureSource = null;
 	if (args.model) modelB64 = fs.readFileSync(path.resolve(String(args.model))).toString("base64");
 	else if (args.fixture) fixtureSource = fs.readFileSync(path.resolve(String(args.fixture)), "utf8");
-	else pathParts = storyInstancePath(String(args.story), roots);
+	else pathParts = storyInstancePath(String(args.story), { roots, mounts: runMounts(args, { quiet: true }) });
+	fs.mkdirSync(outDir, { recursive: true });
 
 	// rur.json compareProbes: Luau snippets Studio evaluates before mounting, with the value a fresh session
 	// has. Studio keeps required modules loaded between compares, so a story can inherit state an earlier
@@ -1070,9 +1093,11 @@ export async function compare(args) {
 				restoreFocus(previousFocus);
 				throw error;
 			}
-			const result = JSON.parse(mounted.text);
-			result.textFlag = textFlag;
+			let result;
 			try {
+				// A story that did not mount is not captured (the unmount below still runs)
+				result = checkStudioMount(mountAnswer(mounted.text), { where: "Studio", source: path.basename(String(source)) });
+				result.textFlag = textFlag;
 				if (captureMethod === "engine") {
 					const shot = await captureEngine(Math.ceil(result.viewport[0] * 4), Math.ceil(result.viewport[1] * 4), { studio });
 					fs.writeFileSync(capturePath, PNG.sync.write(shot.png));

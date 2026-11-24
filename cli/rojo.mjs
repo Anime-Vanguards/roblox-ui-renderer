@@ -14,7 +14,8 @@
 // - `{ "optional": path }` is skipped when missing; `$properties`, `$attributes` and
 //   `$ignoreUnknownInstances` are ignored.
 //
-// `--mount Service/Name=<dir|file>` (repeatable, `;`-separated too) adds explicit mounts.
+// `--mount Service/Name=<dir|file>` (repeatable, `;`-separated too) adds explicit mounts. instancePathOf names the
+// instance a run mounts a story file at, for `rur compare` to ask Studio for.
 // native/src/rojo.rs is the same in Rust (`rur-native render --rojo`, and `rur-native rojo-mounts <file>`, which
 // tools/tests/cli.mjs compares with rojoMounts); its reader is the engine's (roblox_engine_emulator::rojo, which
 // `ree run --rojo` uses too), so a rule changes here and in the engine together.
@@ -234,11 +235,11 @@ export function rojoFileOf(args) {
 	return args.rojo && args.rojo !== true ? String(args.rojo) : isRojoProject(args.project) ? String(args.project) : null;
 }
 
-// Every mount of a run: --rojo <file> (or --project <file.project.json>) and --mount entries
-export function runMounts(args, { onPath } = {}) {
+// Every mount of a run: --rojo <file> (or --project <file.project.json>) and --mount entries (`quiet`: rojoMounts')
+export function runMounts(args, { onPath, quiet } = {}) {
 	const mounts = [];
 	const rojo = rojoFileOf(args);
-	if (rojo) mounts.push(...rojoMounts(rojo, { at: args["rojo-at"], onPath }));
+	if (rojo) mounts.push(...rojoMounts(rojo, { at: args["rojo-at"], onPath, quiet }));
 	const explicit = args.mount === undefined || args.mount === true ? [] : (Array.isArray(args.mount) ? args.mount : [args.mount]);
 	for (const item of explicit.flatMap(value => String(value).split(";")).filter(Boolean)) {
 		const index = item.indexOf("=");
@@ -299,6 +300,132 @@ export function detectRojoProject(args, defaultProject) {
 		args.rojo = beside.length === 1 ? beside[0] : found;
 		const mounted = rojoMounts(args.rojo).filter(mount => mount.kind === "mount").map(mount => mount.path.replaceAll("/", "."));
 		return `rur: Rojo project ${args.rojo} (found beside the story; ${why}--rojo picks another): mounted ${mounted.length ? mounted.join(", ") : "nothing"}`;
+	}
+	return null;
+}
+
+// The suffixes of the files the engine mounts as scripts, the first that matches naming one (the emulator's
+// src/project.rs SCRIPT_SUFFIXES)
+const SCRIPT_SUFFIXES = [".server.luau", ".server.lua", ".client.luau", ".client.lua", ".luau", ".lua"];
+
+// The instance name of script file `name` (its name less the suffix: Foo.story.luau is Foo.story), or null for a file
+// the engine doesn't mount as a script
+function scriptName(name) {
+	const lower = name.toLowerCase();
+	const suffix = SCRIPT_SUFFIXES.find(suffix => lower.length > suffix.length && lower.endsWith(suffix));
+	return suffix === undefined ? null : name.slice(0, name.length - suffix.length);
+}
+
+// The parts of `file`'s path below `dir` ([] for `dir` itself), or null when it isn't inside
+function partsBelow(dir, file) {
+	const relative = path.relative(dir, file);
+	if (relative === "") return [];
+	return relative.startsWith("..") || path.isAbsolute(relative) ? null : relative.split(/[/\\]/);
+}
+
+// The names in folder `dir`, lowercased ([] for one that can't be read)
+function lowerNames(dir) {
+	try {
+		return fs.readdirSync(dir).map(name => name.toLowerCase());
+	} catch {
+		return [];
+	}
+}
+
+// Where `target` is when folder `dir`, which holds a default.project.json, mounts as that project (Rojo mounts such a
+// folder as its project "instead of anything else in it"; the engine's nested_project): below its mounts (rojoMounts),
+// placed at `parent` and then the project's `name`, else `name` (`named`: the name the folder mounts under, kept).
+// undefined when the engine mounts the folder as it is (no project there, an unreadable one, a DataModel tree, nested
+// too deep); null when the project doesn't mount `target`.
+function nestedPath(target, dir, parent, name, depth, named) {
+	let file;
+	try {
+		file = fs.readdirSync(dir).find(entry => entry.toLowerCase() === "default.project.json");
+	} catch {
+		// not a folder that can be read
+	}
+	if (!file) return undefined;
+	file = path.join(dir, file);
+	if (depth >= MAX_PROJECT_NESTING || isDataModel(file)) return undefined;
+	let mounts;
+	try {
+		const project = readProject(file);
+		if (!isObject(project) || !isObject(project.tree)) return undefined;
+		const at = [...parent, named || typeof project.name !== "string" ? name : project.name];
+		mounts = rojoMounts(file, { at: at.join("/"), quiet: true });
+	} catch {
+		return undefined;
+	}
+	for (const mount of mounts) {
+		if (mount.kind !== "mount") continue;
+		// (a `$path` of "." is the folder itself, mounted as it is)
+		const found = mountedPath(target, mount.path.split("/"), path.resolve(mount.value), depth + 1, path.resolve(mount.value) === path.resolve(dir));
+		if (found) return found;
+	}
+	return null;
+}
+
+// The instance path of `target` when the engine mounts `value` (a file or folder) at instance path `at` (the emulator's
+// src/project.rs mount_at: a folder at a service gives the service its contents, else it becomes the instance named
+// last), or null when it doesn't mount it there. `plain`: the folder's own default.project.json is not read.
+function mountedPath(target, at, value, depth = 0, plain = false) {
+	const parts = partsBelow(value, target);
+	if (!parts) return null;
+	// A file mounts under its mount's name (never as a service)
+	if (!parts.length) return at.length > 1 ? at : null;
+	// (names starting with a dot are not mounted)
+	if (parts.some(part => part.startsWith("."))) return null;
+	if (at.length > 1 && !plain) {
+		const nested = nestedPath(target, value, at.slice(0, -1), at[at.length - 1], depth, true);
+		if (nested !== undefined) return nested;
+	}
+	const segments = [...at];
+	let dir = value;
+	for (const [index, part] of parts.entries()) {
+		if (index === parts.length - 1) {
+			const name = scriptName(part);
+			const lower = part.toLowerCase();
+			if (name === null) return null;
+			if (!lower.startsWith("init.")) return [...segments, name];
+			// An init script is its folder: the first of init.server.luau, ..., init.lua there (the others, other init.*
+			// files and any at a service's top are not mounted)
+			const names = lowerNames(dir);
+			return segments.length > 1 && SCRIPT_SUFFIXES.map(suffix => `init${suffix}`).find(init => names.includes(init)) === lower ? segments : null;
+		}
+		dir = path.join(dir, part);
+		const nested = nestedPath(target, dir, segments, part, depth, false);
+		if (nested !== undefined) return nested;
+		segments.push(part);
+	}
+	return null;
+}
+
+// The instance path ([names]) the engine mounts script file `file` at in a run with layout roots `roots`
+// (<root>/<Service>/...: --roots, a project's places) and `mounts` (runMounts: a Rojo project, --mount), as the emulator's
+// src/project.rs names what it mounts: a script by its file name less its suffix, an init script as its folder, a folder
+// with a default.project.json as that project, nothing whose name starts with a dot. So `rur compare` asks Studio for
+// the module the offline run requires. The first mount that holds the file wins, then the first root; null when none
+// does (render then runs the file as a fixture of its own).
+export function instancePathOf(file, { roots = [], mounts = [] } = {}) {
+	const resolved = path.resolve(String(file));
+	let real = resolved;
+	try {
+		real = fs.realpathSync.native(resolved);
+	} catch {
+		// a missing file is in no mount
+	}
+	for (const target of new Set([resolved, real])) {
+		for (const mount of mounts) {
+			if (mount.kind !== "mount") continue;
+			const found = mountedPath(target, String(mount.path).split(/[/\\]/).filter(Boolean), path.resolve(mount.value));
+			if (found) return found;
+		}
+		for (const root of roots) {
+			const parts = partsBelow(path.resolve(root), target);
+			if (!parts || parts.length < 2 || !isService(parts[0])) continue;
+			const found = mountedPath(target, [parts[0]], path.join(path.resolve(root), parts[0]));
+			if (found) return found;
+		}
 	}
 	return null;
 }
