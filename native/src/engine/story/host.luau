@@ -205,7 +205,7 @@ function Host.MountStory(Story, Target, IsModule, State)
 			Result.Parent = Target
 		end
 	elseif type(Story) == "table" and Story.story and not Host.NeedsRenderer(Story, State) then
-		local Vide = Story.vide
+		local Vide, Component = Story.vide, Host.MappedStory(Story, State)
 		local Controls = ConvertControls(Story.controls, if Vide then Vide.source else function(Value)
 			return Value
 		end)
@@ -218,10 +218,10 @@ function Host.MountStory(Story, Target, IsModule, State)
 		end
 		if Vide then
 			Vide.mount(function()
-				return Story.story(Props)
+				return Component(Props)
 			end, Target)
 		else
-			local Result = Story.story(Props)
+			local Result = Component(Props)
 			if typeof(Result) == "Instance" then
 				Result.Parent = Target
 			end
@@ -229,7 +229,7 @@ function Host.MountStory(Story, Target, IsModule, State)
 	elseif type(Story) == "table" and (Story.render or Story.story ~= nil or type(Story.stories) == "table") then
 		if Story.render then Host.MountGeneric(Story, Target, State) else Host.MountRendered(Story, Target, State) end
 	elseif type(Story) == "function" then
-		Story(Target)
+		if not Host.MountHoarcekat(Story, Target, State) then Story(Target) end
 	else
 		error("unsupported story format (expected UI Labs table with story, or a function)", 0)
 	end
@@ -475,11 +475,12 @@ function Host.SetControl(Controls, Specs, Path, Value, Strict)
 end
 
 
--- Flipbook stories and storybooks (github.com/flipbook-labs/flipbook 2.x, which loads them through Storyteller 1.12:
--- github.com/flipbook-labs/storyteller, src/loadStoryModule.luau, src/createRendererForStory.luau, src/renderers/*,
--- src/render.luau). A story table whose `story` needs a renderer is mounted here: it names `packages` (or the legacy
--- `react` / `reactRoblox` / `roact` / `fusion` keys, as UI Labs React stories do), or its storybook does, or `story` is
--- an element or an Instance. The storybook is the `*.storybook` ModuleScript whose `storyRoots` hold the story.
+-- Flipbook stories and storybooks (github.com/flipbook-labs/flipbook 2.x, which loads them through Storyteller 1.13:
+-- github.com/flipbook-labs/storyteller at v1.13.0, src/loadStoryModuleData.luau, src/createRendererForStory.luau,
+-- src/renderers/*, src/render.luau). A story table whose `story` needs a renderer is mounted here: it names `packages`
+-- (or the legacy `react` / `reactRoblox` / `roact` / `fusion` keys, as UI Labs React stories do), or its storybook
+-- names packages or middleware (`mapStory`, `mapDefinition`), or `story` is an element or an Instance. The storybook is
+-- the `*.storybook` ModuleScript whose `storyRoots` hold the story; its middleware runs for every story it owns.
 
 Host.Rendered = setmetatable({}, { __mode = "k" })
 
@@ -537,7 +538,51 @@ function Host.FindStorybook(State)
 	return nil
 end
 
--- Whether a story table mounts here (MountRendered) rather than as a UI Labs story
+-- The storybook of the mounted story, found once per mount (State.Storybook: false when none owns it); a story
+-- module's own packages don't stop the search, since its storybook's middleware still applies
+function Host.StorybookOf(State)
+	if not State then
+		return nil
+	end
+	if State.Storybook == nil then
+		State.Storybook = Host.FindStorybook(State) or false
+	end
+	return State.Storybook or nil
+end
+
+local function HasMiddleware(Storybook)
+	return type(Storybook) == "table" and (type(Storybook.mapStory) == "function" or type(Storybook.mapDefinition) == "function")
+end
+
+-- The story mapDefinition receives (loadStoryModuleData): the story's own fields with the id, name, storybook, source
+-- module and packages Storyteller gives a loaded story. `Key` is the chosen entry's key in a `stories` group.
+local function LoadedStory(Story, Storybook, State, Key)
+	local Loaded = table.clone(Story)
+	local Module = State and State.Module
+	local ModuleName = if typeof(Module) == "Instance" then (string.gsub(Module.Name, "%.story$", "")) else "story"
+	Loaded.name = Story.name or (if Key ~= nil then tostring(Key) else ModuleName)
+	Loaded.id = Story.id or (if type(Key) == "string" then Key else Story.name or (if Key ~= nil then tostring(Key) else "default"))
+	Loaded.storybook = Storybook
+	Loaded.source = Module
+	Loaded.packages = LegacyPackages(Story) or LegacyPackages(Storybook)
+	return Loaded
+end
+
+-- A storybook's middleware for a story it owns, as every renderer of Storyteller 1.13 reads it: the definition
+-- mapDefinition makes of the loaded story, once, when the story mounts (else the story itself), and mapStory or nil
+local function Middleware(Story, Storybook, State, Key)
+	if type(Storybook) ~= "table" then
+		return Story, nil
+	end
+	local MapStory = if type(Storybook.mapStory) == "function" then Storybook.mapStory else nil
+	if type(Storybook.mapDefinition) ~= "function" then
+		return Story, MapStory
+	end
+	return Storybook.mapDefinition(LoadedStory(Story, Storybook, State, Key)), MapStory
+end
+
+-- Whether a story table mounts here (MountRendered) rather than as a UI Labs story: a function story under a storybook
+-- with packages or middleware is a Flipbook story, so it gets a Flipbook renderer (without packages, the Manual one)
 function Host.NeedsRenderer(Story, State)
 	if type(Story) ~= "table" then
 		return false
@@ -548,11 +593,8 @@ function Host.NeedsRenderer(Story, State)
 	if type(Story.story) ~= "function" or LegacyPackages(Story) ~= nil then
 		return true
 	end
-	local Storybook = Host.FindStorybook(State)
-	if State then
-		State.Storybook = Storybook
-	end
-	return LegacyPackages(Storybook) ~= nil
+	local Storybook = Host.StorybookOf(State)
+	return LegacyPackages(Storybook) ~= nil or HasMiddleware(Storybook)
 end
 
 -- A Flipbook controls schema as UI Labs controls, which the rest of the host reads: typed controls
@@ -592,8 +634,8 @@ function Host.FlipbookControls(Controls)
 	return Result
 end
 
--- v1.12's `stories` group: its first entry (in key order for a dictionary), with the group's packages, controls and
--- props as fallbacks
+-- A `stories` group (v1.13's multiple stories per module): its first entry (in key order for a dictionary), with the
+-- group's packages, controls and props as fallbacks, and its key
 local function FirstOfGroup(Story)
 	if type(Story.stories) ~= "table" or Story.story ~= nil then
 		return Story
@@ -615,16 +657,21 @@ local function FirstOfGroup(Story)
 			Chosen[Key] = Story[Key]
 		end
 	end
-	return Chosen
+	return Chosen, Keys[1]
 end
 
 -- Mounts a story that needs a renderer (Storyteller createRendererForStory: Roact, else React + ReactRoblox, else
--- Fusion, else Vide, else the story itself) and keeps how to render it again with new controls in Host.Rendered
+-- Fusion, else Vide, else the story itself) and keeps how to render it again with new controls in Host.Rendered.
+-- The storybook's middleware runs as each Storyteller 1.13 renderer runs it: mapDefinition once, at the mount (the
+-- story's own controls and props still make its props); mapStory's component renders with the props (React and Roact:
+-- with the story's element as its children) and is made again for each render of React, Roact and the Manual
+-- renderer, once for Fusion and Vide, whose controls change in place.
 function Host.MountRendered(Story, Target, State)
-	Story = FirstOfGroup(Story)
-	local Storybook = State and (State.Storybook or (LegacyPackages(Story) == nil and Host.FindStorybook(State)))
+	local Key
+	Story, Key = FirstOfGroup(Story)
+	local Storybook = Host.StorybookOf(State)
 	local Packages = LegacyPackages(Story) or LegacyPackages(Storybook) or {}
-	local Definition = if Storybook and type(Storybook.mapDefinition) == "function" then Storybook.mapDefinition(Story) else Story
+	local Definition, MapStory = Middleware(Story, Storybook, State, Key)
 	local Specs = Host.FlipbookControls(Story.controls)
 	local Controls = ConvertControls(Specs, function(Value)
 		return Value
@@ -639,24 +686,26 @@ function Host.MountRendered(Story, Target, State)
 	-- (and `target`, as UI Labs names the container)
 	local function Props(Values)
 		local Props = { theme = "Dark", locale = "en-us" }
-		for Key, Value in if type(Definition.props) == "table" then Definition.props else {} do
-			Props[Key] = Value
+		for Name, Value in if type(Story.props) == "table" then Story.props else {} do
+			Props[Name] = Value
 		end
 		Props.container, Props.target, Props.story, Props.controls = Target, Target, Story, Values
 		return Props
 	end
-	local Component = Definition.story
-	if Storybook and type(Storybook.mapStory) == "function" then
-		Component = Storybook.mapStory(Definition.story)
+	-- The story's component, through mapStory when the storybook has it
+	local function Mapped()
+		return if MapStory then MapStory(Definition.story) else Definition.story
 	end
 	local Update
 	if Packages.Roact then
 		local Roact = Packages.Roact
 		local function Element(Values)
-			if IsRoactElement(Component) then
-				return Component
+			local StoryProps = Props(Values)
+			local Made = if IsRoactElement(Definition.story) then Definition.story else Roact.createElement(Definition.story, StoryProps)
+			if MapStory then
+				Made = Roact.createElement(MapStory(Definition.story), StoryProps, Made)
 			end
-			return Roact.createElement(Component, Props(Values))
+			return Made
 		end
 		local Tree = Roact.mount(Element(Controls), Target, "RoactRenderer")
 		Update = function(Values)
@@ -665,10 +714,12 @@ function Host.MountRendered(Story, Target, State)
 	elseif Packages.React and Packages.ReactRoblox then
 		local React, ReactRoblox = Packages.React, Packages.ReactRoblox
 		local function Element(Values)
-			if IsReactElement(Component) then
-				return Component
+			local StoryProps = Props(Values)
+			local Made = if IsReactElement(Definition.story) then Definition.story else React.createElement(Definition.story, StoryProps)
+			if MapStory then
+				Made = React.createElement(MapStory(Definition.story), StoryProps, Made)
 			end
-			return React.createElement(Component, Props(Values))
+			return Made
 		end
 		local Root = ReactRoblox.createRoot(Target)
 		Root:render(Element(Controls))
@@ -684,6 +735,7 @@ function Host.MountRendered(Story, Target, State)
 			Sources[Key] = if Vide then Vide.source(Value) elseif Scope then Scope:Value(Value) else Fusion.Value(Value)
 		end
 		local function Mount()
+			local Component = Mapped()
 			local Handle = if typeof(Component) == "Instance" then Component else Component(Props(Sources))
 			if typeof(Handle) == "Instance" and Handle.Parent == nil then
 				Handle.Parent = Target
@@ -710,6 +762,7 @@ function Host.MountRendered(Story, Target, State)
 		-- story(props); a returned Instance without a parent goes into the container. A change mounts it again.
 		local Cleanup
 		local function Mount(Values)
+			local Component = Mapped()
 			local Result = Component
 			if type(Component) == "function" then
 				local Arity = debug.info(Component, "a")
@@ -730,6 +783,38 @@ function Host.MountRendered(Story, Target, State)
 		end
 	end
 	Host.Rendered[Controls] = { Update = Update, Specs = Specs }
+end
+
+-- MountStory's UI Labs story table: the story function it calls with the UI Labs props. Under a storybook with
+-- middleware (a UI Labs Vide story; any other function story there is a Flipbook one, NeedsRenderer) that is the
+-- story mapDefinition made, through mapStory, as Storyteller's Vide renderer runs them: mapDefinition now, at the mount,
+-- and mapStory inside vide.mount.
+function Host.MappedStory(Story, State)
+	local Storybook = Host.StorybookOf(State)
+	if not HasMiddleware(Storybook) then
+		return Story.story
+	end
+	local Definition, MapStory = Middleware(Story, Storybook, State, nil)
+	return function(Props)
+		local Component = if MapStory then MapStory(Definition.story) else Definition.story
+		return Component(Props)
+	end
+end
+
+-- MountStory's Hoarcekat function: under a storybook with middleware it mounts as Storyteller loads it, a story with
+-- no packages (so the Manual renderer, whatever the storybook's packages) calling the function with the container and
+-- the props. Returns false otherwise, and MountStory calls it with the target, as before.
+function Host.MountHoarcekat(Story, Target, State)
+	if not HasMiddleware(Host.StorybookOf(State)) then
+		return false
+	end
+	Host.MountRendered({
+		story = function(Props)
+			return Story(Props.container, Props)
+		end,
+		packages = {},
+	}, Target, State)
+	return true
 end
 
 -- A session's control change of a rendered story: the value set in its controls table, then the story rendered with

@@ -852,6 +852,333 @@ fn flipbook_elements_fusion_manual_and_hoarcekat_stories_mount() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Stand-in React + ReactRoblox (createElement keeps its children in props.children, as React does), Fusion (Value)
+/// and Vide (source, mount) for the storybook middleware tests
+const MIDDLEWARE_PACKAGES: &str = r##"
+local Fake = {}
+function Fake.createElement(Type, Props, Children)
+    local Copy = table.clone(Props or {})
+    Copy.children = Children
+    return { ["$$typeof"] = "element", type = Type, props = Copy }
+end
+function Fake.createRoot(Container)
+    local Root = {}
+    function Root:render(Element)
+        _G.Renders = (_G.Renders or 0) + 1
+        Container:ClearAllChildren()
+        local function Build(Element)
+            if type(Element.type) == "function" then
+                return Build(Element.type(Element.props))
+            end
+            local Made = Instance.new(Element.type)
+            for Key, Value in Element.props do
+                if Key ~= "children" then
+                    Made[Key] = Value
+                end
+            end
+            Made.Parent = Container
+            return Made
+        end
+        _G.Built = Build(Element)
+    end
+    return Root
+end
+function Fake.Value(Initial)
+    local Value = { Current = Initial }
+    function Value:get()
+        return self.Current
+    end
+    function Value:set(New)
+        self.Current = New
+        if self.Changed then
+            self.Changed(New)
+        end
+    end
+    return Value
+end
+function Fake.source(Initial)
+    local Current = Initial
+    return function(...)
+        if select("#", ...) > 0 then
+            Current = ...
+        end
+        return Current
+    end
+end
+function Fake.mount(Component, Target)
+    local Made = Component()
+    if typeof(Made) == "Instance" then
+        Made.Parent = Target
+    end
+    return function() end
+end
+return Fake
+"##;
+
+/// A storybook with no packages whose mapDefinition and mapStory count their calls (mapDefinition renames the story
+/// and wraps its function, so a render shows it used the mapped definition), a storybook beside it that fails to
+/// load, and one story of each shape rur mounts: a Hoarcekat function, a UI Labs table without packages, a UI Labs
+/// Vide story, React and Fusion stories with their own packages, and a `stories` group with its own packages
+fn middleware_root(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("rur-flipbook-middleware-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let storage = dir.join("ReplicatedStorage");
+    std::fs::create_dir_all(storage.join("Stories")).unwrap();
+    std::fs::write(storage.join("Fake.luau"), MIDDLEWARE_PACKAGES).unwrap();
+    std::fs::write(storage.join("Broken.storybook.luau"), r#"error("this storybook fails to load")"#).unwrap();
+    std::fs::write(
+        storage.join("Middleware.storybook.luau"),
+        r#"return {
+            name = "Middleware",
+            storyRoots = { script.Parent.Stories },
+            mapDefinition = function(story)
+                _G.Definitions = (_G.Definitions or 0) + 1
+                _G.Defined = story
+                local Mapped = table.clone(story)
+                Mapped.name = "[WIP] " .. story.name
+                local Story = story.story
+                Mapped.story = function(...)
+                    _G.MappedRuns = (_G.MappedRuns or 0) + 1
+                    return Story(...)
+                end
+                return Mapped
+            end,
+            mapStory = function(story)
+                _G.Maps = (_G.Maps or 0) + 1
+                return function(props)
+                    _G.Wrapped = (_G.Wrapped or 0) + 1
+                    _G.WrappedProps = props
+                    return story(props)
+                end
+            end,
+        }"#,
+    )
+    .unwrap();
+    let fake = r#"local Fake = require(game:GetService("ReplicatedStorage").Fake)"#;
+    let stories = [
+        (
+            "Hoarcekat.story.luau",
+            r#"return function(target, props)
+                _G.HoarcekatTarget, _G.HoarcekatProps = target, props
+                local Frame = Instance.new("Frame")
+                Frame.Name = "FromHoarcekat"
+                Frame.Parent = target
+                return function() end
+            end"#
+                .to_string(),
+        ),
+        (
+            "Plain.story.luau",
+            r#"return {
+                controls = { width = 70 },
+                story = function(props)
+                    local Frame = Instance.new("Frame")
+                    Frame.Name = "FromPlain"
+                    Frame.Size = UDim2.fromOffset(props.controls.width, 10)
+                    return Frame
+                end,
+            }"#
+            .to_string(),
+        ),
+        (
+            "Vide.story.luau",
+            format!(
+                r#"{fake}
+                return {{
+                    vide = Fake,
+                    controls = {{ width = 50 }},
+                    story = function(props)
+                        local Frame = Instance.new("Frame")
+                        Frame.Name = "FromVide"
+                        Frame.Size = UDim2.fromOffset(props.controls.width(), 10)
+                        return Frame
+                    end,
+                }}"#
+            ),
+        ),
+        (
+            "React.story.luau",
+            format!(
+                r#"{fake}
+                return {{
+                    packages = {{ React = Fake, ReactRoblox = Fake }},
+                    controls = {{ label = "Hi" }},
+                    story = function(props)
+                        return Fake.createElement("TextLabel", {{ Name = "FromReact", Text = props.controls.label }})
+                    end,
+                }}"#
+            ),
+        ),
+        (
+            "Fusion.story.luau",
+            format!(
+                r#"{fake}
+                return {{
+                    packages = {{ Fusion = Fake }},
+                    controls = {{ title = "One" }},
+                    story = function(props)
+                        local Label = Instance.new("TextLabel")
+                        Label.Name = "FromFusion"
+                        Label.Text = props.controls.title:get()
+                        props.controls.title.Changed = function(New) Label.Text = New end
+                        return Label
+                    end,
+                }}"#
+            ),
+        ),
+        (
+            "Group.story.luau",
+            format!(
+                r#"{fake}
+                return {{
+                    packages = {{ React = Fake, ReactRoblox = Fake }},
+                    stories = {{
+                        Second = function(props) return Fake.createElement("Frame", {{ Name = "Second" }}) end,
+                        First = {{ story = function(props) return Fake.createElement("Frame", {{ Name = "First" }}) end }},
+                    }},
+                }}"#
+            ),
+        ),
+    ];
+    for (file, source) in stories {
+        std::fs::write(storage.join("Stories").join(file), source).unwrap();
+    }
+    dir
+}
+
+const STORY_TARGET: &str = r#"game:GetService("CoreGui").RURStory.StoryTarget"#;
+
+/// Mounts one story of middleware_root (its own copy of the root) and checks that the storybook's mapDefinition and
+/// mapStory ran exactly once (Storyteller 1.13): mapDefinition got the loaded story (its storybook and source module),
+/// and the story it returned is the one rendered through mapStory's component; then `check`. The storybook beside it
+/// that fails to load only warns.
+fn assert_middleware_runs_once(name: &str, file: &str, check: &str) {
+    let dir = middleware_root(name);
+    let (lua, engine, session) = mount_flipbook(&dir, file, None);
+    run(
+        &lua,
+        &engine,
+        r#"assert(_G.Definitions == 1 and _G.Maps == 1 and _G.Wrapped == 1 and _G.MappedRuns == 1,
+        `mapDefinition {_G.Definitions} mapStory {_G.Maps} wrapper {_G.Wrapped} mapped story {_G.MappedRuns}`)
+        assert(_G.Defined.storybook.name == "Middleware" and _G.Defined.source:IsA("ModuleScript"))"#,
+    );
+    run(&lua, &engine, check);
+    drop((session, lua, engine));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A Hoarcekat function under a storybook with middleware: a story with no packages calling it with the container and
+/// the props
+#[test]
+fn a_storybooks_middleware_runs_once_for_a_hoarcekat_function() {
+    let target = STORY_TARGET;
+    assert_middleware_runs_once(
+        "hoarcekat",
+        "Hoarcekat.story.luau",
+        &format!(
+            r#"assert({target}:FindFirstChild("FromHoarcekat") ~= nil and _G.HoarcekatTarget == {target})
+            assert(_G.HoarcekatProps.container == {target} and _G.HoarcekatProps == _G.WrappedProps)
+            assert(_G.Defined.name == "Hoarcekat" and _G.Defined.id == "default" and next(_G.Defined.packages) == nil)"#
+        ),
+    );
+}
+
+/// A UI Labs table without packages under a storybook with middleware and none: the Manual renderer, with Flipbook's
+/// props
+#[test]
+fn a_storybooks_middleware_runs_once_for_a_table_without_packages() {
+    let target = STORY_TARGET;
+    assert_middleware_runs_once(
+        "plain",
+        "Plain.story.luau",
+        &format!(
+            r#"assert({target}.FromPlain.Size.X.Offset == 70 and _G.WrappedProps.container == {target})
+            assert(_G.Defined.name == "Plain" and _G.Defined.id == "default" and _G.Defined.packages == nil)"#
+        ),
+    );
+}
+
+/// A UI Labs Vide story keeps its UI Labs props (Vide sources, converted controls)
+#[test]
+fn a_storybooks_middleware_runs_once_for_a_ui_labs_vide_story() {
+    let target = STORY_TARGET;
+    assert_middleware_runs_once(
+        "vide",
+        "Vide.story.luau",
+        &format!(
+            r#"assert({target}.FromVide.Size.X.Offset == 50 and _G.WrappedProps.converted ~= nil)
+            assert(type(_G.WrappedProps.controls.width) == "function" and _G.Defined.name == "Vide")"#
+        ),
+    );
+}
+
+/// A React story with its own packages: mapStory's component renders with the story's element as its children
+#[test]
+fn a_storybooks_middleware_runs_once_for_a_react_story_with_its_own_packages() {
+    assert_middleware_runs_once(
+        "react",
+        "React.story.luau",
+        r#"assert(_G.Built.Name == "FromReact" and _G.Built.Text == "Hi" and _G.Renders == 1)
+        assert(_G.WrappedProps.children.props.controls.label == "Hi" and _G.Defined.packages.React ~= nil)"#,
+    );
+}
+
+#[test]
+fn a_storybooks_middleware_runs_once_for_a_fusion_story_with_its_own_packages() {
+    let target = STORY_TARGET;
+    assert_middleware_runs_once(
+        "fusion",
+        "Fusion.story.luau",
+        &format!(r#"assert({target}.FromFusion.Text == "One" and _G.WrappedProps.controls.title:get() == "One")"#),
+    );
+}
+
+/// A `stories` group with its own packages: its first entry, named by its key
+#[test]
+fn a_storybooks_middleware_runs_once_for_a_stories_group() {
+    assert_middleware_runs_once(
+        "group",
+        "Group.story.luau",
+        r#"assert(_G.Built.Name == "First" and _G.Defined.name == "First" and _G.Defined.id == "First")"#,
+    );
+}
+
+/// After a control change the story keeps its mapped definition (mapDefinition ran once), and mapStory runs as each
+/// Storyteller 1.13 renderer runs it: again for a render of React and of the Manual renderer, not for Fusion, whose
+/// controls change in place
+fn assert_middleware_on_a_control_change(name: &str, file: &str, path: serde_json::Value, value: serde_json::Value, maps: u32, rendered: &str) {
+    let dir = middleware_root(name);
+    let (lua, engine, mut session) = mount_flipbook(&dir, file, None);
+    let _ = session.ready(&lua).unwrap();
+    assert_eq!(session.control(&lua, &path, &value)["type"], "frame", "{file}");
+    run(
+        &lua,
+        &engine,
+        &format!(r#"assert(_G.Definitions == 1 and _G.Maps == {maps} and {rendered}, `{file}: mapDefinition {{_G.Definitions}} mapStory {{_G.Maps}}`)"#),
+    );
+    drop((session, lua, engine));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_storybooks_middleware_maps_a_manual_story_again_on_a_control_change() {
+    let target = STORY_TARGET;
+    let rendered = format!("{target}.FromPlain.Size.X.Offset == 120 and #{target}:GetChildren() == 1");
+    assert_middleware_on_a_control_change("plain-change", "Plain.story.luau", json!(["width"]), json!(120), 2, &rendered);
+}
+
+#[test]
+fn a_storybooks_middleware_maps_a_react_story_again_on_a_control_change() {
+    let rendered = r#"_G.Built.Text == "Yo" and _G.Renders == 2"#;
+    assert_middleware_on_a_control_change("react-change", "React.story.luau", json!(["label"]), json!("Yo"), 2, rendered);
+}
+
+#[test]
+fn a_storybooks_middleware_keeps_a_fusion_story_on_a_control_change() {
+    let rendered = format!(r#"{}.FromFusion.Text == "Two""#, STORY_TARGET);
+    assert_middleware_on_a_control_change("fusion-change", "Fusion.story.luau", json!(["title"]), json!("Two"), 1, &rendered);
+}
+
 /// Members a game script can't call raise Roblox's own error, which Roblox's packages catch (Foundation's resolution
 /// scale, SafeFlags): the emulator raises it, as rur's own list of them did before
 #[test]

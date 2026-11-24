@@ -30,7 +30,7 @@ A story module can return:
 
 ### Flipbook stories and storybooks
 
-`rur` supports Flipbook 2.x stories following Storyteller 1.12 semantics. A story table routes through a Flipbook renderer whenever it specifies `packages`, its `story` is a non-function (React/Roact element or `Instance`), or its owning storybook defines `packages`:
+`rur` supports Flipbook 2.x stories following Storyteller 1.13 semantics (without its Iris renderer). A story table routes through a Flipbook renderer whenever it specifies `packages`, its `story` is a non-function (React/Roact element or `Instance`), or its owning storybook defines `packages`, `mapStory` or `mapDefinition`:
 
 | `packages` | Mount behavior | On control change |
 |---|---|---|
@@ -42,7 +42,15 @@ A story module can return:
 
 Legacy lowercase keys (`react`, `reactRoblox`, `roact`, `fusion`) are also accepted (so UI Labs React stories mount the same way). A story's own `packages` overrides its storybook's. `props` includes `controls`, `container` (aliased as `target`), `story`, `theme = "Dark"`, `locale = "en-us"`, and the story's own `props` table. Multi-story `stories` tables mount their first entry.
 
-**Storybooks (`*.storybook.luau` / `.lua`):** Return `{ name, storyRoots = { ... }, packages, mapStory, mapDefinition }`. `rur` discovers storybooks inside mounted project roots (skipping Wally `_Index` internals) and assigns each story to the first storybook whose `storyRoots` contain it. `mapDefinition(story)` runs before mounting and `mapStory(story)` wraps the component.
+**Storybooks (`*.storybook.luau` / `.lua`):** Return `{ name, storyRoots = { ... }, packages, mapStory, mapDefinition }`. `rur` discovers storybooks inside mounted project roots (skipping Wally `_Index` internals) and assigns each story to the first storybook whose `storyRoots` contain it. A storybook that fails to load is skipped with a warning.
+
+A storybook's `mapDefinition` and `mapStory` run for every story it owns, whatever renders it:
+
+- `mapDefinition(story)` runs once, when the story mounts. It receives the loaded story: its own fields plus `id`, `name`, `storybook`, `source` and `packages`. The story it returns is the one rendered, but the props and controls still come from the original story.
+- `mapStory(story)` returns the component that renders in the story's place. React and Roact render it with the props and pass the story's element as its children.
+- React, Roact and the Manual renderer call `mapStory` again on each render. Fusion and Vide call it once, since their controls change in place.
+- Under a storybook with middleware, a Hoarcekat function mounts as a story without packages, so the Manual renderer calls it with `(container, props)`. Without middleware it is still called with the target alone.
+- A UI Labs Vide story (`vide = ...`) keeps its UI Labs props, with `mapStory` applied inside `vide.mount`.
 
 ### Controls
 
