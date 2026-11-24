@@ -200,6 +200,14 @@
 			"digest": "8de257ecafc43cdf477c5462fd8cef26512bd176663151ead03f9f4ad7fe31fd",
 			"status": "ok"
 		},
+		"fast/edit/layout-autosize-constraint": {
+			"digest": "6ecc428e42228971acc7aa630d2a74d985ea882f3e1284f55b9b799846f40876",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-constraint2": {
+			"digest": "0947f7b2c007b53a6d9f0358b15f56c85c3d8195095c2b18b7b66bff2c734047",
+			"status": "ok"
+		},
 		"fast/edit/layout-dynamic": {
 			"digest": "d276a21e0b85c5ba497f1e0533c234f11ad86943212192b150940dd0f5462405",
 			"status": "ok"
@@ -1308,6 +1316,14 @@
 			"digest": "c6dac60801d116cff325de900bef623171afaf825df1f8324c92e44c107d2284",
 			"status": "ok"
 		},
+		"fixtures/edit/layout-autosize-constraint": {
+			"digest": "a728d1746356a8c362c7022b91211c446c4f3712c4b8aa7f4757313d58c13279",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-constraint2": {
+			"digest": "9331218959eeb27ed26805f72fa49b8d00b4a9a2c6e749058acbf0b7b3551618",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-dynamic": {
 			"digest": "a306bb4a21dff572c2151c5b167ac06b3ac0661c2335bd7ed5ec6d4c42c1b216",
 			"status": "ok"
@@ -2404,6 +2420,14 @@
 			"digest": "dafd7ed12710f99a43ded1b8889e60a3675a75074465c09cd44c4778c23ba15d",
 			"status": "ok"
 		},
+		"fixtures/play/layout-autosize-constraint": {
+			"digest": "93349da2e533edc0e3ff10615cc402648e3fa041cc38e23a9681c4eca46c0b77",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-constraint2": {
+			"digest": "37d7a7879b19aa6c73a0afa684ce9856d5f188add45a6598d47c047c206f8c61",
+			"status": "ok"
+		},
 		"fixtures/play/layout-dynamic": {
 			"digest": "660fb9150a39b585291b17a7f1f08170e7138c978035c85f7b7515c43b1576a6",
 			"status": "ok"
@@ -3289,7 +3313,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-23T19:20:29.064Z",
+	"recorded": "2026-11-24T15:45:05.000Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

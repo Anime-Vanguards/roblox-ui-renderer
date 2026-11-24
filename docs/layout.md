@@ -24,6 +24,7 @@ With `--topbar-inset <px>` (e.g., `58`), scripts read `AbsolutePosition` in Robl
 - **Padding:** `UIPadding` scale components are ignored during automatic size measurement (offsets count), then applied against the final size when placing children.
 - **Anchor blending:** Available space for scale-sized content blends both sides around `AnchorPoint` `a`: `(1 - a) * (available - p) + a * p`.
 - **Aspect ratio:** `UIAspectRatioConstraint` applies to the stable size, which is then measured against content on the opposite axis as well.
+- **Size constraints:** On an automatic axis, `UISizeConstraint` bounds the content inside the `UIPadding` offsets and border inset: with `MinSize` 22 and 6 + 6 px of padding, a label holding 8 px of text is 34 px wide. `MaxSize` then caps the object itself, and its padding's scale resolves against the capped size. Its children still lay out in the content box their content asked for, and they extend it past the cap (a 40 px child of a frame capped at 30 makes it 40). An automatic parent measures a capped child at its clamped content plus padding. The same clamp applies to a constrained descendant without `AutomaticSize`, from what it holds (`fixtures/layout-autosize-constraint*.luau`).
 - **Automatic text:** Text objects resolve scale `Size` on automatic axes against the parent's full size (not padded content box). Wrapped text with `AutomaticSize.X` wraps at available parent width. `AutomaticSize.Y` keeps only lines whose bottom falls within `f32` rounding of available parent height below the object's position.
 - **Center culling:** Any `AutomaticSize` element whose center lies outside its clip rect is not drawn at all, nor is its subtree (`fixtures/stories-autosize-cull*.luau`; reported under `culled` in `summary.json`).
 
@@ -37,6 +38,7 @@ With `--topbar-inset <px>` (e.g., `58`), scripts read `AbsolutePosition` in Robl
 ## Borders, padding, and constraints
 
 - **Borders:** `BorderMode.Inset` insets content by `BorderSizePixel`, `Middle` by `BorderSizePixel / 2`, `Outline` by `0` (equivalent to offset `UIPadding`). If padding exceeds width, the content box sits between the inverted edges.
+- **`UISizeConstraint`:** Clamps the size to `[MinSize, MaxSize]` per axis. A constraint whose `MinSize` exceeds its `MaxSize` on either axis does nothing on both axes. The properties keep the values written, in either order.
 - **`UIAspectRatioConstraint`:** `FitWithinMaxSize` chooses the largest fitting box of the target ratio; `ScaleWithParentSize` preserves the dominant axis and scales the other capped by the parent.
 - **`UITextSizeConstraint`:** Clamps `floor(TextSize * UIScale)` to `[floor(MinTextSize), floor(MaxTextSize)]`.
 

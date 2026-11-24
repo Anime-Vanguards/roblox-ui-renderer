@@ -599,7 +599,9 @@ impl<'a> Pass<'a> {
         )
     }
 
-    /// The UISizeConstraint children's (min, max) vectors.
+    /// The UISizeConstraint children's (min, max) vectors. Measured (fixtures/layout-autosize-constraint.luau,
+    /// Studio 0.747): a constraint whose MinSize exceeds its MaxSize on either axis constrains neither axis
+    /// (MinSize (40, 25) with MaxSize (30, 100) leaves a 10 x 10 frame 10 x 10), whichever was set first.
     fn size_constraints(&self, id: InstanceId, mut visit: impl FnMut((f64, f64), (f64, f64))) {
         let class = self.l.ids.c.UISizeConstraint;
         let n = self.l.ids.n;
@@ -607,9 +609,18 @@ impl<'a> Pass<'a> {
             if self.is_a(child, class) {
                 let min = self.vec2(child, n.MinSize).unwrap_or((0.0, 0.0));
                 let max = self.vec2(child, n.MaxSize).unwrap_or((INF, INF));
+                if min.0 > max.0 || min.1 > max.1 {
+                    continue;
+                }
                 visit(min, max);
             }
         }
+    }
+
+    fn has_size_constraint(&self, id: InstanceId) -> bool {
+        let mut any = false;
+        self.size_constraints(id, |_, _| any = true);
+        any
     }
 
     /// The tightest UISizeConstraint bounds on the width (min, max).
@@ -617,15 +628,15 @@ impl<'a> Pass<'a> {
         let (mut low, mut high) = (0.0, INF);
         self.size_constraints(id, |min, max| {
             low = lmax(low, min.0);
-            high = lmin(high, lmax(min.0, max.0));
+            high = lmin(high, max.0);
         });
         (low, high)
     }
 
     fn apply_size_constraint(&self, id: InstanceId, mut width: f64, mut height: f64) -> (f64, f64) {
         self.size_constraints(id, |min, max| {
-            width = clamp(width, min.0, lmax(min.0, max.0));
-            height = clamp(height, min.1, lmax(min.1, max.1));
+            width = clamp(width, min.0, max.0);
+            height = clamp(height, min.1, max.1);
         });
         (width, height)
     }
@@ -704,13 +715,16 @@ impl<'a> Pass<'a> {
     fn extent_visit(&mut self, top_id: InstanceId, parent: InstanceId, parent_record: &Record, axis_x: bool, axis_y: bool, origin: (f64, f64, f64)) -> (f64, f64) {
         let (origin_x, origin_y, scale) = origin;
         let top = parent == top_id;
-        let mut edge_x = if top { 0.0 } else { (parent_record.content.x - origin_x) / scale };
-        let mut edge_y = if top { 0.0 } else { (parent_record.content.y - origin_y) / scale };
+        let start_x = if top { 0.0 } else { (parent_record.content.x - origin_x) / scale };
+        let start_y = if top { 0.0 } else { (parent_record.content.y - origin_y) / scale };
+        let (mut edge_x, mut edge_y) = (start_x, start_y);
+        let mut holds = false;
         {
             let mut collect = |pass: &mut Pass, child: InstanceId, child_record: &Record| {
                 if !pass.visible(child) {
                     return;
                 }
+                holds = true;
                 let scrolling = pass.class(child) == pass.l.ids.c.ScrollingFrame;
                 let (_, auto_x, auto_y) = pass.automatic_axes(child);
                 let child_x = axis_x && !scrolling && !auto_x;
@@ -761,8 +775,16 @@ impl<'a> Pass<'a> {
         if top {
             return (edge_x, edge_y);
         }
-        let (_, pad_right, _, pad_bottom) = self.padding_offsets(parent);
         let ratio = parent_record.scale / scale;
+        // Measured (fixtures/layout-autosize-constraint.luau): what a UISizeConstraint'd descendant holds counts
+        // clamped by its constraint inside its padding (a 30 px capped frame holding 40 px inside 6 + 6 px of
+        // padding counts 42; one with MinSize 22 holding 4 px counts 34); one that holds nothing counts by its box.
+        if holds && self.has_size_constraint(parent) {
+            let (held_x, held_y) = self.apply_size_constraint(parent, (edge_x - start_x) / ratio, (edge_y - start_y) / ratio);
+            edge_x = start_x + held_x * ratio;
+            edge_y = start_y + held_y * ratio;
+        }
+        let (_, pad_right, _, pad_bottom) = self.padding_offsets(parent);
         (edge_x + pad_right * ratio, edge_y + pad_bottom * ratio)
     }
 
@@ -816,6 +838,7 @@ impl<'a> Pass<'a> {
         }
         let (mut base_w, mut base_h) = (width, height);
         let (mut child_measure_w, mut child_measure_h) = (None, None);
+        let (mut held_w, mut held_h) = (None, None);
 
         let mut text_box = None;
         if is_automatic {
@@ -1122,14 +1145,23 @@ impl<'a> Pass<'a> {
                     offset_x = lmax(offset_x, text_extent);
                 }
             }
-            let mut stable_w = if auto_x { lmax(width, lmax(content_width, offset_x) + pad_left + pad_right) } else { width };
-            let mut stable_h = if auto_y { lmax(height, lmax(content_height, offset_y) + pad_top + pad_bottom) } else { height };
+            // Measured (fixtures/layout-autosize-constraint.luau, Studio 0.747): on an automatic axis the
+            // UISizeConstraint bounds the content inside the padding offsets, so MinSize 22 with 6 + 6 px of
+            // padding makes a label holding 8 px of text 34 wide, not 22. The object is then constrained as any
+            // object is (MaxSize caps it), its children still lay out in the content box its content asked for,
+            // and an automatic parent measures it at that asked size (`held`).
+            let (asked_x, asked_y) = self.apply_size_constraint(id, lmax(content_width, offset_x), lmax(content_height, offset_y));
+            let asked_w = asked_x + pad_left + pad_right;
+            let asked_h = asked_y + pad_top + pad_bottom;
+            let mut stable_w = if auto_x { lmax(width, asked_w) } else { width };
+            let mut stable_h = if auto_y { lmax(height, asked_h) } else { height };
             if aspect_x {
                 stable_w = lmax(content_width, natural_x) + pad_left + pad_right;
             }
             if aspect_y {
                 stable_h = lmax(content_height, natural_y) + pad_top + pad_bottom;
             }
+            let (asked_box_w, asked_box_h) = (stable_w, stable_h);
             (stable_w, stable_h) = self.apply_size_constraint(id, stable_w, stable_h);
             if !auto_x && !aspect_x {
                 stable_w = width;
@@ -1137,34 +1169,40 @@ impl<'a> Pass<'a> {
             if !auto_y && !aspect_y {
                 stable_h = height;
             }
+            // (the box the children lay out in: what MaxSize cut stays on automatic axes)
+            let mut box_w = if auto_x { asked_box_w } else { stable_w };
+            let mut box_h = if auto_y { asked_box_h } else { stable_h };
 
             // Measured: an AutomaticSize object's UIAspectRatioConstraint applies to this stable size.
             let (constrained_w, constrained_h) = self.apply_aspect_ratio(id, stable_w, stable_h, parent_w, parent_h);
             if constrained_w != stable_w || constrained_h != stable_h {
                 child_measure_w = Some(lmax(stable_w - pad_left - pad_right, 0.0));
                 child_measure_h = Some(lmax(stable_h - pad_top - pad_bottom, 0.0));
+                (box_w, box_h) = (constrained_w, constrained_h);
             }
             stable_w = constrained_w;
             stable_h = constrained_h;
 
-            let mut second = probe(lmax(stable_w - pad_left - pad_right, 0.0), lmax(stable_h - pad_top - pad_bottom, 0.0), child_measure_w, child_measure_h);
-            second.w = stable_w * scale;
-            second.h = stable_h * scale;
+            let mut second = probe(lmax(box_w - pad_left - pad_right, 0.0), lmax(box_h - pad_top - pad_bottom, 0.0), child_measure_w, child_measure_h);
+            second.w = box_w * scale;
+            second.h = box_h * scale;
             if list && padded {
                 second.gap_w = if auto_x { Some(0.0) } else { None };
                 second.gap_h = if auto_y { Some(0.0) } else { None };
             }
             let (extent_x, extent_y) = self.layout_children(id, &second, true, None);
-            // Measured (layout-probe-autocenter): where children end up against the stable size
-            // extends the frame without its padding.
+            // Measured (layout-probe-autocenter; fixtures/layout-autosize-constraint.luau): where children end
+            // up extends the frame without its padding, past a MaxSize too (a 40 px child of a frame capped at
+            // 30 makes it 40).
             width = if auto_x { lmax(stable_w, extent_x) } else { stable_w };
             height = if auto_y { lmax(stable_h, extent_y) } else { stable_h };
-            (width, height) = self.apply_size_constraint(id, width, height);
-            base_w = stable_w;
-            base_h = stable_h;
+            base_w = box_w;
+            base_h = box_h;
+            held_w = if auto_x && asked_w > width { Some(asked_w) } else { None };
+            held_h = if auto_y && asked_h > height { Some(asked_h) } else { None };
         }
 
-        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h }
+        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h }
     }
 
     /// ComputeSize, memoized for AutomaticSize objects: a result stays valid while the object's
@@ -1212,10 +1250,12 @@ impl<'a> Pass<'a> {
                 if automatic == E::X || automatic == E::XY {
                     result.w = kept[0];
                     result.base_w = kept[2];
+                    result.held_w = None;
                 }
                 if automatic == E::Y || automatic == E::XY {
                     result.h = kept[1];
                     result.base_h = kept[3];
+                    result.held_h = None;
                 }
             }
         }
@@ -1230,7 +1270,12 @@ impl<'a> Pass<'a> {
         let n = self.l.ids.n;
         let scale = f32r(parent.scale * self.own_scale(id));
         let (width, height) = (f32r(unscaled_w * scale), f32r(unscaled_h * scale));
-        let (pad_left, pad_right, pad_top, pad_bottom) = self.padding(id, unscaled_w, unscaled_h);
+        // Measured (fixtures/layout-autosize-constraint.luau): an automatic object its children pushed past
+        // its MaxSize resolves its padding's scale against the capped size (0.1 of a frame capped at 30 is 3
+        // px while it reads 40 wide).
+        let (_, auto_x, auto_y) = self.automatic_axes(id);
+        let (pad_basis_w, pad_basis_h) = if auto_x || auto_y { self.apply_size_constraint(id, unscaled_w, unscaled_h) } else { (unscaled_w, unscaled_h) };
+        let (pad_left, pad_right, pad_top, pad_bottom) = self.padding(id, pad_basis_w, pad_basis_h);
 
         // Measured (layout-probe-negcontent): padding wider than the object leaves the content box
         // between the two padded edges, [W - right, left], |W - left - right| wide.
@@ -1926,6 +1971,17 @@ impl<'a> Pass<'a> {
                 base_h,
                 measure: sized.measure_w.map(|w| (w, sized.measure_h.unwrap_or(0.0))),
             };
+            // Measured (fixtures/layout-autosize-constraint.luau): an automatic parent measures a child its
+            // MaxSize cut at the size the child's content asked for (a 30 px capped frame holding 24 px inside
+            // 6 + 6 px of padding makes its AutomaticSize X parent 36 wide).
+            if let (true, Some((measuring_x, measuring_y))) = (measure, record.measuring) {
+                if let (true, Some(held)) = (measuring_x, sized.held_w) {
+                    entry.w = lmax(entry.w, held);
+                }
+                if let (true, Some(held)) = (measuring_y, sized.held_h) {
+                    entry.h = lmax(entry.h, held);
+                }
+            }
             if let Some(held) = record.held_w.as_ref().and_then(|held| held.iter().find(|(c, _)| *c == child).map(|(_, w)| *w)) {
                 entry.w = held;
                 entry.base_w = held;

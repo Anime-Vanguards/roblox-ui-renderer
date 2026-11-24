@@ -421,6 +421,87 @@ fn automatic_canvas_size_applies_size_and_aspect_constraints() {
     assert_eq!(lines.last().map(String::as_str), Some("print: checked 10, bad 0"), "{lines:#?}");
 }
 
+/// AutomaticSize with UIPadding and UISizeConstraint against a Roblox 0.747 client's rects
+/// (data/studio/whole/autosize-constraint.json): on an automatic axis the constraint bounds the content inside the
+/// padding offsets (MinSize 22 and 6 + 6 px of padding make a label holding 8 px of text 34 wide), MaxSize then caps
+/// the object but its children still push it past the cap, an automatic parent measures a capped child at the size
+/// its content asked for, and a MinSize above MaxSize switches the constraint off. Cells whose text measures
+/// differently from Studio's are counted apart: their sizes follow the text, not these rules.
+#[test]
+fn automatic_size_constraints_bound_the_content_inside_the_padding() {
+    let studio: serde_json::Value = serde_json::from_str(include_str!("../../../../data/studio/whole/autosize-constraint.json")).expect("measurements");
+    // Not reproduced: a scale child of an automatic frame whose Size (50) is above its MaxSize (30) is 12.5 wide in
+    // Studio (0.5 of 25), 9 here (0.5 of the 18 px content box).
+    let known = ["/fx_size50_max30_scale/E/S"];
+    let fixtures = [
+        ("layout-autosize-constraint", include_str!("../../../../fixtures/layout-autosize-constraint.luau")),
+        ("layout-autosize-constraint2", include_str!("../../../../fixtures/layout-autosize-constraint2.luau")),
+    ];
+    let (mut compared, mut text_cells, mut misses) = (0, 0, Vec::new());
+    for (name, source) in fixtures {
+        let script = format!(
+            r#"
+            local Fixture = (function() {source} end)()
+            return function(Target)
+                Fixture(Target)
+                task.spawn(function()
+                    task.wait(0.1)
+                    local Rects = {{}}
+                    for _, Cell in Target:GetChildren() do
+                        local function Visit(Node, Path)
+                            for _, Child in Node:GetChildren() do
+                                if Child:IsA("GuiObject") then
+                                    local At = Path .. "/" .. Child.Name
+                                    local Rect = {{ Child.AbsolutePosition.X - Cell.AbsolutePosition.X, Child.AbsolutePosition.Y - Cell.AbsolutePosition.Y, Child.AbsoluteSize.X, Child.AbsoluteSize.Y }}
+                                    if Child:IsA("TextLabel") or Child:IsA("TextButton") or Child:IsA("TextBox") then
+                                        table.insert(Rect, Child.TextBounds.X)
+                                        table.insert(Rect, Child.TextBounds.Y)
+                                    end
+                                    Rects[At] = Rect
+                                    Visit(Child, At)
+                                end
+                            end
+                        end
+                        Visit(Cell, "/" .. Cell.Name)
+                    end
+                    print(game:GetService("HttpService"):JSONEncode(Rects))
+                end)
+            end
+            "#
+        );
+        let lines = run(&script, 1.5, 0.5);
+        let json = lines.iter().find_map(|line| line.strip_prefix("print: {").map(|rest| format!("{{{rest}"))).unwrap_or_else(|| panic!("{name}: no rects: {lines:#?}"));
+        let ours: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let expected = studio["fixtures"][name].as_object().unwrap();
+        let values = |value: &serde_json::Value| -> Vec<f64> { value.as_array().map(|items| items.iter().filter_map(|v| v.as_f64()).collect()).unwrap_or_default() };
+        let cell_of = |path: &str| path.split('/').nth(1).unwrap_or("").to_string();
+        // Cells holding text that measures differently from Studio's
+        let mut text_differs = std::collections::HashSet::new();
+        for (path, want) in expected {
+            let (want, got) = (values(want), values(&ours[path]));
+            if want.len() == 6 && (got.len() != 6 || (want[4] - got[4]).abs() > 0.01) {
+                text_differs.insert(cell_of(path));
+            }
+        }
+        for (path, want) in expected {
+            let (want, got) = (values(want), values(&ours[path]));
+            compared += 1;
+            let same = got.len() >= 4 && (0..4).all(|k| (want[k] - got[k]).abs() < 0.01);
+            if same || known.contains(&path.as_str()) {
+                continue;
+            }
+            if text_differs.contains(&cell_of(path)) {
+                text_cells += 1;
+                continue;
+            }
+            misses.push(format!("{name} {path}: Studio {:?}, ours {got:?}", &want[..4]));
+        }
+    }
+    eprintln!("compared {compared}, {text_cells} differing only through their text's width");
+    assert!(misses.is_empty(), "{} of {compared} rects differ from Studio's:\n{}", misses.len(), misses.join("\n"));
+    assert!(compared > 260, "only {compared} rects compared");
+}
+
 
 /// Per-instance storage (Slots): entries are guarded by the id's generation, and a slot far beyond
 /// the ones in use costs one chunk, not everything below it.

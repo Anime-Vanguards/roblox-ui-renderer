@@ -146,7 +146,7 @@ impl<T> BoxSlots<T> {
     }
 }
 
-/// A ComputeSize result (width, height, text box, base size, child measure size).
+/// A ComputeSize result (width, height, text box, base size, child measure size, held size).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Sized {
     pub w: f64,
@@ -156,6 +156,10 @@ pub(crate) struct Sized {
     pub base_h: f64,
     pub measure_w: Option<f64>,
     pub measure_h: Option<f64>,
+    /// What an automatic parent measures this object at on an automatic axis whose UISizeConstraint MaxSize
+    /// cut it: its content clamped by the constraint plus its padding offsets (None when that is not wider).
+    pub held_w: Option<f64>,
+    pub held_h: Option<f64>,
 }
 
 /// ComputeSize's inputs (the memo key; compared with Luau `==`).
