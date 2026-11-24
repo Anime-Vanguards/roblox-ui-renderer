@@ -71,6 +71,13 @@ See [examples/rojo-wally](../examples/rojo-wally) for a working Rojo + Wally set
 
 When you run a `--story` or `--module` command with no project flags (`--rojo`, `--project`, `--roots`, `--mount`, `--place`, `RUR_PROJECT`), `rur` walks up from the story folder (then checks the current directory) looking for `default.project.json`, or a lone `*.project.json`. If a folder contains multiple `*.project.json` files without `default.project.json`, `rur` mounts none and lists them so you can choose with `--rojo`.
 
+In a Wally package, `default.project.json` is usually the package's own tree, not a DataModel. The package's code finds its dependencies as siblings (`script:FindFirstAncestor("MyPackage").Parent` is the `Packages` folder that holds Wally's link modules), and only the DataModel dev project beside it, the one you serve into Studio to run the stories, has them. So when the `default.project.json` that `rur` finds is not a DataModel tree, `rur` checks the other `*.project.json` files beside it:
+
+- If exactly one of them is a DataModel tree that mounts the story's file, `rur` mounts that one. The storybook without `--story` asks for a project that mounts every folder the package maps.
+- If several qualify, `rur` keeps `default.project.json`.
+
+Either way, the `rur: Rojo project ...` line says which file was used and why, and names the candidates; `--rojo` picks another.
+
 ```powershell
 cd my-game
 rur-native render --story src/shared/Stories/Button.story.luau --viewport 800x450 --dir out/Button
@@ -88,7 +95,8 @@ Detection never overrides a configured project (a release build respects a `rur.
 ### Missing paths and failure hints
 
 - A missing `$path` logs a warning; if it is a Wally folder (`Packages`, `ServerPackages`, `DevPackages`) beside a `wally.toml`, the warning reminds you to run `wally install`.
-- When a story fails with a missing member error (e.g., `Packages is not a valid member of ReplicatedStorage`) or hangs in `WaitForChild`, `rur` inspects the project on disk (`native/src/hints.rs`) and prints an actionable hint on stderr, in `scene.json` (`diagnostics.hint`), and above the storybook preview—pointing out missing `$path`s, unmounted project files (`--rojo`), missing files in mounted folders, or unmapped sibling folders.
+- When a story fails with a missing member error (e.g., `Packages is not a valid member of ReplicatedStorage`) or hangs in `WaitForChild`, `rur` inspects the project on disk (`native/src/hints.rs`) and prints an actionable hint on stderr, in `scene.json` (`diagnostics.hint`), and above the storybook preview—pointing out missing `$path`s, unmounted project files (`--rojo`), missing files in mounted folders, unmapped sibling folders, or the DataModel project beside a package's own tree that the run should have mounted.
+- When a required module fails, Roblox logs the module's own error and raises `Requested module experienced an error while loading` to the caller. `rur render`, headless captures and the storybook show the logged error instead of that wrapper, and work out the hint from it.
 
 ## Studio snapshots
 

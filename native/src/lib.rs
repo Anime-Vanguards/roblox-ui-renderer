@@ -191,13 +191,15 @@ impl NativeOptions {
         });
         self.rojo = self.rojo.map(|path| absolute(&cwd, &path));
         // A Rojo project: `--project <file.project.json>`, or (release builds) a project folder holding a project file
-        // (its default.project.json, else its only *.project.json) and no rur.json places (rojo.rs)
+        // (its default.project.json, else its only *.project.json; a package's own tree gives way to the one DataModel
+        // project beside it that mounts the story, or the package) and no rur.json places (rojo.rs)
+        let mut why = None;
         if self.rojo.is_none() && rojo::is_project_file(&self.project.to_string_lossy()) {
             self.rojo = Some(self.project.clone());
             self.project = self.project.parent().map(Path::to_path_buf).unwrap_or_default();
         } else if self.rojo.is_none() && self.roots.is_none() && (paths::is_standalone() || named.is_some()) && !rojo::declares_places(&self.project) {
-            match rojo::project_file_in(&self.project) {
-                Ok(found) => self.rojo = found,
+            match rojo::project_for_source(&self.project, self.story.as_deref()) {
+                Ok(found) => (self.rojo, why) = found.map_or((None, None), |(file, why)| (Some(file), why)),
                 Err(several) => self.notes.push(format!("rur: {}", rojo::several_projects(&several))),
             }
         }
@@ -212,7 +214,8 @@ impl NativeOptions {
         }
         if let (Some(file), None) = (&self.rojo, &self.roots) {
             let mounts = rojo::mounts(file, None, &mut self.notes).map_err(anyhow::Error::msg)?;
-            self.notes.insert(0, format!("rur: Rojo project {}: mounted {}", file.display(), rojo::mounted_list(&mounts)));
+            let why = why.map(|why| format!(" ({why}; --rojo picks another)")).unwrap_or_default();
+            self.notes.insert(0, format!("rur: Rojo project {}{why}: mounted {}", file.display(), rojo::mounted_list(&mounts)));
         }
         for note in &self.notes {
             term::project_line(note);
@@ -347,6 +350,37 @@ mod tests {
         assert!(NativeOptions::try_parse_from(["rur-native".as_ref(), example.as_os_str(), "--rojo".as_ref(), "x.project.json".as_ref()]).is_err());
         let missing = NativeOptions::try_parse_from(["rur-native".as_ref(), example.join("missing").as_os_str()]).unwrap().resolve().unwrap_err();
         assert!(missing.to_string().contains("is not a project folder"), "{missing}");
+    }
+
+    /// A Wally package folder: the storybook and headless captures mount the DataModel dev project beside the package's
+    /// own default.project.json, which holds the package's dependencies, and the project line says why
+    #[test]
+    fn a_package_folder_opens_its_data_model_project() {
+        let dir = std::env::temp_dir().join(format!("rur-options-package-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (file, text) in [
+            ("default.project.json", r#"{"name":"Kit","tree":{"$path":"src"}}"#),
+            ("dev.project.json", r#"{"name":"dev","tree":{"$className":"DataModel","ReplicatedStorage":{"Packages":{"$path":"Packages","Kit":{"$path":"src"}}}}}"#),
+            ("Packages/Signal.lua", "return {}"),
+            ("src/Components/Thing.story.lua", "return {}"),
+        ] {
+            std::fs::create_dir_all(dir.join(file).parent().unwrap()).unwrap();
+            std::fs::write(dir.join(file), text).unwrap();
+        }
+        let story = dir.join("src/Components/Thing.story.lua");
+        for args in [vec![dir.as_os_str(), "--story".as_ref(), story.as_os_str(), "--headless".as_ref()], vec![dir.as_os_str()]] {
+            let mut argv: Vec<&std::ffi::OsStr> = vec!["rur-native".as_ref()];
+            argv.extend(&args);
+            let options = NativeOptions::try_parse_from(argv).unwrap().resolve().unwrap();
+            assert_eq!(options.rojo, Some(dir.join("dev.project.json")), "{args:?}");
+            let what = if args.len() > 1 { "Thing.story.lua" } else { "the package" };
+            assert!(
+                options.notes[0].contains(&format!("dev.project.json (default.project.json beside it is the package's own tree, not a DataModel, and this is the one DataModel project there that mounts {what}; --rojo picks another): mounted ReplicatedStorage.Packages, ReplicatedStorage.Packages.Kit")),
+                "{:?}",
+                options.notes
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -77,13 +77,84 @@ pub fn mounts_cli(argv: &[String]) -> i32 {
     }
 }
 
+/// Whether a Rojo project's tree is a DataModel: its `"$className"`, or with none a root `$path` to a project file whose
+/// tree is one (the reader's rule). Any other tree (a Wally package's or a model's own tree) mounts as one instance.
+pub fn is_data_model(file: &Path) -> bool {
+    let mut file = file.to_path_buf();
+    // (a chain of root `$path`s as deep as the reader follows one)
+    for _ in 0..32 {
+        let project = std::fs::read_to_string(&file).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        let Some(tree) = project.as_ref().and_then(|project| project.get("tree")) else { return false };
+        match (tree.get("$className").and_then(serde_json::Value::as_str), tree.get("$path").and_then(serde_json::Value::as_str)) {
+            (Some(class), _) => return class == "DataModel",
+            (None, Some(path)) if is_project_file(path) => file = resolve(file.parent().unwrap_or(Path::new("")), path),
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// Whether project `file` mounts `target` (a file or folder): one of its `$path`s that exists is `target` or holds it
+fn mounts_path(file: &Path, target: &Path) -> bool {
+    let real = |path: &Path| crate::paths::canonical_path(path).unwrap_or_else(|_| path.to_path_buf());
+    let target = real(target);
+    mappings(file).is_ok_and(|mappings| mappings.iter().any(|(_, source, exists)| *exists && target.starts_with(real(source))))
+}
+
+/// The DataModel projects beside `package`, a project whose tree is not a DataModel, that mount `source` (a story or
+/// module file), or with no source every file and folder `package` maps. A Wally package's code finds its dependencies
+/// as its siblings (`script:FindFirstAncestor(<name>).Parent` is the Packages folder of Wally's link modules), and only
+/// such a DataModel dev project has them: the one people serve into Studio to run the package's stories.
+pub fn data_models_beside(package: &Path, source: Option<&Path>) -> Vec<PathBuf> {
+    let targets: Vec<PathBuf> = match source {
+        Some(source) => vec![source.to_path_buf()],
+        None => mappings(package).unwrap_or_default().into_iter().filter(|(_, _, exists)| *exists).map(|(_, path, _)| path).collect(),
+    };
+    if targets.is_empty() || is_data_model(package) {
+        return Vec::new();
+    }
+    let dir = package.parent().unwrap_or(Path::new(""));
+    project_files_in(dir)
+        .into_iter()
+        .filter(|file| file.file_name() != package.file_name() && is_data_model(file) && targets.iter().all(|target| mounts_path(file, target)))
+        .collect()
+}
+
+/// What a run mounts, as the `rur: Rojo project` line and a hint name it: the source file, or the package
+pub fn source_name(source: Option<&Path>) -> String {
+    source.and_then(Path::file_name).map_or_else(|| "the package".to_string(), |name| name.to_string_lossy().into_owned())
+}
+
+/// The names of project files, as a line lists them
+pub fn file_names(files: &[PathBuf]) -> String {
+    files.iter().filter_map(|file| file.file_name()).map(|name| name.to_string_lossy().into_owned()).collect::<Vec<_>>().join(", ")
+}
+
+/// The project a run without project options mounts from folder `dir` ([`project_file_in`]) for `source` (the story or
+/// module file it runs; None for the storybook, which runs the stories the project maps), and why when that needs
+/// saying: a project whose tree is not a DataModel gives way to the one DataModel project beside it that mounts the
+/// source ([`data_models_beside`]); with several such projects it stays, and the reason names them. `Err` lists the
+/// folder's project files when there are several and none is default.project.json.
+pub fn project_for_source(dir: &Path, source: Option<&Path>) -> Result<Option<(PathBuf, Option<String>)>, Vec<PathBuf>> {
+    let Some(found) = project_file_in(dir)? else { return Ok(None) };
+    let mut beside = data_models_beside(&found, source);
+    let name = found.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let what = source_name(source);
+    Ok(Some(match beside.len() {
+        0 => (found, None),
+        1 => (beside.remove(0), Some(format!("{name} beside it is the package's own tree, not a DataModel, and this is the one DataModel project there that mounts {what}"))),
+        _ => (found, Some(format!("this is the package's own tree, not a DataModel, and several DataModel projects beside it mount {what} ({})", file_names(&beside)))),
+    }))
+}
+
 /// How a run's Rojo project was chosen
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Chosen {
     /// `--rojo <file>` or `--project <file.project.json>`
     Named,
-    /// No project options: the project file nearest the story (or in the current directory)
-    Found,
+    /// No project options: the project file nearest the story (or in the current directory), and why it was taken when
+    /// that needs saying ([`project_for_source`])
+    Found { why: Option<String> },
 }
 
 /// What [`resolve_arguments`] did: the arguments for the engine, and the project it mounted
@@ -100,8 +171,8 @@ impl Resolved {
     pub fn note(&self) -> Option<String> {
         let (file, chosen, mounts) = self.project.as_ref()?;
         let how = match chosen {
-            Chosen::Named => "",
-            Chosen::Found => " (found beside the story; --rojo picks another)",
+            Chosen::Named => String::new(),
+            Chosen::Found { why } => format!(" (found beside the story; {}--rojo picks another)", why.as_ref().map(|why| format!("{why}; ")).unwrap_or_default()),
         };
         Some(format!("rur: Rojo project {}{how}: mounted {}", file.display(), mounted_list(mounts)))
     }
@@ -161,7 +232,8 @@ pub fn resolve_arguments(argv: &[String]) -> Result<Resolved, String> {
         Some(file) => (Some(resolve(Path::new(""), &file)), Chosen::Named),
         None if at.is_some() => return Err("--rojo-at places a Rojo project: it needs --rojo <file.project.json>".into()),
         None => match detect(&rest) {
-            Ok(file) => (file, Chosen::Found),
+            Ok(Some((file, why))) => (Some(file), Chosen::Found { why }),
+            Ok(None) => (None, Chosen::Found { why: None }),
             Err(several) => return Ok(Resolved { arguments: rest, project: None, warnings: vec![format!("rur: {}", several_projects(&several))] }),
         },
     };
@@ -189,9 +261,10 @@ pub fn resolve_arguments(argv: &[String]) -> Result<Resolved, String> {
     Ok(Resolved { arguments, project: Some((file, chosen, mounts)), warnings })
 }
 
-/// The project file a run without project options mounts ([`resolve_arguments`]); `Err` lists the project files of
-/// the nearest folder that has several and no default.project.json (rur mounts none of them then)
-fn detect(argv: &[String]) -> Result<Option<PathBuf>, Vec<PathBuf>> {
+/// The project file a run without project options mounts ([`resolve_arguments`]), and why when that needs saying
+/// ([`project_for_source`]); `Err` lists the project files of the nearest folder that has several and no
+/// default.project.json (rur mounts none of them then)
+fn detect(argv: &[String]) -> Result<Option<(PathBuf, Option<String>)>, Vec<PathBuf>> {
     if PROJECT_OPTIONS.iter().any(|key| argv.iter().any(|arg| arg == key)) {
         return Ok(None);
     }
@@ -217,8 +290,8 @@ fn detect(argv: &[String]) -> Result<Option<PathBuf>, Vec<PathBuf>> {
         }
     }
     for dir in source.ancestors().skip(1).chain([cwd.as_path()]) {
-        if let Some(file) = project_file_in(dir)? {
-            return Ok(Some(file));
+        if let Some(found) = project_for_source(dir, Some(&source))? {
+            return Ok(Some(found));
         }
     }
     Ok(None)
@@ -297,7 +370,7 @@ mod tests {
         if std::env::var_os("RUR_PROJECT").is_none() {
             let resolved = resolve_arguments(&strings(&["--story", &story])).unwrap();
             let (file, chosen, _) = resolved.project.as_ref().unwrap();
-            assert_eq!((crate::paths::canonical_path(file).unwrap(), chosen), (crate::paths::canonical_path(&dir.join("default.project.json")).unwrap(), &Chosen::Found));
+            assert_eq!((crate::paths::canonical_path(file).unwrap(), chosen), (crate::paths::canonical_path(&dir.join("default.project.json")).unwrap(), &Chosen::Found { why: None }));
             assert!(resolved.arguments.iter().any(|arg| arg.starts_with("ReplicatedStorage/Packages=")));
             assert!(resolved.note().unwrap().contains("found beside the story"));
         }
@@ -315,6 +388,51 @@ mod tests {
             assert!(resolved.project.is_none());
             assert!(resolved.warnings[0].contains("has several Rojo projects (dev.project.json, place.project.json), so none was mounted"), "{:?}", resolved.warnings);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Wally package: default.project.json is the package's own tree, and the DataModel dev project beside it (the
+    /// Packages folder with the package inside) is what its stories run in. Detection takes the one DataModel project
+    /// that mounts the story and says why; with two it keeps default.project.json and names them; one that doesn't
+    /// mount the story, or a default.project.json that is a DataModel, changes nothing.
+    #[test]
+    fn a_package_tree_gives_way_to_the_data_model_project_beside_it() {
+        if std::env::var_os("RUR_PROJECT").is_some() {
+            return;
+        }
+        let dir = temp_dir("package");
+        write(&dir.join("default.project.json"), r#"{"name":"Kit","tree":{"$path":"src"}}"#);
+        write(&dir.join("dev.project.json"), r#"{"name":"dev","tree":{"$className":"DataModel","ReplicatedStorage":{"Packages":{"$path":"Packages","Kit":{"$path":"src"}}}}}"#);
+        write(&dir.join("Packages/Signal.lua"), "return {}");
+        write(&dir.join("src/init.lua"), "return {}");
+        write(&dir.join("src/Components/Thing.story.lua"), "return {}");
+        let story = dir.join("src/Components/Thing.story.lua").to_string_lossy().into_owned();
+        let strings = |args: &[&str]| args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        let resolved = resolve_arguments(&strings(&["--story", &story])).unwrap();
+        assert!(resolved.project.as_ref().unwrap().0.ends_with("dev.project.json"), "{:?}", resolved.project);
+        assert!(resolved.arguments.iter().any(|arg| arg.starts_with("ReplicatedStorage/Packages/Kit=")), "{:?}", resolved.arguments);
+        let note = resolved.note().unwrap();
+        assert!(
+            note.contains("(found beside the story; default.project.json beside it is the package's own tree, not a DataModel, and this is the one DataModel project there that mounts Thing.story.lua; --rojo picks another): mounted ReplicatedStorage.Packages, ReplicatedStorage.Packages.Kit"),
+            "{note}"
+        );
+        // The storybook (no story): the DataModel project mounts everything the package maps
+        assert_eq!(project_for_source(&dir, None).unwrap().unwrap().0, dir.join("dev.project.json"));
+        // A second DataModel project that mounts the story: default.project.json stays, and the line names both
+        write(&dir.join("play.project.json"), r#"{"name":"play","tree":{"$className":"DataModel","ReplicatedStorage":{"Packages":{"$path":"Packages","Kit":{"$path":"src"}}}}}"#);
+        let resolved = resolve_arguments(&strings(&["--story", &story])).unwrap();
+        assert!(resolved.project.as_ref().unwrap().0.ends_with("default.project.json"));
+        let note = resolved.note().unwrap();
+        assert!(note.contains("several DataModel projects beside it mount Thing.story.lua (dev.project.json, play.project.json); --rojo picks another)"), "{note}");
+        // A DataModel project that maps only the Packages folder doesn't mount the story
+        write(&dir.join("play.project.json"), r#"{"name":"play","tree":{"$className":"DataModel","ReplicatedStorage":{"Packages":{"$path":"Packages"}}}}"#);
+        assert!(resolve_arguments(&strings(&["--story", &story])).unwrap().project.unwrap().0.ends_with("dev.project.json"));
+        // A default.project.json that is a DataModel (through a root $path to one) is the run's, as before
+        write(&dir.join("default.project.json"), r#"{"name":"Kit","tree":{"$path":"dev.project.json"}}"#);
+        assert!(is_data_model(&dir.join("default.project.json")) && !is_data_model(&dir.join("missing.project.json")));
+        let resolved = resolve_arguments(&strings(&["--story", &story])).unwrap();
+        assert!(resolved.project.as_ref().unwrap().0.ends_with("default.project.json"));
+        assert!(resolved.note().unwrap().contains("(found beside the story; --rojo picks another)"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

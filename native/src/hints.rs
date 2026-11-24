@@ -7,7 +7,30 @@
 //! it under a failed or waiting story.
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
+
 use crate::rojo;
+
+/// What Roblox raises to require()'s caller when the module it requires raised an error while loading
+const REQUIRE_WRAPPER: &str = "Requested module experienced an error while loading";
+
+/// A story's failure as a person needs to read it, and as its hint is worked out from: when a required module fails,
+/// Roblox logs the module's own error to output and raises a generic wrapper to the caller (ree does the same), so the
+/// first logged script error that is not the wrapper stands in for it. `output` is the run's script output (a scene's
+/// `diagnostics.output`: entries of `kind` and `message`).
+pub fn failure_cause<'a>(failure: &'a str, output: &'a Value) -> &'a str {
+    if !failure.ends_with(REQUIRE_WRAPPER) {
+        return failure;
+    }
+    output
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["kind"] == "error")
+        .filter_map(|entry| entry["message"].as_str())
+        .find(|message| !message.ends_with(REQUIRE_WRAPPER))
+        .unwrap_or(failure)
+}
 
 /// What a run mounted
 #[derive(Clone, Debug, Default)]
@@ -167,6 +190,11 @@ pub fn missing_child_hint(message: &str, sources: &Sources, story: Option<&Path>
         let wally = wally_lists(&dir, &child).map(|advice| format!(": {advice}")).unwrap_or_default();
         return Some(format!("{} is the folder {}, which has no {child}{wally}", parent.join("."), dir.display()));
     }
+    // The run mounted a package's own tree (not a DataModel), whose code finds its dependencies as siblings that only
+    // a DataModel project beside it has
+    if let Some(hint) = projects.iter().filter(|file| sources.used(file)).find_map(|package| data_model_hint(package, &wanted, story)) {
+        return Some(hint);
+    }
     // A child of a service nothing maps
     let [service] = parent.as_slice() else { return None };
     let nearest = projects.first();
@@ -199,6 +227,19 @@ pub fn missing_child_hint(message: &str, sources: &Sources, story: Option<&Path>
         }
         (None, None) => format!("No Rojo project file is beside the story or above it, and this run mounted {}", sources.listed()),
     })
+}
+
+/// The hint for a run that mounted `package`, a project whose tree is not a DataModel, when DataModel projects beside it
+/// mount the story ([`rojo::data_models_beside`]): the instance path `wanted` exists only in them
+fn data_model_hint(package: &Path, wanted: &str, story: Option<&Path>) -> Option<String> {
+    let beside = rojo::data_models_beside(package, story);
+    let mounted = format!("this run mounted {}, the package's own tree, not a DataModel, so nothing mounts {}", file_name(package), rojo::dotted(wanted));
+    let what = rojo::source_name(story);
+    match beside.as_slice() {
+        [] => None,
+        [file] => Some(format!("{mounted}; {} beside it is a DataModel project that mounts {what}: pass --rojo {}", file_name(file), file.display())),
+        several => Some(format!("{mounted}; DataModel projects beside it mount {what} ({}): pass --rojo <file> to mount one", rojo::file_names(several))),
+    }
 }
 
 /// The hint for a story whose mount still waits when the run ends (a WaitForChild on something nothing mounted, say):
@@ -359,6 +400,56 @@ mod tests {
         let hint = missing_child_hint(MISSING, &sources, Some(&story)).unwrap();
         assert_eq!(hint, format!("{} has no ReplicatedStorage.Packages; under ReplicatedStorage it maps Shared", dir.join("default.project.json").display()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Wally package mounted as its own tree (default.project.json, not a DataModel): its code reads its dependency as
+    /// a sibling, ReplicatedStorage.Signal, which only the DataModel dev project beside it has, so the hint names it
+    #[test]
+    fn a_package_tree_run_names_the_data_model_project_that_mounts_the_story() {
+        let dir = temp_dir("package");
+        write(&dir.join("default.project.json"), r#"{"name":"Kit","tree":{"$path":"src"}}"#);
+        write(&dir.join("dev.project.json"), r#"{"name":"dev","tree":{"$className":"DataModel","ReplicatedStorage":{"Packages":{"$path":"Packages","Kit":{"$path":"src"}}}}}"#);
+        write(&dir.join("Packages/Signal.lua"), "return {}");
+        let story = dir.join("src/Components/Thing.story.lua");
+        write(&story, "return {}");
+        let sources = mounted(&dir, "default.project.json");
+        let missing = r#"Signal is not a valid member of ReplicatedStorage "ReplicatedStorage""#;
+        let hint = missing_child_hint(missing, &sources, Some(&story)).unwrap();
+        assert_eq!(
+            hint,
+            format!(
+                "this run mounted default.project.json, the package's own tree, not a DataModel, so nothing mounts ReplicatedStorage.Signal; dev.project.json beside it is a DataModel project that mounts Thing.story.lua: pass --rojo {}",
+                dir.join("dev.project.json").display()
+            )
+        );
+        // Two of them: both named
+        write(&dir.join("play.project.json"), r#"{"name":"play","tree":{"$className":"DataModel","ReplicatedStorage":{"Packages":{"$path":"Packages","Kit":{"$path":"src"}}}}}"#);
+        let hint = missing_child_hint(missing, &sources, Some(&story)).unwrap();
+        assert!(hint.ends_with("; DataModel projects beside it mount Thing.story.lua (dev.project.json, play.project.json): pass --rojo <file> to mount one"), "{hint}");
+        // A member missing inside the package's own folder is that folder's
+        let hint = missing_child_hint(r#"Gone is not a valid member of Folder "ReplicatedStorage.Kit.Components""#, &sources, Some(&story)).unwrap();
+        assert_eq!(hint, format!("ReplicatedStorage.Kit.Components is the folder {}, which has no Gone", dir.join("src").join("Components").display()));
+        // The run that mounted the DataModel project gets no such hint
+        let dev = mounted(&dir, "dev.project.json");
+        assert!(missing_child_hint(missing, &dev, Some(&story)).is_none_or(|hint| !hint.contains("DataModel")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// When require() fails, the module's own error is logged before require() raises its wrapper: that error is the
+    /// failure people read and the one hints come from
+    #[test]
+    fn a_failed_require_reads_as_the_error_its_module_logged() {
+        let wrapper = "Requested module experienced an error while loading";
+        let output = serde_json::json!([
+            { "kind": "warn", "message": "slow" },
+            { "kind": "error", "message": "Packages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"" },
+            { "kind": "error", "message": wrapper }
+        ]);
+        assert_eq!(failure_cause(wrapper, &output), "Packages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"");
+        assert_eq!(failure_cause(&format!("ReplicatedStorage.Stories.A.story:1: {wrapper}"), &output), "Packages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"");
+        assert_eq!(failure_cause("boom", &output), "boom");
+        assert_eq!(failure_cause(wrapper, &serde_json::json!([{ "kind": "error", "message": wrapper }])), wrapper);
+        assert_eq!(failure_cause(wrapper, &Value::Null), wrapper);
     }
 
     #[test]

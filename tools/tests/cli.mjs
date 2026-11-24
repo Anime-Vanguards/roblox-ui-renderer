@@ -147,6 +147,29 @@ end
 	};
 	for (const [file, reason] of Object.entries(refused)) assert.throws(() => rojoMounts(path.join(nested, file)), { message: `${path.join(nested, file)}: ${reason}` });
 
+	// A Wally package's own default.project.json (not a DataModel) gives way to the one DataModel project beside it that
+	// mounts the story (native/src/rojo.rs project_for_source); with two, it stays and the line names them
+	if (!process.env.RUR_PROJECT) {
+		const { detectRojoProject, isDataModel } = await import("../../cli/rojo.mjs");
+		const tree = (name, value) => write(`package/${name}`, JSON.stringify(value));
+		const dev = { $className: "DataModel", ReplicatedStorage: { Packages: { $path: "Packages", Kit: { $path: "src" } } } };
+		tree("default.project.json", { name: "Kit", tree: { $path: "src" } });
+		tree("dev.project.json", { name: "dev", tree: dev });
+		write("package/Packages/Signal.lua", "return {}");
+		write("package/src/Components/Thing.story.lua", "return {}");
+		const packageDir = fs.realpathSync.native(path.join(dir, "package"));
+		const story = path.join(packageDir, "src", "Components", "Thing.story.lua");
+		const args = { story };
+		const note = detectRojoProject(args, path.join(dir, "elsewhere"));
+		assert.equal(args.rojo, path.join(packageDir, "dev.project.json"));
+		assert.equal(note, `rur: Rojo project ${args.rojo} (found beside the story; default.project.json beside it is the package's own tree, not a DataModel, and this is the one DataModel project there that mounts Thing.story.lua; --rojo picks another): mounted ReplicatedStorage.Packages, ReplicatedStorage.Packages.Kit`);
+		tree("play.project.json", { name: "play", tree: dev });
+		const both = { story };
+		assert.match(detectRojoProject(both, path.join(dir, "elsewhere")), /several DataModel projects beside it mount Thing\.story\.lua \(dev\.project\.json, play\.project\.json\); --rojo picks another\): mounted ReplicatedStorage\.Kit$/);
+		assert.equal(both.rojo, path.join(packageDir, "default.project.json"));
+		assert.ok(isDataModel(path.join(packageDir, "dev.project.json")) && !isDataModel(path.join(packageDir, "default.project.json")));
+	}
+
 	// native/src/rojo.rs gives the same mounts as cli/rojo.mjs (`rur-native rojo-mounts`), in the same order, and refuses
 	// the same projects with the same reasons
 	{

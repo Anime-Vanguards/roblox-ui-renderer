@@ -92,11 +92,12 @@ function readProject(file) {
 }
 
 // [{ kind: "mount" | "instance", path: "Service/Name", value }] for a project file
-// (`onPath(source)` sees every $path before it is checked: --git-ref extracts it there)
+// (`onPath(source)` sees every $path before it is checked: --git-ref extracts it there; `quiet` leaves out the
+// warnings for $paths that don't exist)
 //
 // The tree is built first, then placed (the engine's rojo.rs walk): a node is { className, source, children },
 // its source { kind: "found" | "missing" | "skipped", path } for a `$path` that isn't a project file, else null.
-export function rojoMounts(projectFile, { at, onPath } = {}) {
+export function rojoMounts(projectFile, { at, onPath, quiet } = {}) {
 	const file = path.resolve(projectFile);
 	const project = readProject(file);
 	if (!isObject(project) || !isObject(project.tree)) throw new Error(`${file}: not a Rojo project (no "tree")`);
@@ -179,8 +180,53 @@ export function rojoMounts(projectFile, { at, onPath } = {}) {
 		if (segments.length < 2) throw new Error(`--rojo-at ${at}: needs Service/Name`);
 		place(tree, segments);
 	}
-	for (const [where, source] of missing) process.stderr.write(`rur: warning: ${missingPath(file, where, source)}\n`);
+	if (!quiet) for (const [where, source] of missing) process.stderr.write(`rur: warning: ${missingPath(file, where, source)}\n`);
 	return mounts;
+}
+
+// Whether a project's tree is a DataModel (native/src/rojo.rs is_data_model): its "$className", or with none a root
+// `$path` to a project file whose tree is one
+export function isDataModel(file) {
+	for (let depth = 0; depth < MAX_PROJECT_NESTING; depth++) {
+		let tree;
+		try {
+			tree = JSON.parse(fs.readFileSync(file, "utf8"))?.tree;
+		} catch {
+			return false;
+		}
+		if (!isObject(tree)) return false;
+		if (typeof tree.$className === "string") return tree.$className === "DataModel";
+		if (typeof tree.$path !== "string" || !isRojoProject(tree.$path)) return false;
+		file = path.resolve(path.dirname(file), tree.$path);
+	}
+	return false;
+}
+
+// The DataModel projects beside `pkg`, a project whose tree is not a DataModel, that mount file `source`
+// (native/src/rojo.rs data_models_beside): a Wally package's own tree runs its stories only in the dev project that has
+// its dependencies as siblings
+function dataModelsBeside(pkg, source) {
+	if (isDataModel(pkg)) return [];
+	const real = file => {
+		try {
+			return fs.realpathSync.native(file);
+		} catch {
+			return path.resolve(file);
+		}
+	};
+	const inside = (child, parent) => {
+		const relative = path.relative(parent, child);
+		return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+	};
+	const mounts = file => {
+		try {
+			return rojoMounts(file, { quiet: true }).filter(mount => mount.kind === "mount").map(mount => real(mount.value));
+		} catch {
+			return [];
+		}
+	};
+	const target = real(source);
+	return projectFilesIn(path.dirname(pkg)).filter(file => path.basename(file) !== path.basename(pkg) && isDataModel(file) && mounts(file).some(mounted => inside(target, mounted)));
 }
 
 // The run's Rojo project file: --rojo <file>, or --project <file.project.json>
@@ -207,8 +253,10 @@ const PROJECT_OPTIONS = ["rojo", "project", "roots", "mount", "place", "rojo-at"
 
 // The project file a run with no project options mounts (native/src/rojo.rs detect): with no --rojo,
 // --project, --roots, --mount, --place and no RUR_PROJECT, a --story or --module outside the default project
-// mounts the project file nearest it (its folder or a parent: projectFileIn), else the current directory's. Sets
-// args.rojo and returns the line saying so; a nearest folder with several project files is named instead; else null.
+// mounts the project file nearest it (its folder or a parent: projectFileIn), else the current directory's; a project
+// whose tree is not a DataModel gives way to the one DataModel project beside it that mounts the story
+// (native/src/rojo.rs project_for_source). Sets args.rojo and returns the line saying so; a nearest folder with several
+// project files is named instead; else null.
 export function detectRojoProject(args, defaultProject) {
 	if (PROJECT_OPTIONS.some(key => args[key] !== undefined && args[key] !== false)) return null;
 	if (process.env.RUR_PROJECT) return null;
@@ -243,9 +291,14 @@ export function detectRojoProject(args, defaultProject) {
 		const { file: found, several } = projectFileIn(dir);
 		if (several) return `rur: warning: ${dir} has several Rojo projects (${several.map(file => path.basename(file)).join(", ")}), so none was mounted: pass --rojo <file> to mount one`;
 		if (!found) continue;
-		args.rojo = found;
-		const mounted = rojoMounts(found).filter(mount => mount.kind === "mount").map(mount => mount.path.replaceAll("/", "."));
-		return `rur: Rojo project ${found} (found beside the story; --rojo picks another): mounted ${mounted.length ? mounted.join(", ") : "nothing"}`;
+		const beside = dataModelsBeside(found, file);
+		const what = path.basename(file);
+		const why = beside.length === 1
+			? `${path.basename(found)} beside it is the package's own tree, not a DataModel, and this is the one DataModel project there that mounts ${what}; `
+			: beside.length > 1 ? `this is the package's own tree, not a DataModel, and several DataModel projects beside it mount ${what} (${beside.map(other => path.basename(other)).join(", ")}); ` : "";
+		args.rojo = beside.length === 1 ? beside[0] : found;
+		const mounted = rojoMounts(args.rojo).filter(mount => mount.kind === "mount").map(mount => mount.path.replaceAll("/", "."));
+		return `rur: Rojo project ${args.rojo} (found beside the story; ${why}--rojo picks another): mounted ${mounted.length ? mounted.join(", ") : "nothing"}`;
 	}
 	return null;
 }

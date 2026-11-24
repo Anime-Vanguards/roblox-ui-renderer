@@ -146,6 +146,8 @@ fn capture_scene(
     let mut ready_ms = None;
     let mut startup_timings = Value::Null;
     let mut scene = SceneStore::default();
+    // The story's mount output (the last ready reply's), for a failure's logged cause
+    let mut mount_output = Value::Null;
     let mut standby: Option<RuntimeWorker> = None;
     let mut runtime = if let Some(story) = &options.story {
         eprintln!("Loading story {}", story.display());
@@ -186,7 +188,8 @@ fn capture_scene(
             .cloned()
             .unwrap_or(Value::Null);
         scene.apply(&ready).map_err(anyhow::Error::msg)?;
-        check_scene(&scene)?;
+        mount_output = ready.pointer("/diagnostics/output").cloned().unwrap_or(Value::Null);
+        check_scene(&scene, &mount_output, options)?;
         assets.begin_scene(&scene);
         Some(worker)
     } else {
@@ -284,7 +287,8 @@ fn capture_scene(
             let ready = receive(&worker)?;
             runtime = Some(worker);
             scene.apply(&ready).map_err(anyhow::Error::msg)?;
-            check_scene(&scene)?;
+            mount_output = ready.pointer("/diagnostics/output").cloned().unwrap_or(Value::Null);
+            check_scene(&scene, &mount_output, options)?;
             assets.begin_scene(&scene);
             presentation.update(&scene, None);
             standby = RuntimeWorker::spawn_standby(runtime_options).ok();
@@ -301,7 +305,7 @@ fn capture_scene(
             let apply_at = Instant::now();
             scene.apply_owned(&mut reply).map_err(anyhow::Error::msg)?;
             apply_ms = apply_at.elapsed().as_secs_f64() * 1000.0;
-            check_scene(&scene)?;
+            check_scene(&scene, &mount_output, options)?;
             presentation.update(&scene, reply.get("presentation"));
             profiler.record_runtime(&reply);
         }
@@ -506,12 +510,20 @@ fn receive(worker: &RuntimeWorker) -> Result<Value> {
     }
 }
 
-fn check_scene(scene: &SceneStore) -> Result<()> {
+/// A story that failed ends the capture with its failure, read as the cause the mount logged behind require()'s wrapper
+/// (`mount_output`: the ready reply's `diagnostics.output`; crate::hints::failure_cause), and the hint worked out from it
+fn check_scene(scene: &SceneStore, mount_output: &Value, options: &NativeOptions) -> Result<()> {
     if scene.header().get("status").and_then(Value::as_str) == Some("error") {
-        bail!(
-            "Story failed: {}",
-            scene.header().get("failure").unwrap_or(&Value::Null)
-        );
+        let failure = match scene.header().get("failure") {
+            Some(Value::String(failure)) => failure.clone(),
+            other => other.unwrap_or(&Value::Null).to_string(),
+        };
+        let cause = crate::hints::failure_cause(&failure, mount_output);
+        let hint = options.story.as_ref().and_then(|story| {
+            let sources = RuntimeOptions::from_native(options, story.clone()).sources();
+            crate::hints::missing_child_hint(cause, &sources, Some(story))
+        });
+        bail!("Story failed: {cause}{}", hint.map(|hint| format!("\nhint: {hint}")).unwrap_or_default());
     }
     Ok(())
 }
@@ -736,5 +748,44 @@ mod tests {
             replay.command(0, 0.01),
             json!({"cmd":"frame","dt":0.01,"cadence":"display","events":[]})
         );
+    }
+    /// A capture of a story whose require failed names the error the required module logged, not require()'s wrapper,
+    /// and the hint worked out from it: here a Wally package's own tree was mounted (`--rojo default.project.json`), so
+    /// its dependency is missing, and the hint names the DataModel project beside it
+    #[test]
+    fn a_failed_require_reports_the_logged_cause_and_its_hint() {
+        use clap::Parser;
+        let dir = std::env::temp_dir().join(format!("rur-headless-require-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        for (file, text) in [
+            ("default.project.json", r#"{"name":"Kit","tree":{"$path":"src"}}"#),
+            ("dev.project.json", r#"{"name":"dev","tree":{"$className":"DataModel","ReplicatedStorage":{"Packages":{"$path":"Packages","Kit":{"$path":"src"}}}}}"#),
+            ("Packages/Signal.lua", "return {}"),
+            ("src/Components/Thing.story.lua", "return {}"),
+        ] {
+            fs::create_dir_all(dir.join(file).parent().unwrap()).unwrap();
+            fs::write(dir.join(file), text).unwrap();
+        }
+        let story = dir.join("src/Components/Thing.story.lua");
+        let rojo = dir.join("default.project.json");
+        let args = ["rur-native".as_ref(), "--project".as_ref(), dir.as_os_str(), "--rojo".as_ref(), rojo.as_os_str(), "--story".as_ref(), story.as_os_str(), "--headless".as_ref()];
+        let options = NativeOptions::try_parse_from(args)
+            .unwrap()
+            .resolve()
+            .unwrap();
+        let wrapper = "Requested module experienced an error while loading";
+        let cause = r#"Signal is not a valid member of ReplicatedStorage "ReplicatedStorage""#;
+        let mut scene = SceneStore::default();
+        scene.apply(&json!({"delta":{"nodes":{},"removed":{},"layers":{},"fonts":{},"images":{},"header":{"status":"error","failure":wrapper}}})).unwrap();
+        let output = json!([{ "kind": "error", "message": cause }, { "kind": "error", "message": wrapper }]);
+        let error = check_scene(&scene, &output, &options).unwrap_err().to_string();
+        assert_eq!(
+            error,
+            format!(
+                "Story failed: {cause}\nhint: this run mounted default.project.json, the package's own tree, not a DataModel, so nothing mounts ReplicatedStorage.Signal; dev.project.json beside it is a DataModel project that mounts Thing.story.lua: pass --rojo {}",
+                dir.join("dev.project.json").display()
+            )
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

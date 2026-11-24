@@ -179,6 +179,8 @@ pub struct NativeApp {
     /// place a mount waits at (false) it is for
     hint: Option<String>,
     explained: Option<(bool, String)>,
+    /// The story's mount output (the ready reply's `diagnostics.output`), where a failed require logged its cause
+    mount_output: Value,
     font_reloads: u8,
     pending_fonts: Option<Value>,
     status: String,
@@ -346,6 +348,7 @@ impl NativeApp {
             runtime_failed: false,
             hint: None,
             explained: None,
+            mount_output: Value::Null,
             font_reloads: 0,
             pending_fonts: None,
             status: "Choose a story to begin".into(),
@@ -438,6 +441,7 @@ impl NativeApp {
         self.runtime_failed = false;
         self.hint = None;
         self.explained = None;
+        self.mount_output = Value::Null;
         self.loading = true;
         self.dirty = false;
         self.paused = false;
@@ -502,6 +506,7 @@ impl NativeApp {
                         }
                     }
                     if reply["type"] == "ready" {
+                        self.mount_output = reply.pointer("/diagnostics/output").cloned().unwrap_or(Value::Null);
                         self.last_request = Instant::now();
                         // Prepared only after the story is ready, so both loads never compete.
                         if let Some(path) = self.options.story.clone() {
@@ -765,10 +770,7 @@ impl NativeApp {
 
     /// The hint for the story's failure or wait, worked out again when either changes (it reads project files)
     fn update_hint(&mut self) {
-        let subject = match (&self.error, self.runtime_failed) {
-            (Some(error), true) => Some((true, error.clone())),
-            _ => self.waiting().map(|at| (false, at)),
-        };
+        let subject = story_problem(self.error.as_deref().filter(|_| self.runtime_failed), &self.mount_output, || self.waiting());
         if subject == self.explained {
             return;
         }
@@ -788,10 +790,10 @@ impl NativeApp {
 
     /// A failed or waiting story: what happened and the hint, above the preview (which shows nothing useful then)
     fn problem_card(&self, ui: &mut egui::Ui) {
-        let (headline, color) = match (&self.explained, &self.error) {
-            (Some((true, _)), Some(error)) => (error.clone(), Color32::LIGHT_RED),
-            (Some((false, at)), _) => (format!("The story's mount is still waiting, at {at}"), Color32::from_rgb(240, 200, 90)),
-            _ => return,
+        let (headline, color) = match &self.explained {
+            Some((true, failure)) => (failure.clone(), Color32::LIGHT_RED),
+            Some((false, at)) => (format!("The story's mount is still waiting, at {at}"), Color32::from_rgb(240, 200, 90)),
+            None => return,
         };
         egui::Frame::group(ui.style()).stroke(egui::Stroke::new(1.0_f32, color.gamma_multiply(0.6))).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -1011,10 +1013,10 @@ impl NativeApp {
                         continue;
                     }
                     match note.strip_prefix("Rojo project ") {
-                        // "Rojo project <file>: mounted ...": the file's name, the rest on hover
+                        // "Rojo project <file> [(why)]: mounted ...": the file's name, the rest on hover
                         Some(rest) => {
                             let file = rest.split(": mounted ").next().unwrap_or(rest);
-                            let name = Path::new(file).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| file.to_string());
+                            let name = self.options.rojo.as_deref().unwrap_or(Path::new(file)).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| file.to_string());
                             ui.add(egui::Label::new(egui::RichText::new(format!("Project: {name}")).weak()).truncate()).on_hover_text(note);
                         }
                         None => {
@@ -1574,6 +1576,16 @@ impl Drop for NativeApp {
     }
 }
 
+/// What the storybook explains about its story (the problem card and its hint): a failure (true), read as the cause
+/// the mount logged behind require()'s wrapper ([`crate::hints::failure_cause`]), or else where a yielding mount waits
+/// (false)
+fn story_problem(failure: Option<&str>, mount_output: &Value, waiting: impl FnOnce() -> Option<String>) -> Option<(bool, String)> {
+    match failure {
+        Some(failure) => Some((true, crate::hints::failure_cause(failure, mount_output).to_string())),
+        None => waiting().map(|at| (false, at)),
+    }
+}
+
 fn display_value(value: &Value) -> String {
     value
         .as_str()
@@ -1730,6 +1742,27 @@ mod tests {
         assert_eq!(controls[2]["value"], "retained");
         assert_eq!(controls[3]["value"], json!([1, 0.5, 0]));
         assert_eq!(controls[4]["value"], 7);
+    }
+
+    /// A story whose require failed: the problem card shows the error the required module logged, not the wrapper
+    /// require() raised, and its hint is worked out from that error (Packages here is a member nothing mounted)
+    #[test]
+    fn the_problem_card_shows_the_cause_a_failed_require_logged() {
+        const WRAPPER: &str = "Requested module experienced an error while loading";
+        let cause = r#"Packages is not a valid member of ReplicatedStorage "ReplicatedStorage""#;
+        let output = json!([
+            { "kind": "print", "message": "loading" },
+            { "kind": "error", "message": cause },
+            { "kind": "error", "message": WRAPPER }
+        ]);
+        let problem = story_problem(Some(WRAPPER), &output, || None).unwrap();
+        assert_eq!(problem, (true, cause.to_string()));
+        let hint = |message: &str| crate::hints::missing_child_hint(message, &crate::hints::Sources::default(), Some(Path::new("Button.story.luau")));
+        assert!(hint(&problem.1).is_some() && hint(WRAPPER).is_none());
+        // Another failure is shown as it is, and a wrapper with nothing logged before it stays
+        assert_eq!(story_problem(Some("boom"), &output, || None).unwrap().1, "boom");
+        assert_eq!(story_problem(Some(WRAPPER), &Value::Null, || None).unwrap().1, WRAPPER);
+        assert_eq!(story_problem(None, &output, || Some("Button.story.luau:3".into())), Some((false, "Button.story.luau:3".into())));
     }
 
     #[test]
