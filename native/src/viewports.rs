@@ -12,7 +12,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::mpsc,
+    sync::{Arc, Mutex, OnceLock, mpsc},
     time::Duration,
 };
 
@@ -118,6 +118,30 @@ pub struct ViewportWorker {
 /// the stand-in instead of the found executable
 #[cfg(test)]
 pub(crate) static STAND_INS: std::sync::Mutex<Vec<(PathBuf, PathBuf, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
+
+type ModelWorkers = Mutex<HashMap<(PathBuf, bool), Arc<Mutex<ViewportWorker>>>>;
+static MODEL_WORKERS: OnceLock<ModelWorkers> = OnceLock::new();
+
+/// Process-wide model-bundle worker keyed by `(state_dir, offline)`: every engine in the process
+/// shares one worker instead of starting one child process per VM.
+pub fn shared_model_worker(repo: &Path, offline: bool) -> Arc<Mutex<ViewportWorker>> {
+    let key = (crate::state_dir(repo), offline);
+    let mut map = MODEL_WORKERS.get_or_init(Default::default).lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    map.entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(ViewportWorker::new(repo, offline))))
+        .clone()
+}
+
+/// Drops idle process-wide model workers so the service frees their memory between bursts.
+pub fn release_shared_workers() {
+    if let Some(workers) = MODEL_WORKERS.get() {
+        let drained: Vec<Arc<Mutex<ViewportWorker>>> = {
+            let mut map = workers.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            map.drain().map(|(_, worker)| worker).collect()
+        };
+        drop(drained);
+    }
+}
 
 impl ViewportWorker {
     pub fn new(repo: &Path, offline: bool) -> Self {
@@ -225,13 +249,17 @@ impl ViewportWorker {
         if request["command"] == "catalog" {
             return self.request(request);
         }
-        let folder = self.state.join("model-bundles");
-        std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
-        // Named by the project and the key; the worker replaces it atomically, since a render may have
-        // hard-linked an earlier one into its output
-        let name = hex(&Sha256::digest(serde_json::to_string(&json!([request["av"], request["path"]])).unwrap_or_default().as_bytes()));
         let mut request = request;
-        request["out"] = json!(folder.join(format!("{name}.rbxm")));
+        if request["out"].as_str().is_none() {
+            let folder = self.state.join("model-bundles");
+            std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
+            // Named by the project and the key; the worker replaces it atomically, since a render may have
+            // hard-linked an earlier one into its output
+            let name = hex(&Sha256::digest(serde_json::to_string(&json!([request["av"], request["path"]])).unwrap_or_default().as_bytes()));
+            request["out"] = json!(folder.join(format!("{name}.rbxm")));
+        } else if let Some(parent) = request["out"].as_str().and_then(|out| Path::new(out).parent()) {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
         self.request(request)
     }
 
@@ -288,6 +316,7 @@ impl ViewportWorker {
             command.creation_flags(0x0800_0000);
         }
         let mut child = command.spawn().map_err(|error| format!("starting the viewport worker {}: {error}", program.display()))?;
+        crate::process::attach_child(&child);
         let input = child.stdin.take().ok_or("the viewport worker has no stdin")?;
         let output = child.stdout.take().ok_or("the viewport worker has no stdout")?;
         let (send, replies) = mpsc::channel();

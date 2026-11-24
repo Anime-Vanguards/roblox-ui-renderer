@@ -499,6 +499,7 @@ impl Video {
         crate::download::without_account(&mut command);
         hide_console(&mut command);
         let mut child = command.spawn().map_err(|error| format!("no video: could not start {} ({error}); set RUR_FFMPEG to an ffmpeg", ffmpeg.display()))?;
+        crate::process::attach_child(&child);
         let stdin: ChildStdin = child.stdin.take().ok_or("ffmpeg's stdin")?;
         let mut stderr = child.stderr.take().ok_or("ffmpeg's stderr")?;
         let errors = std::thread::spawn(move || {

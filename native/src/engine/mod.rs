@@ -116,7 +116,7 @@ pub fn new_engine(options: Options) -> Result<Rc<Engine>, String> {
     }
     let engine = Engine::with_layers(options, vec![Rc::new(GuiLayer)])?;
     #[cfg(feature = "desktop")]
-    engine.set_bundle_source(Box::new(WorkerBundles(crate::viewports::ViewportWorker::new(&engine.options.repo, engine.options.offline))));
+    engine.set_bundle_source(Box::new(WorkerBundles::shared(&engine.options.repo, engine.options.offline)));
     Ok(engine)
 }
 
@@ -125,43 +125,282 @@ pub fn host() -> launch::Host {
     launch::Host { name: "rur", repo: default_repo(), new_engine: Rc::new(new_engine) }
 }
 
-/// Manifest bundles from the 3D worker (viewports.rs `model` requests).
+/// Manifest bundles from the 3D worker (viewports.rs `model` requests), sharing one process-wide
+/// worker and a content-addressed immutable catalog cache on disk (`<state>/model-bundles/catalog-v1-<sha256>.json`).
 #[cfg(feature = "desktop")]
-struct WorkerBundles(crate::viewports::ViewportWorker);
+struct WorkerBundles {
+    state: PathBuf,
+    worker: std::sync::Arc<std::sync::Mutex<crate::viewports::ViewportWorker>>,
+}
+
+#[cfg(feature = "desktop")]
+const CATALOG_SCHEMA_VERSION: u32 = 1;
+#[cfg(feature = "desktop")]
+const BUNDLE_SCHEMA_VERSION: u32 = 1;
+
+#[cfg(feature = "desktop")]
+fn manifest_path(av: &Path) -> Option<PathBuf> {
+    // The manifest module RUR_BUNDLE_MANIFEST names (relative to the project); without it the catalog is asked every time
+    let manifest = std::env::var_os("RUR_BUNDLE_MANIFEST").map(|file| av.join(file));
+    manifest
+}
+
+#[cfg(feature = "desktop")]
+impl WorkerBundles {
+    fn shared(repo: &Path, offline: bool) -> Self {
+        Self {
+            state: crate::state_dir(repo),
+            worker: crate::viewports::shared_model_worker(repo, offline),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_worker(state: PathBuf, worker: crate::viewports::ViewportWorker) -> Self {
+        Self { state, worker: std::sync::Arc::new(std::sync::Mutex::new(worker)) }
+    }
+
+    fn bundle_with_manifest(&mut self, av: &Path, key: &str, manifest: Option<&Path>) -> Result<PathBuf, String> {
+        use std::collections::HashSet;
+        use std::sync::{Condvar, Mutex, OnceLock};
+
+        static IN_FLIGHT: OnceLock<(Mutex<HashSet<PathBuf>>, Condvar)> = OnceLock::new();
+
+        struct FlightGuard<'a> {
+            state: &'a (Mutex<HashSet<PathBuf>>, Condvar),
+            target: PathBuf,
+        }
+        impl Drop for FlightGuard<'_> {
+            fn drop(&mut self) {
+                self.state.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&self.target);
+                self.state.1.notify_all();
+            }
+        }
+
+        let manifest_digest = manifest.and_then(|file| std::fs::read(file).ok()).map(|text| text::hinted::sha256_hex(&text));
+        let Some(manifest_digest) = manifest_digest else {
+            let reply = self
+                .worker
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .model(serde_json::json!({ "command": "bundle", "av": av, "path": key }))?;
+            return reply["file"].as_str().map(PathBuf::from).ok_or_else(|| "the model worker returned no model file".to_string());
+        };
+
+        let bundle_digest = text::hinted::sha256_hex(format!("{manifest_digest}\0{key}").as_bytes());
+        let target = bundle_cache_path(&self.state, BUNDLE_SCHEMA_VERSION, &bundle_digest);
+        if is_valid_rbxm(&target) {
+            return Ok(target);
+        }
+
+        let flight = IN_FLIGHT.get_or_init(Default::default);
+        let _guard = loop {
+            let mut set = flight.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if is_valid_rbxm(&target) {
+                return Ok(target);
+            }
+            if set.insert(target.clone()) {
+                break FlightGuard { state: flight, target: target.clone() };
+            }
+            set = flight.1.wait(set).unwrap_or_else(|poisoned| poisoned.into_inner());
+        };
+
+        if is_valid_rbxm(&target) {
+            return Ok(target);
+        }
+
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let partial = target.with_extension(format!("rbxm.{}.{seq}.tmp", std::process::id()));
+        let reply = self
+            .worker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .model(serde_json::json!({ "command": "bundle", "av": av, "path": key, "out": partial }))?;
+        let produced = reply["file"].as_str().map(PathBuf::from).ok_or_else(|| "the model worker returned no model file".to_string())?;
+        if produced != partial {
+            return Ok(produced);
+        }
+        replace_immutable_file(&partial, &target, is_valid_rbxm).map_err(|error| format!("saving model bundle cache {}: {error}", target.display()))?;
+        Ok(target)
+    }
+
+    fn catalog_with_manifest(&mut self, av: &Path, manifest: Option<&Path>) -> Result<Vec<String>, String> {
+        use std::collections::HashSet;
+        use std::sync::{Condvar, Mutex, OnceLock};
+
+        #[derive(Default)]
+        struct CatalogCache {
+            entries: rustc_hash::FxHashMap<(PathBuf, String), Vec<String>>,
+            in_flight: HashSet<(PathBuf, String)>,
+        }
+        static CATALOGS: OnceLock<(Mutex<CatalogCache>, Condvar)> = OnceLock::new();
+
+        struct InFlightGuard<'a> {
+            state: &'a (Mutex<CatalogCache>, Condvar),
+            key: (PathBuf, String),
+        }
+        impl Drop for InFlightGuard<'_> {
+            fn drop(&mut self) {
+                let mut guard = self.state.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.in_flight.remove(&self.key);
+                self.state.1.notify_all();
+            }
+        }
+
+        let digest = manifest.and_then(|file| std::fs::read(file).ok()).map(|text| text::hinted::sha256_hex(&text));
+        let Some(digest) = digest else {
+            let reply = self
+                .worker
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .model(serde_json::json!({ "command": "catalog", "av": av }))?;
+            return Ok(reply["bundles"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect());
+        };
+
+        let key = (self.state.clone(), digest.clone());
+        let cache = CATALOGS.get_or_init(Default::default);
+        let cache_file = catalog_cache_path(&self.state, CATALOG_SCHEMA_VERSION, &digest);
+
+        let _flight = loop {
+            let mut guard = cache.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(keys) = guard.entries.get(&key).cloned() {
+                return Ok(keys);
+            }
+            if !guard.in_flight.contains(&key) {
+                guard.in_flight.insert(key.clone());
+                break InFlightGuard { state: cache, key: key.clone() };
+            }
+            guard = cache.1.wait(guard).unwrap_or_else(|poisoned| poisoned.into_inner());
+        };
+
+        if let Some(keys) = read_catalog_cache(&cache_file, CATALOG_SCHEMA_VERSION, &digest) {
+            cache.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).entries.insert(key, keys.clone());
+            return Ok(keys);
+        }
+
+        let reply = self
+            .worker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .model(serde_json::json!({ "command": "catalog", "av": av }))?;
+        let keys: Vec<String> = reply["bundles"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        let _ = write_catalog_cache(&cache_file, CATALOG_SCHEMA_VERSION, &digest, &keys);
+        cache.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).entries.insert(key, keys.clone());
+        Ok(keys)
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn catalog_cache_path(state: &Path, version: u32, sha256: &str) -> PathBuf {
+    state.join("model-bundles").join(format!("catalog-v{version}-{sha256}.json"))
+}
+
+#[cfg(feature = "desktop")]
+fn bundle_cache_path(state: &Path, version: u32, sha256: &str) -> PathBuf {
+    state.join("model-bundles").join(format!("bundle-v{version}-{sha256}.rbxm"))
+}
+
+#[cfg(feature = "desktop")]
+fn is_valid_rbxm(file: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut handle) = std::fs::File::open(file) else {
+        return false;
+    };
+    let mut magic = [0u8; 8];
+    handle.read_exact(&mut magic).is_ok() && &magic == b"<roblox!"
+}
+
+#[cfg(feature = "desktop")]
+fn replace_immutable_file(partial: &Path, target: &Path, valid: impl Fn(&Path) -> bool) -> std::io::Result<()> {
+    let mut attempt = 0;
+    loop {
+        match std::fs::rename(partial, target) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if attempt < 7
+                    && (error.kind() == std::io::ErrorKind::PermissionDenied
+                        || error.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                if valid(target) {
+                    let _ = std::fs::remove_file(partial);
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10 << attempt.min(3)));
+                attempt += 1;
+            }
+            Err(error) => {
+                let _ = std::fs::remove_file(partial);
+                return Err(error);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn read_catalog_cache(file: &Path, version: u32, sha256: &str) -> Option<Vec<String>> {
+    let bytes = std::fs::read(file).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    if value["version"].as_u64() != Some(u64::from(version)) || value["sha256"].as_str() != Some(sha256) {
+        return None;
+    }
+    let bundles = value["bundles"].as_array()?;
+    let mut keys = Vec::with_capacity(bundles.len());
+    for entry in bundles {
+        keys.push(entry.as_str()?.to_string());
+    }
+    Some(keys)
+}
+
+#[cfg(feature = "desktop")]
+fn write_catalog_cache(file: &Path, version: u32, sha256: &str, keys: &[String]) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let body = serde_json::to_vec(&serde_json::json!({
+        "version": version,
+        "sha256": sha256,
+        "bundles": keys,
+    }))
+    .map_err(std::io::Error::other)?;
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let partial = file.with_extension(format!("json.{}.{seq}.tmp", std::process::id()));
+    std::fs::write(&partial, &body)?;
+    let mut attempt = 0;
+    loop {
+        match std::fs::rename(&partial, file) {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt < 7 && (error.kind() == std::io::ErrorKind::PermissionDenied || error.kind() == std::io::ErrorKind::AlreadyExists) => {
+                // Content-addressed immutable target: if another process already landed the exact file, we are done.
+                if read_catalog_cache(file, version, sha256).is_some() {
+                    let _ = std::fs::remove_file(&partial);
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10 << attempt.min(3)));
+                attempt += 1;
+            }
+            Err(error) => {
+                let _ = std::fs::remove_file(&partial);
+                return Err(error);
+            }
+        }
+    }
+}
 
 #[cfg(feature = "desktop")]
 impl project::model_assets::BundleSource for WorkerBundles {
-    /// The manifest's bundle keys, kept by the process while the manifest module's text is the same:
-    /// every engine mounts the catalog, and asking for it started the worker for each one (a render
-    /// service makes an engine per render; 150 ms each)
+    /// The manifest's bundle keys, cached by content SHA-256 on disk and in memory (SingleFlight)
+    /// so neither repeated engines nor concurrent cold starts spawn extra model workers.
     fn catalog(&mut self, av: &Path) -> Result<Vec<String>, String> {
-        use std::hash::Hasher;
-        type Catalogs = std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, (u64, Vec<String>)>>;
-        static CATALOGS: std::sync::OnceLock<Catalogs> = std::sync::OnceLock::new();
-        // The manifest module RUR_BUNDLE_MANIFEST names (relative to the project); without it the catalog is asked every time
-        let digest = std::env::var_os("RUR_BUNDLE_MANIFEST").and_then(|file| std::fs::read(av.join(file)).ok()).map(|text| {
-            let mut hasher = rustc_hash::FxHasher::default();
-            hasher.write(&text);
-            hasher.write_usize(text.len());
-            hasher.finish()
-        });
-        let catalogs = CATALOGS.get_or_init(Default::default);
-        if let Some(digest) = digest {
-            if let Some((_, keys)) = catalogs.lock().ok().and_then(|catalogs| catalogs.get(av).filter(|(known, _)| *known == digest).cloned()) {
-                return Ok(keys);
-            }
-        }
-        let catalog = self.0.model(serde_json::json!({ "command": "catalog", "av": av }))?;
-        let keys: Vec<String> = catalog["bundles"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
-        if let (Some(digest), Ok(mut catalogs)) = (digest, catalogs.lock()) {
-            catalogs.insert(av.to_path_buf(), (digest, keys.clone()));
-        }
-        Ok(keys)
+        let manifest = manifest_path(av);
+        self.catalog_with_manifest(av, manifest.as_deref())
     }
 
     fn bundle(&mut self, av: &Path, key: &str) -> Result<PathBuf, String> {
-        let reply = self.0.model(serde_json::json!({ "command": "bundle", "av": av, "path": key }))?;
-        reply["file"].as_str().map(PathBuf::from).ok_or_else(|| "the model worker returned no model file".to_string())
+        let manifest = manifest_path(av);
+        self.bundle_with_manifest(av, key, manifest.as_deref())
     }
 }
 
@@ -169,14 +408,40 @@ impl project::model_assets::BundleSource for WorkerBundles {
 mod bundle_tests {
     use super::*;
 
+    fn temp_dir(name: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "rur-model-{name}-{}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn counting_worker(state: &Path, counter: &Path, bundles: &[&str]) -> crate::viewports::ViewportWorker {
+        let script = format!(
+            "const fs=require('fs');require('readline').createInterface({{input:process.stdin}}).on('line',line=>{{const r=JSON.parse(line);if(r.command==='catalog'){{fs.appendFileSync({counter},'c');process.stdout.write(JSON.stringify({{bundles:{bundles}}})+'\\n');}}}});",
+            counter = serde_json::to_string(counter).unwrap(),
+            bundles = serde_json::to_string(bundles).unwrap(),
+        );
+        let node = std::env::var_os("RUR_NODE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("node"));
+        crate::viewports::ViewportWorker::with_command(state, node, vec!["-e".into(), script])
+    }
+
+    fn call_count(counter: &Path) -> usize {
+        std::fs::read(counter).map(|bytes| bytes.len()).unwrap_or(0)
+    }
+
     /// Manifest bundles reach the engine from the 3D worker (here a stand-in answering the catalog and
     /// every bundle with one model file, written where the worker is told)
     #[test]
     fn manifest_bundles_come_from_the_worker() {
         use project::model_assets::BundleSource;
         use rbx_dom_weak::{InstanceBuilder, WeakDom, types::Vector3};
-        let directory = std::env::temp_dir().join(format!("rur-model-mount-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        std::fs::create_dir_all(&directory).unwrap();
+        let directory = temp_dir("mount");
         let model_file = directory.join("model.rbxm");
         let dom = WeakDom::new(InstanceBuilder::new("DataModel").with_child(InstanceBuilder::new("Part").with_name("RealPart").with_property("Size", Vector3::new(2., 3., 4.))));
         let mut bytes = Vec::new();
@@ -184,12 +449,134 @@ mod bundle_tests {
         std::fs::write(&model_file, bytes).unwrap();
         let script = format!("const fs=require('fs');require('readline').createInterface({{input:process.stdin}}).on('line',line=>{{const request=JSON.parse(line);const reply=request.command==='catalog'?{{bundles:['Models/Thing']}}:(fs.copyFileSync({model},request.out),{{file:request.out}});process.stdout.write(JSON.stringify(reply)+'\\n');}});", model = serde_json::to_string(&model_file).unwrap());
         let node = std::env::var_os("RUR_NODE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("node"));
-        let mut source = WorkerBundles(crate::viewports::ViewportWorker::with_command(&directory, node, vec!["-e".into(), script]));
+        let mut source = WorkerBundles::with_worker(directory.clone(), crate::viewports::ViewportWorker::with_command(&directory, node, vec!["-e".into(), script]));
         assert_eq!(source.catalog(&directory).unwrap(), vec!["Models/Thing".to_string()]);
         let bundle = source.bundle(&directory, "Models/Thing").unwrap();
         assert!(bundle.starts_with(directory.join("model-bundles")));
         assert_eq!(std::fs::read(&bundle).unwrap(), std::fs::read(&model_file).unwrap());
         drop(source);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn catalog_cache_ignores_half_written_tmp_and_corrupt_files() {
+        let dir = temp_dir("corrupt");
+        let state = dir.join("state");
+        let manifest = dir.join("manifest.luau");
+        let counter = dir.join("calls");
+        std::fs::write(&manifest, b"return { a = 1 }").unwrap();
+        let digest = text::hinted::sha256_hex(b"return { a = 1 }");
+        let target = catalog_cache_path(&state, CATALOG_SCHEMA_VERSION, &digest);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        // Half-written sibling .tmp and truncated target must be ignored and rebuilt cleanly
+        std::fs::write(target.with_extension("json.999.0.tmp"), b"{\"version\":1,\"bundles\":[").unwrap();
+        std::fs::write(&target, b"{\"version\":1,\"sha256\":").unwrap();
+        let mut source = WorkerBundles::with_worker(state.clone(), counting_worker(&state, &counter, &["Models/A"]));
+        assert_eq!(source.catalog_with_manifest(&dir, Some(&manifest)).unwrap(), vec!["Models/A".to_string()]);
+        assert_eq!(call_count(&counter), 1);
+        assert_eq!(read_catalog_cache(&target, CATALOG_SCHEMA_VERSION, &digest), Some(vec!["Models/A".to_string()]));
+        drop(source);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn catalog_cache_handles_concurrent_writers_for_same_key() {
+        let dir = temp_dir("concurrent");
+        let state = dir.join("state");
+        let manifest = dir.join("manifest.luau");
+        let counter = dir.join("calls");
+        std::fs::write(&manifest, b"return { shared = true }").unwrap();
+        let digest = text::hinted::sha256_hex(b"return { shared = true }");
+        let target = catalog_cache_path(&state, CATALOG_SCHEMA_VERSION, &digest);
+
+        // Concurrent atomic writes to the exact same key from several threads all succeed
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+        let mut handles = Vec::new();
+        for _ in 0..6 {
+            let target = target.clone();
+            let digest = digest.clone();
+            let barrier = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                write_catalog_cache(&target, CATALOG_SCHEMA_VERSION, &digest, &["Models/Shared".into()]).unwrap();
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(read_catalog_cache(&target, CATALOG_SCHEMA_VERSION, &digest), Some(vec!["Models/Shared".to_string()]));
+
+        // SingleFlight deduplicates concurrent in-process cold fetches for a fresh digest
+        let manifest2 = dir.join("manifest2.luau");
+        std::fs::write(&manifest2, b"return { race = 42 }").unwrap();
+        let shared_worker = std::sync::Arc::new(std::sync::Mutex::new(counting_worker(&state, &counter, &["Models/Race"])));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let state = state.clone();
+            let dir = dir.clone();
+            let manifest2 = manifest2.clone();
+            let shared_worker = shared_worker.clone();
+            let barrier = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut src = WorkerBundles { state, worker: shared_worker };
+                barrier.wait();
+                src.catalog_with_manifest(&dir, Some(&manifest2)).unwrap()
+            }));
+        }
+        for h in handles {
+            assert_eq!(h.join().unwrap(), vec!["Models/Race".to_string()]);
+        }
+        assert_eq!(call_count(&counter), 1, "SingleFlight must ask the worker once");
+        drop(shared_worker);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn catalog_cache_misses_and_rebuilds_for_older_schema_version() {
+        let dir = temp_dir("version");
+        let state = dir.join("state");
+        let manifest = dir.join("manifest.luau");
+        let counter = dir.join("calls");
+        std::fs::write(&manifest, b"return { ver = 1 }").unwrap();
+        let digest = text::hinted::sha256_hex(b"return { ver = 1 }");
+        let old_file = catalog_cache_path(&state, 0, &digest);
+        write_catalog_cache(&old_file, 0, &digest, &["Models/Stale".into()]).unwrap();
+        // Also verify a current-path file stamped with an older schema version is rejected
+        let current_file = catalog_cache_path(&state, CATALOG_SCHEMA_VERSION, &digest);
+        write_catalog_cache(&current_file, 0, &digest, &["Models/Stale".into()]).unwrap();
+        assert_eq!(read_catalog_cache(&current_file, CATALOG_SCHEMA_VERSION, &digest), None);
+
+        let mut source = WorkerBundles::with_worker(state.clone(), counting_worker(&state, &counter, &["Models/Fresh"]));
+        assert_eq!(source.catalog_with_manifest(&dir, Some(&manifest)).unwrap(), vec!["Models/Fresh".to_string()]);
+        assert_eq!(call_count(&counter), 1);
+        assert_eq!(read_catalog_cache(&current_file, CATALOG_SCHEMA_VERSION, &digest), Some(vec!["Models/Fresh".to_string()]));
+        drop(source);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn catalog_cache_misses_immediately_when_manifest_changes_same_tick() {
+        let dir = temp_dir("edit");
+        let state = dir.join("state");
+        let manifest = dir.join("manifest.luau");
+        let counter = dir.join("calls");
+        std::fs::write(&manifest, b"return { item = 'AAA' }").unwrap();
+        let mut first = WorkerBundles::with_worker(state.clone(), counting_worker(&state, &counter, &["Models/First"]));
+        assert_eq!(first.catalog_with_manifest(&dir, Some(&manifest)).unwrap(), vec!["Models/First".to_string()]);
+        assert_eq!(call_count(&counter), 1);
+
+        // Second source hits disk cache without calling worker
+        let mut cached = WorkerBundles::with_worker(state.clone(), counting_worker(&state, &counter, &["Models/Unused"]));
+        assert_eq!(cached.catalog_with_manifest(&dir, Some(&manifest)).unwrap(), vec!["Models/First".to_string()]);
+        assert_eq!(call_count(&counter), 1);
+
+        // Immediate same-length overwrite in the same filesystem tick must miss immediately
+        std::fs::write(&manifest, b"return { item = 'BBB' }").unwrap();
+        let mut edited = WorkerBundles::with_worker(state.clone(), counting_worker(&state, &counter, &["Models/Second"]));
+        assert_eq!(edited.catalog_with_manifest(&dir, Some(&manifest)).unwrap(), vec!["Models/Second".to_string()]);
+        assert_eq!(call_count(&counter), 2);
+        drop((first, cached, edited));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

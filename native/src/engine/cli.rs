@@ -137,13 +137,16 @@ pub fn dispatch() -> Option<i32> {
             return Some(2);
         }
     };
-    match run(parsed) {
-        Ok(code) => Some(code),
+    let code = match run(parsed) {
+        Ok(code) => code,
         Err(error) => {
             eprintln!("rur-native engine: {error}");
-            Some(1)
+            1
         }
-    }
+    };
+    #[cfg(feature = "desktop")]
+    crate::viewports::release_shared_workers();
+    Some(code)
 }
 
 /// `--background r,g,b` (0-255) as 0-1 channels
@@ -432,7 +435,10 @@ fn spawn_job_child(variables: &RurVariables, argv: &[String]) -> std::io::Result
     // It downloads: the API key this process took out of its environment at startup goes with it
     #[cfg(feature = "desktop")]
     crate::download::with_api_key(&mut command);
-    command.spawn()
+    let child = command.spawn()?;
+    #[cfg(feature = "desktop")]
+    crate::process::attach_child(&child);
+    Ok(child)
 }
 
 /// Waits for the child and returns its answer line. Whatever else it printed goes on to this

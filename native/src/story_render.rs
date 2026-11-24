@@ -225,7 +225,7 @@ impl StoryRenderer {
         std::fs::create_dir_all(out).with_context(|| format!("Creating {}", out.display()))?;
         self.resolver.set_offline(offline);
         let mut args = args.clone();
-        args.offline = offline;
+        args.offline |= offline;
         args.dump_scene = Some(out.join("scene.json").to_string_lossy().into_owned());
         if runs {
             args.dependencies = Some(out.join("dependencies.json").to_string_lossy().into_owned());

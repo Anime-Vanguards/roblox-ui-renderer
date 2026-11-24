@@ -280,10 +280,7 @@ pub fn cli(argv: &[String]) -> i32 {
         Err(_) => return 0,
     };
     let state_dir = crate::state_dir(&repo);
-    // Renders' rasters and source walks gain nothing past 8 threads; a pool per core only wakes and spins
-    if std::env::var_os("RAYON_NUM_THREADS").is_none() {
-        let _ = rayon::ThreadPoolBuilder::new().num_threads(thread::available_parallelism().map_or(8, |cores| cores.get().min(8))).build_global();
-    }
+    crate::process::configure_rayon();
     // Module sources and bytecode carry over from VM to VM (no native code generation), decoded images
     // from render to render
     crate::engine::lua::modules::reuse_compiled_modules();
@@ -316,6 +313,7 @@ pub fn cli(argv: &[String]) -> i32 {
         let busy = service.active.load(Ordering::Acquire) > 0;
         if !busy && since_render >= idle {
             service.log("exiting: idle");
+            crate::viewports::release_shared_workers();
             std::process::exit(0);
         }
         let renders = service.renders.load(Ordering::Acquire);
@@ -484,6 +482,7 @@ impl Service {
         if let Ok(mut renderer) = self.renderer.try_lock() {
             if release {
                 renderer.release();
+                crate::viewports::release_shared_workers();
             } else {
                 renderer.trim();
             }
@@ -616,6 +615,7 @@ impl Service {
             ("POST", "/shutdown") => {
                 self.send(&mut stream, 200, json!({"ok": true})).map_err(io)?;
                 self.log("exiting: requested");
+                crate::viewports::release_shared_workers();
                 std::process::exit(0);
             }
             _ => self.send(&mut stream, 404, json!({"error": "not found"})).map_err(io),
@@ -634,7 +634,7 @@ impl Service {
             return Ok(Err(format!("the render's engine environment {env:?} is not the service's {:?}", self.env)));
         }
         let argv: Vec<String> = input["argv"].as_array().ok_or("argv must be a list")?.iter().map(|arg| arg.as_str().unwrap_or_default().to_string()).collect();
-        let args = crate::engine::cli::parse(&argv)?;
+        let mut args = crate::engine::cli::parse(&argv)?;
         let out = PathBuf::from(crate::paths::request_path(input, "out")?);
         let options = RenderOptions {
             png: input["png"].as_bool().unwrap_or(true),
@@ -646,6 +646,7 @@ impl Service {
                 Some(other) => return Err(format!("pixels: unknown format {other:?} (rgba)")),
             },
         };
+        args.offline |= options.offline;
         let started = Instant::now();
         let mut check_ms = None;
         let run_started = Instant::now();
@@ -800,9 +801,10 @@ impl Service {
             return Ok(Err(format!("the sequence's engine environment {env:?} is not the service's {:?}", self.env)));
         }
         let argv: Vec<String> = input["argv"].as_array().ok_or("argv must be a list")?.iter().map(|arg| arg.as_str().unwrap_or_default().to_string()).collect();
-        let args = crate::engine::cli::parse(&argv)?;
+        let mut args = crate::engine::cli::parse(&argv)?;
         let out = PathBuf::from(crate::paths::request_path(input, "out")?);
         let offline = input["offline"].as_bool().unwrap_or(false);
+        args.offline |= offline;
         let (spec, options) = crate::sequence::parse_options(&input["sequence"], offline)?;
         let started = Instant::now();
         let key = startup_key(&args);

@@ -42,37 +42,69 @@ fn main() -> anyhow::Result<()> {
         }
         rur_native::render::gpu::initialize_loader_environment();
     }
+    rur_native::process::configure_rayon();
+    let argv: Vec<String> = std::env::args().collect();
+    if let Some(command @ ("engine" | "engine-batch" | "engine-batch-job")) = argv.get(1).map(String::as_str) {
+        rur_native::process::watch_parent(command);
+    }
     // `rur-native engine ...`: the engine CLI every Node host spawns (engine/cli.rs)
     if let Some(code) = rur_native::engine::cli::dispatch() {
         std::process::exit(code);
     }
     // `rur-native render ...`: one `rur render` output directory (story_render.rs)
-    let argv: Vec<String> = std::env::args().collect();
     match argv.get(1).map(String::as_str) {
-        Some("render") => std::process::exit(rur_native::story_render::cli(&argv[2..])),
+        Some("render") => {
+            rur_native::process::watch_parent("render");
+            std::process::exit(rur_native::story_render::cli(&argv[2..]));
+        }
         // `rur-native assets fetch <uri>... | account`: the asset cache and downloads, for the Node CLI (download.rs)
-        Some("assets") => std::process::exit(rur_native::download::cli(&argv[2..])),
+        Some("assets") => {
+            rur_native::process::watch_parent("assets");
+            std::process::exit(rur_native::download::cli(&argv[2..]));
+        }
         // `rur-native doctor [--json]`: what this install uses and is missing, with how to fix it (doctor.rs)
         Some("doctor") => std::process::exit(rur_native::doctor::cli(&argv[2..])),
         // `rur-native debug-report [<story>...]`: every story rendered on its own, written up to share (report.rs)
-        Some("debug-report") => std::process::exit(rur_native::report::cli(&argv[2..])),
+        Some("debug-report") => {
+            rur_native::process::watch_parent("debug-report");
+            std::process::exit(rur_native::report::cli(&argv[2..]));
+        }
         // `rur-native rojo-mounts <file.project.json>`: the mounts a Rojo project gives a run (rojo.rs)
-        Some("rojo-mounts") => std::process::exit(rur_native::rojo::mounts_cli(&argv[2..])),
+        Some("rojo-mounts") => {
+            rur_native::process::watch_parent("rojo-mounts");
+            std::process::exit(rur_native::rojo::mounts_cli(&argv[2..]));
+        }
         // `rur-native sequence ...`: a story captured frame by frame (sequence.rs)
-        Some("sequence") => std::process::exit(rur_native::story_render::sequence_cli(&argv[2..])),
+        Some("sequence") => {
+            rur_native::process::watch_parent("sequence");
+            std::process::exit(rur_native::story_render::sequence_cli(&argv[2..]));
+        }
         // `rur-native sweep ...` / `diff ...`: every story rendered and reported on (sweep.rs), a source rendered at a git
         // ref and in the working tree and compared (diff.rs); `rur sweep` and `rur diff` forward to them
-        Some("sweep") => std::process::exit(rur_native::sweep::cli(&argv[2..])),
-        Some("diff") => std::process::exit(rur_native::diff::cli(&argv[2..])),
+        Some("sweep") => {
+            rur_native::process::watch_parent("sweep");
+            std::process::exit(rur_native::sweep::cli(&argv[2..]));
+        }
+        Some("diff") => {
+            rur_native::process::watch_parent("diff");
+            std::process::exit(rur_native::diff::cli(&argv[2..]));
+        }
         // `rur-native cost ...`: deterministic Roblox UI cost accounting and A/B diff (cost.rs); `rur cost` forwards here
-        Some("cost") => std::process::exit(rur_native::cost::cli(&argv[2..])),
+        Some("cost") => {
+            rur_native::process::watch_parent("cost");
+            std::process::exit(rur_native::cost::cli(&argv[2..]));
+        }
         // `rur-native git-ref ...`: a run's sources extracted at a git ref, for `rur render --git-ref` (gitref.rs)
-        Some("git-ref") => std::process::exit(rur_native::gitref::cli(&argv[2..])),
+        Some("git-ref") => {
+            rur_native::process::watch_parent("git-ref");
+            std::process::exit(rur_native::gitref::cli(&argv[2..]));
+        }
         // `rur-native serve ...`: the render service cli/client.mjs starts (serve.rs)
         Some("serve") => std::process::exit(rur_native::serve::cli(&argv[2..])),
         // `rur-native record ...`: a harness run recorded as a 3D scene and a playback: the emulator's
         // recorder (`ree record`) with rur's engines (the GUI layer installed)
         Some("record") => {
+            rur_native::process::watch_parent("record");
             let args = rur_native::engine::cli::with_rojo_project(&argv[2..]).and_then(|args| rur_native::paths::record_arguments(&args)).map_err(anyhow::Error::msg)?;
             std::process::exit(rur_native::engine::record::run::cli(&args, &rur_native::engine::host(), true));
         }
@@ -92,6 +124,7 @@ fn main() -> anyhow::Result<()> {
     }
     let options = NativeOptions::parse().resolve()?;
     if options.headless {
+        rur_native::process::watch_parent("headless");
         rur_native::headless::run(options)
     } else {
         rur_native::app::run(options)

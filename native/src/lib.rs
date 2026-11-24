@@ -50,6 +50,8 @@ pub mod term;
 pub mod paths;
 pub mod presentation;
 #[cfg(feature = "desktop")]
+pub mod process;
+#[cfg(feature = "desktop")]
 pub mod profiler;
 #[cfg(feature = "desktop")]
 pub mod profile_cli;
