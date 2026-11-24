@@ -3,6 +3,9 @@
 
 pub const DATA_WIDTH: u32 = 2048;
 pub const IMAGE_SLOTS: usize = 8;
+/// The widest and tallest texture a packet may upload: the native device's limit (gpu.rs asks for
+/// wgpu::Limits::default()). A layer for an element larger than this holds only the part of it that shows.
+pub const MAX_TEXTURE_SIDE: u32 = 8192;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct TextureId(pub u64);

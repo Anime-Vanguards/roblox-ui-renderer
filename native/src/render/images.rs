@@ -621,6 +621,12 @@ fn rounded_parity(radius: [f64; 4], rect: ImageRect, transform: [f64; 6]) -> Opt
 /// Measured at 1x (fixtures/image-probe-slicecorner.luau + image-corner.luau): the analytic per-pixel fwidth
 /// left 3-6 level fringes on small radii, 172 + 30 px > 2 -> 19 + 0.
 pub fn quad_corner_mask(w: usize, h: usize, radii: [f64; 4], ox: i64, oy: i64) -> Vec<f32> {
+    quad_corner_mask_region(w, h, radii, ox, oy, [0, 0, w, h])
+}
+
+/// quad_corner_mask's pixels in `region` (x, y, width, height within the quad) alone: each the same as the whole
+/// mask's (a quad wider or taller than a texture can be keeps a mask of the part that shows)
+pub fn quad_corner_mask_region(w: usize, h: usize, radii: [f64; 4], ox: i64, oy: i64, region: [usize; 4]) -> Vec<f32> {
     let (px2, py2) = (ox.rem_euclid(2), oy.rem_euclid(2));
     let (hw, hh) = (w as f64 / 2.0, h as f64 / 2.0);
     let [tl, tr, br, bl] = radii.map(|r| r.max(0.0));
@@ -636,9 +642,10 @@ pub fn quad_corner_mask(w: usize, h: usize, radii: [f64; 4], ox: i64, oy: i64) -
         let (qx, qy) = (px.abs() - hw + r, py.abs() - hh + r);
         if qx > 0.0 && qy > 0.0 { qx.hypot(qy) - r } else { qx.max(qy) - r }
     };
-    (0..w * h)
+    let [rx, ry, rw, rh] = region;
+    (0..rw * rh)
         .map(|k| {
-            let (i, j) = ((k % w) as i64, (k / w) as i64);
+            let (i, j) = ((rx + k % rw) as i64, (ry + k / rw) as i64);
             let (qi, qj) = (i - (i + px2) % 2, j - (j + py2) % 2);
             let origin = sd(qi, qj);
             let fw = (sd(qi + 1, qj) - origin).abs() + (sd(qi, qj + 1) - origin).abs();

@@ -411,13 +411,17 @@ export async function render(args, { service = false, env = process.env } = {}) 
 	}
 	const missingImages = Object.entries(manifest.images || {}).filter(([, entry]) => entry.error);
 	const output = asArray(scene.diagnostics && scene.diagnostics.output);
+	// A render whose drawing failed wrote no render.png: status "error", the drawing error as its failure and no
+	// png (native/src/summary.rs drawing_failure)
+	const renderErrors = asArray(result.renderErrors);
+	const drawingFailure = renderErrors.length ? `drawing failed: ${renderErrors.join("; ")}` : null;
 	const summary = {
-		status: scene.status,
-		failure: scene.failure || null,
+		status: drawingFailure ? "error" : scene.status,
+		failure: scene.failure || drawingFailure,
 		// What to mount when the failure reads a missing child of a service (native/src/rojo.rs missing_child_hint)
 		...(scene.diagnostics && scene.diagnostics.hint ? { hint: scene.diagnostics.hint } : {}),
 		out: outDir,
-		png: args["no-png"] ? null : path.join(outDir, "render.png"),
+		png: args["no-png"] || drawingFailure ? null : path.join(outDir, "render.png"),
 		nodes: asArray(scene.nodes).length,
 		viewport: scene.viewport,
 		scriptErrors: output.filter(entry => entry.kind === "error").length,
@@ -429,7 +433,7 @@ export async function render(args, { service = false, env = process.env } = {}) 
 		// What the render left out or could not draw (cli/diagnostics.mjs): culled nodes, wrapped text
 		// lines the box dropped, glyphs no font has, and the script's print / warn output
 		...sceneDiagnostics(scene).summary,
-		renderErrors: asArray(result.renderErrors),
+		renderErrors,
 		seconds: (Date.now() - started) / 1000,
 		phases: result.phases || {},
 	};

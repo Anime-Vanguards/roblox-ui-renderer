@@ -313,7 +313,16 @@ impl StoryRenderer {
                 pixels
             }
             Err(error) => {
+                // No picture: the render failed (crate::summary::drawing_failure), and a render.png an earlier
+                // render left there is not taken for this one's
+                if encode {
+                    let _ = std::fs::remove_file(out.join("render.png"));
+                }
                 result["renderErrors"].as_array_mut().unwrap().push(json!(format!("{error:#}")));
+                result["status"] = json!("error");
+                if let Some(summary) = result.get_mut("summary").filter(|summary| summary.is_object()) {
+                    summary["status"] = json!("error");
+                }
                 None
             }
         };

@@ -54,6 +54,7 @@ Every render writes into `--out` (and prints diagnostics to stderr):
 - `render.png`: physical-pixel RGBA8 image (straight alpha).
 - `scene.json`: full laid-out tree, visual properties, glyph placements, and draw order.
 - `summary.json`: status, script errors, unemulated APIs, missing images/fonts, per-stage timings, `culled` AutomaticSize nodes, `textLinesDropped`, `missingGlyphs`, and script `output`. `missingFonts` lists the cloud fonts that could not be downloaded, then the font families whose text was not drawn at all: neither the family nor the Source Sans Pro fallback had a face, as on a machine without Studio's fonts ([text.md](text.md#fonts-and-fallback)); `scene.json` names those in `diagnostics.unavailableFonts`. Like missing glyphs, missing fonts leave `status` as it is and don't make a sweep's story unclean; the sweep lists them per story and counts them under "Missing fonts".
+- A render that could not draw its picture writes no `render.png` (and removes the one an earlier render left there): `summary.json` lists why under `renderErrors`, its `status` is `error`, its `failure` starts with `drawing failed:` (unless the story failed first) and its `png` is `null`, and `rur render` exits with code `2`, as for a story that failed. A viewport wider or taller than the GPU's texture limit (8192 px) is one; an element of any size is drawn, as only the part of it that shows needs a texture.
 - `dependencies.json`: every source file required during the run.
 - `manifest.json`, `glyphs.png`, and `assets/`: bundled glyph atlas and hard links to cached images.
 
@@ -109,7 +110,7 @@ Renders every story in the project in isolated `rur-native render` child process
 - `--summarize`: regenerate `summary.md` and totals from `report.json` without rendering.
 - **Forwarded render flags:** `--viewport` (default `1200x900`), `--time` (`1`), `--scale` (`1.5`), `--mode`, `--player`, `--background`, `--project`, `--roots`, `--place-id`, `--rotation-clipping`, `--device`, `--topbar-inset`, `--rojo`, `--rojo-at`, `--git-ref`, `--plugin`, `--mount`, `--offline`, `--no-png`.
 
-**Exit codes:** `rur sweep` and `rur-native sweep` exit with the same code, which agrees with the report. A story is clean when it rendered with status `ok`, no script errors and no render errors (`clean` in each record of `report.json`; the totals count them).
+**Exit codes:** `rur sweep` and `rur-native sweep` exit with the same code, which agrees with the report. A story is clean when it rendered with status `ok`, no script errors and no render errors (`clean` in each record of `report.json`; the totals count them). A story that ran but could not be drawn has status `error` and is grouped under a `render:` cause.
 
 | Code | Meaning |
 |---|---|

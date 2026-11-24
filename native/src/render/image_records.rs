@@ -1,10 +1,10 @@
 //! Canonical IMAGE / IMAGE_ROTATED packets sample retained source mip textures on the GPU.
 use super::{
     geometry::*,
-    images::{dims, image_quads, quad_corner_mask},
+    images::{dims, image_quads, quad_corner_mask_region},
     packet::*,
     sampling::{asset_levels, mip_levels, pixelated_level},
-    scene_draw::{BuildContext, DrawPreparer},
+    scene_draw::{BuildContext, DrawPreparer, over_texture_limit, visible_part},
 };
 use crate::assets::{AssetId, TextureAsset};
 use serde_json::Value;
@@ -19,6 +19,9 @@ struct MaskKey {
     radii: [u64; 4],
     /// The target position's parity: quad_corner_mask's coarse derivative quads
     parity: [u8; 2],
+    /// The part of the quad the mask holds (x, y, width, height): all of it, unless the quad is wider or taller
+    /// than a texture can be
+    region: [u32; 4],
 }
 struct MaskTexture {
     id: TextureId,
@@ -118,20 +121,30 @@ impl GpuImageCache {
     }
 }
 impl DrawPreparer {
-    fn image_mask_texture(&mut self, width: u32, height: u32, radii: [f64; 4], ox: f64, oy: f64) -> TextureId {
+    /// The corner mask of a `width` x `height` quad whose top left pixel is at target (ox, oy), its `region`
+    /// alone (x, y, width, height in the quad; the shader reads it at the quad pixel less the region's corner)
+    fn image_mask_texture(&mut self, width: u32, height: u32, radii: [f64; 4], ox: f64, oy: f64, region: [u32; 4]) -> TextureId {
         let parity = [ox, oy].map(|v| (v.round() as i64).rem_euclid(2) as u8);
         let key = MaskKey {
             width,
             height,
             radii: radii.map(f64::to_bits),
             parity,
+            region,
         };
         if let Some(entry) = self.gpu_image_cache.masks.get_mut(&key) {
             entry.last = self.frame;
             self.stats.upload_cache_hits += 1;
             return entry.id;
         }
-        let coverage = quad_corner_mask(width as usize, height as usize, radii, parity[0] as i64, parity[1] as i64);
+        let coverage = quad_corner_mask_region(
+            width as usize,
+            height as usize,
+            radii,
+            parity[0] as i64,
+            parity[1] as i64,
+            region.map(|v| v as usize),
+        );
         let bytes = bytemuck::cast_slice(&coverage).to_vec();
         let size = bytes.len();
         let id = self.texture_id();
@@ -140,8 +153,8 @@ impl DrawPreparer {
             revision: 1,
             format: TextureFormat::R32Float,
             levels: vec![TextureLevel {
-                width,
-                height,
+                width: region[2],
+                height: region[3],
                 bytes: bytes.into(),
             }],
         });
@@ -291,7 +304,18 @@ impl DrawPreparer {
             } else {
                 mip_levels(levels, lod)
             };
-            let mask = rounded.then(|| self.image_mask_texture(width as u32, height as u32, radii, x0 + tx, y0 + ty));
+            // A rounded quad wider or taller than a texture can be keeps a mask of the part that shows
+            let region = if rounded && over_texture_limit(Rect::new(x0, y0, width, height)) {
+                let shown = Rect::new(visible[0], visible[1], visible[2] - visible[0], visible[3] - visible[1]);
+                let shown = visible_part(ctx, shown, [tx, ty], clip);
+                if shown.w <= 0. || shown.h <= 0. {
+                    continue;
+                }
+                [shown.x - x0, shown.y - y0, shown.w, shown.h].map(|v| v as u32)
+            } else {
+                [0, 0, width as u32, height as u32]
+            };
+            let mask = rounded.then(|| self.image_mask_texture(width as u32, height as u32, radii, x0 + tx, y0 + ty, region));
             let start = self.begin(
                 ctx,
                 [
@@ -318,7 +342,7 @@ impl DrawPreparer {
             ]);
             self.push([0.; 4]);
             self.push([tint[0], tint[1], tint[2], fade]);
-            self.push([if rounded { 1. } else { 0. }, 0., 0., 0.]);
+            self.push([if rounded { 1. } else { 0. }, region[0] as f64, region[1] as f64, 0.]);
             self.push([0.; 4]);
             // The draw may be clipped, but sampling still spans the original full quad.
             let mut tap_offsets = [0.; 4];
@@ -934,13 +958,13 @@ mod tests {
     fn mask_cache_lifetime_is_validated_for_retained_records() {
         let mut draw = DrawPreparer::new();
         draw.frame = 1;
-        let first = draw.image_mask_texture(4, 5, [2.; 4], 0., 0.);
-        assert_eq!(first, draw.image_mask_texture(4, 5, [2.; 4], 0., 0.));
+        let first = draw.image_mask_texture(4, 5, [2.; 4], 0., 0., [0, 0, 4, 5]);
+        assert_eq!(first, draw.image_mask_texture(4, 5, [2.; 4], 0., 0., [0, 0, 4, 5]));
         assert_eq!(draw.packet.textures.len(), 1);
         assert!(draw.gpu_image_cache.touch(first, 2));
         let mut masks = Vec::new();
         for index in 0..512 {
-            masks.push(draw.image_mask_texture(4, 5, [index as f64 / 1000.; 4], 0., 0.));
+            masks.push(draw.image_mask_texture(4, 5, [index as f64 / 1000.; 4], 0., 0., [0, 0, 4, 5]));
         }
         assert_eq!(draw.gpu_image_cache.mask_bytes, 513 * 4 * 5 * 4);
         // Eviction preserves a retained node's current-frame reference.
@@ -951,12 +975,48 @@ mod tests {
         assert_eq!(draw.gpu_image_cache.mask_bytes, 512 * 4 * 5 * 4);
         draw.frame = 3;
         let index = masks.iter().position(|id| *id == evicted[0]).unwrap();
-        let second = draw.image_mask_texture(4, 5, [index as f64 / 1000.; 4], 0., 0.);
+        let second = draw.image_mask_texture(4, 5, [index as f64 / 1000.; 4], 0., 0., [0, 0, 4, 5]);
         assert_ne!(evicted[0], second);
         draw.reset_resources();
         assert!(draw.retired.contains(&first));
         assert!(draw.retired.contains(&second));
         assert!(!draw.gpu_image_cache.touch(second, 4));
+    }
+    /// A rounded image quad wider than a texture can be (a 9255 x 5 px bar under a UICorner) keeps the corner mask
+    /// of the part that shows, which the record reads at its offset; one that fits keeps the whole quad's
+    #[test]
+    fn a_rounded_image_wider_than_a_texture_keeps_the_mask_of_the_part_that_shows() {
+        let asset = TextureAsset { id: AssetId("bar".into()), width: 2, height: 2, rgba: vec![255; 16].into() };
+        let record = |w: u32| {
+            let mut draw = DrawPreparer::new();
+            draw.scale = 1.;
+            draw.frame = 1;
+            let mut ctx = BuildContext::new(FRAME_TARGET, 400, 200, [0., 0.]);
+            let node = serde_json::json!({"id":1,"rect":[-200,100,w,5],"image":{"uri":"bar","scaleType":"Stretch"}});
+            draw.snapped_image_records(&mut ctx, &node, &asset, physical_rect(&node, 1.), [2.5; 4]).unwrap();
+            let masks: Vec<(u32, u32)> = draw
+                .packet
+                .textures
+                .iter()
+                .filter(|t| t.format == TextureFormat::R32Float)
+                .map(|t| (t.levels[0].width, t.levels[0].height))
+                .collect();
+            // The record's corner texel: (mask slot, the mask's x and y in the quad, 0)
+            let start = draw.packet.texels.iter().position(|t| *t == [6., 0., 0., 0.]).expect("an IMAGE record") - 2;
+            (masks, draw.packet.texels[start + 8])
+        };
+        assert_eq!(record(9255), (vec![(400, 5)], [1., 200., 0., 0.]));
+        assert_eq!(record(8000), (vec![(8000, 5)], [1., 0., 0., 0.]));
+    }
+    /// quad_corner_mask_region's pixels are the whole mask's there, at either parity
+    #[test]
+    fn a_mask_region_is_that_part_of_the_whole_mask() {
+        for (ox, oy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let whole = super::super::images::quad_corner_mask(13, 7, [3.5, 2., 0., 4.], ox, oy);
+            let part = quad_corner_mask_region(13, 7, [3.5, 2., 0., 4.], ox, oy, [3, 2, 9, 4]);
+            let expected: Vec<f32> = (0..4).flat_map(|j| whole[(2 + j) * 13 + 3..(2 + j) * 13 + 12].to_vec()).collect();
+            assert_eq!(part, expected, "parity {ox}, {oy}");
+        }
     }
     #[test]
     fn source_mips_reuse_replace_and_retire_without_aliasing() {

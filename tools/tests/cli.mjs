@@ -425,6 +425,57 @@ end
 	console.log("CLI render without fonts: PASS (the button's font in missingFonts, on stderr and in its note)");
 }
 
+// A rounded bar wider than a texture can be (9255 x 5 px under a UICorner, as a progress bar on a wide screen) is drawn
+// where it shows. A render that draws no picture (here a viewport wider than a texture) fails: exit 2, status "error",
+// the drawing error as its failure and on stderr, no png in its summary, and no render.png (an earlier one is removed).
+{
+	const { PNG } = await import("pngjs");
+	const os = await import("node:os");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-cli-wide-"));
+	fs.writeFileSync(path.join(dir, "bar.luau"), `return function(Target)
+	local Bar = Instance.new("Frame")
+	Bar.Name = "Bar"
+	Bar.Position = UDim2.fromOffset(-200, 100)
+	Bar.Size = UDim2.fromOffset(9255, 5)
+	Bar.BackgroundColor3 = Color3.new(0, 0, 0)
+	Bar.BackgroundTransparency = 0.45
+	Bar.Parent = Target
+	local Corner = Instance.new("UICorner")
+	Corner.CornerRadius = UDim.new(0, 2.5)
+	Corner.Parent = Bar
+end
+`);
+	const out = path.join(dir, "out");
+	const render = viewport => spawnSync(process.execPath, ["cli/rur.mjs", "render", "--fixture", path.join(dir, "bar.luau"), "--viewport", viewport, "--scale", "1", "--offline", "--json", "--out", out],
+		{ cwd: root, encoding: "utf8", windowsHide: true, env: { ...process.env, RUR_STATE_DIR: path.join(dir, "state"), RUR_NO_SERVICE: "1" } });
+	const drawn = render("400x200");
+	assert.equal(drawn.status, 0, drawn.stderr);
+	const summary = JSON.parse(drawn.stdout);
+	assert.equal(summary.status, "ok", summary.failure);
+	assert.deepEqual(summary.renderErrors, []);
+	assert.equal(summary.png, path.join(out, "render.png"));
+	const png = PNG.sync.read(fs.readFileSync(summary.png));
+	const pixel = (x, y) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 4)].join();
+	// Rows 100 to 104 are the bar's across the picture, to its right edge; the rows beside it the background's
+	for (const x of [0, 200, 399]) {
+		assert.notEqual(pixel(x, 102), pixel(x, 50), `the bar at ${x}, 102`);
+		assert.equal(pixel(x, 106), pixel(x, 50), `the background at ${x}, 106`);
+	}
+
+	const failed = render("9000x10");
+	assert.equal(failed.status, 2, failed.stderr);
+	const failure = JSON.parse(failed.stdout);
+	assert.equal(failure.status, "error");
+	assert.match(failure.failure, /^drawing failed: .*Invalid texture extent 9000x10/);
+	assert.match(failure.renderErrors.join("\n"), /Invalid texture extent 9000x10/);
+	assert.equal(failure.png, null);
+	assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, "summary.json"), "utf8")).png, null);
+	assert.ok(!fs.existsSync(path.join(out, "render.png")), "the earlier render.png is gone");
+	assert.match(failed.stderr, /rur: drawing failed, no render\.png: .*Invalid texture extent 9000x10/);
+	fs.rmSync(dir, { recursive: true, force: true });
+	console.log("CLI wide rounded bar: PASS (drawn where it shows; a render without a picture exits 2 with status error and no png)");
+}
+
 // `inspect crop`: the node the query names before nodes whose path only contains it, one inside the image
 // before one outside, and a node wholly outside the image is an error naming its rect, not an empty PNG.
 {

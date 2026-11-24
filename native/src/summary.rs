@@ -355,6 +355,12 @@ pub fn scene_diagnostics(scene: &Json) -> Diagnostics {
 
 /// What a render wrote, as summary.json holds it (cli/rur.mjs render): `result` is what `rur-native render` printed,
 /// `seconds` the render's time; `git_ref` and the result's profile are added when there are any
+/// What a render whose drawing failed (its renderErrors: story_render.rs png_into) gives as its failure: it wrote no
+/// render.png, so it reports status "error" and no png (cli/rur.mjs render reports it the same way)
+pub fn drawing_failure(render_errors: &[Json]) -> Option<String> {
+    (!render_errors.is_empty()).then(|| format!("drawing failed: {}", render_errors.iter().map(Json::text).collect::<Vec<_>>().join("; ")))
+}
+
 pub fn render_summary(out: &Path, png: bool, result: &Json, seconds: f64, git_ref: Option<&Json>) -> Result<Json, String> {
     let file = out.join("scene.json");
     let scene = Json::read(&file).ok_or_else(|| format!("{}: no scene", file.display()))?;
@@ -370,17 +376,20 @@ pub fn render_summary(out: &Path, png: bool, result: &Json, seconds: f64, git_re
     let output = diagnostics.get("output").items();
     let count = |kind: &str| output.iter().filter(|entry| entry.get("kind").as_str() == Some(kind)).count();
     let mut summary = Json::object();
-    if scene.has("status") {
+    let drawing = drawing_failure(result.get("renderErrors").items());
+    if drawing.is_some() {
+        summary.set("status", "error");
+    } else if scene.has("status") {
         summary.set("status", scene.get("status").clone());
     }
     let failure = scene.get("failure");
-    summary.set("failure", if failure.truthy() { failure.clone() } else { Json::Null });
+    summary.set("failure", if failure.truthy() { failure.clone() } else { drawing.clone().map_or(Json::Null, Json::from) });
     // What to mount when the failure reads a missing child of a service (hints.rs)
     if diagnostics.get("hint").truthy() {
         summary.set("hint", diagnostics.get("hint").clone());
     }
     summary.set("out", out);
-    summary.set("png", png.then(|| out.join("render.png").display().to_string()));
+    summary.set("png", (png && drawing.is_none()).then(|| out.join("render.png").display().to_string()));
     summary.set("nodes", scene.get("nodes").items().len());
     if scene.has("viewport") {
         summary.set("viewport", scene.get("viewport").clone());
@@ -416,6 +425,28 @@ pub fn write_summary(out: &Path, summary: &Json) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A render whose drawing failed (its renderErrors) wrote no render.png: it reports status "error", the drawing
+    /// error as its failure and no png. A story that failed keeps its own failure.
+    #[test]
+    fn a_render_that_drew_no_picture_fails_and_names_no_png() {
+        let out = std::env::temp_dir().join(format!("rur-summary-drawing-{}", std::process::id()));
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("scene.json"), r#"{"status": "ok", "nodes": [], "diagnostics": {}}"#).unwrap();
+        let failed = Json::parse(r#"{"status": "error", "renderErrors": ["Invalid texture extent 9255x5"]}"#).unwrap();
+        let summary = render_summary(&out, true, &failed, 0.0, None).unwrap();
+        assert_eq!(summary.get("status").as_str(), Some("error"));
+        assert_eq!(summary.get("failure").as_str(), Some("drawing failed: Invalid texture extent 9255x5"));
+        assert_eq!(summary.get("png"), &Json::Null);
+        let drawn = render_summary(&out, true, &Json::parse(r#"{"status": "ok", "renderErrors": []}"#).unwrap(), 0.0, None).unwrap();
+        assert_eq!(drawn.get("status").as_str(), Some("ok"));
+        assert_eq!(drawn.get("failure"), &Json::Null);
+        assert_eq!(drawn.get("png").as_str(), Some(out.join("render.png").display().to_string().as_str()));
+        std::fs::write(out.join("scene.json"), r#"{"status": "error", "failure": "M:4: boom", "nodes": []}"#).unwrap();
+        let both = render_summary(&out, true, &failed, 0.0, None).unwrap();
+        assert_eq!((both.get("status").as_str(), both.get("failure").as_str()), (Some("error"), Some("M:4: boom")));
+        std::fs::remove_dir_all(&out).unwrap();
+    }
 
     #[test]
     fn diagnostics_name_culled_nodes_dropped_lines_and_quoted_paths() {

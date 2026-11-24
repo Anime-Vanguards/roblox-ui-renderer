@@ -529,7 +529,10 @@ pub fn aggregate(records: &mut [Json], hierarchies: &HashMap<String, HashSet<Str
         if status == "timeout" || status == "crash" {
             found.push((if failure.truthy() { failure.text() } else { status.clone() }, status.clone()));
         } else if status == "error" && failure.truthy() {
-            found.push((failure.text(), "mount".into()));
+            // (a story that mounted but could not be drawn: crate::summary::drawing_failure)
+            let drawing = crate::summary::drawing_failure(record.get("renderErrors").items()).map(|text| primary_message(&text));
+            let kind = if drawing.as_deref() == failure.as_str() { "render" } else { "mount" };
+            found.push((failure.text(), kind.into()));
         }
         for message in record.get("errors").items() {
             let message = message.text();
@@ -1073,6 +1076,29 @@ mod tests {
         assert_eq!(totals.get("seconds").stringify(0), r#"{"total":10,"median":3,"p90":4,"max":4}"#);
         assert_eq!(totals.get("clean").as_f64(), Some(1.0));
         // One clean story of four: the sweep exits 1
+        assert_eq!(exit_code(&totals), 1);
+    }
+
+    /// A story that ran but could not be drawn (its summary's failure is the drawing failure: crate::summary) is a
+    /// render cause, not a mount one; a story that failed to mount and so drew nothing stays a mount cause
+    #[test]
+    fn a_story_that_could_not_be_drawn_is_a_render_cause() {
+        let record = |story: &str, failure: &str| {
+            Json::object()
+                .with("story", story)
+                .with("place", "lobby")
+                .with("status", "error")
+                .with("clean", false)
+                .with("failure", failure)
+                .with("renderErrors", vec![Json::from("Invalid texture extent 9255x5")])
+                .with("seconds", 1.0)
+        };
+        let mut records = vec![record("a", "drawing failed: Invalid texture extent 9255x5"), record("b", "M:4: boom 1")];
+        let totals = aggregate(&mut records, &HashMap::new());
+        let causes: Vec<String> = totals.get("causes").items().iter().map(|cause| cause.get("cause").text()).collect();
+        assert_eq!(causes.len(), 2, "{causes:?}");
+        assert!(causes.iter().any(|cause| cause.starts_with("render: drawing failed: Invalid texture extent")), "{causes:?}");
+        assert!(causes.iter().any(|cause| cause == "mount: boom N"), "{causes:?}");
         assert_eq!(exit_code(&totals), 1);
     }
 

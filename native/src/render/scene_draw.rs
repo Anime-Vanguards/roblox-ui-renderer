@@ -107,6 +107,77 @@ impl DrawStats {
 mod tests {
     use super::*;
     use serde_json::json;
+    /// The packet of a scene of `nodes` (all drawn, in order) in a `viewport` at scale 1
+    fn prepared(viewport: [u32; 2], nodes: serde_json::Value) -> RenderPacket {
+        let draw: Vec<u64> = nodes.as_array().unwrap().iter().map(|node| node["id"].as_u64().unwrap()).collect();
+        let mut scene = SceneStore::default();
+        scene.apply(&json!({"viewport":{"width":viewport[0],"height":viewport[1],"scale":1},"nodes":nodes,"layers":[{"draw":draw}],"fonts":[],"images":[]})).unwrap();
+        let assets = AssetStore::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap(), true);
+        DrawPreparer::new().prepare(&scene, &assets).unwrap()
+    }
+    fn uploads_fit_a_texture(packet: &RenderPacket) -> bool {
+        packet.textures.iter().all(|t| t.levels.iter().all(|l| l.width <= MAX_TEXTURE_SIDE && l.height <= MAX_TEXTURE_SIDE))
+    }
+    /// A rounded bar wider than a texture can be and a few pixels tall (a progress bar on a wide screen, 9255 x 5 px as
+    /// reported): its layer was the whole rect, as for every rect under 65536 px, and the GPU refused it ("Invalid
+    /// texture extent 9255x5"), so nothing was drawn. Its layer is the part that shows, the same pixels as a narrower
+    /// bar's there, also under a ScrollingFrame's clip.
+    #[test]
+    fn a_rounded_frame_wider_than_a_texture_draws_the_part_that_shows() {
+        let bar = |w: u32, h: u32| json!({"id":1,"rect":[-200,100,w,h],"bg":{"color":[0,0,0],"transparency":0.45},"corner":2.5});
+        let layer = |packet: &RenderPacket| {
+            assert_eq!(packet.textures.len(), 1, "one layer");
+            let level = &packet.textures[0].levels[0];
+            (level.width, level.height, level.bytes.to_vec())
+        };
+        for (w, h) in [(9255, 5), (12340, 5), (9255, 4), (12340, 6), (8193, 5)] {
+            let packet = prepared([400, 200], json!([bar(w, h)]));
+            assert!(uploads_fit_a_texture(&packet), "{w}x{h}");
+            assert_eq!(layer(&packet).0, 400, "{w}x{h}: the 400 px that show");
+        }
+        // Where it shows, its pixels are those of an 8000 px bar (one layer of the whole rect), 200 px in
+        let (_, h, wide) = layer(&prepared([400, 200], json!([bar(9255, 5)])));
+        let (narrow_w, _, narrow) = layer(&prepared([400, 200], json!([bar(8000, 5)])));
+        assert_eq!(narrow_w, 8000);
+        for row in 0..h as usize {
+            let shown = &wide[row * 400 * 4..(row + 1) * 400 * 4];
+            let start = (row * 8000 + 200) * 4;
+            assert_eq!(shown, &narrow[start..start + 400 * 4], "row {row}");
+        }
+        // Inside a ScrollingFrame's clip
+        let mut clipped = bar(9255, 5);
+        clipped["clip"] = json!([50, 50, 300, 100]);
+        let packet = prepared([400, 200], json!([clipped]));
+        assert!(uploads_fit_a_texture(&packet));
+        assert_eq!(layer(&packet).0, 300);
+    }
+    /// The other layers made the size of an element: a UIGradient's border, a UIShadow and one its frame cuts, each
+    /// on a frame wider than a texture can be, keep only the part that shows
+    #[test]
+    fn borders_and_shadows_wider_than_a_texture_keep_the_part_that_shows() {
+        let wide = |extra: serde_json::Value| {
+            let mut node = json!({"id":1,"rect":[-200,100,9255,20],"bg":{"color":[1,1,1]}});
+            for (key, value) in extra.as_object().unwrap() {
+                node[key] = value.clone();
+            }
+            node
+        };
+        for (what, node) in [
+            ("gradient border", wide(json!({"border":{"size":1,"color":[0,0,0]},"gradient":{"color":[[0,1,0,0],[1,0,1,0]]}}))),
+            ("shadow", wide(json!({"shadows":[{"blur":4,"color":[0,0,0]}]}))),
+            ("hard shadow", wide(json!({"shadows":[{"color":[0,0,0],"spread":[8,8]}]}))),
+            ("cut shadow", wide(json!({"corner":4,"shadows":[{"blur":4,"color":[0,0,0],"behind":false}]}))),
+            ("inset shadow", wide(json!({"corner":4,"shadows":[{"blur":4,"color":[0,0,0],"inset":true}]}))),
+        ] {
+            let packet = prepared([400, 200], json!([node]));
+            assert!(!packet.textures.is_empty(), "{what}: drawn");
+            assert!(uploads_fit_a_texture(&packet), "{what}: {:?}", packet.textures.iter().map(|t| (t.levels[0].width, t.levels[0].height)).collect::<Vec<_>>());
+        }
+    }
+    #[test]
+    fn the_texture_limit_is_the_devices() {
+        assert_eq!(MAX_TEXTURE_SIDE, wgpu::Limits::default().max_texture_dimension_2d);
+    }
     #[test]
     fn gradient_border_outer_half_pixel_ties_round_down() {
         let mut scene = SceneStore::default();
@@ -2337,7 +2408,7 @@ impl DrawPreparer {
                             Some((bounds, mesh.local(origin)?))
                         })
                         .collect();
-                    let key = match local {
+                    let mut key = match local {
                         Some(local) => format!(
                             "gradborder-local:{}",
                             serde_json::to_string(&(local, [outer.w, outer.h], border_colour, fill_colour, a, ring.is_some()))
@@ -2349,16 +2420,27 @@ impl DrawPreparer {
                                 .unwrap_or_default()
                         ),
                     };
-                    let raster = move || super::gradients::border_gradient_mesh_pixels(&parts, outer);
+                    // A border wider or taller than a texture can be: the layer holds the part that shows
+                    let shown = if over_texture_limit(outer) {
+                        let shown = visible_part(ctx, outer, [m[4], m[5]], clip);
+                        if shown.w <= 0. || shown.h <= 0. {
+                            return Ok(());
+                        }
+                        key.push_str(&format!(":shown {:?}", [shown.x - outer.x, shown.y - outer.y, shown.w, shown.h]));
+                        shown
+                    } else {
+                        outer
+                    };
+                    let raster = move || super::gradients::border_gradient_mesh_pixels(&parts, shown);
                     let (.., id) = self.cached_layer(
                         key,
-                        outer.x as i32,
-                        outer.y as i32,
-                        outer.w as u32,
-                        outer.h as u32,
+                        shown.x as i32,
+                        shown.y as i32,
+                        shown.w as u32,
+                        shown.h as u32,
                         Box::new(raster),
                     );
-                    self.image_layer(ctx, outer.translated(m[4], m[5]), id, clip);
+                    self.image_layer(ctx, shown.translated(m[4], m[5]), id, clip);
                     return Ok(());
                 }
                 let hole = if fill.w > 0. && fill.h > 0. {
@@ -2407,13 +2489,11 @@ impl DrawPreparer {
             return Ok(());
         }
         if gradient.is_object() || radii.iter().any(|v| *v > 0.) {
-            let clip_bounds = clip.unwrap_or(NO_CLIP);
-            let crop = if m[4].fract() == 0. && m[5].fract() == 0. {
-                let l = r.x.max((clip_bounds[0].max(0.) - m[4]).floor());
-                let t = r.y.max((clip_bounds[1].max(0.) - m[5]).floor());
-                let right = (r.x + r.w).min((clip_bounds[2].min(ctx.width as f64) - m[4]).ceil());
-                let bottom = (r.y + r.h).min((clip_bounds[3].min(ctx.height as f64) - m[5]).ceil());
-                Rect::new(l, t, (right - l).max(0.), (bottom - t).max(0.))
+            // A rect wider or taller than a texture can be is always cropped to the part that shows
+            // (a 9255 x 5 px rounded bar: "Invalid texture extent 9255x5", and no picture)
+            let oversized = over_texture_limit(r);
+            let crop = if (m[4].fract() == 0. && m[5].fract() == 0.) || oversized {
+                visible_part(ctx, r, [m[4], m[5]], clip)
             } else {
                 r
             };
@@ -2427,10 +2507,12 @@ impl DrawPreparer {
             }
             // A solid fill's pixel depends on its place in the rect only (corner_coverage_region_limited):
             // the whole rect's layer, drawn under the same clip, draws the crop's pixels, and is one layer
-            // for every crop of it (a row scrolling across the clip edge, equal rows) unless far larger
+            // for every crop of it (a row scrolling across the clip edge, equal rows) unless far larger, or
+            // larger than a texture can be (a 9255 x 5 px rect is under 65536 px)
             let full = r.w * r.h;
             let crop = if !gradient.is_object()
                 && crop != r
+                && !oversized
                 && r.w.fract() == 0.
                 && r.h.fract() == 0.
                 && (full <= 4. * crop.w * crop.h || full <= 65536.)
@@ -2778,6 +2860,19 @@ impl DrawPreparer {
             let y = (cy - h / 2. - pad).floor();
             let width = ((cx + w / 2. + pad).ceil() - x) as u32;
             let height = ((cy + h / 2. + pad).ceil() - y) as u32;
+            let clip = clip_rect(node, ctx.origin, self.scale);
+            let translation = m[0] == 1. && m[1] == 0. && m[2] == 0. && m[3] == 1.;
+            // Unturned and wider or taller than a texture can be: the layer holds the part that shows (each of
+            // its pixels is computed from where it lies)
+            let (x, y, width, height) = if translation && over_texture_limit(Rect::new(x, y, width as f64, height as f64)) {
+                let shown = visible_part(ctx, Rect::new(x, y, width as f64, height as f64), [m[4], m[5]], clip);
+                if shown.w <= 0. || shown.h <= 0. {
+                    continue;
+                }
+                (shown.x, shown.y, shown.w as u32, shown.h as u32)
+            } else {
+                (x, y, width, height)
+            };
             let rgb = color(&shadow["color"], [0.; 3]).map(stop_byte);
             // Blurred shadows through Studio's mesh + profile texture (coverage::shadow_mesh / shadow_alpha8,
             // measured), hard ones the rounded rect at floor(255 alpha) (coverage::ShadowField)
@@ -2862,8 +2957,6 @@ impl DrawPreparer {
                 }
             };
             let rect = Rect::new(x, y, width as f64, height as f64);
-            let clip = clip_rect(node, ctx.origin, self.scale);
-            let translation = m[0] == 1. && m[1] == 0. && m[2] == 0. && m[3] == 1.;
             // The part in the shadow's exact box (exact_shadow_boxes: where three halos overlap, shadow-probe-p)
             // blends like an image (straight bytes, BlendMode::Image), the rest premultiplied; one draw per clip rect
             let exact = (translation && ctx.target == FRAME_TARGET)
@@ -2970,6 +3063,16 @@ impl DrawPreparer {
         let y = (e[1] - 1.).floor();
         let width = ((e[2] + 1.).ceil() - x) as u32;
         let height = ((e[3] + 1.).ceil() - y) as u32;
+        // Unturned and wider or taller than a texture can be: the layer holds the part that shows (each of its
+        // pixels is computed from where it lies, the derivative quads' parity from the target's)
+        let (x, y, width, height) = if about[..4] == [1., 0., 0., 1.]
+            && over_texture_limit(Rect::new(x, y, width as f64, height as f64))
+        {
+            let shown = visible_part(ctx, Rect::new(x, y, width as f64, height as f64), shift, clip_rect(node, ctx.origin, scale));
+            (shown.x, shown.y, shown.w as u32, shown.h as u32)
+        } else {
+            (x, y, width, height)
+        };
         if width == 0 || height == 0 || width > 16384 || height > 16384 {
             return;
         }
@@ -3756,6 +3859,22 @@ impl DrawPreparer {
 
 /// No clip (the shaders' NO_CLIP rect)
 const NO_CLIP_RECT: [f64; 4] = [-1e9, -1e9, 1e9, 1e9];
+
+/// Whether a layer the size of `r` would be wider or taller than a texture can be (MAX_TEXTURE_SIDE)
+pub(crate) fn over_texture_limit(r: Rect) -> bool {
+    r.w > MAX_TEXTURE_SIDE as f64 || r.h > MAX_TEXTURE_SIDE as f64
+}
+
+/// The whole local pixels of `r`, drawn through the translation `t`, that cover the part of the target under `clip`:
+/// no larger than the target, so a layer of only these pixels fits a texture whatever the size of `r`
+pub(crate) fn visible_part(ctx: &BuildContext, r: Rect, t: [f64; 2], clip: Option<[f64; 4]>) -> Rect {
+    let c = clip.unwrap_or(NO_CLIP);
+    let l = r.x.max((c[0].max(0.) - t[0]).floor());
+    let top = r.y.max((c[1].max(0.) - t[1]).floor());
+    let right = (r.x + r.w).min((c[2].min(ctx.width as f64) - t[0]).ceil());
+    let bottom = (r.y + r.h).min((c[3].min(ctx.height as f64) - t[1]).ceil());
+    Rect::new(l, top, (right - l).max(0.), (bottom - top).max(0.))
+}
 
 /// A solid (rounded) fill's premultiplied layer: pixels [x0, x0 + w) x [y0, y0 + h) of a `size` rect whose
 /// coverage is corner_coverage_region_limited's (1 without radii), each pixel (colour, gpu8(a / 255 x

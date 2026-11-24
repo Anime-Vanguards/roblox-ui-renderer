@@ -216,6 +216,7 @@ export function missingFonts(diagnostics) {
 export function diagnosticLines(summary) {
 	const lines = [];
 	const more = (shown, total) => (total > shown ? `, +${total - shown} more` : "");
+	if (asArray(summary.renderErrors).length) lines.push(`drawing failed, no render.png: ${summary.renderErrors.join("; ")}`);
 	if (summary.hint) lines.push(`hint: ${summary.hint}`);
 	if (summary.culled && summary.culled.count) {
 		lines.push(`culled: ${summary.culled.count} (${summary.culled.nodes} nodes; ${summary.culled.examples.join("; ")}${more(summary.culled.examples.length, summary.culled.count)})`);

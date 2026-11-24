@@ -1109,6 +1109,9 @@ mod tests {
         release.send(()).unwrap();
         let (result, _) = render("png", true).recv_timeout(Duration::from_secs(120)).unwrap().unwrap().unwrap();
         assert!(result["renderErrors"].to_string().contains("test GPU start failed"), "{result}");
+        // It drew no picture: the render failed, as its summary says (crate::summary::drawing_failure)
+        assert_eq!(result["status"], "error", "{result}");
+        assert!(!dir.join("png/render.png").exists());
         assert_eq!(starts.load(Ordering::Acquire), 1);
         let log = std::fs::read_to_string(dir.join("state/serve.log")).unwrap();
         assert!(log.contains("GPU start failed: test GPU start failed"), "{log}");

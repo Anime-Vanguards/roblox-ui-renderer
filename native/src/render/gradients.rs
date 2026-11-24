@@ -698,14 +698,24 @@ pub fn border_gradient_meshes(
     parts
 }
 
-/// Straight RGBA bytes over `outer` from border_gradient_meshes' quads
+/// Straight RGBA bytes over `outer` (the border's outer rect, or the part of it that shows: whole pixels) from
+/// border_gradient_meshes' quads
 pub fn border_gradient_mesh_pixels(parts: &[([f64; 4], GradientMesh)], outer: Rect) -> Vec<u8> {
     let ow = outer.w.max(0.) as usize;
     let oh = outer.h.max(0.) as usize;
     let mut out = vec![0u8; ow * oh * 4];
     for (bounds, mesh) in parts {
-        let [x0, y0, x1, y1] = *bounds;
-        let field = mesh.field(*bounds);
+        // (each pixel of a field is its own: the field of a part's piece is that piece of the part's field)
+        let [x0, y0, x1, y1] = [
+            bounds[0].max(outer.x),
+            bounds[1].max(outer.y),
+            bounds[2].min(outer.x + outer.w),
+            bounds[3].min(outer.y + outer.h),
+        ];
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        let field = mesh.field([x0, y0, x1, y1]);
         let w = (x1 - x0) as usize;
         let h = (y1 - y0) as usize;
         for j in 0..h {

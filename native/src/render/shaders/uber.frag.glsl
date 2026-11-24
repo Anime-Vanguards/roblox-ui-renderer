@@ -935,7 +935,7 @@ float textureCornerMask(vec2 ij, vec4 quad, vec2 s, vec4 radii) {
 
 // IMAGE (snapped quad): quad (X0, Y0, W, H), node rect (L, T, R, B), (slot, l0, f, flags: 1 pixelated,
 // 4 corner mask, 8 in a CanvasGroup texture, 16 texture corner mask), tap offsets, tint + fade, corner (mask
-// slot, 0, 0, 0) or texture corner radii, gradient (flag, offset), texture corner (QW, QH, offX, offY),
+// slot, the mask's x and y in the quad, 0) or texture corner radii, gradient (flag, offset), texture corner (QW, QH, offX, offY),
 // (sx, sy). In a texture (a resampled CanvasGroup's image, groups.rs group_image) the quad and node rect are
 // in texels. The output is the straight colour and alpha
 // converted like the GPU; the "image" batch blend mixes it like Studio (on the screen too)
@@ -950,7 +950,7 @@ vec4 kindImage(ivec2 P, vec2 X) {
 	int flags = int(rec(5).w);
 	float coverage = 1.0;
 	if ((flags & 4) != 0) {
-		coverage = imageTexel(int(rec(8).x), P - ivec2(quad.xy), 0).r;
+		coverage = imageTexel(int(rec(8).x), P - ivec2(quad.xy) - ivec2(rec(8).yz), 0).r;
 	} else if ((flags & 16) != 0) {
 		coverage = textureCornerMask(vec2(P) - quad.xy, rec(10), rec(11).xy, rec(8));
 	}
