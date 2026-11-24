@@ -703,3 +703,69 @@ console.log(JSON.stringify({ summary, contacted }));
 	}
 	console.log("CLI through a linked folder: PASS (rur and inspect run when started by a symlinked path, and take --state-dir)");
 }
+
+// `rur cost`, `rur cost compare`, and `rur sequence --cost`: deterministic Roblox UI cost pass, Studio CanvasGroup RT
+// bytes, calibrated/refused timings, multi-frame sequence layout churn, and A/B diff.
+{
+	const os = await import("node:os");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-cost-cli-"));
+	const env = { ...process.env, RUR_NO_SERVICE: "1" };
+	const runRur = (...argv) => spawnSync(process.execPath, ["cli/rur.mjs", ...argv], { cwd: root, encoding: "utf8", windowsHide: true, env });
+	try {
+		const help = runRur("cost", "--help");
+		assert.equal(help.status, 0, help.stderr);
+		assert.match(help.stdout, /rur cost/);
+
+		// Single-moment CanvasGroup fixture: exact Studio rectangular RT bytes (723,600 B, not square 1,116,000 B)
+		// and bit-identical output across repeats
+		const outA = path.join(dir, "cg-a");
+		const outB = path.join(dir, "cg-b");
+		const rA = runRur("cost", "--fixture", path.join(root, "fixtures", "canvasgroup.luau"), "--no-snapshots", "--json", "--out", outA);
+		assert.equal(rA.status, 0, rA.stderr);
+		const rB = runRur("cost", "--fixture", path.join(root, "fixtures", "canvasgroup.luau"), "--no-snapshots", "--json", "--out", outB);
+		assert.equal(rB.status, 0, rB.stderr);
+		const rawA = fs.readFileSync(path.join(outA, "cost.json"), "utf8");
+		const rawB = fs.readFileSync(path.join(outB, "cost.json"), "utf8");
+		assert.equal(rawA, rawB, "cost.json must be bit-identical across runs");
+		const costA = JSON.parse(rawA);
+		assert.equal(costA.schema, "rur-cost/1");
+		assert.equal(costA.totals.canvasGroupTargets, 7);
+		assert.equal(costA.totals.canvasRtBytes, 723600);
+		assert.equal(costA.totals.glyphQuads, 30);
+		assert.equal(costA.predicted["desktop-ref"].layoutCpuMs.status, "calibrated");
+		assert.equal(costA.predicted["phone-mid"].layoutCpuMs.basis, "anchored");
+		assert.equal(costA.predicted["phone-mid"].drawPassCpuMs.status, "refused");
+		assert.equal(costA.predicted["phone-mid"].drawPassCpuMs.ms, null);
+		assert.equal(costA.predicted["phone-mid"].gpuUiMs.status, "refused");
+		assert.equal(costA.predicted["phone-mid"].gpuUiMs.ms, null);
+
+		// `rur cost compare`: identical reports -> unchanged; higher-cost vs lower-cost -> improved
+		const sameCmp = runRur("cost", "compare", outA, outB, "--json");
+		assert.equal(sameCmp.status, 0, sameCmp.stderr);
+		assert.equal(JSON.parse(sameCmp.stdout).verdict, "unchanged");
+
+		// Sequence cost mode: static fixture incurs 0 layout churn on frames 1..N
+		const outSeq = path.join(dir, "seq-cost");
+		const rSeq = runRur("cost", "--fixture", path.join(root, "fixtures", "corners.luau"), "--no-snapshots", "--from", "0", "--frames", "4", "--fps", "60", "--json", "--out", outSeq);
+		assert.equal(rSeq.status, 0, rSeq.stderr);
+		const seqCost = JSON.parse(fs.readFileSync(path.join(outSeq, "cost.json"), "utf8"));
+		assert.equal(seqCost.mode, "sequence");
+		assert.equal(seqCost.sequence.frames.length, 4);
+		assert.ok(seqCost.sequence.frames[0].layout.passes >= 1);
+		for (const frame of seqCost.sequence.frames.slice(1)) {
+			assert.equal(frame.layout.passes, 0);
+			assert.equal(frame.layout.stored + frame.layout.moved, 0);
+		}
+
+		// `rur sequence --cost --no-png --no-video`: writes cost.json alongside trace.json
+		const outSeqFlag = path.join(dir, "seq-with-cost");
+		const rSeqFlag = runRur("sequence", "--fixture", path.join(root, "fixtures", "corners.luau"), "--no-snapshots", "--from", "0", "--frames", "3", "--fps", "60", "--no-png", "--no-video", "--cost", "--json", "--out", outSeqFlag);
+		assert.equal(rSeqFlag.status, 0, rSeqFlag.stderr);
+		const seqSummary = JSON.parse(rSeqFlag.stdout);
+		assert.ok(seqSummary.cost && fs.existsSync(seqSummary.cost), "sequence --cost writes cost.json");
+		assert.equal(JSON.parse(fs.readFileSync(seqSummary.cost, "utf8")).sequence.frames.length, 3);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+	console.log("CLI cost: PASS (rur cost, compare, sequence churn, and sequence --cost)");
+}

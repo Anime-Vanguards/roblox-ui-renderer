@@ -18,6 +18,7 @@ node tools/native-app/build.mjs              # build rur-native (FreeType is dow
 npm test                                     # selftest: engine goldens, CLI, assets, places, examples
 cd native; cargo test --release; cd ..       # Rust unit and integration tests
 node cli/rur.mjs render --story <file> --viewport 1200x900 --time 1 --out out/x
+node cli/rur.mjs cost --story <file> --viewport 1920x1080 --out out/x-cost    # deterministic Roblox UI cost (docs/cost.md)
 node cli/inspect.mjs tree out/x --depth 6    # the laid-out tree; also node / at / crop / diff
 node cli/rur.mjs doctor                      # toolchain, build, service and Studio lock state
 ```
@@ -36,7 +37,7 @@ engine binary frozen while `native/` is being edited; `--no-service` skips the r
   `session.rs`, `cli.rs`. `native/src/render/`: the wgpu renderer and the uber shader. `native/src/glyphs.rs`
   and `glyphs/rur_glyph.c`: FreeType glyphs. `resolve.rs` and `download.rs`: content URIs, asset downloads and
   the Roblox cookie (keep cookie handling there). `serve.rs`: the render service. `app.rs`: the storybook.
-  `sweep.rs`, `diff.rs`, `gitref.rs`: `rur sweep`, `rur diff` and `--git-ref` (the Node CLI forwards to them).
+  `sweep.rs`, `diff.rs`, `cost.rs`, `gitref.rs`: `rur sweep`, `rur diff`, `rur cost` and `--git-ref` (the Node CLI forwards to them).
 - `fixtures/`: measurement scenes, each run by the golden suite. `tools/engine/golden.mjs` and `golden.json`:
   the engine's recorded output. `data/studio/`: frozen Studio measurements.
 - `tools/analysis/`: fitting scripts; `tools/studio/`, `tools/interaction/`: Studio probes and input

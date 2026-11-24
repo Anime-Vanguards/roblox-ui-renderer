@@ -12,6 +12,8 @@ CLI reference for `node cli/rur.mjs` (or `npm run rur -- <command>`), standalone
 | `rur sweep` | Render every story in the project and group failures by root cause |
 | `rur compare --story <file>` | Capture in Roblox Studio and offline, diffing layout rects and pixels ([studio.md](studio.md)) |
 | `rur diff --git-ref <ref> --story <file>` | Render a story at `<ref>` vs. your working tree and diff layout + pixels |
+| `rur cost --story <file>` | Deterministic Roblox UI cost pass: batch breaks, quads/glyphs, overdraw, CanvasGroup RT bytes, hidden DOM, and sequence layout churn ([cost.md](cost.md)) |
+| `rur cost compare <before> <after>` | Deterministic A/B diff between two `cost.json` reports ([cost.md](cost.md)) |
 | `rur record --harness <file.luau>` | Run a Luau harness in play mode and record the 3D `Workspace` for `ror` |
 | `rur profile diff <before> <after>` | Compare two engine profiles ([Profiles](#profiles---profile)) |
 | `rur profile view <dir> [<dir2>]` | Interactive terminal viewer for a profile or diff ([Profiles](#profiles---profile)) |
@@ -19,7 +21,7 @@ CLI reference for `node cli/rur.mjs` (or `npm run rur -- <command>`), standalone
 | `rur native` | Launch the interactive desktop storybook ([storybook.md](storybook.md)) |
 | `rur doctor [--fix]` / `rur clean` / `rur selftest` | Check environment, prune output dir, run offline selftests |
 
-`rur sweep` and `rur diff` delegate directly to `rur-native sweep` and `rur-native diff`, so release binaries support them identically without Node.
+`rur sweep`, `rur diff`, and `rur cost` delegate directly to `rur-native sweep`, `rur-native diff`, and `rur-native cost`, so release binaries support them identically without Node.
 
 **Global flags & environment:** `--state-dir <dir>` (`RUR_STATE_DIR`), `RUR_OUT_DIR`, `--json` (JSON-only stdout), `--isolated`, and `--no-service` ([live-preview.md](live-preview.md#how-a-render-runs)).
 
@@ -70,8 +72,8 @@ node cli/rur.mjs sequence --story <file> --from 0 --to 4 --fps 60 --crop Stage
 Mounts the story once and captures frames at `from + i / fps`. Whenever `fps` divides 60, frame `i` is pixel-identical to `rur render --time <t>`.
 
 - **Range:** `--from` plus `--to` (exclusive), `--frames N`, or `--duration S` (default 1 s); `--fps` (default 60).
-- **Cropping & options:** `--crop <node>` (bounding box on frame 0, rounded to even dimensions for video) or `--crop x,y,w,h`; `--pad px`; `--actions`; `--no-png`; `--no-video`; `--scenes` (save every frame's `scene.json`).
-- **Output (`out/<name>-sequence`):** `frames/00000.png`..., `trace.json` (per-frame position/size/rotation changes), `video.mp4` (H.264 BT.709 via `ffmpeg` from `PATH` or `RUR_FFMPEG`), `video-quarter.mp4` (0.25x slow-motion), and `summary.json`.
+- **Cropping & options:** `--crop <node>` (bounding box on frame 0, rounded to even dimensions for video) or `--crop x,y,w,h`; `--pad px`; `--actions`; `--no-png`; `--no-video`; `--scenes` (save every frame's `scene.json`); `--cost` (write per-frame deterministic `cost.json`, [cost.md](cost.md)).
+- **Output (`out/<name>-sequence`):** `frames/00000.png`..., `trace.json` (per-frame position/size/rotation changes), `video.mp4` (H.264 BT.709 via `ffmpeg` from `PATH` or `RUR_FFMPEG`), `video-quarter.mp4` (0.25x slow-motion), `cost.json` (with `--cost`), and `summary.json`.
 
 ## Rojo projects and explicit mounts
 

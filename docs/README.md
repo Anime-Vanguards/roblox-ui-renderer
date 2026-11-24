@@ -5,7 +5,8 @@ Reference guides for running `rur`, understanding its Studio parity rules, and e
 | Guide | Covers |
 |---|---|
 | [setup.md](setup.md) | Release binaries, verification, build requirements, `rur doctor`, state directories, and output roots |
-| [render.md](render.md) | CLI commands: `render`, `sequence`, `--git-ref`/`diff`, `--plugin`, `--all-layers`, `sweep`, `record`, `profile`, and `inspect` |
+| [render.md](render.md) | CLI commands: `render`, `sequence`, `cost`, `--git-ref`/`diff`, `--plugin`, `--all-layers`, `sweep`, `record`, `profile`, and `inspect` |
+| [cost.md](cost.md) | Deterministic Roblox UI cost accounting (`rur cost`, `rur cost compare`, `rur sequence --cost`), CanvasGroup RT bytes, hidden-DOM traversal, layout churn, and calibration/refusal contract |
 | [storybook.md](storybook.md) | Desktop storybook (`rur native`), headless captures, benchmarks, and memory leak inspection |
 | [web.md](web.md) | WebAssembly browser build, asset bundles, and frame-identity testing |
 | [assets.md](assets.md) | Built-in textures, fonts, `rbxassetid://` downloads, Open Cloud API key, cookies, account broker, and Studio image reads |
