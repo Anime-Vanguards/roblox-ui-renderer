@@ -1,20 +1,22 @@
 //! `rur cost` (`rur-native cost`): deterministic Roblox UI render-cost pass.
 //!
-//! Counts what Roblox's 2D UI renderer does for a screen (or a saved `scene.json`) without a GPU
-//! device, rasterization, or host wall-clock timing fields:
-//! - Roblox `Pass2d` draw calls, batch breaks (by cause: layerPass, renderTarget, clip, shader,
-//!   texture, rotation), non-glyph quads by kind, glyph quads (fill + legacy 4-offset TextStroke +
-//!   contextual UIStroke), and clipped screen / offscreen overdraw in viewport multiples.
+//! Counts deterministic UI work for a screen (or a saved `scene.json`) without a GPU device,
+//! rasterization, or host wall-clock timing fields:
+//! - Non-glyph quads by kind, glyph quads (fill + legacy 4-offset TextStroke + contextual
+//!   UIStroke), and clipped screen / offscreen overdraw in viewport multiples.
+//! - An unmeasured state-transition model for draw calls and batch breaks (by cause: layerPass,
+//!   renderTarget, clip, shader, texture, rotation) — distinct from rur's uber-shader, informational
+//!   only (not calibrated against a client; client UI image atlasing is unmodeled).
 //! - `CanvasGroup` offscreen render-target allocations using exact Studio rectangular RGBA8
 //!   dimensions (`render::geometry::group_texture_dims`: float32 logical size, 2048 px side cap,
 //!   2048 x 1024 px area cap, skipping culled, empty, and fully transparent groups), RT switches,
 //!   and nesting depth.
 //! - Live-DOM hidden-in-shown accounting (`Visible = false` roots and all descendant GuiObjects and
 //!   instances under enabled ScreenGuis), separated from disabled ScreenGuis (`Enabled = false`).
-//! - Deterministic `Layout.Stats` counters, calibrated desktop layout CPU ms (Studio 0.744 client
-//!   slopes from `engine/layout/install.rs`), anchored `phone-mid` layout CPU ms with uncertainty
-//!   band, and explicit refusals (`status: "refused"`, `ms: null`) for uncalibrated draw-pass CPU
-//!   and mobile GPU UI milliseconds.
+//! - Deterministic `Layout.Stats` counters, extrapolated desktop layout CPU ms (Studio 0.744 client
+//!   lazy-layout slopes from `engine/layout/install.rs`), anchored `phone-mid` layout CPU ms with
+//!   uncertainty band, and explicit refusals (`status: "refused"`, `ms: null`) for uncalibrated
+//!   draw-pass CPU and mobile GPU UI milliseconds.
 //! - `rur cost compare <before> <after>` deterministic A/B diff (`rrr-ab/1`).
 
 use std::{
@@ -405,8 +407,23 @@ fn intersect_area(bounds: [f64; 4], clip: Option<[f64; 4]>, target: [f64; 4]) ->
     }
 }
 
-fn scissor_key(clip: Option<[f64; 4]>) -> Option<[i64; 4]> {
-    clip.map(|c| [c[0].round() as i64, c[1].round() as i64, c[2].round() as i64, c[3].round() as i64])
+/// Effective scissor state within `target_bounds`. A clip rect that covers the entire render
+/// target changes no scissor state and normalizes to `None`.
+fn effective_scissor_key(clip: Option<[f64; 4]>, target_bounds: [f64; 4]) -> Option<[i64; 4]> {
+    let c = clip?;
+    let x0 = c[0].max(target_bounds[0]).round() as i64;
+    let y0 = c[1].max(target_bounds[1]).round() as i64;
+    let x1 = c[2].min(target_bounds[2]).round() as i64;
+    let y1 = c[3].min(target_bounds[3]).round() as i64;
+    let tx0 = target_bounds[0].round() as i64;
+    let ty0 = target_bounds[1].round() as i64;
+    let tx1 = target_bounds[2].round() as i64;
+    let ty1 = target_bounds[3].round() as i64;
+    if x0 <= tx0 && y0 <= ty0 && x1 >= tx1 && y1 >= ty1 {
+        None
+    } else {
+        Some([x0, y0, x1, y1])
+    }
 }
 
 fn round6(value: f64) -> f64 {
@@ -615,6 +632,7 @@ impl<'a> Analyzer<'a> {
         node: &Value,
         nid: u64,
         target_id: u64,
+        target_bounds: [f64; 4],
         pass_id: u8,
         quad_kind: &'static str,
         shader: &'static str,
@@ -631,7 +649,7 @@ impl<'a> Analyzer<'a> {
             pass_id,
             shader,
             texture,
-            scissor: scissor_key(clip),
+            scissor: effective_scissor_key(clip, target_bounds),
             rotated,
         };
         self.record_batch(sg, node, nid, target_id, state, area_px);
@@ -662,10 +680,10 @@ impl<'a> Analyzer<'a> {
             let segs = p2d.get("segments").and_then(Value::as_array).map_or(0, Vec::len) as u64;
             if segs > 0 {
                 let phys = physical_rect(node, self.scale).rect;
-                let clip = clip_rect(node, [0.0, 0.0], self.scale);
+                let clip = if in_group { None } else { clip_rect(node, [0.0, 0.0], self.scale) };
                 let area = intersect_area(phys.bounds(), clip, target_bounds);
                 if area > 0.0 {
-                    self.emit_quads(sg, node, nid, target_id, pass_id, "path2d", "path2d", None, clip, false, segs, area);
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, pass_id, "path2d", "path2d", None, clip, false, segs, area);
                     drawn_any = true;
                 }
             }
@@ -678,7 +696,7 @@ impl<'a> Analyzer<'a> {
 
         let phys = physical_rect(node, self.scale).rect;
         let bounds = quad_bounds_device(node, phys, self.scale);
-        let clip = clip_rect(node, [0.0, 0.0], self.scale);
+        let clip = if in_group { None } else { clip_rect(node, [0.0, 0.0], self.scale) };
         let clipped_area = intersect_area(bounds, clip, target_bounds);
         let corner = if in_group { false } else { has_corner(node) };
         let gradient = if in_group { false } else { node.get("gradient").is_some_and(Value::is_object) };
@@ -694,7 +712,7 @@ impl<'a> Analyzer<'a> {
                         && phys.w > 0.0
                         && phys.h > 0.0
                     {
-                        self.emit_quads(sg, node, nid, target_id, pass_id, "shadow", "shadow", None, clip, rot, 1, clipped_area);
+                        self.emit_quads(sg, node, nid, target_id, target_bounds, pass_id, "shadow", "shadow", None, clip, rot, 1, clipped_area);
                         drawn_any = true;
                     }
                 }
@@ -706,12 +724,12 @@ impl<'a> Analyzer<'a> {
             let a = alpha8(1.0 - bg.get("transparency").and_then(Value::as_f64).unwrap_or(0.0));
             if a > 0 && phys.w > 0.0 && phys.h > 0.0 && clipped_area > 0.0 {
                 let shader = if corner || gradient { "styled_fill" } else { "solid" };
-                self.emit_quads(sg, node, nid, target_id, pass_id, shader, shader, None, clip, rot, 1, clipped_area);
+                self.emit_quads(sg, node, nid, target_id, target_bounds, pass_id, shader, shader, None, clip, rot, 1, clipped_area);
                 drawn_any = true;
                 if !in_group && !corner {
                     if let Some(border) = node.get("border").and_then(Value::as_object) {
                         if border.get("size").and_then(Value::as_f64).unwrap_or(0.0) > 0.0 {
-                            self.emit_quads(sg, node, nid, target_id, pass_id, "border", shader, None, clip, rot, 1, 0.0);
+                            self.emit_quads(sg, node, nid, target_id, target_bounds, pass_id, "border", shader, None, clip, rot, 1, 0.0);
                         }
                     }
                 }
@@ -729,6 +747,7 @@ impl<'a> Analyzer<'a> {
                         node,
                         nid,
                         target_id,
+                        target_bounds,
                         pass_id,
                         shader,
                         shader,
@@ -747,7 +766,7 @@ impl<'a> Analyzer<'a> {
         if let Some(text) = node.get("text").and_then(Value::as_object) {
             if let Some(lines) = text.get("lines").and_then(Value::as_array).filter(|l| !l.is_empty()) {
                 let a = alpha8(1.0 - text.get("transparency").and_then(Value::as_f64).unwrap_or(0.0));
-                let tclip = text_clip_rect(node, [0.0, 0.0], self.scale);
+                let tclip = if in_group { None } else { text_clip_rect(node, [0.0, 0.0], self.scale) };
                 let mut glyphs = 0u64;
                 let mut line_area = 0.0f64;
                 for line in lines {
@@ -801,7 +820,7 @@ impl<'a> Analyzer<'a> {
                         pass_id,
                         shader: "text",
                         texture: Some("font-atlas".to_string()),
-                        scissor: scissor_key(tclip),
+                        scissor: effective_scissor_key(tclip, target_bounds),
                         rotated: rot,
                     };
                     self.record_batch(sg, node, nid, target_id, state, line_area);
@@ -821,7 +840,7 @@ impl<'a> Analyzer<'a> {
                         && phys.h > 0.0
                         && clipped_area > 0.0
                     {
-                        self.emit_quads(sg, node, nid, target_id, pass_id, "shadow", "shadow", None, clip, rot, 1, clipped_area);
+                        self.emit_quads(sg, node, nid, target_id, target_bounds, pass_id, "shadow", "shadow", None, clip, rot, 1, clipped_area);
                         drawn_any = true;
                     }
                 }
@@ -836,7 +855,7 @@ impl<'a> Analyzer<'a> {
                         && phys.w > 0.0
                         && phys.h > 0.0
                     {
-                        self.emit_quads(sg, node, nid, target_id, pass_id, "stroke", "stroke", None, clip, rot, 1, 0.0);
+                        self.emit_quads(sg, node, nid, target_id, target_bounds, pass_id, "stroke", "stroke", None, clip, rot, 1, 0.0);
                         drawn_any = true;
                     }
                 }
@@ -849,7 +868,7 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn draw_post(&mut self, sg: &mut ScreenGuiAccum, node: &Value, nid: u64, target_id: u64, pass_id: u8) {
+    fn draw_post(&mut self, sg: &mut ScreenGuiAccum, node: &Value, nid: u64, target_id: u64, target_bounds: [f64; 4], pass_id: u8) {
         let Some(scroll) = node.get("scroll").and_then(Value::as_object) else { return };
         let thickness = (scroll.get("thickness").and_then(Value::as_f64).unwrap_or(0.0) - 1e-6).ceil() as i64;
         if thickness <= 0 || alpha8(1.0 - scroll.get("transparency").and_then(Value::as_f64).unwrap_or(0.0)) == 0 {
@@ -869,6 +888,7 @@ impl<'a> Analyzer<'a> {
                         node,
                         nid,
                         target_id,
+                        target_bounds,
                         pass_id,
                         "scrollbar",
                         "image",
@@ -944,6 +964,7 @@ impl<'a> Analyzer<'a> {
                             gnode,
                             gid,
                             target_id,
+                            target_bounds,
                             pass_id,
                             "group_composite",
                             "group_composite",
@@ -970,7 +991,7 @@ impl<'a> Analyzer<'a> {
                 continue;
             }
             if raw < 0 {
-                self.draw_post(sg, node, nid, target_id, pass_id);
+                self.draw_post(sg, node, nid, target_id, target_bounds, pass_id);
             } else {
                 self.draw_node(sg, node, nid, target_id, target_bounds, pass_id, skip_group == Some(nid));
             }
@@ -1141,6 +1162,7 @@ fn predicted_scene_only_json() -> Value {
 
 pub fn unmodeled_list() -> Value {
     json!([
+        "draw_calls_and_batch_breaks: drawCalls and batchBreaks come from an unmeasured state-transition model (distinct image URIs break batches; client UI image atlasing and real draw counts are uncalibrated)",
         "draw_pass_cpu_ms: Pass2d / fillGuiVertices / TextRender per-element CPU slopes are uncalibrated (refused in predicted.*.drawPassCpuMs)",
         "gpu_ui_ms: mobile GPU fill-rate, tile-binning, and CanvasGroup offscreen RT bandwidth costs are uncalibrated (refused in predicted.*.gpuUiMs)",
         "thermal_throttling_dvfs: device clock scaling and sustained thermal throttling are not modeled",
@@ -1392,7 +1414,8 @@ pub fn analyze_scene(
         "fidelity".into(),
         json!({
             "canvasGroupRt": "exact_studio_dimensions (rectangular float32 logical size, 2048 side cap, 2048x1024 area cap, culled/empty/transparent skipped)",
-            "batchBreaks": "roblox_pass2d_state_model (layerPass, renderTarget, clip, shader, texture, rotation)",
+            "drawCalls": "unmeasured_state_transition_model (estimates batches from pass/shader/texture/clip/rotation transitions; no client capture backs these counts and UI image atlasing is unmodeled)",
+            "batchBreaks": "unmeasured_state_transition_model (layerPass, renderTarget, clip, shader, texture, rotation; not calibrated against a client)",
             "layoutCpuMs": if dom_hidden.is_some() {
                 "single_moment_export_pass_only (fullTreeLayoutCpuMs extrapolates lazy-layout slope; run --from and --frames for per-frame cost)"
             } else {
@@ -1639,9 +1662,9 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         "screenOverdrawViewports",
         "offscreenOverdrawViewports",
     ];
-    const VERDICT_KEYS: [&str; 7] = [
-        "drawCalls",
-        "batchBreaks",
+    // Unmeasured state-transition model counts (`drawCalls`, `batchBreaks`) remain informational in
+    // `counts` and do not drive `verdict`.
+    const VERDICT_KEYS: [&str; 5] = [
         "quads",
         "glyphQuads",
         "canvasRtBytes",
@@ -1761,6 +1784,7 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
     Ok(sort_json(json!({
         "schema": "rrr-ab/1",
         "verdict": verdict,
+        "verdictBasis": "measured_counts_only (quads, glyphQuads, canvasRtBytes, screenOverdrawViewports, offscreenOverdrawViewports, hiddenGuiObjects, and sequence layout churn; unmeasured model drawCalls and batchBreaks are informational only)",
         "equivalence": {
             "passed": true,
             "checks": checks,
@@ -2093,12 +2117,10 @@ fn print_summary(report: &Value, dest: &Path) {
         let desk_ms = seq.pointer("/steadyStateLayoutCpuMs/desktop-ref").and_then(Value::as_f64).unwrap_or(0.0);
         let phone_ms = seq.pointer("/steadyStateLayoutCpuMs/phone-mid").and_then(Value::as_f64).unwrap_or(0.0);
         eprintln!(
-            "rur cost: {} ({} frames @ {} fps) | draws={} breaks={} | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m/{:.1}sp/{:.1}sm (extrapolated desk {:.4} ms, phone {:.4} ms; draw/gpu refused) -> {}",
+            "rur cost: {} ({} frames @ {} fps) | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m/{:.1}sp/{:.1}sm (extrapolated desk {:.4} ms, phone {:.4} ms; draw/gpu refused) | model draws={} breaks={} (unmeasured) -> {}",
             report["status"].as_str().unwrap_or("?"),
             frames,
             fps,
-            t["drawCalls"].as_u64().unwrap_or(0),
-            t["batchBreaks"].as_u64().unwrap_or(0),
             t["quads"].as_u64().unwrap_or(0),
             t["glyphQuads"].as_u64().unwrap_or(0),
             format_bytes(rt_bytes),
@@ -2112,6 +2134,8 @@ fn print_summary(report: &Value, dest: &Path) {
             steady["scrollMoved"].as_f64().unwrap_or(0.0),
             desk_ms,
             phone_ms,
+            t["drawCalls"].as_u64().unwrap_or(0),
+            t["batchBreaks"].as_u64().unwrap_or(0),
             dest.display(),
         );
         return;
@@ -2120,12 +2144,10 @@ fn print_summary(report: &Value, dest: &Path) {
         let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
         let phone_ms = report.pointer("/predicted/phone-mid/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
         eprintln!(
-            "rur cost: {} | guis={} (disabled={}) | draws={} breaks={} | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s (extrapolated desk {:.4} ms, phone {:.4} ms; per-frame cost needs --from and --frames; draw/gpu refused) -> {}",
+            "rur cost: {} | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s (extrapolated desk {:.4} ms, phone {:.4} ms; per-frame cost needs --from and --frames; draw/gpu refused) | model draws={} breaks={} (unmeasured) -> {}",
             report["status"].as_str().unwrap_or("?"),
             t["screenGuis"].as_u64().unwrap_or(0),
             t["disabledScreenGuis"].as_u64().unwrap_or(0),
-            t["drawCalls"].as_u64().unwrap_or(0),
-            t["batchBreaks"].as_u64().unwrap_or(0),
             t["quads"].as_u64().unwrap_or(0),
             t["glyphQuads"].as_u64().unwrap_or(0),
             format_bytes(rt_bytes),
@@ -2139,16 +2161,16 @@ fn print_summary(report: &Value, dest: &Path) {
             ft["stored"].as_u64().unwrap_or(0),
             desk_ms,
             phone_ms,
+            t["drawCalls"].as_u64().unwrap_or(0),
+            t["batchBreaks"].as_u64().unwrap_or(0),
             dest.display(),
         );
     } else {
         eprintln!(
-            "rur cost: {} (scene) | guis={} (disabled={}) | draws={} breaks={} | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects (incomplete) | layout=unavailable (--scene; run live with --from and --frames; draw/gpu refused) -> {}",
+            "rur cost: {} (scene) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects (incomplete) | layout=unavailable (--scene; run live with --from and --frames; draw/gpu refused) | model draws={} breaks={} (unmeasured) -> {}",
             report["status"].as_str().unwrap_or("?"),
             t["screenGuis"].as_u64().unwrap_or(0),
             t["disabledScreenGuis"].as_u64().unwrap_or(0),
-            t["drawCalls"].as_u64().unwrap_or(0),
-            t["batchBreaks"].as_u64().unwrap_or(0),
             t["quads"].as_u64().unwrap_or(0),
             t["glyphQuads"].as_u64().unwrap_or(0),
             format_bytes(rt_bytes),
@@ -2158,6 +2180,8 @@ fn print_summary(report: &Value, dest: &Path) {
             t["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
             t["hiddenInShown"]["roots"].as_u64().unwrap_or(0),
             t["hiddenInShown"]["guiObjects"].as_u64().unwrap_or(0),
+            t["drawCalls"].as_u64().unwrap_or(0),
+            t["batchBreaks"].as_u64().unwrap_or(0),
             dest.display(),
         );
     }
@@ -2237,12 +2261,12 @@ Usage:
   rur cost compare <before> <after> [--out <dir|file.json>] [--json]
 
 Outputs:
-  <out>/cost.json    deterministic JSON (zero wall-clock fields): Roblox Pass2d draw calls,
-                     batch breaks by cause, quads & glyph quads, clipped overdraw, exact Studio
-                     CanvasGroup RT bytes & switches, live-DOM hidden-in-shown subtrees, layout
-                     pass counters (and per-frame churn in sequence mode), calibrated desktop /
-                     phone-mid layout CPU ms, and explicit refusals for uncalibrated draw-pass
-                     CPU and mobile GPU UI ms.
+  <out>/cost.json    deterministic JSON (zero wall-clock fields): quads & glyph quads, clipped
+                     overdraw, Studio CanvasGroup RT dimensions & switches, live-DOM hidden-in-shown
+                     subtrees, layout pass counters (and per-frame churn in sequence mode),
+                     extrapolated desktop / phone-mid layout CPU ms, an unmeasured state-transition
+                     draw/batch model, and explicit refusals for uncalibrated draw-pass CPU and
+                     mobile GPU UI ms.
 ";
 
 fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
@@ -2474,6 +2498,49 @@ mod tests {
         assert_eq!(t["canvasRtBytes"], 2049 * 38 * 4);
         assert_eq!(t["canvasRtSwitches"], 2);
         assert_eq!(t["maxCanvasGroupDepth"], 1);
+    }
+
+    #[test]
+    fn canvas_group_first_child_has_no_spurious_clip_break() {
+        // CanvasGroup [20, 20, 200, 100] with plain child whose exported clip equals the group's
+        // rect: a scissor equal to the offscreen target's bounds changes no state, so clip breaks = 0.
+        let scene = store_of(json!({
+            "viewport": {"width": 800, "height": 600, "scale": 1.0},
+            "status": "ok",
+            "nodes": [
+                {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true},
+                {"id": 10, "name": "BoxGroup", "path": "G.BoxGroup", "class": "CanvasGroup", "rect": [20, 20, 200, 100], "bg": {"color": [1, 1, 1], "transparency": 0}, "group": {"transparency": 0}},
+                {"id": 11, "name": "PlainChild", "path": "G.BoxGroup.PlainChild", "class": "Frame", "rect": [30, 30, 50, 50], "clip": [20, 20, 200, 100], "bg": {"color": [0, 1, 0], "transparency": 0}}
+            ],
+            "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": [
+                {"group": 10, "draw": [10, 11]}
+            ]}],
+            "fonts": [],
+            "images": []
+        }));
+        let report = analyze_scene(&scene, LayoutStats::default(), None);
+        assert_eq!(report["totals"]["batchBreaksByCause"]["clip"], 0);
+        assert_eq!(report["totals"]["batchBreaks"], 0);
+        assert_eq!(report["totals"]["drawCalls"], 2);
+        let child = report["objects"].as_array().unwrap().iter().find(|o| o["name"] == "PlainChild").unwrap();
+        assert_eq!(child["batchBreaks"], 0);
+        assert!(report["fidelity"]["drawCalls"].as_str().unwrap().contains("unmeasured"));
+        assert!(report["fidelity"]["batchBreaks"].as_str().unwrap().contains("unmeasured"));
+        assert!(!report["fidelity"]["batchBreaks"].as_str().unwrap().to_ascii_lowercase().contains("roblox"));
+    }
+
+    #[test]
+    fn compare_reports_ignores_unmeasured_draw_and_batch_counts() {
+        let mut before = sample_cost_report("single", "live", "ok", 1920.0, 1080.0, 1.5, true, 10, 0, 0);
+        let mut after = sample_cost_report("single", "live", "ok", 1920.0, 1080.0, 1.5, true, 10, 0, 0);
+        before["totals"]["drawCalls"] = json!(2);
+        before["totals"]["batchBreaks"] = json!(1);
+        after["totals"]["drawCalls"] = json!(8);
+        after["totals"]["batchBreaks"] = json!(7);
+        let diff = compare_reports(&before, &after).unwrap();
+        assert_eq!(diff["verdict"], "unchanged");
+        assert_eq!(diff["counts"]["delta"]["drawCalls"], 6.0);
+        assert_eq!(diff["counts"]["delta"]["batchBreaks"], 6.0);
     }
 
     #[test]

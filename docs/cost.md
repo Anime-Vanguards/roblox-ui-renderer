@@ -1,6 +1,6 @@
 # Deterministic UI cost (`rur cost`)
 
-`rur cost` runs a deterministic, CPU-only accounting pass over a Roblox UI scene (or a multi-frame sequence) to count what Roblox's 2D UI renderer would do, without initializing a GPU device or recording host wall-clock timings.
+`rur cost` runs a deterministic, CPU-only accounting pass over a Roblox UI scene (or a multi-frame sequence) to count quads, glyphs, clipped overdraw, Studio `CanvasGroup` render-target sizes, hidden DOM subtrees, and layout churn without initializing a GPU device or recording host wall-clock timings.
 
 Every `cost.json` output contains zero wall-clock fields and zero output-directory paths, so repeated runs of the same input are bit-identical even under heavy host load.
 
@@ -31,21 +31,18 @@ node cli/rur.mjs cost --story path/to/Hud.story.luau --compare out/before/cost.j
 
 ## What `rur cost` counts
 
-### 1. Roblox `Pass2d` draw model
+### 1. Quads, glyphs, overdraw, and the unmeasured draw/batch model
 
-`rur`'s own wgpu renderer uses an uber-shader that merges dissimilar primitives into very few batches. `rur cost` intentionally models **Roblox's** 2D UI batching state rather than `rur`'s:
-
-- **Batch state key (per render target):** `(layerPass, shader, texture, scissorRect, rotated)`
-- **Batch break causes (`totals.batchBreaksByCause`):**
-  - `layerPass`: switching between `PlayerGui` and `CoreGui` passes.
-  - `renderTarget`: compositing a `CanvasGroup` offscreen texture onto its parent target.
-  - `clip`: changing the active scissor clip rectangle (`ClipsDescendants` / scroll window / text self-clip).
-  - `shader`: switching between `solid`, `styled_fill` (`UICorner` or `UIGradient`), `image`, `styled_image`, `text`, `stroke`, `shadow`, `path2d`, and `group_composite`.
-  - `texture`: changing `Image` URI between adjacent image quads.
-  - `rotation`: switching between axis-aligned and rotated elements.
 - **Quads (`totals.quads`, `totals.quadsByKind`):** non-glyph UI quads broken down by kind (`solid`, `styled_fill`, `border`, `image`, `styled_image`, `shadow`, `stroke`, `scrollbar`, `group_composite`, `path2d`).
 - **Glyph quads (`totals.glyphQuads`):** visible non-space fill glyph quads (`fillGlyphQuads`) plus stroke glyph quads (`strokeGlyphQuads`: 4 offset copies per glyph for legacy `TextStrokeTransparency < 1`, plus 1 copy per glyph for each enabled `ApplyStrokeMode.Contextual` `UIStroke` on a text object). Clipped-out lines are excluded; `MaxVisibleGraphemes` cuts are honored.
 - **Overdraw (`totals.screenOverdrawViewports`, `totals.offscreenOverdrawViewports`):** clipped physical pixel area summed over drawn quads and visible text line boxes, divided by the physical viewport area (`physicalWidth * physicalHeight`), separated into main-screen vs. `CanvasGroup` offscreen render-target overdraw.
+- **Unmeasured draw/batch model (`totals.drawCalls`, `totals.batchBreaks`, `totals.batchBreaksByCause`):** `rur`'s own wgpu renderer uses an uber-shader that merges dissimilar primitives into very few batches. `rur cost` instead tracks a simple state-transition model per render target keyed by `(layerPass, shader, texture, effectiveScissor, rotated)`, where a scissor covering the whole render target normalizes to unclipped. **No client capture backs these draw-call or batch-break counts**: every distinct image URI counts as a `texture` break (ignoring client UI image atlasing), and the shader split (`solid`, `styled_fill`, `image`, `styled_image`, `text`, `stroke`, `shadow`, `path2d`, `group_composite`) is uncalibrated. Both fields are marked `"unmeasured_state_transition_model"` in `fidelity`, listed in `unmodeled`, printed last in the summary line as `model draws=... breaks=... (unmeasured)`, and **excluded from `rur cost compare` verdicts** (informational only).
+  - `layerPass`: switching between `PlayerGui` and `CoreGui` passes.
+  - `renderTarget`: compositing a `CanvasGroup` offscreen texture onto its parent target.
+  - `clip`: changing the active scissor clip rectangle inside the target (`ClipsDescendants` / scroll window / text self-clip).
+  - `shader`: switching between modeled primitive shader classes.
+  - `texture`: changing `Image` URI between adjacent image quads.
+  - `rotation`: switching between axis-aligned and rotated elements.
 
 ### 2. `CanvasGroup` offscreen render targets
 
@@ -95,8 +92,8 @@ In sequence mode (`rur cost --from/--to/--frames/--duration/--fps` or `rur seque
 - **Input validation:** Both inputs must be well-formed `rur-cost/1` cost reports. Passing a non-cost file (such as `scene.json`, `summary.json`, `trace.json`, or a previous `rrr-ab/1` diff) exits non-zero with an error naming what the file is and what to run instead.
 - **Equivalence checks:** `schema`, `status` (both `"ok"`), `mode` (`single` vs. `sequence`, plus matching `frameCount` and `fps` for sequences), `input` (`live` vs. `scene`) and `totals.hiddenInShown.complete`, `viewport` (`width` and `height`), and `scale`. Any mismatch returns `verdict: "refused"` with `equivalence.passed: false`, lists every mismatch and remediation command, and exits non-zero.
 - **Comparable arms (`rrr-ab/1`):**
-  - `verdict`: `improved`, `regressed`, `mixed`, or `unchanged` (with `measurementNoise: 0.0`).
+  - `verdict`: `improved`, `regressed`, `mixed`, or `unchanged` (with `measurementNoise: 0.0`), driven only by measured counts (`quads`, `glyphQuads`, `canvasRtBytes`, screen/offscreen overdraw, `hiddenGuiObjects`, and sequence layout churn; unmeasured `drawCalls`/`batchBreaks` are informational only).
   - `equivalence`: `{ "passed": true, "checks": [...] }`.
-  - `counts`: `before`, `after`, and `delta` across draw calls, batch breaks, quads, glyph quads, CanvasGroup RT bytes/targets/switches, screen/offscreen overdraw, and hidden-in-shown `GuiObject`s.
-  - `layout` and `predicted`: before/after/delta layout counters and calibrated layout CPU ms.
+  - `counts`: `before`, `after`, and `delta` across quads, glyph quads, CanvasGroup RT bytes/targets/switches, screen/offscreen overdraw, hidden-in-shown `GuiObject`s, and informational model draw calls / batch breaks.
+  - `layout` and `predicted`: before/after/delta layout counters and extrapolated layout CPU ms.
   - `screenGuiMovers`: per-`ScreenGui` deltas for every layer whose counts changed.

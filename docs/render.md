@@ -12,7 +12,7 @@ CLI reference for `node cli/rur.mjs` (or `npm run rur -- <command>`), standalone
 | `rur sweep` | Render every story in the project and group failures by root cause |
 | `rur compare --story <file>` | Capture in Roblox Studio and offline, diffing layout rects and pixels ([studio.md](studio.md)) |
 | `rur diff --git-ref <ref> --story <file>` | Render a story at `<ref>` vs. your working tree and diff layout + pixels |
-| `rur cost --story <file>` | Deterministic Roblox UI cost pass: batch breaks, quads/glyphs, overdraw, CanvasGroup RT bytes, hidden DOM, and sequence layout churn ([cost.md](cost.md)) |
+| `rur cost --story <file>` | Deterministic UI cost pass: quads/glyphs, overdraw, CanvasGroup RT bytes, hidden DOM, sequence layout churn, and an unmeasured draw/batch model ([cost.md](cost.md)) |
 | `rur cost compare <before> <after>` | Deterministic A/B diff between two `cost.json` reports ([cost.md](cost.md)) |
 | `rur record --harness <file.luau>` | Run a Luau harness in play mode and record the 3D `Workspace` for `ror` |
 | `rur profile diff <before> <after>` | Compare two engine profiles ([Profiles](#profiles---profile)) |

@@ -28,7 +28,7 @@
 //   rur diff --git-ref <ref> --story <file> [--out dir]  render at <ref> and in the working tree, diff them (rur-native diff)
 //   rur cost --story <file> | --fixture <file> | --scene <scene.json> [--out dir] [--json]
 //             [--all-layers] [--from 0 --frames 60 --fps 60] [--compare <before>]
-//                                                       deterministic Roblox UI draw, CanvasGroup RT, hidden-DOM and layout cost
+//                                                       deterministic UI quads, glyphs, overdraw, CanvasGroup RT, hidden-DOM, layout churn and unmeasured draw model
 //   rur cost compare <before> <after> [--out dir] [--json]  compare two cost.json reports (rur-native cost)
 //   rur record --harness <file.luau> [--place <name>] [--seconds 3] [--fps 60] [--out dir]
 //             [--context <json|file>] [--assets-at <Service.Path>] [--assets <prefix>,...] [--mode play|edit]
