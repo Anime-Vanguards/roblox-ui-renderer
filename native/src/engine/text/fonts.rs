@@ -11,6 +11,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::resolve::AssetRef;
+
 use super::hinted::Hinted;
 use super::opentype::Font;
 
@@ -216,7 +218,8 @@ pub struct FontRegistry {
     hinted: Hinted,
     /// `Fonts.Diagnostics`: key -> message.
     pub diagnostics: BTreeMap<String, String>,
-    /// `Fonts.MissingAssets`: cloud asset ids that were needed but are not cached.
+    /// `Fonts.MissingAssets`: cloud assets that were needed but are not cached: the id, or for a pinned version
+    /// its content id (`rbxassetid://N&version=V`), as download.rs fetch_fonts reads them.
     pub missing_assets: BTreeSet<String>,
     /// Families no face could be read for, not even the Source Sans Pro fallback (no Studio fonts): their text
     /// has no glyphs and is not drawn (the scene's `diagnostics.unavailableFonts`).
@@ -367,14 +370,18 @@ impl FontRegistry {
             }
             return None;
         }
-        let asset_id = asset_id_of(uri)?;
+        let asset = font_asset(uri)?;
+        let key = asset.key();
         for extension in ["", ".ttf", ".otf", ".ttc", ".json", ".bin"] {
-            let candidate = format!("{}/{asset_id}{extension}", self.assets);
+            let candidate = format!("{}/{key}{extension}", self.assets);
             if self.preloaded.contains(&candidate) {
                 return Some(candidate);
             }
         }
-        self.missing_assets.insert(asset_id);
+        self.missing_assets.insert(match asset.version() {
+            None => asset.id().to_string(),
+            Some(_) => asset.uri(),
+        });
         None
     }
 
@@ -552,28 +559,44 @@ impl FontRegistry {
     }
 }
 
-/// `string.match(Uri, "^rbxassetid://(%d+)") or string.match(Uri, "[?&][iI][dD]=(%d+)")`.
-fn asset_id_of(uri: &str) -> Option<String> {
-    let digits = |text: &str| -> Option<String> {
-        let count = text.bytes().take_while(|byte| byte.is_ascii_digit()).count();
-        (count > 0).then(|| text[..count].to_string())
-    };
-    if let Some(rest) = uri.strip_prefix("rbxassetid://") {
-        if let Some(found) = digits(rest) {
-            return Some(found);
-        }
+/// The cloud asset a family or face URI names, read as an image's is (resolve.rs asset_ref):
+/// `rbxassetid://N`, `rbxassetid://N&version=V` (that version, cached as `<id>-v<version>`) and
+/// `roblox.com/asset/?id=N`. A bare id names no font, nor does a spelling a Roblox client loads nothing for.
+fn font_asset(uri: &str) -> Option<AssetRef> {
+    if uri.trim().bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
     }
-    let bytes = uri.as_bytes();
-    for index in 0..bytes.len() {
-        if (bytes[index] == b'?' || bytes[index] == b'&')
-            && bytes.get(index + 1).is_some_and(|byte| byte.eq_ignore_ascii_case(&b'i'))
-            && bytes.get(index + 2).is_some_and(|byte| byte.eq_ignore_ascii_case(&b'd'))
-            && bytes.get(index + 3) == Some(&b'=')
-        {
-            if let Some(found) = digits(&uri[index + 4..]) {
-                return Some(found);
-            }
+    crate::resolve::asset_ref(uri)?.ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pinned family or face is its own cache file, and a missing one is reported as the content id
+    /// download.rs fetch_fonts downloads
+    #[test]
+    fn cloud_fonts_are_found_by_id_and_version() {
+        let cache = std::env::temp_dir().join(format!("rur-font-versions-{}", std::process::id()));
+        let assets = cache.join("assets");
+        let _ = std::fs::remove_dir_all(&cache);
+        std::fs::create_dir_all(&assets).unwrap();
+        for name in ["5.json", "5-v2.json", "6-v3.ttf"] {
+            std::fs::write(assets.join(name), "{}").unwrap();
         }
+        let cache_dir = cache.to_string_lossy().replace('\\', "/");
+        let mut fonts = FontRegistry::new(FontPaths { root: cache_dir.clone(), cache: cache_dir.clone(), content_root: None, fonts: None });
+        let file = |name: &str| Some(format!("{cache_dir}/assets/{name}"));
+        assert_eq!(fonts.resolve_uri("rbxassetid://5"), file("5.json"));
+        assert_eq!(fonts.resolve_uri("rbxassetid://5&version=2"), file("5-v2.json"));
+        assert_eq!(fonts.resolve_uri("rbxassetid://5&Version=02&x=y"), file("5-v2.json"));
+        assert_eq!(fonts.resolve_uri("http://www.roblox.com/asset/?id=5&version=2"), file("5-v2.json"));
+        assert_eq!(fonts.resolve_uri("rbxassetid://6&version=3"), file("6-v3.ttf"));
+        assert_eq!(fonts.resolve_uri("rbxassetid://6"), None);
+        assert_eq!(fonts.resolve_uri("rbxassetid://5&version=4"), None);
+        assert_eq!(fonts.resolve_uri("rbxassetid://5?version=2"), None, "a Roblox client loads nothing for it");
+        assert_eq!(fonts.resolve_uri("5"), None, "a bare id is no font");
+        assert_eq!(fonts.missing_assets.iter().map(String::as_str).collect::<Vec<_>>(), ["6", "rbxassetid://5&version=4"]);
+        let _ = std::fs::remove_dir_all(&cache);
     }
-    None
 }

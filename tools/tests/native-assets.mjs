@@ -1,14 +1,15 @@
 // The CLI's side of assets, which the engine downloads (native/src/download.rs, whose own checks are
 // `cargo test --release download::`): `rur-native assets` answers the CLI (offline here, so no request goes
 // out) and reports the account and the Open Cloud API key without their secrets; child processes that
-// download nothing get no credentials. All credentials are synthetic.
+// download nothing get no credentials; cli/assets.mjs reads content ids as the engine does (pinned versions
+// included). All credentials are synthetic.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { withoutCookie } from "../../cli/assets.mjs";
+import { assetKey, assetKeyFromUri, assetKeyUri, isAssetKey, parseAssetUri, withoutCookie } from "../../cli/assets.mjs";
 import { ensureEngine } from "../../cli/engine.mjs";
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "rur-native-assets-test-"));
@@ -16,6 +17,9 @@ const cache = path.join(directory, "assets");
 fs.mkdirSync(path.join(cache, "downloaded"), { recursive: true });
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==", "base64");
 fs.writeFileSync(path.join(cache, "123.png"), png);
+// Version 2 of 123, pinned: its own file, other bytes
+const pinnedPng = Buffer.concat([png, Buffer.from("v2")]);
+fs.writeFileSync(path.join(cache, "123-v2.png"), pinnedPng);
 fs.writeFileSync(path.join(cache, "thumb-AvatarHeadShot-42-150x150-webp.png"), png);
 fs.writeFileSync(path.join(cache, "999.rbxmx"), "<roblox><url>rbxassetid://124</url></roblox>");
 fs.writeFileSync(path.join(cache, "77.ttf"), Buffer.from([0, 1, 0, 0, 1, 2, 3]));
@@ -48,6 +52,22 @@ function assets(args, { env = {}, input = "" } = {}) {
 }
 
 try {
+	// Content ids: the CLI's reader and the engine's (native/src/resolve.rs asset_ref, its cargo test) answer the
+	// same table
+	const table = JSON.parse(fs.readFileSync(new URL("../../native/tests/fixtures/content-ids.json", import.meta.url), "utf8"));
+	const read = uri => {
+		const asset = parseAssetUri(uri);
+		return asset === null ? "not an asset id" : asset.error ? "loads nothing" : assetKey(asset);
+	};
+	for (const [uri, key] of table.assets) assert.equal(read(uri), key, JSON.stringify(uri));
+	for (const uri of table.loadsNothing) assert.equal(read(uri), "loads nothing", JSON.stringify(uri));
+	for (const uri of table.notAssetIds) assert.equal(read(uri), "not an asset id", JSON.stringify(uri));
+	assert.deepEqual(parseAssetUri("rbxassetid://88&Version=+03&next=https://example.com/../x"), { id: "88", version: "3" });
+	assert.equal(parseAssetUri("RBXASSETID://1").error, "a Roblox client loads nothing for this content id: its scheme is not in lower case");
+	assert.deepEqual(["88", "88-v3"].map(assetKeyUri), ["rbxassetid://88", "rbxassetid://88&version=3"]);
+	assert.deepEqual(["88", "88-v3"].map(key => assetKeyFromUri(assetKeyUri(key))), ["88", "88-v3"]);
+	assert.deepEqual(["88", "88-v3", "88-v", "thumb-Asset-1-150x150-webp", "1234"].map(isAssetKey), [true, true, false, false, true]);
+
 	// The account rur-native reports: which, never its value
 	const access = env => JSON.parse(assets(["account", "--json"], { env }).stdout).access;
 	assert.equal(access({}), null);
@@ -102,10 +122,22 @@ try {
 	assert.deepEqual(JSON.parse(fonts.stdout).map(row => row.kind ?? "error"), ["font", "error"]);
 	assert.ok(fs.readFileSync(path.join(cache, "fonts.json"), "utf8").includes("77.ttf"), "a cached font is listed in fonts.json");
 	assert.match(assets(["fetch", "--offline", "rbxassetid://123"]).stdout, /^rbxassetid:\/\/123\t.*123\.png\r?\n$/);
+	// A pinned version is its own file; a spelling a Roblox client loads nothing for says so
+	const versions = ["rbxassetid://123&version=2", "rbxassetid://123&Version=02&x=y", "rbxassetid://123&version=0", "rbxassetid://123&version=3", "rbxassetid://123?version=2", "RBXASSETID://123"];
+	const pinned = new Map(JSON.parse(assets(["fetch", "--offline", "--json", ...versions]).stdout).map(({ uri, ...row }) => [uri, row]));
+	assert.deepEqual(versions.map(uri => (pinned.get(uri).file ? path.basename(pinned.get(uri).file) : pinned.get(uri).error)), [
+		"123-v2.png",
+		"123-v2.png",
+		"123.png",
+		"offline and not cached",
+		"a Roblox client loads nothing for this content id: a ? follows its id",
+		"a Roblox client loads nothing for this content id: its scheme is not in lower case",
+	]);
+	assert.ok(fs.readFileSync(pinned.get(versions[0]).file).equals(pinnedPng));
 
 	// Child processes that download nothing get neither the cookie, the token nor the API key
 	assert.deepEqual(withoutCookie({ ROBLOX_BROKER_TOKEN: "a", Roblox_Broker_Token: "b", ROBLOSECURITY: "c", ROBLOX_ASSET_DELIVERY_API_KEY: "d", roblox_asset_delivery_api_key: "e", ROR_STUDIO_COOKIE: "1", ror_studio_cookie: "1", ROBLOX_BROKER_URL: "https://env.example", PATH: "kept" }), { ROBLOX_BROKER_URL: "https://env.example", PATH: "kept" });
-	console.log("Native assets: rur-native assets reports the account and the API key without them and resolves offline (cache, thumbnails, files, decals, fonts) without a request; child environments carry no credential.");
+	console.log("Native assets: content ids read alike in the CLI and the engine; rur-native assets reports the account and the API key without them and resolves offline (cache, pinned versions, thumbnails, files, decals, fonts) without a request; child environments carry no credential.");
 } finally {
 	assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
 	assert.ok(path.basename(directory).startsWith("rur-native-assets-test-"));

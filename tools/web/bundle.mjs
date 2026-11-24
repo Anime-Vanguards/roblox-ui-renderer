@@ -299,7 +299,8 @@ export async function bundle({ stories, project = defaultProject(), out, place, 
 		} catch {
 			continue;
 		}
-		for (const match of text.matchAll(/rbxassetid:\/\/\d+|rbxasset:\/\/[\w\-./@]+\.(?:png|jpg|jpeg)/gi)) uris.add(match[0]);
+		// (a pinned version's whole spelling, rbxassetid://N&version=V: its own image)
+		for (const match of text.matchAll(/rbxassetid:\/\/\d+(?:&[^\s"'`<>\\]*)?|rbxasset:\/\/[\w\-./@]+\.(?:png|jpg|jpeg)/gi)) uris.add(match[0]);
 		for (const match of text.matchAll(/"(\d{8,})"|\b(\d{9,})\b/g)) uris.add(`rbxassetid://${match[1] || match[2]}`);
 	}
 	// The engine's own resolver (`rur-native assets fetch --offline`): the cache and local files, as a render finds them

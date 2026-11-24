@@ -20,10 +20,13 @@
 //
 // `node cli/studio-images.mjs store [<id>...]` (more ids on stdin, one per line) reads the ids and stores the
 // images in the asset cache: the native resolver runs it for the images asset delivery refused
-// (native/src/download.rs), and it prints {"stored": [id...], "errors": {id: reason}}.
+// (native/src/download.rs), and it prints {"stored": [id...], "errors": {id: reason}}. An id is a cache key
+// (cli/assets.mjs assetKey): a pinned version is `<id>-v<version>`, which Studio loads as
+// rbxassetid://<id>&version=<version>.
 
 import zlib from "node:zlib";
 import { isMain } from "./entry.mjs";
+import { assetKeyFromUri, assetKeyUri, isAssetKey } from "./assets.mjs";
 
 // pngjs, loaded when a read needs it: without rur's npm packages `store` still answers, with the command
 // that installs them (cli/assets.mjs storeFromStudio)
@@ -43,12 +46,14 @@ const WAVE = 12;
 // Many images in one call: a JSON list, one entry per id it reached, in order: { width, height, encoding
 // ("zstd" | "raw"), pixels (base64 RGBA8) } or { error }. Ids load WAVE at a time; the call stops once
 // CALL_BUDGET characters are used (a wave's unreported loads are dropped and asked for again next call).
+// `ids`: cache keys (isAssetKey); an id is loaded by its number, a pinned version by its content id.
 function imagesLuau(ids) {
+	const entry = key => (/-v/.test(key) ? JSON.stringify(assetKeyUri(key)) : key);
 	return `
 local AssetService = game:GetService("AssetService")
 local EncodingService = game:GetService("EncodingService")
 local HttpService = game:GetService("HttpService")
-local Ids = { ${ids.join(", ")} }
+local Ids = { ${ids.map(entry).join(", ")} }
 local Results = {}
 local Used = 0
 
@@ -73,7 +78,9 @@ for First = 1, #Ids, ${WAVE} do
 	local Thread = coroutine.running()
 	for Index = First, Last do
 		task.spawn(function()
-			Loads[Index] = table.pack(pcall(AssetService.CreateEditableImageAsync, AssetService, Content.fromAssetId(Ids[Index])))
+			local Id = Ids[Index]
+			local Source = if type(Id) == "string" then Content.fromUri(Id) else Content.fromAssetId(Id)
+			Loads[Index] = table.pack(pcall(AssetService.CreateEditableImageAsync, AssetService, Source))
 			Waiting -= 1
 			if Waiting == 0 then
 				task.spawn(Thread)
@@ -230,11 +237,15 @@ function encodePng(width, height, rgba) {
 	return PNG.sync.write(image);
 }
 
-// Reads `ids` (digit strings) from Studio. Returns { images: Map<id, png Buffer>, errors: Map<id, reason> };
-// with no Studio reachable every id's reason says so.
-export async function readStudioImages(ids, env = process.env) {
+// Reads `keys` (digit strings, `<id>-v<version>` for a pinned version) from Studio. Returns { images:
+// Map<id, png Buffer>, errors: Map<id, reason> }; with no Studio reachable every id's reason says so.
+export async function readStudioImages(keys, env = process.env) {
 	const images = new Map();
 	const errors = new Map();
+	// Only keys reach the Luau
+	for (const key of keys) if (!isAssetKey(key)) errors.set(key, "not an asset id");
+	const ids = keys.filter(isAssetKey);
+	if (!ids.length) return { images, errors };
 	let sessions;
 	try {
 		sessions = await studios(env);
@@ -283,8 +294,9 @@ export async function readStudioImages(ids, env = process.env) {
 	return { images, errors };
 }
 
-// Every image id a place's GUI names: ImageLabel / ImageButton / ScrollingFrame image properties. Attributes
-// and StringValues are not read: on a live place every one holding an asset URI was an AnimationId. Read-only.
+// Every image a place's GUI names: ImageLabel / ImageButton / ScrollingFrame image properties, as the values
+// that name an asset (read here as a render reads them, cli/assets.mjs parseAssetUri). Attributes and
+// StringValues are not read: on a live place every one holding an asset URI was an AnimationId. Read-only.
 const SCAN_LUAU = `
 local HttpService = game:GetService("HttpService")
 local Properties = {
@@ -298,13 +310,12 @@ local function Add(Value)
 	if type(Value) ~= "string" then
 		return
 	end
-	for _, Pattern in { "rbxassetid://(%d+)", "roblox%.com/asset/?%?.-id=(%d+)" } do
-		for Id in string.gmatch(Value, Pattern) do
-			if not Seen[Id] then
-				Seen[Id] = true
-				table.insert(Ids, Id)
-			end
-		end
+	if Seen[Value] then
+		return
+	end
+	if string.find(Value, "rbxassetid://", 1, true) or string.find(string.lower(Value), "roblox%.com/asset/?%?.-id=%d") then
+		Seen[Value] = true
+		table.insert(Ids, Value)
 	end
 end
 for _, Service in game:GetChildren() do
@@ -322,12 +333,18 @@ end
 return HttpService:JSONEncode(Ids)
 `;
 
-// The image ids of every connected Studio's place (RUR_STUDIO narrows them), and the Studios' names
+// The images of every connected Studio's place (RUR_STUDIO narrows them) by cache key (an id, or `<id>-v<version>`
+// for a pinned version; a spelling a client loads nothing for is left out), and the Studios' names
 export async function studioImageIds(env = process.env) {
 	const sessions = await studios(env);
 	if (!sessions.length) throw new Error("no Studio edit session is connected");
 	const ids = new Set();
-	for (const session of sessions) for (const id of JSON.parse(await session.run(SCAN_LUAU))) ids.add(String(id));
+	for (const session of sessions) {
+		for (const value of JSON.parse(await session.run(SCAN_LUAU))) {
+			const key = assetKeyFromUri(String(value));
+			if (key) ids.add(key);
+		}
+	}
 	return { ids: [...ids], studios: sessions.map(session => session.name) };
 }
 
@@ -335,7 +352,8 @@ export async function studioImageIds(env = process.env) {
 async function store(args) {
 	let input = "";
 	if (!process.stdin.isTTY) for await (const chunk of process.stdin) input += chunk;
-	const ids = [...new Set([...args, ...input.split(/\s+/)].map(id => id.replace(/\D/g, "")).filter(Boolean))];
+	// A cache key as it is, other text by its digits
+	const ids = [...new Set([...args, ...input.split(/\s+/)].map(id => (isAssetKey(id) ? id : id.replace(/\D/g, ""))).filter(Boolean))];
 	const { storeFromStudio } = await import("./assets.mjs");
 	const { files, errors } = await storeFromStudio(ids);
 	process.stdout.write(`${JSON.stringify({ stored: [...files.keys()], errors: Object.fromEntries(errors) })}\n`);

@@ -9,6 +9,20 @@ This page covers where `rur` loads textures, fonts, and thumbnails from, how aut
 - **Thumbnails (`rbxthumb://`):** Fetched as WebP from Roblox's thumbnail service (matching Studio), decoded, and cached as PNG.
 - **CLI helpers:** `rur-native assets fetch <uri>...` (`--offline`, `--json`) resolves and caches URIs using the exact render path; `rur-native assets account` reports which credentials are active (`api key, then cookie`, `broker`, `studio (Windows Credential Manager)`, `none`...; `--json`: `{"access": "broker" | "cookie" | null, "apiKey": true | false, "source": "broker" | "cookie" | "studio (<store>)" | null, "studio": "<Roblox Studio's account: off, not found, found or unreadable>"}`), never their values.
 
+### Pinned versions
+
+Roblox saves an asset pinned to one of its versions as `rbxassetid://N&version=V`. `rur` loads that version, as a Roblox client does: it asks asset delivery for `assetId/N/version/V` (also on Open Cloud's route with the API key, and as `"version": V` in a batch request) and caches it apart from the latest version, as `<state dir>/assets/N-vV.<ext>`. Images, cloud fonts and font families read it alike, and an image read from Studio is read at that version. Every request is built from the two numbers alone.
+
+The text after the `&` is read the way a Roblox client reads it (measured on Studio 0.747's client, with a mesh and an image whose only version is 1, so a version that is read loads at 1 and fails at 2):
+
+- The `version` key matches in any case. Its value is form-decoded (`+` is a space, then `%xx` escapes) and trimmed, then read as an integer: an optional sign, then decimal digits (leading zeros allowed, `08` is 8) or `0x` and hex digits, within a signed 64-bit integer.
+- A version that is empty, no integer (`abc`, `2.0`, `2/`), 0 or negative loads the latest version.
+- Repeated `version` keys are read in order, each integer replacing the one before, until the first value that is no integer: `&version=2&version=abc&version=1` loads version 2, `&version=abc&version=2` the latest.
+- Other keys are ignored, but for a lowercase `id=M`, which loads asset M, and `assetversionid` (any case), which names an asset version by its own id: `rur` does not fetch those, and says so.
+- `http://www.roblox.com/asset/?id=N&version=V` reads its `version` key the same way.
+
+A client loads nothing for some spellings, and neither does `rur`, which gives the reason in the missing image's diagnostic: `rbxassetid://N?version=V`, a `/` or `%` right after the id (`rbxassetid://N/`, `rbxassetid://N/&version=1`, `rbxassetid://N%26version=1`), a `#` anywhere, an upper-case scheme (`RBXASSETID://N`) and white space before the scheme. `rbxassetid://N` followed by other text keeps loading asset N, as before.
+
 ### Open Cloud API key
 
 An [Open Cloud API key](https://create.roblox.com/docs/cloud/auth/api-keys) with asset read access is the narrowest way to download private assets: it reads assets, nothing else about the account. Configure it from one of:

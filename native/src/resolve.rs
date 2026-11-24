@@ -243,15 +243,16 @@ impl Resolver {
                 None => None,
             };
         }
-        match asset_id(trimmed) {
-            Some(id) => self.asset(&id, true),
+        match asset_ref(uri) {
+            Some(Ok(asset)) => self.asset(&asset, true),
+            Some(Err(reason)) => Some(Err(reason)),
             None => Some(Err(format!("unsupported content uri: {uri}"))),
         }
     }
 
-    /// A cached asset id (fetch_asset_id without the network): a model resolves to the texture it names.
-    fn asset(&mut self, id: &str, allow_decal: bool) -> Option<Resolution> {
-        let Some(file) = cached_file(&self.assets, id) else {
+    /// A cached asset (fetch_asset without the network): a model resolves to the texture it names.
+    fn asset(&mut self, asset: &AssetRef, allow_decal: bool) -> Option<Resolution> {
+        let Some(file) = cached_file(&self.assets, &asset.key()) else {
             return self.offline.then(|| Err("offline and not cached".into()));
         };
         // A pre-unwrap .bin entry is migrated by the downloader; a font is recorded in the font index there
@@ -266,12 +267,9 @@ impl Resolver {
         }
         if allow_decal && sniff(&bytes).kind == "model" {
             let text: String = bytes.iter().map(|&byte| byte as char).collect();
-            let Some(inner) = model_texture(&text) else {
-                return Some(Err(format!("asset {id} is a model without an image texture")));
+            let Some(inner) = model_texture(&text).filter(|inner| inner.id() != asset.id()) else {
+                return Some(Err(format!("asset {asset} is a model without an image texture")));
             };
-            if inner == id {
-                return Some(Err(format!("asset {id} is a model without an image texture")));
-            }
             return self.asset(&inner, false);
         }
         Some(Ok(file))
@@ -349,37 +347,213 @@ fn file_path(uri: &str) -> PathBuf {
     PathBuf::from(percent_decode(rest))
 }
 
-/// cli/assets.mjs assetIdFromUri
-pub(crate) fn asset_id(uri: &str) -> Option<String> {
-    let uri = uri.trim();
-    let lower = uri.to_ascii_lowercase();
-    let digits = |text: &str| -> Option<String> {
-        let id: String = text.chars().take_while(char::is_ascii_digit).collect();
-        (!id.is_empty()).then_some(id)
+/// An asset of asset delivery that a content URI names: its id (digits) and the version it pins, None for the
+/// latest. Every request for it is built from these two numbers alone (download.rs), never from the URI's text.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AssetRef {
+    id: String,
+    version: Option<u64>,
+}
+
+impl AssetRef {
+    /// The latest version of `id`; None unless `id` is digits
+    pub fn latest(id: &str) -> Option<Self> {
+        (!id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())).then(|| Self { id: id.to_string(), version: None })
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn version(&self) -> Option<u64> {
+        self.version
+    }
+
+    /// Its name in the asset cache (`<key>.<ext>`, `downloaded/<key>.<ext>.json`): the id for the latest version,
+    /// `<id>-v<version>` for a pinned one, so each version has its own file
+    pub fn key(&self) -> String {
+        match self.version {
+            None => self.id.clone(),
+            Some(version) => format!("{}-v{version}", self.id),
+        }
+    }
+
+    /// What follows asset delivery's `assetId/` routes: `<id>`, or `<id>/version/<version>`
+    pub fn route(&self) -> String {
+        match self.version {
+            None => self.id.clone(),
+            Some(version) => format!("{}/version/{version}", self.id),
+        }
+    }
+
+    /// A content id that names it, `rbxassetid://<id>[&version=<version>]` (the spelling Roblox saves)
+    pub fn uri(&self) -> String {
+        match self.version {
+            None => format!("rbxassetid://{}", self.id),
+            Some(version) => format!("rbxassetid://{}&version={version}", self.id),
+        }
+    }
+}
+
+/// "123", or "123 version 4" (messages: "asset 123 version 4 ...")
+impl std::fmt::Display for AssetRef {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.version {
+            None => formatter.write_str(&self.id),
+            Some(version) => write!(formatter, "{} version {version}", self.id),
+        }
+    }
+}
+
+/// Whether `key` is an [`AssetRef::key`]: `<digits>` or `<digits>-v<digits>`
+pub fn is_asset_key(key: &str) -> bool {
+    let (id, version) = match key.split_once("-v") {
+        Some((id, version)) => (id, Some(version)),
+        None => (key, None),
     };
-    if let Some(rest) = lower.strip_prefix("rbxassetid://") {
-        return digits(rest);
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    digits(id) && version.is_none_or(digits)
+}
+
+/// The asset delivery asset a content URI names (cli/assets.mjs parseAssetUri reads the same; both are checked
+/// against native/tests/fixtures/content-ids.json). None for text that is no asset id (`rbxasset://`,
+/// `rbxthumb://`, other URIs); an error for a spelling a Roblox client loads nothing for. docs/assets.md
+/// ("Pinned versions") has the measurements.
+///
+/// - `rbxassetid://N`: the digits after the scheme (`rbxassetid://77abc` is 77). A client loads nothing for an
+///   upper-case scheme, white space before it, a `#` anywhere, or a `?`, `/` or `%` right after the id
+///   (`N?version=2`, `N/`, `N%26version=2`).
+/// - `rbxassetid://N&version=V`, how Roblox saves a pinned version: [`pinned`].
+/// - `roblox.com/asset/?id=N` (any case): the first `id=` key's digits; a `version` key reads as in [`pinned`].
+/// - A bare id.
+pub fn asset_ref(uri: &str) -> Option<Result<AssetRef, String>> {
+    const SCHEME: &str = "rbxassetid://";
+    let loads_nothing = |why: &str| Err(format!("a Roblox client loads nothing for this content id: {why}"));
+    if let Some(rest) = uri.strip_prefix(SCHEME) {
+        if rest.contains('#') {
+            return Some(loads_nothing("it holds a #"));
+        }
+        if let Some(amp) = rest.find('&') {
+            return Some(pinned(&rest[..amp], &rest[amp + 1..]));
+        }
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        if digits == 0 {
+            return None;
+        }
+        return match rest[digits..].chars().next() {
+            Some(after @ ('?' | '/' | '%')) => Some(loads_nothing(&format!("a {after} follows its id"))),
+            _ => Some(Ok(AssetRef { id: rest[..digits].to_string(), version: None })),
+        };
+    }
+    let trimmed = uri.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with(SCHEME) {
+        return Some(loads_nothing(if uri.starts_with(trimmed) { "its scheme is not in lower case" } else { "white space comes before its scheme" }));
     }
     // /roblox\.com\/asset\/?\?.*?\bid=(\d+)/i
     if let Some(at) = lower.find("roblox.com/asset") {
         let rest = &lower[at + "roblox.com/asset".len()..];
         let rest = rest.strip_prefix('/').unwrap_or(rest);
-        if let Some(query) = rest.strip_prefix('?') {
-            let mut search = 0;
-            while let Some(found) = query[search..].find("id=") {
-                let start = search + found;
-                let boundary = start == 0 || !query.as_bytes()[start - 1].is_ascii_alphanumeric() && query.as_bytes()[start - 1] != b'_';
-                if boundary {
-                    if let Some(id) = digits(&query[start + 3..]) {
-                        return Some(id);
+        let query = rest.strip_prefix('?')?;
+        let mut search = 0;
+        while let Some(found) = query[search..].find("id=") {
+            let start = search + found;
+            let boundary = start == 0 || !query.as_bytes()[start - 1].is_ascii_alphanumeric() && query.as_bytes()[start - 1] != b'_';
+            let id = &query[start + 3..];
+            let id = &id[..id.len() - id.trim_start_matches(|c: char| c.is_ascii_digit()).len()];
+            if boundary && !id.is_empty() {
+                let mut version = VersionReader::default();
+                for (key, value) in query_pairs(query) {
+                    if key.eq_ignore_ascii_case("version") {
+                        version.read(value.as_deref());
                     }
                 }
-                search = start + 3;
+                return Some(Ok(AssetRef { id: id.to_string(), version: version.version }));
             }
+            search = start + 3;
         }
         return None;
     }
-    (!uri.is_empty() && uri.bytes().all(|byte| byte.is_ascii_digit())).then(|| uri.to_string())
+    AssetRef::latest(trimmed).map(Ok)
+}
+
+/// `rbxassetid://N&<query>`, the spelling Roblox saves a pinned version in, read as a Roblox client reads it
+/// (measured on Studio 0.747's client): the id may have white space around it, but nothing else before the
+/// `&`. The query's keys and values are form-decoded (`+` a space, then `%xx`) and trimmed. `version` (any
+/// case) reads as [`VersionReader`]; a lowercase `id` holding an id names that asset instead; any other key is
+/// ignored, but for `assetversionid` (any case), which names an asset version by its own id: rur does not
+/// fetch those.
+fn pinned(id: &str, query: &str) -> Result<AssetRef, String> {
+    let mut id = canonical_id(id.trim()).ok_or_else(|| "a Roblox client loads nothing for this content id: no asset id comes before its &".to_string())?;
+    let mut version = VersionReader::default();
+    for (key, value) in query_pairs(query) {
+        if key.eq_ignore_ascii_case("assetversionid") {
+            return Err("an assetversionid names an asset version by its own id, which rur does not fetch".into());
+        }
+        if key == "id" {
+            if let Some(other) = value.as_deref().and_then(canonical_id) {
+                id = other;
+            }
+        } else if key.eq_ignore_ascii_case("version") {
+            version.read(value.as_deref());
+        }
+    }
+    Ok(AssetRef { id, version: version.version })
+}
+
+/// A query's `key=value` pairs in order, form-decoded and trimmed; a pair without `=` has no value
+fn query_pairs(query: &str) -> impl Iterator<Item = (String, Option<String>)> + '_ {
+    let decode = |text: &str| percent_decode(&text.replace('+', " ")).trim().to_string();
+    query.split('&').filter(|pair| !pair.is_empty()).map(move |pair| match pair.split_once('=') {
+        Some((key, value)) => (decode(key), Some(decode(value))),
+        None => (decode(pair), None),
+    })
+}
+
+/// An id as `&id=` and the pinned spelling take it: 1 to 20 digits, a u64 other than 0, written without
+/// leading zeros
+fn canonical_id(text: &str) -> Option<String> {
+    if text.is_empty() || text.len() > 20 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse::<u64>().ok().filter(|&id| id != 0).map(|id| id.to_string())
+}
+
+/// The `version` keys of a query, in order: each value that is an integer (an optional sign, then decimal
+/// digits, leading zeros allowed, or `0x` and hex digits; within i64) replaces the version before it, 0 or
+/// less meaning the latest; the first value that is none (empty, no `=`, `abc`, `4/`, `4.0`, past i64) ends
+/// the reading and keeps what was read.
+#[derive(Default)]
+struct VersionReader {
+    version: Option<u64>,
+    done: bool,
+}
+
+impl VersionReader {
+    fn read(&mut self, value: Option<&str>) {
+        if self.done {
+            return;
+        }
+        match value.and_then(version_integer) {
+            Some(number) => self.version = u64::try_from(number).ok().filter(|&number| number > 0),
+            None => self.done = true,
+        }
+    }
+}
+
+fn version_integer(text: &str) -> Option<i64> {
+    let (sign, digits) = match text.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", text.strip_prefix('+').unwrap_or(text)),
+    };
+    let (radix, digits) = match digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X")) {
+        Some(hex) => (16, hex),
+        None => (10, digits),
+    };
+    if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    i64::from_str_radix(&format!("{sign}{digits}"), radix).ok()
 }
 
 /// The UnapprovedImage icon's bytes (4,085, sha256 below): what the thumbnail service served for a Blocked
@@ -492,8 +666,9 @@ pub fn sniff(bytes: &[u8]) -> Sniffed {
     is(".bin", "unknown", "application/octet-stream")
 }
 
-/// cli/assets.mjs resolveModelTexture: /(?:rbxassetid:\/\/|[?&]id=)(\d+)/i
-pub(crate) fn model_texture(text: &str) -> Option<String> {
+/// cli/assets.mjs resolveModelTexture: /(?:rbxassetid:\/\/|[?&]id=)(\d+)/i, the latest version of the id (a
+/// decal model's texture is Roblox's `http://www.roblox.com/asset/?id=N`, which pins none)
+pub(crate) fn model_texture(text: &str) -> Option<AssetRef> {
     let lower = text.to_ascii_lowercase();
     let mut best: Option<(usize, String)> = None;
     for pattern in ["rbxassetid://", "?id=", "&id="] {
@@ -510,7 +685,7 @@ pub(crate) fn model_texture(text: &str) -> Option<String> {
             search = start + 1;
         }
     }
-    best.map(|(_, id)| id)
+    best.and_then(|(_, id)| AssetRef::latest(&id))
 }
 
 /// The Studio install rur finds when `RUR_ROBLOX_CONTENT` names none (the best of [`content_roots`] after it; the
@@ -623,22 +798,65 @@ pub(crate) mod tests {
         assert!(content_roots_with(None, || panic!("checkout must not query the locator"), None, false).is_empty());
     }
 
+    /// The cases cli/assets.mjs parseAssetUri is checked against too (tools/tests/native-assets.mjs)
     #[test]
-    fn asset_ids_and_thumbnail_keys_follow_cli_assets() {
-        assert_eq!(asset_id("rbxassetid://123"), Some("123".into()));
-        assert_eq!(asset_id("RBXASSETID://77abc"), Some("77".into()));
-        assert_eq!(asset_id("http://www.roblox.com/asset/?id=456"), Some("456".into()));
-        assert_eq!(asset_id("https://www.roblox.com/asset?version=1&id=789"), Some("789".into()));
-        assert_eq!(asset_id("321"), Some("321".into()));
-        assert_eq!(asset_id("rbxgameasset://x"), None);
+    fn content_ids_name_the_asset_and_version_a_roblox_client_loads() {
+        let table: Value = serde_json::from_str(include_str!("../tests/fixtures/content-ids.json")).unwrap();
+        let read = |uri: &str| match asset_ref(uri) {
+            None => "not an asset id".to_string(),
+            Some(Err(_)) => "loads nothing".to_string(),
+            Some(Ok(asset)) => asset.key(),
+        };
+        let mut count = 0;
+        for case in table["assets"].as_array().unwrap() {
+            let (uri, key) = (case[0].as_str().unwrap(), case[1].as_str().unwrap());
+            assert_eq!(read(uri), key, "{uri:?}");
+            count += 1;
+        }
+        for (group, expected) in [("loadsNothing", "loads nothing"), ("notAssetIds", "not an asset id")] {
+            for uri in table[group].as_array().unwrap() {
+                let uri = uri.as_str().unwrap();
+                assert_eq!(read(uri), expected, "{uri:?}");
+                count += 1;
+            }
+        }
+        assert!(count > 100, "{count} cases");
+        // Each reason says what the client does
+        let reason = |uri: &str| asset_ref(uri).unwrap().unwrap_err();
+        assert_eq!(reason("RBXASSETID://1"), "a Roblox client loads nothing for this content id: its scheme is not in lower case");
+        assert_eq!(reason(" rbxassetid://1"), "a Roblox client loads nothing for this content id: white space comes before its scheme");
+        assert_eq!(reason("rbxassetid://1?version=2"), "a Roblox client loads nothing for this content id: a ? follows its id");
+        assert_eq!(reason("rbxassetid://1&version=2#"), "a Roblox client loads nothing for this content id: it holds a #");
+        assert_eq!(reason("rbxassetid://1/&version=2"), "a Roblox client loads nothing for this content id: no asset id comes before its &");
+        assert!(reason("rbxassetid://1&assetversionid=2").starts_with("an assetversionid names an asset version"));
+    }
+
+    /// A pinned version's cache name, asset delivery route and spelling come from its two numbers alone
+    #[test]
+    fn a_pinned_version_is_named_by_its_numbers() {
+        let pinned = asset_ref("rbxassetid://88&Version=+03&next=https://example.com/../x").unwrap().unwrap();
+        assert_eq!((pinned.id(), pinned.version()), ("88", Some(3)));
+        assert_eq!((pinned.key(), pinned.route(), pinned.uri(), pinned.to_string()), ("88-v3".into(), "88/version/3".into(), "rbxassetid://88&version=3".into(), "88 version 3".into()));
+        let latest = AssetRef::latest("88").unwrap();
+        assert_eq!((latest.key(), latest.route(), latest.uri(), latest.to_string()), ("88".into(), "88".into(), "rbxassetid://88".into(), "88".into()));
+        assert_eq!(asset_ref(&pinned.uri()), Some(Ok(pinned)));
+        assert_eq!(AssetRef::latest("8a"), None);
+        assert_eq!(AssetRef::latest(""), None);
+        for (key, valid) in [("88", true), ("88-v3", true), ("88-v", false), ("-v3", false), ("88-v3-v4", false), ("thumb-Asset-1-150x150-webp", false), ("placeholder-ab", false), ("", false)] {
+            assert_eq!(is_asset_key(key), valid, "{key}");
+        }
+    }
+
+    #[test]
+    fn thumbnail_keys_and_model_textures_follow_cli_assets() {
         let key = |query: &str| ThumbnailQuery::parse(query).key();
         assert_eq!(key("type=AvatarHeadShot&id=1&w=60&h=60"), "thumb-AvatarHeadShot-1-60x60-webp");
         assert_eq!(key("id=5"), "thumb-Asset-5-150x150-webp");
         // An empty value takes the default, as `params.get(name) || default` did; no id is "null"
         assert_eq!(key("type=&w=&id=5"), "thumb-Asset-5-150x150-webp");
         assert_eq!(key("type=Avatar"), "thumb-Avatar-null-150x150-webp");
-        assert_eq!(model_texture("<roblox> <url>http://www.roblox.com/asset/?id=42</url>"), Some("42".into()));
-        assert_eq!(model_texture("x rbxassetid://7 y ?id=3"), Some("7".into()));
+        assert_eq!(model_texture("<roblox> <url>http://www.roblox.com/asset/?id=42</url>"), AssetRef::latest("42"));
+        assert_eq!(model_texture("x rbxassetid://7 y ?id=3"), AssetRef::latest("7"));
     }
 
     #[test]
@@ -693,6 +911,36 @@ pub(crate) mod tests {
         let fonts = json!({"missingFontAssets": ["rbxassetid://789"]});
         assert!(!offline.fetch_fonts(&fonts).unwrap());
         assert_eq!(fake.urls().len(), 1);
+        let _ = std::fs::remove_dir_all(&assets);
+    }
+
+    /// Each version of an asset is its own cache file; a spelling a client loads nothing for is an error, asked
+    /// of nobody
+    #[cfg(feature = "desktop")]
+    #[test]
+    fn each_version_resolves_to_its_own_cache_file() {
+        use crate::download::tests::Fake;
+        let assets = std::env::temp_dir().join(format!("rur-asset-versions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&assets);
+        std::fs::create_dir_all(assets.join("downloaded")).unwrap();
+        for (name, bytes) in [("123.png", [137u8, 80, 78, 71, 1]), ("123-v2.png", [137u8, 80, 78, 71, 2])] {
+            std::fs::write(assets.join(name), bytes).unwrap();
+            let record = json!({"sha256": crate::engine::text::hinted::sha256_hex(&bytes), "size": bytes.len()});
+            std::fs::write(assets.join("downloaded").join(format!("{name}.json")), record.to_string()).unwrap();
+        }
+        let fake = Fake::new(|_| Err("no network in this test".into()));
+        let mut online = resolver_with(&assets, false, fake.clone());
+        assert_eq!(online.local("rbxassetid://123"), Some(Ok(assets.join("123.png"))));
+        assert_eq!(online.local("rbxassetid://123&version=2"), Some(Ok(assets.join("123-v2.png"))));
+        assert_eq!(online.local("rbxassetid://123&Version=02&x=y"), Some(Ok(assets.join("123-v2.png"))));
+        assert_eq!(online.local("rbxassetid://123&version=0"), Some(Ok(assets.join("123.png"))), "version 0 is the latest");
+        assert_eq!(online.local("rbxassetid://123&version=3"), None, "another version is downloaded");
+        let refused = online.resolve_all(&["rbxassetid://123?version=2".into(), "RBXASSETID://123".into(), " rbxassetid://123".into()]);
+        assert_eq!(refused.len(), 3);
+        for (uri, result) in &refused {
+            assert!(result.as_ref().unwrap_err().starts_with("a Roblox client loads nothing for this content id"), "{uri}: {result:?}");
+        }
+        assert!(fake.urls().is_empty(), "{:?}", fake.urls());
         let _ = std::fs::remove_dir_all(&assets);
     }
 

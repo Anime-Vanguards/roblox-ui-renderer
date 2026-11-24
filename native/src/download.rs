@@ -5,7 +5,8 @@
 //!   first; for an asset it refuses with 401 or 403, Open Cloud's asset delivery route with the API key
 //!   when one is configured; then with the account. The CDN location it answers is downloaded without
 //!   credentials. Many ids are located first through the batch endpoint, 100 per request, and 16
-//!   downloads run at once.
+//!   downloads run at once. A pinned version (`rbxassetid://N&version=V`, resolve.rs asset_ref) is asked
+//!   for as `assetId/N/version/V` (and `"version": V` in a batch) and cached apart, as `N-vV.<ext>`.
 //! - `rbxthumb://` from the thumbnail service: its WebP rendition (what Studio draws), decoded to PNG
 //!   here, else its PNG rendition. A Blocked avatar thumbnail is Studio's placeholder silhouette.
 //! - The cloud fonts a run reported missing.
@@ -18,8 +19,8 @@
 //! before either. The cookie is only ever placed in the Cookie header of requests to
 //! `https://assetdelivery.roblox.com`, the broker's token only in the Authorization header of requests to
 //! that broker, the API key only in the `x-api-key` header of requests to
-//! `https://apis.roblox.com/asset-delivery-api/v1/assetId/<id>`. None of them is printed, logged, cached or
-//! written anywhere, sent across a redirect or passed to a child process that downloads nothing; rur-native
+//! `https://apis.roblox.com/asset-delivery-api/v1/assetId/<id>[/version/<version>]`. None of them is printed,
+//! logged, cached or written anywhere, sent across a redirect or passed to a child process that downloads nothing; rur-native
 //! takes the API key out of its environment at startup, so only its own render processes get it back.
 //!
 //! The cache is cli/assets.mjs's layout, so caches it filled stay valid: `<state dir>/assets/<id>.<ext>`
@@ -41,7 +42,7 @@ use std::{
 
 use serde_json::{Value, json};
 
-use crate::resolve::{Sniffed, sniff};
+use crate::resolve::{AssetRef, Sniffed, sniff};
 
 /// Roblox Studio's signed-in account, the cookie's last source
 pub mod studio_cookie;
@@ -51,8 +52,8 @@ pub const USER_AGENT: &str = "rur/0.1 (offline Roblox UI renderer)";
 const DELIVERY_HOST: &str = "assetdelivery.roblox.com";
 /// Open Cloud: the only host the API key is sent to
 const OPEN_CLOUD_HOST: &str = "apis.roblox.com";
-/// Open Cloud's asset delivery route, the only one the API key is sent to; the asset id follows it. rur asks
-/// for no version or other representation on the public route either (resolve.rs asset_id drops `version=`).
+/// Open Cloud's asset delivery route, the only one the API key is sent to; the asset id follows it, and
+/// `/version/<version>` for a pinned version. rur asks for no other representation on the public route either.
 const OPEN_CLOUD_ROUTE: &str = "/asset-delivery-api/v1/assetId/";
 /// The variable (and RUR_COOKIE_ENV file entry) that holds an Open Cloud API key for private assets. Not a
 /// `RUR_*` name: those are a batch job's settings (engine/cli.rs), which the key must never travel in.
@@ -882,9 +883,9 @@ impl Downloader {
         crate::resolve::cached_file(&self.assets, key)
     }
 
-    /// Whether fetch_asset_id would download `id`: nothing cached under it, or a file rur did not download
-    fn needs_download(&self, id: &str) -> bool {
-        match self.cached(id) {
+    /// Whether fetch_asset would download `asset`: nothing cached under it, or a file rur did not download
+    fn needs_download(&self, asset: &AssetRef) -> bool {
+        match self.cached(&asset.key()) {
             Some(file) => std::fs::read(&file).is_ok_and(|bytes| !crate::resolve::downloaded(&file, &bytes)),
             None => true,
         }
@@ -945,16 +946,17 @@ impl Downloader {
         Some(format!("the account broker refused: {text}"))
     }
 
-    /// GET Open Cloud's asset delivery route for `id` with the API key: that route only, over https, and a
+    /// GET Open Cloud's asset delivery route for `asset` with the API key: that route only, over https, and a
     /// redirect it answers is not followed. A rate limit (429, or no request left in the window) holds every
     /// request with the key until Open Cloud says the window resets; a 429 is asked again, KEY_ATTEMPTS
     /// requests in all.
-    fn key_get(&self, id: &str, key: &ApiKey) -> Result<Response, TransportError> {
-        // The URL is built here, from the id's digits: the key reaches no other host or path
+    fn key_get(&self, asset: &AssetRef, key: &ApiKey) -> Result<Response, TransportError> {
+        // The URL is built here, from the id's digits and the version's number: the key reaches no other host or path
+        let id = asset.id();
         if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
             return Err(TransportError { message: format!("invalid asset id {id}"), code: None });
         }
-        let url = format!("https://{OPEN_CLOUD_HOST}{OPEN_CLOUD_ROUTE}{id}");
+        let url = format!("https://{OPEN_CLOUD_HOST}{OPEN_CLOUD_ROUTE}{}", asset.route());
         let mut attempt = 0;
         loop {
             let resume = *self.key_resume.lock().unwrap();
@@ -974,14 +976,14 @@ impl Downloader {
         }
     }
 
-    /// Where Open Cloud's asset delivery has `id`, asked with the API key: None when no key is configured,
+    /// Where Open Cloud's asset delivery has `asset`, asked with the API key: None when no key is configured,
     /// else the location or why there is none (never with the key in it)
-    fn key_location(&self, id: &str) -> Option<Result<String, String>> {
+    fn key_location(&self, asset: &AssetRef) -> Option<Result<String, String>> {
         let key = match self.api_key()? {
             Ok(key) => key,
             Err(reason) => return Some(Err(reason.clone())),
         };
-        let response = match self.key_get(id, key) {
+        let response = match self.key_get(asset, key) {
             Ok(response) => response,
             Err(error) => return Some(Err(format!("Open Cloud with the API key did not answer{}", error.code.map(|code| format!(" ({code})")).unwrap_or_default()))),
         };
@@ -1010,17 +1012,17 @@ impl Downloader {
         Some(Err(format!("Open Cloud with the API key: {}", text.replace(key.secret(), "<api key>"))))
     }
 
-    /// Where asset delivery has `id`: the public route first; for an asset it refuses with 401 or 403 (a
+    /// Where asset delivery has `asset`: the public route first; for an asset it refuses with 401 or 403 (a
     /// private one), Open Cloud's route with the API key; then with the account
-    fn delivery_location(&self, id: &str) -> Result<String, String> {
-        let route = format!("/v1/assetId/{id}");
+    fn delivery_location(&self, asset: &AssetRef) -> Result<String, String> {
+        let route = format!("/v1/assetId/{}", asset.route());
         let (mut last_status, mut last_error, mut account_tried, mut refusal) = (0i64, None::<Value>, false, None::<String>);
         let mut key_failure = None::<String>;
         for with_account in [false, true] {
             // After the public route refused the asset as private (401 or 403, its status or its error's code)
             let private = last_status == 401 || last_status == 403 || last_error.as_ref().is_some_and(|error| matches!(error["code"].as_f64(), Some(code) if code == 401.0 || code == 403.0));
             if with_account && private {
-                match self.key_location(id) {
+                match self.key_location(asset) {
                     Some(Ok(location)) => return Ok(location),
                     Some(Err(reason)) => key_failure = Some(reason),
                     None => {}
@@ -1064,7 +1066,7 @@ impl Downloader {
         }
         let key_note = key_failure.map(|reason| format!("; {reason}")).unwrap_or_default();
         if let Some(refusal) = refusal {
-            return Err(format!("asset {id} unavailable from asset delivery ({refusal}{key_note})"));
+            return Err(format!("asset {asset} unavailable from asset delivery ({refusal}{key_note})"));
         }
         if let Some(error) = last_error {
             // [code, message].filter(part => part !== undefined && part !== "").join(": ")
@@ -1082,9 +1084,9 @@ impl Downloader {
             let private = matches!(error["code"].as_f64(), Some(code) if code == 401.0 || code == 403.0);
             let hint = if private && !account_tried { "; private asset, no asset cookie is configured" } else { "" };
             let detail = if detail.is_empty() { format!("HTTP {last_status}") } else { detail };
-            return Err(format!("asset {id} unavailable from asset delivery ({detail}{hint}{key_note})"));
+            return Err(format!("asset {asset} unavailable from asset delivery ({detail}{hint}{key_note})"));
         }
-        Err(format!("asset {id} unavailable from asset delivery (HTTP {last_status}{key_note})"))
+        Err(format!("asset {asset} unavailable from asset delivery (HTTP {last_status}{key_note})"))
     }
 
     /// Where many assets are, from asset delivery's batch endpoint: up to 100 per request, through the
@@ -1092,8 +1094,9 @@ impl Downloader {
     /// through delivery_location costs a round trip (two for a private one) before its download, so a UI
     /// of many images waited on lookups. An id it does not place is left out; its download asks
     /// delivery_location, which reports why. With an API key the batch goes without the account: Open Cloud
-    /// has no batch route, and the key is asked for a private asset before the account is.
-    fn delivery_locations(&self, ids: &[String]) -> HashMap<String, String> {
+    /// has no batch route, and the key is asked for a private asset before the account is. The locations are
+    /// keyed by [`AssetRef::key`].
+    fn delivery_locations(&self, assets: &[AssetRef]) -> HashMap<String, String> {
         const ROUTE: &str = "/v1/assets/batch";
         let with_account = !matches!(self.api_key(), Some(Ok(_)));
         let target = match self.delivery_target(ROUTE, with_account) {
@@ -1104,7 +1107,7 @@ impl Downloader {
             },
             Err(_) => return HashMap::new(),
         };
-        let chunks: Vec<&[String]> = ids.chunks(BATCH).collect();
+        let chunks: Vec<&[AssetRef]> = assets.chunks(BATCH).collect();
         if chunks.len() == 1 {
             return self.locate(&target, chunks[0]);
         }
@@ -1121,10 +1124,15 @@ impl Downloader {
         found.into_inner().unwrap()
     }
 
-    fn locate(&self, target: &Target, chunk: &[String]) -> HashMap<String, String> {
+    fn locate(&self, target: &Target, chunk: &[AssetRef]) -> HashMap<String, String> {
         let mut found = HashMap::new();
-        // assetId as written: ids are digit strings, and some are past a double's integers
-        let body = format!("[{}]", chunk.iter().enumerate().map(|(index, id)| format!(r#"{{"requestId":"{index}","assetId":{id}}}"#)).collect::<Vec<_>>().join(","));
+        // assetId as written: ids are digit strings, and some are past a double's integers; a pinned version
+        // goes as its number
+        let item = |index: usize, asset: &AssetRef| match asset.version() {
+            None => format!(r#"{{"requestId":"{index}","assetId":{}}}"#, asset.id()),
+            Some(version) => format!(r#"{{"requestId":"{index}","assetId":{},"version":{version}}}"#, asset.id()),
+        };
+        let body = format!("[{}]", chunk.iter().enumerate().map(|(index, asset)| item(index, asset)).collect::<Vec<_>>().join(","));
         let Ok(mut response) = self.post(target, &body, None) else { return found };
         // A request with the cookie is answered once with the CSRF token it must carry (the broker answers its own)
         let token = (!target.broker).then(|| response.header("x-csrf-token").filter(|token| !token.is_empty()).map(str::to_string)).flatten();
@@ -1148,9 +1156,9 @@ impl Downloader {
                 Value::Bool(value) => Some(f64::from(u8::from(*value))),
                 _ => None,
             };
-            let id = index.filter(|index| index.fract() == 0.0 && *index >= 0.0).and_then(|index| chunk.get(index as usize));
-            if let (Some(id), Some(location)) = (id, reply["location"].as_str().filter(|location| !location.is_empty())) {
-                found.insert(id.clone(), location.to_string());
+            let asset = index.filter(|index| index.fract() == 0.0 && *index >= 0.0).and_then(|index| chunk.get(index as usize));
+            if let (Some(asset), Some(location)) = (asset, reply["location"].as_str().filter(|location| !location.is_empty())) {
+                found.insert(asset.key(), location.to_string());
             }
         }
         found
@@ -1172,7 +1180,7 @@ impl Downloader {
         let cached = std::fs::read_dir(&self.assets).into_iter().flatten().flatten().filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             let (stem, ext) = name.rsplit_once('.')?;
-            let font = !stem.is_empty() && stem.bytes().all(|byte| byte.is_ascii_digit()) && ["ttf", "otf", "ttc"].contains(&ext.to_ascii_lowercase().as_str());
+            let font = crate::resolve::is_asset_key(stem) && ["ttf", "otf", "ttc"].contains(&ext.to_ascii_lowercase().as_str());
             font.then_some(name)
         });
         for entry in cached.chain(std::iter::once(name)) {
@@ -1187,21 +1195,31 @@ impl Downloader {
         let _ = write_atomic(&index, text.as_bytes());
     }
 
-    /// Downloads (or reads from the cache) an asset id: a decal / texture model resolves to the image it
-    /// names when `allow_decal`. `location`: where delivery_locations found it, tried before asking asset
-    /// delivery again.
+    /// [`Self::fetch_asset`] of a content id (resolve.rs asset_ref: `rbxassetid://N&version=V` is version V)
+    /// or of other text holding an id (its digits: `--fonts` arguments, a run's missingFontAssets)
     pub fn fetch_asset_id(&self, asset_id: &str, allow_decal: bool, offline: bool, location: Option<&str>) -> Result<Fetched, String> {
-        let id: String = asset_id.chars().filter(char::is_ascii_digit).collect();
-        if id.is_empty() {
-            return Err(format!("invalid asset id {asset_id}"));
-        }
-        let mut cached = self.cached(&id);
+        let asset = match crate::resolve::asset_ref(asset_id) {
+            Some(parsed) => parsed?,
+            None => {
+                let id: String = asset_id.chars().filter(char::is_ascii_digit).collect();
+                AssetRef::latest(&id).ok_or_else(|| format!("invalid asset id {asset_id}"))?
+            }
+        };
+        self.fetch_asset(&asset, allow_decal, offline, location)
+    }
+
+    /// Downloads (or reads from the cache) an asset, at the version it pins or the latest: a decal / texture
+    /// model resolves to the image it names when `allow_decal`. `location`: where delivery_locations found it,
+    /// tried before asking asset delivery again.
+    pub fn fetch_asset(&self, asset: &AssetRef, allow_decal: bool, offline: bool, location: Option<&str>) -> Result<Fetched, String> {
+        let key = asset.key();
+        let mut cached = self.cached(&key);
         if let Some(file) = cached.clone().filter(|file| file.extension().is_some_and(|ext| ext == "bin")) {
             // Cached before gzip bodies were unwrapped: the real file under its own extension
             let body = unwrap(std::fs::read(&file).map_err(|error| error.to_string())?);
             let sniffed = sniff(&body);
             if sniffed.ext != ".bin" {
-                let target = self.assets.join(format!("{id}{}", sniffed.ext));
+                let target = self.assets.join(format!("{key}{}", sniffed.ext));
                 write_atomic(&target, &body)?;
                 let _ = std::fs::remove_file(&file);
                 if sniffed.kind == "font" {
@@ -1222,7 +1240,7 @@ impl Downloader {
                     self.record_font(file);
                 }
                 if sniffed.kind == "model" && allow_decal {
-                    return self.model_texture(&id, file, offline);
+                    return self.model_texture(asset, file, offline);
                 }
                 return Ok(Fetched::new(file.clone(), sniffed));
             }
@@ -1230,15 +1248,15 @@ impl Downloader {
         if offline {
             return Err("offline and not cached".into());
         }
-        // One download per asset at a time: a second request waits for the first's answer
-        let key = self.assets.join(&id);
+        // One download per asset version at a time: a second request waits for the first's answer
+        let flight_key = self.assets.join(&key);
         let (shared, first) = {
             let mut flights = in_flight().lock().unwrap();
-            match flights.get(&key) {
+            match flights.get(&flight_key) {
                 Some(shared) => (shared.clone(), false),
                 None => {
                     let shared: Shared = Arc::new((Mutex::new(None), Condvar::new()));
-                    flights.insert(key.clone(), shared.clone());
+                    flights.insert(flight_key.clone(), shared.clone());
                     (shared, true)
                 }
             }
@@ -1251,22 +1269,22 @@ impl Downloader {
             }
             return answer.clone().unwrap();
         }
-        let mut flight = Flight { key, shared, answer: None };
-        let result = self.download_asset(&id, allow_decal, location, cached, cached_bytes);
+        let mut flight = Flight { key: flight_key, shared, answer: None };
+        let result = self.download_asset(asset, allow_decal, location, cached, cached_bytes);
         flight.answer = Some(result.clone());
         result
     }
 
-    fn download_asset(&self, id: &str, allow_decal: bool, location: Option<&str>, cached: Option<PathBuf>, cached_bytes: Option<Vec<u8>>) -> Result<Fetched, String> {
+    fn download_asset(&self, asset: &AssetRef, allow_decal: bool, location: Option<&str>, cached: Option<PathBuf>, cached_bytes: Option<Vec<u8>>) -> Result<Fetched, String> {
         let body = (|| -> Result<Vec<u8>, String> {
             let mut download = location.and_then(|location| self.get(location, Vec::new(), 5, false).ok());
             if !download.as_ref().is_some_and(Response::ok) {
-                let location = self.delivery_location(id)?;
+                let location = self.delivery_location(asset)?;
                 download = Some(self.get(&location, Vec::new(), 5, false).map_err(|error| error.message)?);
             }
             let download = download.unwrap();
             if !download.ok() {
-                return Err(format!("asset {id} download failed (HTTP {})", download.status));
+                return Err(format!("asset {asset} download failed (HTTP {})", download.status));
             }
             Ok(unwrap(download.body))
         })()
@@ -1279,7 +1297,7 @@ impl Downloader {
         })?;
         let sniffed = sniff(&body);
         std::fs::create_dir_all(&self.assets).map_err(|error| format!("creating {}: {error}", self.assets.display()))?;
-        let file = self.assets.join(format!("{id}{}", sniffed.ext));
+        let file = self.assets.join(format!("{}{}", asset.key(), sniffed.ext));
         // The same bytes keep their file (and render directories' links to it); other bytes replace it
         if cached.as_ref() != Some(&file) || cached_bytes.as_deref() != Some(&body[..]) {
             write_atomic(&file, &body)?;
@@ -1292,21 +1310,21 @@ impl Downloader {
             self.record_font(&file);
         }
         if sniffed.kind == "model" && allow_decal {
-            return self.model_texture(id, &file, false);
+            return self.model_texture(asset, &file, false);
         }
         Ok(Fetched::new(file, sniffed))
     }
 
     /// A decal / texture model asset (e.g. a Decal id used as an image) -> the image it references
-    fn model_texture(&self, id: &str, file: &Path, offline: bool) -> Result<Fetched, String> {
+    fn model_texture(&self, asset: &AssetRef, file: &Path, offline: bool) -> Result<Fetched, String> {
         let text: String = std::fs::read(file).map_err(|error| error.to_string())?.iter().map(|&byte| byte as char).collect();
         match crate::resolve::model_texture(&text) {
-            Some(inner) if inner != id => {
-                let mut fetched = self.fetch_asset_id(&inner, false, offline, None)?;
-                fetched.via = Some(id.to_string());
+            Some(inner) if inner.id() != asset.id() => {
+                let mut fetched = self.fetch_asset(&inner, false, offline, None)?;
+                fetched.via = Some(asset.id().to_string());
                 Ok(fetched)
             }
-            _ => Err(format!("asset {id} is a model without an image texture")),
+            _ => Err(format!("asset {asset} is a model without an image texture")),
         }
     }
 
@@ -1399,9 +1417,10 @@ impl Downloader {
         if trimmed.to_ascii_lowercase().starts_with("rbxthumb://") {
             return self.fetch_thumbnail(&trimmed["rbxthumb://".len()..], offline);
         }
-        match crate::resolve::asset_id(trimmed) {
-            Some(id) if offline && self.cached(&id).is_none() => Err("offline and not cached".into()),
-            Some(id) => self.fetch_asset_id(&id, true, offline, locations.get(&id).map(String::as_str)),
+        match crate::resolve::asset_ref(uri) {
+            Some(Ok(asset)) if offline && self.cached(&asset.key()).is_none() => Err("offline and not cached".into()),
+            Some(Ok(asset)) => self.fetch_asset(&asset, true, offline, locations.get(&asset.key()).map(String::as_str)),
+            Some(Err(reason)) => Err(reason),
             None => Err(format!("unsupported content uri: {uri}")),
         }
     }
@@ -1411,11 +1430,11 @@ impl Downloader {
     pub fn resolve_all(&self, uris: &[String], offline: bool) -> BTreeMap<String, Result<Fetched, String>> {
         let mut seen = HashSet::new();
         let queue: Vec<&String> = uris.iter().filter(|uri| seen.insert(uri.as_str())).collect();
-        let ids: Vec<String> = if offline {
+        let ids: Vec<AssetRef> = if offline {
             Vec::new()
         } else {
             let mut seen = HashSet::new();
-            queue.iter().filter_map(|uri| crate::resolve::asset_id(uri)).filter(|id| seen.insert(id.clone()) && self.needs_download(id)).collect()
+            queue.iter().filter_map(|uri| crate::resolve::asset_ref(uri)?.ok()).filter(|asset| seen.insert(asset.key()) && self.needs_download(asset)).collect()
         };
         let locations = if ids.len() > 1 { self.delivery_locations(&ids) } else { HashMap::new() };
         let results = Mutex::new(BTreeMap::new());
@@ -1457,23 +1476,24 @@ impl Downloader {
         fetched
     }
 
-    /// The asset ids asset delivery would not give (a private image), read from an open Studio when a
-    /// bridge is configured; an id Studio cannot read either keeps its error, with Studio's reason
+    /// The assets asset delivery would not give (a private image), read from an open Studio when a bridge is
+    /// configured; one Studio cannot read either keeps its error, with Studio's reason. Studio is asked for
+    /// them by [`AssetRef::key`] (a pinned version as `<id>-v<version>`, cli/studio-images.mjs).
     fn read_refused_from_studio(&self, results: &mut BTreeMap<String, Result<Fetched, String>>) {
-        let refused: Vec<(String, String, String)> = results
+        let refused: Vec<(String, AssetRef, String)> = results
             .iter()
             .filter_map(|(uri, result)| {
                 let error = result.as_ref().err().filter(|error| !error.contains("without an image texture"))?;
-                Some((uri.clone(), crate::resolve::asset_id(uri)?, error.clone()))
+                Some((uri.clone(), crate::resolve::asset_ref(uri)?.ok()?, error.clone()))
             })
             .collect();
         if refused.is_empty() {
             return;
         }
         let mut ids: Vec<String> = Vec::new();
-        for (_, id, _) in &refused {
-            if !ids.contains(id) {
-                ids.push(id.clone());
+        for (_, asset, _) in &refused {
+            if !ids.contains(&asset.key()) {
+                ids.push(asset.key());
             }
         }
         let reads = match &self.studio {
@@ -1491,10 +1511,11 @@ impl Downloader {
             Ok(reads) => reads,
             Err(reason) => StudioReads { stored: HashSet::new(), errors: ids.iter().map(|id| (id.clone(), format!("not read from Studio: {reason}"))).collect() },
         };
-        for (uri, id, error) in refused {
-            let answer = if reads.stored.contains(&id) {
-                self.fetch_asset_id(&id, true, true, None).map_err(|reason| format!("{error}; read from Studio but not cached: {reason}"))
-            } else if let Some(reason) = reads.errors.get(&id) {
+        for (uri, asset, error) in refused {
+            let key = asset.key();
+            let answer = if reads.stored.contains(&key) {
+                self.fetch_asset(&asset, true, true, None).map_err(|reason| format!("{error}; read from Studio but not cached: {reason}"))
+            } else if let Some(reason) = reads.errors.get(&key) {
                 Err(format!("{error}; {reason}"))
             } else {
                 continue;
@@ -2552,6 +2573,96 @@ pub(crate) mod tests {
         let counts: Vec<usize> = bodies.iter().map(|body| body.matches("assetId").count()).collect();
         assert!(counts.contains(&100) && counts.contains(&50), "{counts:?}");
         assert!(bodies.iter().any(|body| body.contains(r#""assetId":90071992547409930}"#)));
+    }
+
+    /// A pinned version (`rbxassetid://N&version=V`, how Roblox saves one) is asked for as `assetId/N/version/V`
+    /// on every route and as `"version": V` in a batch, built from its two numbers alone (none of the URI's
+    /// other text reaches a request), and cached apart from the latest version: `N-vV.<ext>` with its own record.
+    #[test]
+    fn pinned_versions_are_asked_for_by_their_numbers_and_cached_apart() {
+        let temp = Temp::new("pinned");
+        let assets = temp.0.join("assets");
+        // Asset delivery places each version at a CDN path of its own; the CDN's PNG ends with that path
+        let cdn = |id: &Value, version: &Value| format!("https://cdn.example/{id}/{}", if version.is_null() { "latest".to_string() } else { version.to_string() });
+        let fake = Fake::new(move |seen| {
+            let route = path(&seen.url).to_string();
+            if host_of(&seen.url) == "cdn.example" {
+                return ok([png(), route.into_bytes()].concat());
+            }
+            if seen.method == Method::Post {
+                let items: Vec<Value> = serde_json::from_str(&seen.body).unwrap();
+                let replies: Vec<Value> = items.iter().map(|item| json!({"requestId": item["requestId"], "location": cdn(&item["assetId"], &item["version"])})).collect();
+                return ok(Value::Array(replies).to_string());
+            }
+            let tail = route.strip_prefix("/v1/assetId/").unwrap_or_else(|| panic!("asked {route}"));
+            let (id, version) = tail.split_once("/version/").map_or((tail, Value::Null), |(id, version)| (id, json!(version.parse::<u64>().unwrap())));
+            ok(json!({"location": cdn(&json!(id.parse::<u64>().unwrap()), &version)}).to_string())
+        });
+        let downloader = Downloader::for_tests(&assets, fake.clone());
+        let fetch = |uri: &str| downloader.resolve_uri(uri, false, &HashMap::new()).unwrap();
+        let tail = |file: &Path| String::from_utf8_lossy(&std::fs::read(file).unwrap()[png().len()..]).into_owned();
+
+        let pinned = fetch("rbxassetid://88&Version=+03&next=https://example.com/../x&q=?y");
+        assert_eq!(fake.urls(), ["https://assetdelivery.roblox.com/v1/assetId/88/version/3", "https://cdn.example/88/3"]);
+        assert_eq!((pinned.file.clone(), tail(&pinned.file)), (assets.join("88-v3.png"), "/88/3".to_string()));
+        assert_eq!(record(&assets, "88-v3.png")["size"], json!(png().len() + "/88/3".len()));
+        fake.clear();
+        let latest = fetch("rbxassetid://88");
+        assert_eq!(fake.urls(), ["https://assetdelivery.roblox.com/v1/assetId/88", "https://cdn.example/88/latest"]);
+        assert_eq!((latest.file.clone(), tail(&latest.file)), (assets.join("88.png"), "/88/latest".to_string()));
+        assert_eq!(tail(&pinned.file), "/88/3", "the latest version did not replace the pinned one");
+        // Cached: each spelling of a version finds its file; version 0 is the latest
+        fake.clear();
+        for (uri, file) in [("rbxassetid://88&version=3", "88-v3.png"), ("rbxassetid://88&version=03&x=y", "88-v3.png"), ("rbxassetid://88&version=0", "88.png"), ("http://www.roblox.com/asset/?id=88&version=3", "88-v3.png")] {
+            assert_eq!(fetch(uri).file, assets.join(file), "{uri}");
+        }
+        assert!(fake.urls().is_empty(), "{:?}", fake.urls());
+
+        // A batch names each version
+        let uris: Vec<String> = ["rbxassetid://90&version=2", "rbxassetid://90", "rbxassetid://91&version=7", "rbxassetid://90&Version=2"].iter().map(|uri| uri.to_string()).collect();
+        let results = downloader.resolve_all(&uris, false);
+        let seen = fake.seen();
+        let posts: Vec<&Seen> = seen.iter().filter(|seen| seen.method == Method::Post).collect();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].body, r#"[{"requestId":"0","assetId":90,"version":2},{"requestId":"1","assetId":90},{"requestId":"2","assetId":91,"version":7}]"#);
+        let mut gets: Vec<String> = seen.iter().filter(|seen| seen.method == Method::Get).map(|seen| seen.url.clone()).collect();
+        gets.sort();
+        assert_eq!(gets, ["https://cdn.example/90/2", "https://cdn.example/90/latest", "https://cdn.example/91/7"], "located: no lookups, one download per version");
+        for (uri, file, body) in [(&uris[0], "90-v2.png", "/90/2"), (&uris[1], "90.png", "/90/latest"), (&uris[2], "91-v7.png", "/91/7"), (&uris[3], "90-v2.png", "/90/2")] {
+            let fetched = results[uri].as_ref().unwrap();
+            assert_eq!((fetched.file.clone(), tail(&fetched.file)), (assets.join(file), body.to_string()), "{uri}");
+        }
+
+        // Offline: the cached version only
+        fake.clear();
+        let offline = downloader.resolve_all(&["rbxassetid://88&version=3".into(), "rbxassetid://88&version=4".into()], true);
+        assert_eq!(offline["rbxassetid://88&version=3"].as_ref().unwrap().file, assets.join("88-v3.png"));
+        assert_eq!(offline["rbxassetid://88&version=4"].as_ref().unwrap_err(), "offline and not cached");
+        // A spelling a client loads nothing for is asked of nobody
+        let refused = downloader.resolve_all(&["rbxassetid://88?version=3".into(), "rbxassetid://88&assetversionid=3".into()], false);
+        assert!(refused.values().all(Result::is_err), "{refused:?}");
+        assert!(fake.urls().is_empty(), "{:?}", fake.urls());
+
+        // A private version: Open Cloud's route with the API key, then the broker's, carry the version
+        let private = Fake::new(|seen| match host_of(&seen.url) {
+            "cdn.example" => ok(png()),
+            DELIVERY_HOST => status(403, &[], r#"{"errors":[{"code":403,"message":"Asset is not authorized"}]}"#),
+            OPEN_CLOUD_HOST => status(403, &[], r#"{"code":"PERMISSION_DENIED","message":"denied"}"#),
+            _ => ok(json!({"location": "https://cdn.example/77-5"}).to_string()),
+        });
+        let account = Account::Broker { url: "https://broker.example".into(), token: "dummy-pinned-token".into() };
+        let downloader = Downloader::for_tests(&temp.0.join("private"), private.clone()).with_key("dummy-pinned-key").with_account(account);
+        let fetched = downloader.resolve_uri("rbxassetid://77&version=5", false, &HashMap::new()).unwrap();
+        assert_eq!(fetched.file, temp.0.join("private").join("77-v5.png"));
+        assert_eq!(
+            private.urls(),
+            [
+                "https://assetdelivery.roblox.com/v1/assetId/77/version/5",
+                "https://apis.roblox.com/asset-delivery-api/v1/assetId/77/version/5",
+                "https://broker.example/rbx/assetdelivery.roblox.com/v1/assetId/77/version/5",
+                "https://cdn.example/77-5",
+            ]
+        );
     }
 
     /// Offline nothing goes out; cached thumbnails,

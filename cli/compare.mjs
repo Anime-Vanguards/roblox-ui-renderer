@@ -13,7 +13,7 @@ import { runLuau, captureViewport, captureEngine, studioCaptureMethod, luauStrin
 import { withStudioLock } from "./lock.mjs";
 import { OUT_DIR, sharedStatePath, textSubpixel } from "./paths.mjs";
 import { findEngine } from "./engine.mjs";
-import { withoutCookie } from "./assets.mjs";
+import { assetKeyFromUri, withoutCookie } from "./assets.mjs";
 import { execFileSync } from "node:child_process";
 import { render } from "./rur.mjs";
 import { CLOCK_LUAU, writeClock, clockSummary, withRecordedClock } from "./clock.mjs";
@@ -724,9 +724,13 @@ export function compareLayout(studioNodes, scene, dpi, targetOffset) {
 	return { studioNodes: studioNodes.length - hidden, hiddenStudioNodes: hidden, ourNodes: ours.length, matched, exact, within1, propMismatches, contentMismatches, extraNodes: extra, rows };
 }
 
-// Asset ids compare by number ("rbxassetid://1" = "http://www.roblox.com/asset/?id=1")
+// Asset ids compare by number and pinned version ("rbxassetid://1" = "http://www.roblox.com/asset/?id=1",
+// "rbxassetid://1&version=2" = "rbxassetid://1&Version=02", neither = "rbxassetid://1&version=3"), as a render
+// reads them (cli/assets.mjs parseAssetUri); other text by the first id it holds
 function assetKey(uri) {
 	const text = String(uri || "");
+	const key = assetKeyFromUri(text);
+	if (key) return key;
 	const id = text.match(/(?:rbxassetid:\/\/|[?&]id=)(\d+)/i);
 	return id ? id[1] : text.trim().toLowerCase();
 }

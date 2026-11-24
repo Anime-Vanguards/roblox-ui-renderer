@@ -8,7 +8,8 @@
 // rbxasset://      → the local Roblox Studio install (content/, ExtraContent/, PlatformContent/pc/)
 // rbxassetid://N   → assetdelivery.roblox.com (public route first; for a private asset Open Cloud's asset
 //                    delivery with the API key, then the account), then an open Studio for an image
-//                    asset delivery refuses (cli/studio-images.mjs, when a bridge is set)
+//                    asset delivery refuses (cli/studio-images.mjs, when a bridge is set). A pinned version,
+//                    rbxassetid://N&version=V, is cached apart as N-vV (parseAssetUri, assetKey).
 // rbxthumb://...   → thumbnails.roblox.com
 
 import fs from "node:fs";
@@ -132,11 +133,13 @@ function recordDownload(file, body, extra = {}) {
 	writeAtomic(recordFile(file), JSON.stringify({ sha256: sha256(body), size: body.length, ...extra }));
 }
 
-// An image Studio decoded for rur (cli/studio-images.mjs), stored as assets/<id>.png. Not a stand-in: its
-// pixels are the asset's own, as Studio loads them, re-encoded losslessly. Its record says
-// "source": "studio", so the cache can tell it from a download (`rur assets warm --refresh` reads it again).
+// An image Studio decoded for rur (cli/studio-images.mjs), stored as assets/<key>.png (the id, or `<id>-v<version>`
+// for a pinned version). Not a stand-in: its pixels are the asset's own, as Studio loads them, re-encoded
+// losslessly. Its record says "source": "studio", so the cache can tell it from a download (`rur assets warm
+// --refresh` reads it again).
 export function storeStudioImage(assetId, png) {
-	const id = String(assetId).replace(/\D/g, "");
+	const id = keyOf(assetId);
+	if (!id) throw new Error(`not an asset id: ${assetId}`);
 	const cached = cachedFile(id);
 	fs.mkdirSync(ASSET_DIR, { recursive: true });
 	const file = path.join(ASSET_DIR, `${id}.png`);
@@ -187,21 +190,140 @@ export function studioContentRoots() {
 	return roots;
 }
 
-export function assetIdFromUri(uri) {
-	const trimmed = String(uri).trim();
-	let match = /^rbxassetid:\/\/(\d+)/i.exec(trimmed);
-	if (match) return match[1];
-	match = /roblox\.com\/asset\/?\?.*?\bid=(\d+)/i.exec(trimmed);
-	if (match) return match[1];
-	match = /^(\d+)$/.exec(trimmed);
-	if (match) return match[1];
-	return null;
+// The asset delivery asset a content URI names, as native/src/resolve.rs asset_ref reads it (both are checked
+// against native/tests/fixtures/content-ids.json): null for text that is no asset id, { error } for a spelling a
+// Roblox client loads nothing for, else { id, version } (digit strings; version null for the latest).
+// `rbxassetid://N&version=V` is how Roblox saves a pinned version (docs/assets.md "Pinned versions").
+export function parseAssetUri(uri) {
+	const SCHEME = "rbxassetid://";
+	const text = String(uri);
+	const loadsNothing = why => ({ error: `a Roblox client loads nothing for this content id: ${why}` });
+	if (text.startsWith(SCHEME)) {
+		const rest = text.slice(SCHEME.length);
+		if (rest.includes("#")) return loadsNothing("it holds a #");
+		const amp = rest.indexOf("&");
+		if (amp >= 0) return pinnedAsset(rest.slice(0, amp), rest.slice(amp + 1));
+		const id = /^\d*/.exec(rest)[0];
+		if (!id) return null;
+		const after = rest[id.length];
+		if (after === "?" || after === "/" || after === "%") return loadsNothing(`a ${after} follows its id`);
+		return { id, version: null };
+	}
+	const trimmed = rustTrim(text);
+	const lower = asciiLower(trimmed);
+	if (lower.startsWith(SCHEME)) return loadsNothing(text.startsWith(trimmed) ? "its scheme is not in lower case" : "white space comes before its scheme");
+	// /roblox\.com\/asset\/?\?.*?\bid=(\d+)/i
+	const at = lower.indexOf("roblox.com/asset");
+	if (at >= 0) {
+		let rest = lower.slice(at + "roblox.com/asset".length);
+		if (rest.startsWith("/")) rest = rest.slice(1);
+		if (!rest.startsWith("?")) return null;
+		const query = rest.slice(1);
+		for (let search = 0, start; (start = query.indexOf("id=", search)) >= 0; search = start + 3) {
+			const boundary = start === 0 || !/[A-Za-z0-9_]/.test(query[start - 1]);
+			const id = /^\d*/.exec(query.slice(start + 3))[0];
+			if (boundary && id) {
+				const version = versionReader();
+				for (const [key, value] of queryPairs(query)) if (asciiLower(key) === "version") version.read(value);
+				return { id, version: version.version };
+			}
+		}
+		return null;
+	}
+	return /^\d+$/.test(trimmed) ? { id: trimmed, version: null } : null;
 }
 
-// Where the usable cache file of `id` came from: "studio" (storeStudioImage), "download", or null when
-// there is none (nothing cached, or a file without its matching record)
+// rbxassetid://N&<query> (resolve.rs pinned): the id with white space around it at most; `version` in any case
+// (versionReader), a lowercase `id` holding an id names that asset, `assetversionid` in any case is refused
+function pinnedAsset(idText, query) {
+	let id = canonicalId(rustTrim(idText));
+	if (!id) return { error: "a Roblox client loads nothing for this content id: no asset id comes before its &" };
+	const version = versionReader();
+	for (const [key, value] of queryPairs(query)) {
+		const lower = asciiLower(key);
+		if (lower === "assetversionid") return { error: "an assetversionid names an asset version by its own id, which rur does not fetch" };
+		if (key === "id") id = (value !== null && canonicalId(value)) || id;
+		else if (lower === "version") version.read(value);
+	}
+	return { id, version: version.version };
+}
+
+// The `key=value` pairs of a query in order, form-decoded (`+` a space, then %xx) and trimmed; no `=`: value null
+function queryPairs(query) {
+	const decode = part => rustTrim(percentDecode(part.replace(/\+/g, " ")));
+	return query.split("&").filter(Boolean).map(pair => {
+		const equals = pair.indexOf("=");
+		return equals < 0 ? [decode(pair), null] : [decode(pair.slice(0, equals)), decode(pair.slice(equals + 1))];
+	});
+}
+
+// resolve.rs percent_decode: %xx escapes of the UTF-8 bytes; a % without two hex digits stays
+function percentDecode(text) {
+	const bytes = Buffer.from(text, "utf8");
+	const out = [];
+	for (let index = 0; index < bytes.length; index++) {
+		const hex = bytes[index] === 0x25 && index + 2 < bytes.length ? /^[0-9a-fA-F]{2}$/.exec(bytes.subarray(index + 1, index + 3).toString("latin1")) : null;
+		if (hex) {
+			out.push(parseInt(hex[0], 16));
+			index += 2;
+		} else out.push(bytes[index]);
+	}
+	return Buffer.from(out).toString("utf8");
+}
+
+// 1 to 20 digits, a u64 other than 0, without leading zeros (resolve.rs canonical_id)
+function canonicalId(text) {
+	if (!/^\d{1,20}$/.test(text)) return null;
+	const id = BigInt(text);
+	return id > 0n && id < 2n ** 64n ? String(id) : null;
+}
+
+// resolve.rs VersionReader: each `version` value that is an integer (a sign, then decimal digits or 0x and hex,
+// within i64) replaces the one before, 0 or less the latest; the first that is none ends the reading
+function versionReader() {
+	const reader = {
+		version: null,
+		done: false,
+		read(value) {
+			if (reader.done) return;
+			const match = value === null ? null : /^([+-]?)(?:0[xX]([0-9a-fA-F]+)|(\d+))$/.exec(value);
+			if (!match) {
+				reader.done = true;
+				return;
+			}
+			const magnitude = match[2] !== undefined ? BigInt(`0x${match[2]}`) : BigInt(match[3]);
+			const number = match[1] === "-" ? -magnitude : magnitude;
+			if (number < -(2n ** 63n) || number > 2n ** 63n - 1n) reader.done = true;
+			else reader.version = number > 0n ? String(number) : null;
+		},
+	};
+	return reader;
+}
+
+// Rust's str::trim: Unicode White_Space at both ends (JavaScript's trim also takes the byte order mark)
+const rustTrim = text => text.replace(/^[\p{White_Space}]+|[\p{White_Space}]+$/gu, "");
+const asciiLower = text => text.replace(/[A-Z]/g, letter => letter.toLowerCase());
+
+// An asset's name in the cache (resolve.rs AssetRef key): the id for the latest version, `<id>-v<version>` for a
+// pinned one; and back to a content id that names it
+export const assetKey = ({ id, version }) => (version ? `${id}-v${version}` : id);
+export const isAssetKey = key => /^\d+(?:-v\d+)?$/.test(String(key));
+export function assetKeyFromUri(uri) {
+	const asset = parseAssetUri(uri);
+	return asset && !asset.error ? assetKey(asset) : null;
+}
+export function assetKeyUri(key) {
+	const [id, version] = String(key).split("-v");
+	return version ? `rbxassetid://${id}&version=${version}` : `rbxassetid://${id}`;
+}
+// A cache key from a key, or from other text holding an id (its digits, as before pinned versions)
+const keyOf = assetId => (isAssetKey(assetId) ? String(assetId) : String(assetId).replace(/\D/g, ""));
+
+// Where the usable cache file of `key` (an id, or `<id>-v<version>`) came from: "studio" (storeStudioImage),
+// "download", or null when there is none (nothing cached, or a file without its matching record)
 export function cachedSource(assetId) {
-	const id = String(assetId).replace(/\D/g, "");
+	const id = keyOf(assetId);
+	if (!id) return null;
 	const cached = cachedFile(id);
 	if (!cached || !downloaded(cached, fs.readFileSync(cached))) return null;
 	try {
@@ -236,15 +358,16 @@ export async function storeFromStudio(ids, env = process.env) {
 	}
 }
 
-// The asset ids asset delivery would not give (a private image), read from an open Studio when a bridge is
-// configured; an id Studio cannot read either keeps its error, with Studio's reason. `results`: resolveAll's.
+// The assets asset delivery would not give (a private image), read from an open Studio when a bridge is
+// configured, by cache key (a pinned version as `<id>-v<version>`); one Studio cannot read either keeps its
+// error, with Studio's reason. `results`: resolveAll's.
 export async function readRefusedFromStudio(results, env = process.env) {
-	const refused = [...results].filter(([uri, result]) => result.error && assetIdFromUri(uri) && !/without an image texture/.test(result.error));
+	const refused = [...results].filter(([uri, result]) => result.error && assetKeyFromUri(uri) && !/without an image texture/.test(result.error));
 	if (!refused.length || !studioImagesEnabled(env)) return;
-	const { files, errors } = await storeFromStudio([...new Set(refused.map(([uri]) => assetIdFromUri(uri)))], env);
+	const { files, errors } = await storeFromStudio([...new Set(refused.map(([uri]) => assetKeyFromUri(uri)))], env);
 	for (const [uri, result] of refused) {
-		const id = assetIdFromUri(uri);
-		if (files.has(id)) results.set(uri, files.get(id));
-		else if (errors.has(id)) results.set(uri, { error: `${result.error}; ${errors.get(id)}` });
+		const key = assetKeyFromUri(uri);
+		if (files.has(key)) results.set(uri, files.get(key));
+		else if (errors.has(key)) results.set(uri, { error: `${result.error}; ${errors.get(key)}` });
 	}
 }

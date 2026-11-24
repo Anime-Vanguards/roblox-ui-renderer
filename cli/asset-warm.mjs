@@ -4,7 +4,7 @@
 // Studio (readRefusedFromStudio), as a render would, so later renders find them all cached and need
 // neither Studio nor the network. --refresh reads the ids cached from Studio again (an image re-uploaded
 // under the same id, or a cache to rebuild).
-import { assetIdFromUri, cachedSource, readRefusedFromStudio, resolveAll, storeFromStudio, studioImagesEnabled } from "./assets.mjs";
+import { assetKeyFromUri, assetKeyUri, cachedSource, readRefusedFromStudio, resolveAll, storeFromStudio, studioImagesEnabled } from "./assets.mjs";
 import { studioImageIds } from "./studio-images.mjs";
 
 // `resolve`: how the ids are downloaded (resolveAll's signature; tests give their own)
@@ -21,13 +21,14 @@ export async function warmAssets({ refresh = false, env = process.env, resolve =
 		const { files } = await storeFromStudio(stale, env);
 		refreshed.push(...files.keys());
 	}
-	// Studio is read here, with this environment, for what asset delivery refused
-	const results = await resolve(ids.map(id => `rbxassetid://${id}`), { offline: false, studio: false });
+	// Studio is read here, with this environment, for what asset delivery refused (ids are cache keys: a pinned
+	// version is asked for as rbxassetid://<id>&version=<version>)
+	const results = await resolve(ids.map(assetKeyUri), { offline: false, studio: false });
 	await readRefusedFromStudio(results, env);
 	const counts = { cached: 0, downloaded: 0, fromStudio: 0, refreshed: refreshed.length };
 	const missing = [];
 	for (const [uri, result] of results) {
-		const id = assetIdFromUri(uri);
+		const id = assetKeyFromUri(uri);
 		if (result.error) missing.push({ id, error: result.error });
 		else if (refreshed.includes(id)) continue;
 		else if (before.get(id)) counts.cached++;

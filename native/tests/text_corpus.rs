@@ -38,6 +38,8 @@ pub fn shared_state_path(repo: &std::path::Path, relative: &str) -> std::path::P
 pub use rur_native::glyphs;
 // ... and counts its caches with the crate's counters (a profile's `caches`)
 pub use rur_native::cache_counts;
+// ... and reads cloud font ids with the crate's content id reader
+pub use rur_native::resolve;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

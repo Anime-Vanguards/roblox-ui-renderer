@@ -29,8 +29,12 @@ const DIGITS: [[u8; 5]; 10] = [
     [0b111, 0b101, 0b111, 0b001, 0b111],
 ];
 
-/// The longest run of digits in a content URI (an asset id), or "" when it has none
+/// The asset id a content URI names (not a pinned version's number), else its longest run of digits, or ""
+/// when it has none
 pub fn label(uri: &str) -> String {
+    if let Some(Ok(asset)) = crate::resolve::asset_ref(uri) {
+        return asset.id().to_string();
+    }
     uri.split(|character: char| !character.is_ascii_digit()).max_by_key(|run| run.len()).unwrap_or_default().to_string()
 }
 
@@ -106,6 +110,7 @@ mod tests {
     fn checkerboard_with_the_id_on_a_band() {
         assert_eq!(label("rbxassetid://117011682359398"), "117011682359398");
         assert_eq!(label("rbxthumb://type=Asset&id=42&w=150&h=150"), "150");
+        assert_eq!(label("rbxassetid://42&version=12345"), "42", "the id, not the version");
         let rgba = pixels("117011682359398");
         assert_eq!(rgba.len(), (SIZE * SIZE * 4) as usize);
         assert_eq!(at(&rgba, 0, 0), MAGENTA);

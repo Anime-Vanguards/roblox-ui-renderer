@@ -3,7 +3,7 @@
 // id Studio cannot read keeps its error with Studio's reason. Many ids go in one call, compressed when
 // Node supports it, until its budget is used; the rest go in the next. The one-shot `store` command the
 // native resolver runs for a render's refused images answers what it stored. `rur assets warm` reads what
-// the place names. Refusals are synthetic (the engine's downloader is checked by `cargo test download::`),
+// the place names. A pinned version (rbxassetid://N&version=V) is read and cached as its own image, N-vV. Refusals are synthetic (the engine's downloader is checked by `cargo test download::`),
 // and so is the bridge (an HTTP one, as robloxstudio-mcp --http-only serves).
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -45,12 +45,15 @@ const bridge = http.createServer((request, response) => {
 		assert.equal(`${request.method} ${request.url}`, "POST /mcp/execute_luau");
 		const { code, sessionId } = JSON.parse(body);
 		assert.equal(sessionId, "edit-1", "only edit sessions are asked");
-		// The place scan (rur assets warm): its GUI names 41 and 42 (both readable) and 43 (not the creator's)
+		// The place scan (rur assets warm): its GUI names 41 (also pinned at version 3) and 42 (both readable),
+		// 43 (not the creator's), and 45 in a spelling a Roblox client loads nothing for
 		if (code.includes("GetDescendants")) {
 			scans++;
-			return reply({ content: [{ type: "text", text: JSON.stringify({ success: true, returnValue: JSON.stringify(["41", "42", "43"]) }) }] });
+			return reply({ content: [{ type: "text", text: JSON.stringify({ success: true, returnValue: JSON.stringify(["rbxassetid://41", "41", "rbxassetid://41&version=3", "42", "http://www.roblox.com/asset/?id=43", "rbxassetid://45?version=1"]) }) }] });
 		}
-		const ids = /local Ids = \{ ([\d, ]*) \}/.exec(code)[1].split(", ");
+		// Ids by number, pinned versions by content id
+		const ids = /local Ids = \{ (.*) \}/.exec(code)[1].split(", ").map(entry => (entry.startsWith('"') ? JSON.parse(entry) : entry));
+		assert.ok(ids.every(id => /^\d+$|^rbxassetid:\/\/\d+&version=\d+$/.test(id)), `only ids reach the Luau: ${ids}`);
 		const compressed = code.includes("if true then");
 		assert.equal(compressed, typeof zlib.zstdDecompressSync === "function", "Studio is asked to compress exactly when this Node can decompress");
 		luauCalls.push(ids);
@@ -89,11 +92,11 @@ try {
 	delete process.env.ROBLOX_BROKER_TOKEN;
 	process.env.ROBLOX_BROKER_CREDENTIALS = path.join(temporary, "absent.json");
 	process.env.RUR_PROJECT = path.join(temporary, "no-project");
-	const { assetIdFromUri, cachedSource, readRefusedFromStudio } = await import(pathToFileURL(path.join(repo, "cli", "assets.mjs")).href);
+	const { assetKeyFromUri, cachedSource, readRefusedFromStudio } = await import(pathToFileURL(path.join(repo, "cli", "assets.mjs")).href);
 	// What the engine answers when asset delivery refuses every id it has not cached
 	const refused = uris => new Map(uris.map(uri => [uri, { error: REFUSAL }]));
 	const refuseUncached = async uris => new Map(uris.map(uri => {
-		const id = assetIdFromUri(uri);
+		const id = assetKeyFromUri(uri);
 		return [uri, cachedSource(id) ? { file: path.join(state, "assets", `${id}.png`), kind: "image", mime: "image/png" } : { error: REFUSAL }];
 	}));
 
@@ -118,10 +121,21 @@ try {
 		const record = JSON.parse(fs.readFileSync(path.join(path.dirname(result.file), "downloaded", `${path.basename(result.file)}.json`), "utf8"));
 		assert.equal(record.source, "studio");
 		assert.equal(record.size, fs.statSync(result.file).size);
-		assert.equal(cachedSource(assetIdFromUri(uri)), "studio", "read once: cached afterwards");
+		assert.equal(cachedSource(assetKeyFromUri(uri)), "studio", "read once: cached afterwards");
 	}
 	assert.match(results.get("rbxassetid://33").error, /Authentication required.*; Studio \(Test Place\) could not read it: .*no permission/);
 	assert.deepEqual(luauCalls, [["31", "32", "33"], ["33"]], "the ids in one call, the rest in the next once its budget is used");
+
+	// A pinned version: Studio loads it by its content id, and it is cached apart from the latest version
+	luauCalls = [];
+	const latestPng = fs.readFileSync(path.join(state, "assets", "31.png"));
+	fs.writeFileSync(path.join(state, "assets", "31.png"), Buffer.concat([latestPng, Buffer.from("latest")]));
+	results = refused(["rbxassetid://31&Version=02&x=y", "rbxassetid://31&version=2"]);
+	await readRefusedFromStudio(results);
+	assert.deepEqual(luauCalls, [["rbxassetid://31&version=2"]], "one read per version, by its numbers");
+	for (const result of results.values()) assert.equal(path.basename(result.file), "31-v2.png");
+	assert.equal(cachedSource("31-v2"), "studio");
+	assert.ok(fs.readFileSync(path.join(state, "assets", "31.png")).equals(Buffer.concat([latestPng, Buffer.from("latest")])), "the latest version's file is left alone");
 
 	// A model without a texture is not Studio's to read; RUR_STUDIO_IMAGES=0 turns reading off
 	luauCalls = [];
@@ -153,13 +167,14 @@ try {
 	const { warmAssets } = await import(pathToFileURL(path.join(repo, "cli", "asset-warm.mjs")).href);
 	await assert.rejects(warmAssets({ env: {}, resolve: refuseUncached }), /set RUR_STUDIO_MCP_URL or \w+ to a Studio MCP bridge/);
 	const pick = ({ images, cached, downloaded, fromStudio, refreshed, missing }) => ({ images, cached, downloaded, fromStudio, refreshed, missing: missing.map(entry => entry.id) });
-	assert.deepEqual(pick(await warmAssets({ resolve: refuseUncached })), { images: 3, cached: 0, downloaded: 0, fromStudio: 2, refreshed: 0, missing: ["43"] });
+	assert.deepEqual(pick(await warmAssets({ resolve: refuseUncached })), { images: 4, cached: 0, downloaded: 0, fromStudio: 3, refreshed: 0, missing: ["43"] });
+	assert.equal(cachedSource("41-v3"), "studio", "the pinned version is read as its own image");
 	luauCalls = [];
-	assert.deepEqual(pick(await warmAssets({ resolve: refuseUncached })), { images: 3, cached: 2, downloaded: 0, fromStudio: 0, refreshed: 0, missing: ["43"] });
+	assert.deepEqual(pick(await warmAssets({ resolve: refuseUncached })), { images: 4, cached: 3, downloaded: 0, fromStudio: 0, refreshed: 0, missing: ["43"] });
 	assert.deepEqual(luauCalls, [["43"]], "a warm cache asks Studio only for what it could not read");
-	assert.deepEqual(pick(await warmAssets({ refresh: true, resolve: refuseUncached })), { images: 3, cached: 0, downloaded: 0, fromStudio: 0, refreshed: 2, missing: ["43"] });
+	assert.deepEqual(pick(await warmAssets({ refresh: true, resolve: refuseUncached })), { images: 4, cached: 0, downloaded: 0, fromStudio: 0, refreshed: 3, missing: ["43"] });
 	assert.equal(scans, 3);
-	console.log("Asset studio: refused images read from Studio, cached with a studio record, the one-shot store command, opt-out and assets warm passed.");
+	console.log("Asset studio: refused images read from Studio, cached with a studio record, pinned versions apart, the one-shot store command, opt-out and assets warm passed.");
 } finally {
 	bridge.close();
 	for (const [name, value] of previousEnv) {
