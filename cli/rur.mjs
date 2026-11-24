@@ -646,12 +646,15 @@ async function doctor({ fix = false } = {}) {
 	const { missingPackages } = await import("./packages.mjs");
 	const missing = missingPackages();
 	// The engine's downloader reads the cookie or the broker and the API key; it says only which (never a value)
-	const credentials = await accountAccess();
+	const credentials = await accountAccess().catch(() => undefined);
 	const access = credentials?.access;
 	// ror, which draws ViewportFrames, and the Studio install fonts and textures come from (with what is wrong with
 	// RUR_ROBLOX_CONTENT): as the engine finds them (`rur-native doctor`)
 	const { findEngine } = await import("./engine.mjs");
-	const engine = findEngine();
+	let engine = null;
+	try {
+		engine = findEngine();
+	} catch { /* reported in the engine field below */ }
 	let viewports = "unknown until the native engine is built";
 	let studio = null;
 	if (engine) {

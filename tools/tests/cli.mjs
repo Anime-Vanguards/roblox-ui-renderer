@@ -704,6 +704,50 @@ console.log(JSON.stringify({ summary, contacted }));
 	console.log("CLI through a linked folder: PASS (rur and inspect run when started by a symlinked path, and take --state-dir)");
 }
 
+// RUR_NATIVE_ENGINE naming a missing file (or a directory) is an error naming the path and what to do,
+// never a fallback into a cold build.
+{
+	const os = await import("node:os");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-cli-missing-engine-"));
+	const missingPath = path.join(dir, "no-such-rur-native.exe");
+	const stateDir = path.join(dir, "state");
+	const env = { ...process.env, RUR_NATIVE_ENGINE: missingPath, RUR_STATE_DIR: stateDir, RUR_NO_SERVICE: "1" };
+	try {
+		// Direct findEngine() / ensureEngine() check
+		const checkMod = spawnSync(process.execPath, ["--input-type=module", "-e", `
+import assert from "node:assert/strict";
+import { findEngine, ensureEngine } from "./cli/engine.mjs";
+assert.throws(() => findEngine(), err => err.message.includes(${JSON.stringify(missingPath)}) && /unset RUR_NATIVE_ENGINE/i.test(err.message));
+await assert.rejects(() => ensureEngine(), err => err.message.includes(${JSON.stringify(missingPath)}) && /unset RUR_NATIVE_ENGINE/i.test(err.message));
+`], { cwd: root, encoding: "utf8", windowsHide: true, env });
+		assert.equal(checkMod.status, 0, checkMod.stderr);
+
+		// A directory path is also refused as not a file
+		const checkDir = spawnSync(process.execPath, ["--input-type=module", "-e", `
+import assert from "node:assert/strict";
+import { findEngine } from "./cli/engine.mjs";
+assert.throws(() => findEngine(), err => err.message.includes(${JSON.stringify(dir)}) && /not a file/i.test(err.message));
+`], { cwd: root, encoding: "utf8", windowsHide: true, env: { ...env, RUR_NATIVE_ENGINE: dir } });
+		assert.equal(checkDir.status, 0, checkDir.stderr);
+
+		// End-to-end CLI invocation refuses and never starts a build into RUR_STATE_DIR
+		const cliRes = spawnSync(process.execPath, ["cli/rur.mjs", "cost", "--help"], { cwd: root, encoding: "utf8", windowsHide: true, env });
+		assert.notEqual(cliRes.status, 0, "rur with missing RUR_NATIVE_ENGINE must exit non-zero");
+		assert.ok(cliRes.stderr.includes(missingPath), `expected missing path in stderr, got: ${cliRes.stderr}`);
+		assert.match(cliRes.stderr, /unset RUR_NATIVE_ENGINE/i);
+		assert.equal(fs.existsSync(path.join(stateDir, "native-app")), false, "missing RUR_NATIVE_ENGINE must never trigger a native-app build");
+
+		// `rur doctor` still runs and reports the missing RUR_NATIVE_ENGINE
+		const docRes = spawnSync(process.execPath, ["cli/rur.mjs", "doctor"], { cwd: root, encoding: "utf8", windowsHide: true, env });
+		assert.equal(docRes.status, 0, docRes.stderr);
+		const doc = JSON.parse(docRes.stdout);
+		assert.ok(doc.engine.includes(missingPath) && doc.engine.includes("missing"), doc.engine);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+	console.log("CLI missing RUR_NATIVE_ENGINE: PASS (errors with path and remedy, never starts a cold build)");
+}
+
 // `rur cost`, `rur cost compare`, and `rur sequence --cost`: deterministic Roblox UI cost pass, Studio CanvasGroup RT
 // bytes, calibrated/refused timings, multi-frame sequence layout churn, and A/B diff.
 {

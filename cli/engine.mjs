@@ -8,7 +8,8 @@
 // toolchain the build fails and the host stops with a message saying so (docs/setup.md "Requirements").
 //
 // RUR_NATIVE_ENGINE=<exe> names an already-resolved binary (a parent process, e.g. the sweep, passes
-// it on to its children so they do not re-check the build).
+// it on to its children so they do not re-check the build). Naming a missing file is an error rather
+// than falling back to a build.
 //
 // --isolated (RUR_ISOLATED=1, cli/paths.mjs): the binary the state dir's .cache/native-app/manifest.json
 // names (checksum verified) is used even when the sources changed since it was built (said in one
@@ -27,7 +28,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // findNativeApp hashes every source file and the binary; hosts ask often (every live session, every
 // standby), so the answer is kept while none of those files changed (size + mtime).
 let cached = null;
-let warnedGiven = false;
 
 function stampFiles() {
 	const files = [...APP_DIRECTORIES.map(directory => path.join(directory, "manifest.json")), path.join(CRATE_DIRECTORY, "Cargo.toml"), path.join(CRATE_DIRECTORY, "Cargo.lock"),
@@ -75,13 +75,20 @@ function isolatedEngine() {
 	return isolatedChoice;
 }
 
-// The current engine binary, or null when there is no build for the current sources
+// The current engine binary, or null when there is no build for the current sources.
+// Throws when RUR_NATIVE_ENGINE names a missing file or non-file instead of falling back to a build.
 export function findEngine() {
 	const given = process.env.RUR_NATIVE_ENGINE;
-	if (given && fs.existsSync(given)) return given;
-	if (given && !warnedGiven) {
-		warnedGiven = true;
-		process.stderr.write(`rur: RUR_NATIVE_ENGINE=${given} does not exist; using the build for the current sources\n`);
+	if (given) {
+		try {
+			if (fs.statSync(given).isFile()) return given;
+		} catch {
+			// missing
+		}
+		throw new Error(
+			`RUR_NATIVE_ENGINE=${given} does not exist (or is not a file). `
+			+ "Point RUR_NATIVE_ENGINE at an existing rur-native binary, or unset RUR_NATIVE_ENGINE to use the checkout's build."
+		);
 	}
 	// None yet: the build of ensureEngine makes one, and findEngine after it finds it current
 	if (isolated() && isolatedEngine()) return isolatedChoice;
