@@ -262,7 +262,9 @@ impl StandbyKey {
                     }
                     let path = entry.path();
                     if kind.is_dir() {
-                        if !files && (name.starts_with('.') || lower.ends_with(".lua") || lower.ends_with(".luau")) {
+                        // The engine's project scan: a name that starts with a dot mounts as any other
+                        // (pesde's Packages/.pesde), but nothing in a .git is listed
+                        if !files && (name == ".git" || lower.ends_with(".lua") || lower.ends_with(".luau")) {
                             return 0;
                         }
                         let own = std::fs::metadata(&path).map_or(0, |metadata| stamp(&path, &metadata));
@@ -709,6 +711,25 @@ mod tests {
             options.standby_key().unwrap(),
             other_project.standby_key().unwrap()
         );
+    }
+
+    /// A folder made below Packages/.pesde changes what the engine mounts, so a standby is stale; one
+    /// made in a .git is not (the engine lists nothing in it).
+    #[test]
+    fn a_standby_goes_stale_below_a_dot_folder_but_not_below_git() {
+        let dir = std::env::temp_dir().join(format!("rur-standby-dots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let roots = dir.join("src");
+        for folder in ["ReplicatedStorage/Packages/.pesde", "ReplicatedStorage/.git/objects"] {
+            std::fs::create_dir_all(roots.join(folder)).unwrap();
+        }
+        let key = StandbyKey(vec!["--roots".into(), roots.to_string_lossy().into_owned(), dir.to_string_lossy().into_owned()]);
+        let before = key.fingerprint();
+        std::fs::create_dir_all(roots.join("ReplicatedStorage/.git/objects/ab")).unwrap();
+        assert_eq!(key.fingerprint(), before, "a folder made in .git");
+        std::fs::create_dir_all(roots.join("ReplicatedStorage/Packages/.pesde/pkg")).unwrap();
+        assert_ne!(key.fingerprint(), before, "a folder made in Packages/.pesde");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn reply(worker: &RuntimeWorker) -> Value {

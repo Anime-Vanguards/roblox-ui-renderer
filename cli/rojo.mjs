@@ -309,11 +309,15 @@ export function detectRojoProject(args, defaultProject) {
 const SCRIPT_SUFFIXES = [".server.luau", ".server.lua", ".client.luau", ".client.lua", ".luau", ".lua"];
 
 // The instance name of script file `name` (its name less the suffix: Foo.story.luau is Foo.story), or null for a file
-// the engine doesn't mount as a script
+// the engine doesn't mount as a script. As Rojo names them (the emulator's src/project.rs script_info): a file named
+// only by a suffix loses a .server or .client one whole (.server.luau is a Script named "") and keeps a module's
+// (.luau is a ModuleScript named .luau)
 function scriptName(name) {
 	const lower = name.toLowerCase();
-	const suffix = SCRIPT_SUFFIXES.find(suffix => lower.length > suffix.length && lower.endsWith(suffix));
-	return suffix === undefined ? null : name.slice(0, name.length - suffix.length);
+	const suffix = SCRIPT_SUFFIXES.find(suffix => lower.endsWith(suffix));
+	if (suffix === undefined) return null;
+	const stem = name.slice(0, name.length - suffix.length);
+	return stem === "" && !/^\.(server|client)\./.test(suffix) ? name : stem;
 }
 
 // The parts of `file`'s path below `dir` ([] for `dir` itself), or null when it isn't inside
@@ -373,8 +377,8 @@ function mountedPath(target, at, value, depth = 0, plain = false) {
 	if (!parts) return null;
 	// A file mounts under its mount's name (never as a service)
 	if (!parts.length) return at.length > 1 ? at : null;
-	// (names starting with a dot are not mounted)
-	if (parts.some(part => part.startsWith("."))) return null;
+	// (names starting with a dot mount as any other, but nothing in a .git below the mount: it mounts as an empty Folder)
+	if (parts.slice(0, -1).includes(".git")) return null;
 	if (at.length > 1 && !plain) {
 		const nested = nestedPath(target, value, at.slice(0, -1), at[at.length - 1], depth, true);
 		if (nested !== undefined) return nested;
@@ -403,7 +407,7 @@ function mountedPath(target, at, value, depth = 0, plain = false) {
 // The instance path ([names]) the engine mounts script file `file` at in a run with layout roots `roots`
 // (<root>/<Service>/...: --roots, a project's places) and `mounts` (runMounts: a Rojo project, --mount), as the emulator's
 // src/project.rs names what it mounts: a script by its file name less its suffix, an init script as its folder, a folder
-// with a default.project.json as that project, nothing whose name starts with a dot. So `rur compare` asks Studio for
+// with a default.project.json as that project, nothing in a .git below a mount. So `rur compare` asks Studio for
 // the module the offline run requires. The first mount that holds the file wins, then the first root; null when none
 // does (render then runs the file as a fixture of its own).
 export function instancePathOf(file, { roots = [], mounts = [] } = {}) {

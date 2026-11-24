@@ -25,6 +25,13 @@ pub fn mount_read(name: &str) -> bool {
     lower.ends_with(".rbxm") || lower.ends_with(".rbxmx") || lower.ends_with(".meta.json") || lower.ends_with(".project.json")
 }
 
+/// Whether a listing of a project tree passes over the entry named `name` and all below it: node_modules,
+/// and a .git, which the engine mounts as an empty Folder whatever it holds. Other names that start with
+/// a dot mount as any other (pesde's Packages/.pesde), so changes below them count.
+pub fn unlisted(name: &str) -> bool {
+    name == ".git" || name == "node_modules"
+}
+
 /// The changes counted under `root` since its watch started, or None while it cannot be watched
 pub fn changes(root: &Path, scope: Scope) -> Option<u64> {
     imp::changes(root, scope)
@@ -157,8 +164,8 @@ mod imp {
             let (next, action, name_bytes) = (field(0) as usize, field(4), field(8) as usize);
             let name: Vec<u16> = bytes.get(offset + 12..offset + 12 + name_bytes).unwrap_or_default().chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
             let name = String::from_utf16_lossy(&name);
-            // What a listing of the tree skips: hidden entries and node_modules
-            let skipped = name.split(['\\', '/']).any(|part| part.starts_with('.') || part == "node_modules");
+            // What a listing of the tree skips
+            let skipped = name.split(['\\', '/']).any(super::unlisted);
             if !skipped && (scope == Scope::Everything || action != ACTION_MODIFIED || super::mount_read(&name)) {
                 return true;
             }
@@ -216,6 +223,24 @@ mod tests {
         assert!(after_meta > start);
         std::fs::create_dir_all(root.join("a/b")).unwrap();
         assert!(settles(&root, Scope::Structure, after_meta) > after_meta);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn changes_below_a_dot_folder_count_but_not_below_git() {
+        let root = std::env::temp_dir().join(format!("rur-watch-dots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Packages/.pesde")).unwrap();
+        std::fs::create_dir_all(root.join(".git/objects")).unwrap();
+        let start = changes(&root, Scope::Structure).expect("watched");
+        // Git's own files: the engine lists nothing in a .git
+        std::fs::create_dir_all(root.join(".git/objects/ab")).unwrap();
+        std::fs::write(root.join(".git/objects/ab/cdef"), "x").unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(changes(&root, Scope::Structure), Some(start));
+        // A package pesde installs mounts
+        std::fs::create_dir_all(root.join("Packages/.pesde/pkg")).unwrap();
+        assert!(settles(&root, Scope::Structure, start) > start);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

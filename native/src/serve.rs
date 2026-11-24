@@ -945,7 +945,7 @@ pub fn fingerprint(repo: &Path, state_dir: &Path, args: &Args) -> u64 {
                     metadata = target;
                 }
                 if metadata.is_dir() {
-                    if name.starts_with('.') || name == "node_modules" {
+                    if crate::watch::unlisted(&name) {
                         return 0;
                     }
                     stamp(&path, &metadata).rotate_left(1) ^ walk(&path, files)

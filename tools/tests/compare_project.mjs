@@ -47,6 +47,8 @@ try {
 		"src/shared/Legacy.story.lua": STORY,
 		"src/shared/Absent.story.luau": STORY,
 		"src/shared/.hidden/Hidden.story.luau": STORY,
+		"src/shared/.luau": "return {}\n",
+		"src/shared/.git/Inside.story.luau": STORY,
 		"src/shared/init.story.luau": STORY,
 		"src/shared/Kit/default.project.json": JSON.stringify({ name: "UiKit", tree: { $path: "lib" } }),
 		"src/shared/Kit/lib/Button.story.luau": STORY,
@@ -73,6 +75,10 @@ try {
 		"src/shared/Card/Parts.luau": "ReplicatedStorage.Shared.Card.Parts",
 		"src/shared/Run.server.luau": "ReplicatedStorage.Shared.Run",
 		"src/shared/Legacy.story.lua": "ReplicatedStorage.Shared.Legacy.story",
+		// (names that start with a dot mount as Rojo builds them: a dot folder is a Folder, and a file named only
+		// by a module's suffix keeps it)
+		"src/shared/.hidden/Hidden.story.luau": "ReplicatedStorage.Shared..hidden.Hidden.story",
+		"src/shared/.luau": "ReplicatedStorage.Shared..luau",
 		"src/shared/Kit/lib/Button.story.luau": "ReplicatedStorage.Shared.UiKit.Button.story",
 		"src/server/Tool.story.luau": "ServerStorage.Tool.story",
 		"screens/Main.story.luau": "StarterGui.Screens.Main.story",
@@ -81,10 +87,10 @@ try {
 	};
 	const name = file => instancePathOf(at(file), { roots, mounts })?.join(".") ?? null;
 	for (const [file, full] of Object.entries(expected)) assert.equal(name(file), full, file);
-	// Not mounted: an init script after the folder's first one, a dot folder, init.* files that aren't the folder's
-	// script, what a nested project doesn't map, a service folder's own init script, a file at a root's top, a file
-	// outside every mount
-	for (const file of ["src/shared/Panel/init.luau", "src/shared/.hidden/Hidden.story.luau", "src/shared/init.story.luau", "src/shared/Kit/Other.story.luau", "src/server/init.luau", "layout/Loose.story.luau", "stories/Outside.story.luau"]) {
+	// Not mounted: an init script after the folder's first one, what a .git holds (an empty Folder), init.* files that
+	// aren't the folder's script, what a nested project doesn't map, a service folder's own init script, a file at a
+	// root's top, a file outside every mount
+	for (const file of ["src/shared/Panel/init.luau", "src/shared/.git/Inside.story.luau", "src/shared/init.story.luau", "src/shared/Kit/Other.story.luau", "src/server/init.luau", "layout/Loose.story.luau", "stories/Outside.story.luau"]) {
 		assert.equal(name(file), null, file);
 	}
 
@@ -145,7 +151,7 @@ return function() end
 	const output = JSON.parse(fs.readFileSync(at("out/probe/scene.json"), "utf8")).diagnostics.output || [];
 	const mounted = new Set(output.map(entry => String(entry.message)).filter(message => message.startsWith("MOUNTED ")).map(message => message.slice("MOUNTED ".length)));
 	for (const [file, full] of Object.entries(expected)) assert.ok(mounted.has(full), `the engine mounts ${file} at ${full} (it mounted ${[...mounted].join(", ")})`);
-	for (const unmounted of ["Hidden.story", "init.story", "Other.story", "Loose.story"]) assert.ok(![...mounted].some(full => full.endsWith(unmounted)), unmounted);
+	for (const unmounted of ["Inside.story", "init.story", "Other.story", "Loose.story"]) assert.ok(![...mounted].some(full => full.endsWith(unmounted)), unmounted);
 
 	// A stand-in Studio MCP bridge (cli/studio.mjs: newline-delimited JSON-RPC, execute_luau results paged through
 	// _G.__RUR_RESULT): it has the modules `present` names, answers the mount script as Studio's would and captures a
