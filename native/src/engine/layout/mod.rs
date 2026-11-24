@@ -243,6 +243,8 @@ pub struct Stats {
     pub skipped: u64,
     pub moved: u64,
     pub texts: u64,
+    /// Number of scroll passes applied (`process_pending_scrolls` entries that moved at least one record)
+    pub scroll_passes: u64,
     /// Records a scroll moved (`Pass::moved` while pending scrolls are applied)
     pub scroll_moved: u64,
 }
@@ -258,6 +260,7 @@ impl Stats {
         self.skipped += other.skipped;
         self.moved += other.moved;
         self.texts += other.texts;
+        self.scroll_passes += other.scroll_passes;
         self.scroll_moved += other.scroll_moved;
     }
 
@@ -272,6 +275,7 @@ impl Stats {
             skipped: self.skipped.saturating_sub(before.skipped),
             moved: self.moved.saturating_sub(before.moved),
             texts: self.texts.saturating_sub(before.texts),
+            scroll_passes: self.scroll_passes.saturating_sub(before.scroll_passes),
             scroll_moved: self.scroll_moved.saturating_sub(before.scroll_moved),
         }
     }

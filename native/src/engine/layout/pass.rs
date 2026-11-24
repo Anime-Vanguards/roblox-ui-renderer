@@ -2220,10 +2220,12 @@ impl<'a> Pass<'a> {
     }
 
     /// Finishes a record that moved in place: computed properties, a new version, and the
-    /// descendants moved along.
-    fn moved(&mut self, id: InstanceId) {
+    /// descendants moved along. `from_scroll` distinguishes scroll shifts from `store` same-shape moves.
+    fn moved(&mut self, id: InstanceId, from_scroll: bool) {
         let Some(record) = self.l.records.get(id) else { return };
-        self.l.stats.scroll_moved += 1;
+        if from_scroll {
+            self.l.stats.scroll_moved += 1;
+        }
         let (absolute_x, absolute_y) = absolute_position(record);
         let rotation = record.rotation;
         let n = self.l.ids.n;
@@ -2231,11 +2233,11 @@ impl<'a> Pass<'a> {
         self.set_absolute_position(id, absolute_x, absolute_y);
         self.set_number(id, n_rotation, rotation);
         self.bump(id);
-        self.shift_children(id);
+        self.shift_children(id, from_scroll);
     }
 
     /// Re-places the children of a moved record in place from their stored placement terms.
-    fn shift_children(&mut self, id: InstanceId) {
+    fn shift_children(&mut self, id: InstanceId, from_scroll: bool) {
         let Some(record) = self.l.records.get_mut(id) else { return };
         let (origin_x, origin_y) = if record.canvas_place.is_some() { locate_canvas(record) } else { (record.content.x, record.content.y) };
         let parent = ParentPlace::of(record);
@@ -2248,7 +2250,10 @@ impl<'a> Pass<'a> {
             let Some(child_record) = self.l.records.get_mut(child) else { continue };
             if child_record.place.is_some() {
                 locate(child_record, origin_x, origin_y, parent, visible);
-                self.moved(child);
+                if !from_scroll {
+                    self.l.stats.moved += 1;
+                }
+                self.moved(child, from_scroll);
             }
         }
         self.l.give_vec(children);
@@ -2320,8 +2325,12 @@ impl<'a> Pass<'a> {
             }
             if self.apply_scroll(id) {
                 self.bump(id);
-                self.shift_children(id);
-                applied.push((id, self.l.stats.scroll_moved - before, after));
+                self.shift_children(id, true);
+                let delta = self.l.stats.scroll_moved - before;
+                if delta > 0 {
+                    self.l.stats.scroll_passes += 1;
+                }
+                applied.push((id, delta, after));
             }
         }
         applied
@@ -2360,7 +2369,7 @@ impl<'a> Pass<'a> {
                 kept.rotation = record.rotation;
                 kept.visible = record.visible;
                 kept.place = record.place;
-                self.moved(id);
+                self.moved(id, false);
                 self.l.stored_stamps.set(id, stamp);
                 return;
             }

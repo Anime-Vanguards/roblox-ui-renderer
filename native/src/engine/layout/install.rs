@@ -209,10 +209,36 @@ pub fn pages(engine: &Engine, layout: InstanceId) -> Vec<InstanceId> {
     with_pass(engine, |pass| pass.pages(layout)).unwrap_or_default()
 }
 
+/// Ensures `id`'s tree is laid out so its records (e.g. `scroll_max`) are current, without flushing
+/// pending `CanvasPosition` scrolls that are about to be superseded.
+fn ensure_laid_out(engine: &Engine, id: InstanceId) {
+    let _memory = crate::memtrace::scope(crate::memtrace::Tag::Layout);
+    let price = with_pass(engine, |pass| {
+        if pass.state.dom.get(id).is_none() {
+            return 0.0;
+        }
+        let root = pass.find_root(id);
+        let mut price = pass.l.owed.remove(&root).unwrap_or(0.0);
+        if !pass.is_laid_out(root) {
+            let charged = pass.l.changed_since_frame_layout(root);
+            let before = pass.l.stats;
+            pass.run(root);
+            if charged {
+                price += lazy_layout_price(&before, &pass.l.stats);
+            }
+        }
+        price
+    });
+    if let Some(price) = price.filter(|price| *price > 0.0) {
+        engine.state.borrow().sched.charge(price);
+    }
+}
+
 /// `Layout.ClampCanvasPosition`: the assigned position clamped against the frame's current layout
-/// (laid out first, like reading AbsoluteSize).
+/// (laid out first, like reading AbsoluteSize, without flushing pending scrolls that this write
+/// supersedes).
 fn clamp_canvas_position(engine: &Engine, id: InstanceId, value: Value) -> Value {
-    ensure(engine, id);
+    ensure_laid_out(engine, id);
     let Value::Vector2(position) = &value else { return value };
     let clamped = with_pass(engine, |pass| pass.clamp_canvas(id, position.x as f64, position.y as f64)).flatten();
     match clamped {

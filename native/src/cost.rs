@@ -44,10 +44,11 @@ pub const STUDIO_LAYOUT_PASS_MS: f64 = 2.3e-3;
 pub const STUDIO_LAYOUT_OBJECT_MS: f64 = 0.312e-3;
 pub const STUDIO_SCROLL_PASS_MS: f64 = 62.0e-3;
 
-/// Recorded live frame-weighted mobile mid-tier UI main-thread scaling ratio and uncertainty band.
-pub const PHONE_UI_MAIN_RATIO: f64 = 4.09 * 0.77;
-pub const PHONE_UI_MAIN_LOW: f64 = 2.65 * 0.77;
-pub const PHONE_UI_MAIN_HIGH: f64 = 8.0 * 0.77;
+/// Recorded live frame-weighted mobile mid-tier UI main-thread scaling ratio and uncertainty band
+/// for uncaptured desktop timings (4.09 * 2.0 * 0.77 = 6.2986, band 4.081..12.32).
+pub const PHONE_UI_MAIN_RATIO: f64 = 4.09 * 2.0 * 0.77;
+pub const PHONE_UI_MAIN_LOW: f64 = 2.65 * 2.0 * 0.77;
+pub const PHONE_UI_MAIN_HIGH: f64 = 8.0 * 2.0 * 0.77;
 
 const MAX_OBJECTS_REPORTED: usize = 200;
 const MAX_HIDDEN_SUBTREES_REPORTED: usize = 100;
@@ -987,18 +988,41 @@ pub fn layout_stats_json(stats: LayoutStats) -> Value {
         "skipped": stats.skipped,
         "moved": stats.moved,
         "texts": stats.texts,
+        "scrollPasses": stats.scroll_passes,
+        "scrollMoved": stats.scroll_moved,
+    })
+}
+
+fn layout_stats_json_scoped(stats: LayoutStats, scope: &'static str) -> Value {
+    json!({
+        "scope": scope,
+        "passes": stats.passes,
+        "computed": stats.computed,
+        "memo": stats.memo,
+        "measures": stats.measures,
+        "stored": stats.stored,
+        "skipped": stats.skipped,
+        "moved": stats.moved,
+        "texts": stats.texts,
+        "scrollPasses": stats.scroll_passes,
         "scrollMoved": stats.scroll_moved,
     })
 }
 
 pub fn desktop_layout_cpu_ms(stats: LayoutStats) -> f64 {
+    let scroll_passes = if stats.scroll_passes > 0 {
+        stats.scroll_passes
+    } else if stats.scroll_moved > 0 {
+        1
+    } else {
+        0
+    };
     stats.passes as f64 * STUDIO_LAYOUT_PASS_MS
-        + (stats.stored + stats.moved) as f64 * STUDIO_LAYOUT_OBJECT_MS
-        + if stats.scroll_moved > 0 { STUDIO_SCROLL_PASS_MS } else { 0.0 }
+        + (stats.stored + stats.moved + stats.scroll_moved) as f64 * STUDIO_LAYOUT_OBJECT_MS
+        + scroll_passes as f64 * STUDIO_SCROLL_PASS_MS
 }
 
-pub fn predicted_json(stats: LayoutStats) -> Value {
-    let desk_ms = desktop_layout_cpu_ms(stats);
+fn draw_and_gpu_refusals() -> (Value, Value) {
     let draw_refusal = json!({
         "status": "refused",
         "basis": "uncalibrated",
@@ -1013,26 +1037,102 @@ pub fn predicted_json(stats: LayoutStats) -> Value {
         "reason": "No recorded mobile GPU UI fill-rate or offscreen render-target calibration backing gpuUiMs.",
         "settledBy": "Regress overdraw viewports and CanvasGroup RT bytes against recorded GPU timing captures on target devices."
     });
+    (draw_refusal, gpu_refusal)
+}
+
+fn desktop_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_from: &'static str) -> Value {
+    json!({
+        "status": "extrapolated",
+        "basis": "extrapolated",
+        "scope": scope,
+        "ms": round9(desk_ms),
+        "extrapolatedFrom": extrapolated_from,
+        "source": "Studio 0.744 client script-triggered lazy-layout slope (native/src/engine/layout/install.rs: 2.3 us/pass + 0.312 us/(stored+moved) + 62 us/scroll + 0.312 us/scrollMoved)"
+    })
+}
+
+fn phone_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_from: &'static str) -> Value {
+    json!({
+        "status": "extrapolated",
+        "basis": "anchored_extrapolation",
+        "scope": scope,
+        "ms": round9(desk_ms * PHONE_UI_MAIN_RATIO),
+        "ratio": PHONE_UI_MAIN_RATIO,
+        "bandMs": [round9(desk_ms * PHONE_UI_MAIN_LOW), round9(desk_ms * PHONE_UI_MAIN_HIGH)],
+        "extrapolatedFrom": extrapolated_from,
+        "source": "Anchored to desktop-ref via recorded mobile mid-tier uncaptured UI main-thread ratio 6.2986x (band 4.081x..12.32x; whole-UI-pass ratio applied to layout)"
+    })
+}
+
+pub fn predicted_sequence_json(desk_ms: f64, scope: &'static str) -> Value {
+    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
+    let desk_from = "Studio 0.744 script-triggered lazy-layout probe (100-1,000 card scroll and single-card edit slopes) extrapolated to frame layout passes";
+    let phone_from = "desktop-ref extrapolated layoutCpuMs scaled by recorded mobile mid-tier uncaptured UI main-thread ratio 6.2986x (band 4.081x..12.32x)";
     json!({
         "desktop-ref": {
-            "layoutCpuMs": {
-                "status": "calibrated",
-                "basis": "measured",
-                "ms": round9(desk_ms),
-                "source": "Studio 0.744 client lazy-layout calibration (native/src/engine/layout/install.rs: 2.3 us/pass + 0.312 us/(stored+moved) + 62 us/scroll pass)"
-            },
+            "layoutCpuMs": desktop_layout_extrapolation(desk_ms, scope, desk_from),
             "drawPassCpuMs": draw_refusal,
             "gpuUiMs": gpu_refusal
         },
         "phone-mid": {
-            "layoutCpuMs": {
-                "status": "calibrated",
-                "basis": "anchored",
-                "ms": round9(desk_ms * PHONE_UI_MAIN_RATIO),
-                "ratio": PHONE_UI_MAIN_RATIO,
-                "bandMs": [round9(desk_ms * PHONE_UI_MAIN_LOW), round9(desk_ms * PHONE_UI_MAIN_HIGH)],
-                "source": "Anchored to desktop-ref via recorded mobile mid-tier UI main-thread ratio 3.1493x (band 2.0405x..6.16x)"
-            },
+            "layoutCpuMs": phone_layout_extrapolation(desk_ms, scope, phone_from),
+            "drawPassCpuMs": draw_refusal,
+            "gpuUiMs": gpu_refusal
+        }
+    })
+}
+
+pub fn predicted_json(stats: LayoutStats) -> Value {
+    predicted_sequence_json(desktop_layout_cpu_ms(stats), "per_frame")
+}
+
+fn predicted_single_live_json(stats: LayoutStats) -> Value {
+    let desk_ms = desktop_layout_cpu_ms(stats);
+    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
+    let frame_refusal = json!({
+        "status": "refused",
+        "basis": "unmeasured",
+        "scope": "per_frame_unavailable_in_single_moment",
+        "ms": Value::Null,
+        "reason": "Single-moment mode runs an export full-tree layout pass, not a frame's incremental layout churn; see fullTreeLayoutCpuMs for the one-shot full-tree cost.",
+        "settledBy": "Run `rur cost` with --from and --frames (and --fps) to measure per-frame layout churn."
+    });
+    let desk_from = "Studio 0.744 script-triggered lazy-layout probe (2.3 us/pass + 0.312 us/record) extrapolated to laying the whole tree out once during export";
+    let phone_from = "desktop-ref fullTreeLayoutCpuMs scaled by recorded mobile mid-tier uncaptured UI main-thread ratio 6.2986x (band 4.081x..12.32x)";
+    json!({
+        "desktop-ref": {
+            "layoutCpuMs": frame_refusal,
+            "fullTreeLayoutCpuMs": desktop_layout_extrapolation(desk_ms, "full_tree_export_pass", desk_from),
+            "drawPassCpuMs": draw_refusal,
+            "gpuUiMs": gpu_refusal
+        },
+        "phone-mid": {
+            "layoutCpuMs": frame_refusal,
+            "fullTreeLayoutCpuMs": phone_layout_extrapolation(desk_ms, "full_tree_export_pass", phone_from),
+            "drawPassCpuMs": draw_refusal,
+            "gpuUiMs": gpu_refusal
+        }
+    })
+}
+
+fn predicted_scene_only_json() -> Value {
+    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
+    let layout_refusal = json!({
+        "status": "refused",
+        "basis": "unmeasured",
+        "scope": "unavailable_in_scene_mode",
+        "ms": Value::Null,
+        "reason": "Saved scene.json carries no layout pass counters.",
+        "settledBy": "Run live with --story/--fixture and --from/--frames/--fps to measure per-frame layout churn."
+    });
+    json!({
+        "desktop-ref": {
+            "layoutCpuMs": layout_refusal,
+            "drawPassCpuMs": draw_refusal,
+            "gpuUiMs": gpu_refusal
+        },
+        "phone-mid": {
+            "layoutCpuMs": layout_refusal,
             "drawPassCpuMs": draw_refusal,
             "gpuUiMs": gpu_refusal
         }
@@ -1263,36 +1363,51 @@ pub fn analyze_scene(
         .and_then(Value::as_str)
         .unwrap_or("ok");
 
-    sort_json(json!({
-        "schema": "rur-cost/1",
-        "status": status,
-        "mode": "single",
-        "input": if dom_hidden.is_some() { "live" } else { "scene" },
-        "viewport": {
+    let mut report = Map::new();
+    report.insert("schema".into(), json!("rur-cost/1"));
+    report.insert("status".into(), json!(status));
+    report.insert("mode".into(), json!("single"));
+    report.insert("input".into(), json!(if dom_hidden.is_some() { "live" } else { "scene" }));
+    report.insert(
+        "viewport".into(),
+        json!({
             "width": vp.width,
             "height": vp.height,
             "scale": vp.scale,
             "physicalWidth": phys_w,
             "physicalHeight": phys_h,
-        },
-        "totals": totals_json,
-        "layout": layout_stats_json(layout),
-        "screenGuis": screen_guis_json,
-        "objects": objects_json,
-        "hiddenSubtrees": hidden_subtrees_json,
-        "predicted": predicted_json(layout),
-        "fidelity": {
+        }),
+    );
+    report.insert("totals".into(), totals_json);
+    if dom_hidden.is_some() {
+        report.insert("fullTreeLayout".into(), layout_stats_json_scoped(layout, "full_tree_export_pass"));
+        report.insert("predicted".into(), predicted_single_live_json(layout));
+    } else {
+        report.insert("predicted".into(), predicted_scene_only_json());
+    }
+    report.insert("screenGuis".into(), json!(screen_guis_json));
+    report.insert("objects".into(), json!(objects_json));
+    report.insert("hiddenSubtrees".into(), json!(hidden_subtrees_json));
+    report.insert(
+        "fidelity".into(),
+        json!({
             "canvasGroupRt": "exact_studio_dimensions (rectangular float32 logical size, 2048 side cap, 2048x1024 area cap, culled/empty/transparent skipped)",
             "batchBreaks": "roblox_pass2d_state_model (layerPass, renderTarget, clip, shader, texture, rotation)",
+            "layoutCpuMs": if dom_hidden.is_some() {
+                "single_moment_export_pass_only (fullTreeLayoutCpuMs extrapolates lazy-layout slope; run --from and --frames for per-frame cost)"
+            } else {
+                "unavailable_in_scene_mode (run live with --from and --frames for per-frame layout cost)"
+            },
             "hiddenInShown": if hidden.complete {
                 "live_dom_traversal"
             } else {
                 "scene_json_only_incomplete (run without --scene for full hidden subtree counts)"
             },
             "determinism": "zero_wall_clock_fields"
-        },
-        "unmodeled": unmodeled_list(),
-    }))
+        }),
+    );
+    report.insert("unmodeled".into(), unmodeled_list());
+    sort_json(Value::Object(report))
 }
 
 fn describe_non_cost_report(value: &Value) -> String {
@@ -1533,7 +1648,7 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         "screenOverdrawViewports",
         "offscreenOverdrawViewports",
     ];
-    const LAYOUT_KEYS: [&str; 5] = ["passes", "computed", "stored", "moved", "scrollMoved"];
+    const LAYOUT_KEYS: [&str; 6] = ["passes", "computed", "stored", "moved", "scrollPasses", "scrollMoved"];
 
     let mut before_counts = Map::new();
     let mut after_counts = Map::new();
@@ -1569,6 +1684,7 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         any_regressed = true;
     }
 
+    let is_sequence = before["mode"].as_str() == Some("sequence");
     let mut before_layout = Map::new();
     let mut after_layout = Map::new();
     let mut delta_layout = Map::new();
@@ -1579,7 +1695,7 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         before_layout.insert(key.into(), json!(b));
         after_layout.insert(key.into(), json!(a));
         delta_layout.insert(key.into(), json!(d));
-        if matches!(key, "stored" | "moved" | "scrollMoved") {
+        if is_sequence && matches!(key, "stored" | "moved" | "scrollPasses" | "scrollMoved") {
             if d < -1e-9 {
                 any_improved = true;
             } else if d > 1e-9 {
@@ -1757,6 +1873,7 @@ impl SequenceAccumulator {
             layout,
         });
         self.times.push(time);
+        let frame_scope = if index == 0 { "mount_and_runup" } else { "per_frame" };
         self.frames.push(json!({
             "index": index,
             "time": round9(time),
@@ -1764,8 +1881,8 @@ impl SequenceAccumulator {
             "changedNodes": changed_nodes,
             "removedNodes": removed_nodes,
             "totals": totals,
-            "layout": layout_stats_json(layout),
-            "predicted": predicted_json(layout),
+            "layout": layout_stats_json_scoped(layout, frame_scope),
+            "predicted": predicted_sequence_json(desktop_layout_cpu_ms(layout), frame_scope),
         }));
     }
 
@@ -1784,7 +1901,7 @@ impl SequenceAccumulator {
             (round6(mean), round6(peak), round6(p95))
         };
 
-        let fields: [(&str, fn(&FrameMetrics) -> f64); 12] = [
+        let fields: [(&str, fn(&FrameMetrics) -> f64); 13] = [
             ("drawCalls", |m| m.draw_calls),
             ("batchBreaks", |m| m.batch_breaks),
             ("quads", |m| m.quads),
@@ -1796,6 +1913,7 @@ impl SequenceAccumulator {
             ("layoutPasses", |m| m.layout.passes as f64),
             ("layoutStored", |m| m.layout.stored as f64),
             ("layoutMoved", |m| m.layout.moved as f64),
+            ("layoutScrollPasses", |m| m.layout.scroll_passes as f64),
             ("layoutScrollMoved", |m| m.layout.scroll_moved as f64),
         ];
         let mut mean_map = Map::new();
@@ -1814,20 +1932,36 @@ impl SequenceAccumulator {
         let steady_computed = steady_slice.iter().map(|m| m.layout.computed as f64).sum::<f64>() / steady_len;
         let steady_stored = steady_slice.iter().map(|m| m.layout.stored as f64).sum::<f64>() / steady_len;
         let steady_moved = steady_slice.iter().map(|m| m.layout.moved as f64).sum::<f64>() / steady_len;
+        let steady_scroll_passes = steady_slice.iter().map(|m| m.layout.scroll_passes as f64).sum::<f64>() / steady_len;
         let steady_scroll = steady_slice.iter().map(|m| m.layout.scroll_moved as f64).sum::<f64>() / steady_len;
         let steady_desk_ms = steady_slice.iter().map(|m| desktop_layout_cpu_ms(m.layout)).sum::<f64>() / steady_len;
 
         let mut base = self.last_report.unwrap_or_else(|| {
             analyze_scene(&SceneStore::default(), LayoutStats::default(), None)
         });
-        let last_layout = self.metrics.last().map(|m| m.layout).unwrap_or_default();
+        let steady_layout_json = json!({
+            "scope": "steady_state_per_frame_mean",
+            "passes": round6(steady_passes),
+            "computed": round6(steady_computed),
+            "stored": round6(steady_stored),
+            "moved": round6(steady_moved),
+            "scrollPasses": round6(steady_scroll_passes),
+            "scrollMoved": round6(steady_scroll),
+        });
         if let Some(obj) = base.as_object_mut() {
             obj.insert("mode".into(), json!("sequence"));
             if let Some(status) = status_override {
                 obj.insert("status".into(), json!(status));
             }
-            obj.insert("layout".into(), layout_stats_json(last_layout));
-            obj.insert("predicted".into(), predicted_json(last_layout));
+            obj.remove("fullTreeLayout");
+            obj.insert("layout".into(), steady_layout_json.clone());
+            obj.insert("predicted".into(), predicted_sequence_json(steady_desk_ms, "steady_state_per_frame_mean"));
+            if let Some(fid) = obj.get_mut("fidelity").and_then(Value::as_object_mut) {
+                fid.insert(
+                    "layoutCpuMs".into(),
+                    json!("extrapolated_from_lazy_layout_probe (desktop lazy-layout slope extrapolated to per-frame layout passes; phone-mid uses uncaptured 6.2986x UI ratio)"),
+                );
+            }
             obj.insert(
                 "sequence".into(),
                 json!({
@@ -1847,9 +1981,11 @@ impl SequenceAccumulator {
                             "computed": round6(steady_computed),
                             "stored": round6(steady_stored),
                             "moved": round6(steady_moved),
+                            "scrollPasses": round6(steady_scroll_passes),
                             "scrollMoved": round6(steady_scroll),
                         },
                         "steadyStateLayoutCpuMs": {
+                            "basis": "extrapolated",
                             "desktop-ref": round9(steady_desk_ms),
                             "phone-mid": round9(steady_desk_ms * PHONE_UI_MAIN_RATIO),
                             "phone-mid-band": [
@@ -1949,7 +2085,6 @@ fn format_bytes(bytes: u64) -> String {
 
 fn print_summary(report: &Value, dest: &Path) {
     let t = &report["totals"];
-    let l = &report["layout"];
     let rt_bytes = t["canvasRtBytes"].as_u64().unwrap_or(0);
     if let Some(seq) = report.pointer("/sequence/summary") {
         let frames = seq["frameCount"].as_u64().unwrap_or(0);
@@ -1958,7 +2093,7 @@ fn print_summary(report: &Value, dest: &Path) {
         let desk_ms = seq.pointer("/steadyStateLayoutCpuMs/desktop-ref").and_then(Value::as_f64).unwrap_or(0.0);
         let phone_ms = seq.pointer("/steadyStateLayoutCpuMs/phone-mid").and_then(Value::as_f64).unwrap_or(0.0);
         eprintln!(
-            "rur cost: {} ({} frames @ {} fps) | draws={} breaks={} | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m (desk {:.4} ms, phone {:.4} ms; draw/gpu refused) -> {}",
+            "rur cost: {} ({} frames @ {} fps) | draws={} breaks={} | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m/{:.1}sp/{:.1}sm (extrapolated desk {:.4} ms, phone {:.4} ms; draw/gpu refused) -> {}",
             report["status"].as_str().unwrap_or("?"),
             frames,
             fps,
@@ -1973,37 +2108,59 @@ fn print_summary(report: &Value, dest: &Path) {
             steady["passes"].as_f64().unwrap_or(0.0),
             steady["stored"].as_f64().unwrap_or(0.0),
             steady["moved"].as_f64().unwrap_or(0.0),
+            steady["scrollPasses"].as_f64().unwrap_or(0.0),
+            steady["scrollMoved"].as_f64().unwrap_or(0.0),
             desk_ms,
             phone_ms,
             dest.display(),
         );
         return;
     }
-    let desk_ms = report.pointer("/predicted/desktop-ref/layoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
-    let phone_ms = report.pointer("/predicted/phone-mid/layoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
-    eprintln!(
-        "rur cost: {} | guis={} (disabled={}) | draws={} breaks={} | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | layout={}p/{}s/{}m (desk {:.4} ms, phone {:.4} ms; draw/gpu refused) -> {}",
-        report["status"].as_str().unwrap_or("?"),
-        t["screenGuis"].as_u64().unwrap_or(0),
-        t["disabledScreenGuis"].as_u64().unwrap_or(0),
-        t["drawCalls"].as_u64().unwrap_or(0),
-        t["batchBreaks"].as_u64().unwrap_or(0),
-        t["quads"].as_u64().unwrap_or(0),
-        t["glyphQuads"].as_u64().unwrap_or(0),
-        format_bytes(rt_bytes),
-        t["canvasGroupTargets"].as_u64().unwrap_or(0),
-        t["canvasRtSwitches"].as_u64().unwrap_or(0),
-        t["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
-        t["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
-        t["hiddenInShown"]["roots"].as_u64().unwrap_or(0),
-        t["hiddenInShown"]["guiObjects"].as_u64().unwrap_or(0),
-        l["passes"].as_u64().unwrap_or(0),
-        l["stored"].as_u64().unwrap_or(0),
-        l["moved"].as_u64().unwrap_or(0),
-        desk_ms,
-        phone_ms,
-        dest.display(),
-    );
+    if let Some(ft) = report.get("fullTreeLayout") {
+        let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
+        let phone_ms = report.pointer("/predicted/phone-mid/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
+        eprintln!(
+            "rur cost: {} | guis={} (disabled={}) | draws={} breaks={} | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s (extrapolated desk {:.4} ms, phone {:.4} ms; per-frame cost needs --from and --frames; draw/gpu refused) -> {}",
+            report["status"].as_str().unwrap_or("?"),
+            t["screenGuis"].as_u64().unwrap_or(0),
+            t["disabledScreenGuis"].as_u64().unwrap_or(0),
+            t["drawCalls"].as_u64().unwrap_or(0),
+            t["batchBreaks"].as_u64().unwrap_or(0),
+            t["quads"].as_u64().unwrap_or(0),
+            t["glyphQuads"].as_u64().unwrap_or(0),
+            format_bytes(rt_bytes),
+            t["canvasGroupTargets"].as_u64().unwrap_or(0),
+            t["canvasRtSwitches"].as_u64().unwrap_or(0),
+            t["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            t["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            t["hiddenInShown"]["roots"].as_u64().unwrap_or(0),
+            t["hiddenInShown"]["guiObjects"].as_u64().unwrap_or(0),
+            ft["passes"].as_u64().unwrap_or(0),
+            ft["stored"].as_u64().unwrap_or(0),
+            desk_ms,
+            phone_ms,
+            dest.display(),
+        );
+    } else {
+        eprintln!(
+            "rur cost: {} (scene) | guis={} (disabled={}) | draws={} breaks={} | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects (incomplete) | layout=unavailable (--scene; run live with --from and --frames; draw/gpu refused) -> {}",
+            report["status"].as_str().unwrap_or("?"),
+            t["screenGuis"].as_u64().unwrap_or(0),
+            t["disabledScreenGuis"].as_u64().unwrap_or(0),
+            t["drawCalls"].as_u64().unwrap_or(0),
+            t["batchBreaks"].as_u64().unwrap_or(0),
+            t["quads"].as_u64().unwrap_or(0),
+            t["glyphQuads"].as_u64().unwrap_or(0),
+            format_bytes(rt_bytes),
+            t["canvasGroupTargets"].as_u64().unwrap_or(0),
+            t["canvasRtSwitches"].as_u64().unwrap_or(0),
+            t["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            t["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            t["hiddenInShown"]["roots"].as_u64().unwrap_or(0),
+            t["hiddenInShown"]["guiObjects"].as_u64().unwrap_or(0),
+            dest.display(),
+        );
+    }
 }
 
 fn resolve_cost_file(path: &Path) -> PathBuf {
@@ -2359,18 +2516,50 @@ mod tests {
 
     #[test]
     fn calibration_and_refusal_contract() {
+        // Non-scroll: 2 passes * 2.3 us + 15 records * 0.312 us = 4.6 + 4.68 = 9.28 us = 0.00928 ms
+        // phone-mid (6.2986x uncaptured UI main ratio): 0.00928 * 6.2986 = 0.058451008 ms
         let stats = LayoutStats {
             passes: 2,
             stored: 10,
             moved: 5,
+            scroll_passes: 0,
             scroll_moved: 0,
             ..Default::default()
         };
         let pred = predicted_json(stats);
-        let expected_desk = 2.0 * STUDIO_LAYOUT_PASS_MS + 15.0 * STUDIO_LAYOUT_OBJECT_MS;
-        assert!((pred["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - expected_desk).abs() < 1e-9);
-        assert_eq!(pred["phone-mid"]["layoutCpuMs"]["basis"], "anchored");
-        assert!((pred["phone-mid"]["layoutCpuMs"]["ms"].as_f64().unwrap() - expected_desk * PHONE_UI_MAIN_RATIO).abs() < 1e-9);
+        assert_eq!(pred["desktop-ref"]["layoutCpuMs"]["basis"], "extrapolated");
+        assert!((pred["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - 0.00928).abs() < 1e-9);
+        assert_eq!(pred["phone-mid"]["layoutCpuMs"]["basis"], "anchored_extrapolation");
+        assert!((pred["phone-mid"]["layoutCpuMs"]["ratio"].as_f64().unwrap() - 6.2986).abs() < 1e-9);
+        assert!((pred["phone-mid"]["layoutCpuMs"]["ms"].as_f64().unwrap() - 0.058451008).abs() < 1e-9);
+
+        // Scroll 100 cards with 2 children each (+ container = 301 records):
+        // 62 us + 301 * 0.312 us = 155.912 us = 0.155912 ms (~156 us as recorded in install.rs)
+        let scroll_100 = LayoutStats {
+            scroll_passes: 1,
+            scroll_moved: 301,
+            ..Default::default()
+        };
+        assert!((desktop_layout_cpu_ms(scroll_100) - 0.155912).abs() < 1e-9);
+
+        // Scroll 1,000 cards with 2 children each (+ container = 3,001 records):
+        // 62 us + 3001 * 0.312 us = 998.312 us = 0.998312 ms (~998 us as recorded in install.rs)
+        let scroll_1000 = LayoutStats {
+            scroll_passes: 1,
+            scroll_moved: 3001,
+            ..Default::default()
+        };
+        assert!((desktop_layout_cpu_ms(scroll_1000) - 0.998312).abs() < 1e-9);
+
+        // Two scrolls in one frame charge the 62 us base per scroll plus every moved record:
+        // 2 * 62 us + 602 * 0.312 us = 311.824 us = 0.311824 ms
+        let two_scrolls = LayoutStats {
+            scroll_passes: 2,
+            scroll_moved: 602,
+            ..Default::default()
+        };
+        assert!((desktop_layout_cpu_ms(two_scrolls) - 0.311824).abs() < 1e-9);
+
         for tier in ["desktop-ref", "phone-mid"] {
             for metric in ["drawPassCpuMs", "gpuUiMs"] {
                 assert_eq!(pred[tier][metric]["status"], "refused");
@@ -2379,6 +2568,80 @@ mod tests {
                 assert!(pred[tier][metric]["settledBy"].as_str().unwrap().len() >= 12);
             }
         }
+    }
+
+    #[test]
+    fn scroll_sequence_coalesces_per_frame_and_prices_100_cards_as_recorded() {
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+        let tmp = std::env::temp_dir().join(format!("rur-scroll-cost-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let fixture = tmp.join("scroll100.luau");
+        let source = "\
+return function(Target)
+	local RunService = game:GetService(\"RunService\")
+	local Scroller = Instance.new(\"ScrollingFrame\")
+	Scroller.Size = UDim2.fromOffset(620, 500)
+	Scroller.CanvasSize = UDim2.fromOffset(0, 5000)
+	Scroller.Parent = Target
+	local Tab = Instance.new(\"Frame\")
+	Tab.BackgroundTransparency = 1
+	Tab.Size = UDim2.new(1, 0, 0, 5000)
+	Tab.Parent = Scroller
+	for i = 1, 100 do
+		local Card = Instance.new(\"Frame\")
+		Card.Position = UDim2.fromOffset(0, (i - 1) * 40)
+		Card.Size = UDim2.fromOffset(200, 36)
+		Card.Parent = Tab
+		local Main = Instance.new(\"Frame\")
+		Main.Size = UDim2.fromScale(1, 1)
+		Main.Parent = Card
+		local Title = Instance.new(\"TextLabel\")
+		Title.Size = UDim2.fromOffset(80, 20)
+		Title.Text = \"\"
+		Title.Parent = Card
+	end
+	local y = 0
+	RunService.Heartbeat:Connect(function()
+		y = (y + 10) % 2000
+		Scroller.CanvasPosition = Vector2.new(0, y)
+	end)
+end
+";
+        std::fs::write(&fixture, source).unwrap();
+        let argv: Vec<String> = vec![
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--roots".into(), root.to_string_lossy().into_owned(),
+            "--fixture".into(), fixture.to_string_lossy().into_owned(),
+            "--viewport".into(), "800x600".into(),
+            "--scale".into(), "1".into(),
+            "--no-snapshots".into(),
+        ];
+        let args = engine::cli::parse(&argv).unwrap();
+
+        // Single-moment mode refuses per-frame layoutCpuMs and reports fullTreeLayoutCpuMs
+        let single_run = engine::cli::run_once_with_cost(&args).unwrap();
+        let mut store = SceneStore::default();
+        store.apply(&single_run.scene.scene).unwrap();
+        let single_rep = analyze_scene(&store, single_run.layout, Some(&single_run.dom_hidden));
+        assert_eq!(single_rep["predicted"]["desktop-ref"]["layoutCpuMs"]["status"], "refused");
+        assert!(single_rep["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].is_null());
+        assert_eq!(single_rep["predicted"]["desktop-ref"]["fullTreeLayoutCpuMs"]["basis"], "extrapolated");
+        assert!(single_rep["fullTreeLayout"]["stored"].as_u64().unwrap() >= 301);
+
+        // Sequence mode: each steady-state 60 Hz frame applies 1 scroll moving 301 records (not 1204)
+        // and prices it at 62 us + 301 * 0.312 us = 0.155912 ms
+        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, collect_cost: true };
+        let seq_rep = run_sequence_cost(&args, &spec, &repo).unwrap();
+        let frames = seq_rep["sequence"]["frames"].as_array().unwrap();
+        for f in &frames[1..] {
+            assert_eq!(f["layout"]["scrollPasses"], 1, "expected 1 scroll pass per 60 Hz frame");
+            assert_eq!(f["layout"]["scrollMoved"], 301, "expected 301 records moved per scroll");
+            let ms = f["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
+            assert!((ms - 0.155912).abs() < 1e-6, "expected 0.155912 ms, got {ms}");
+            assert_eq!(f["predicted"]["desktop-ref"]["layoutCpuMs"]["basis"], "extrapolated");
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     fn sample_cost_report(

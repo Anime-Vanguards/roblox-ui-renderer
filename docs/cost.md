@@ -72,16 +72,20 @@ When invoked with `--scene <scene.json>`, `totals.hiddenInShown.complete` is `fa
 
 In sequence mode (`rur cost --from/--to/--frames/--duration/--fps` or `rur sequence --cost`), each captured frame records:
 
-- Incremental `Layout.Stats` counters for that frame (`passes`, `computed`, `memo`, `measures`, `stored`, `skipped`, `moved`, `texts`, `scrollMoved`). Static UI incurs `0` layout churn on frames `1..N`; animated or resizing UI reports the exact objects laid out each frame.
+- Incremental `Layout.Stats` counters for that frame (`passes`, `computed`, `memo`, `measures`, `stored`, `skipped`, `moved`, `texts`, `scrollPasses`, `scrollMoved`). Static UI incurs `0` layout churn on frames `1..N`; animated or resizing UI reports the exact objects laid out each frame, and scrolling reports `scrollPasses` and `scrollMoved` separately from non-scroll `moved` records.
 - `unchanged`, `changedNodes`, `removedNodes`, and full per-frame `totals` matching single-moment `rur cost --time <t>` when `fps` divides `60`.
-- `sequence.summary`: `mean`, `peak`, and `p95` across all frames, plus steady-state (`frames[1..]`) layout churn mean and calibrated layout CPU ms.
+- `sequence.summary`: `mean`, `peak`, and `p95` across all frames, plus steady-state (`frames[1..]`) layout churn mean and extrapolated layout CPU ms.
+- Note on `--mode edit` vs `--mode play`: in default `--mode edit`, `Heartbeat` fires at Studio's 240 Hz edit-mode cadence (4 beats per 1/60 s frame), whereas `--mode play` runs `Heartbeat` once per 1/60 s frame like a playing client. Repeated `CanvasPosition` writes without an intervening `AbsolutePosition` read coalesce to one scroll pass per frame; pass `--mode play` when scripts do per-Heartbeat work that must run once per client frame.
 
-### 5. Attribution, calibration, and explicit refusals
+### 5. Attribution, extrapolation, and explicit refusals
 
 - **Attribution:** `screenGuis` attributes draw calls, batch breaks, quads, glyph quads, CanvasGroup RT bytes/switches, overdraw, and hidden-in-shown counts per `ScreenGui` (enabled ScreenGuis sum conservatively to `totals`; disabled ScreenGuis appear with `enabled: false`). `objects` lists the heaviest drawn objects and `CanvasGroup`s.
-- **Calibrated layout CPU ms (`predicted.*.layoutCpuMs`):**
-  - `desktop-ref` (`basis: "measured"`): Studio 0.744 client lazy-layout calibration (`native/src/engine/layout/install.rs`): `2.3 us` per pass + `0.312 us` per `stored + moved` record + `62 us` when scrolling moved records.
-  - `phone-mid` (`basis: "anchored"`): anchored to `desktop-ref` using a recorded mid-tier mobile UI main-thread ratio (`3.1493x`, uncertainty band `bandMs: [2.0405x, 6.16x]`).
+- **Single-moment vs. per-frame layout CPU ms:**
+  - Single-moment `rur cost` (without `--from`) only observes the export's full-tree layout pass (`fullTreeLayout`). It **refuses** `predicted.*.layoutCpuMs` (`status: "refused"`, `ms: null`) and directs you to run with `--from` and `--frames` for per-frame cost, while reporting the one-shot full-tree price separately under `predicted.*.fullTreeLayoutCpuMs` (`scope: "full_tree_export_pass"`).
+  - `--scene` reports carry no layout counters and refuse `predicted.*.layoutCpuMs`.
+- **Extrapolated layout CPU ms (`predicted.*.layoutCpuMs` in sequence mode, `fullTreeLayoutCpuMs` in single mode):**
+  - `desktop-ref` (`basis: "extrapolated"`): extrapolates the Studio 0.744 script-triggered lazy-layout probe (`native/src/engine/layout/install.rs`: `2.3 us` per pass + `0.312 us` per `stored + moved + scrollMoved` record + `62 us` per scroll pass; 100 cards / 301 records = `155.9 us`, 1,000 cards / 3,001 records = `998.3 us`) to frame or full-tree layout passes, naming the recording in `extrapolatedFrom`.
+  - `phone-mid` (`basis: "anchored_extrapolation"`): scales `desktop-ref` by the recorded mobile mid-tier uncaptured UI main-thread ratio (`6.2986x`, band `bandMs: [4.081x, 12.32x]`), matching the uncaptured timing of the desktop layout probe.
 - **Explicit refusals (`status: "refused"`, `ms: null`):** `drawPassCpuMs` and `gpuUiMs` are explicitly refused on both tiers with `reason` and `settledBy` because no per-element Studio or mobile GPU calibration backs them yet. `unmodeled` enumerates all excluded cost dimensions.
 
 ## A/B comparison (`rur cost compare`)
