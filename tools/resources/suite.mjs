@@ -1,10 +1,11 @@
 // rur's resource workloads (tools/resources/measure.mjs runs them; AGENTS.md "Resource budgets" says when).
 //
-// - golden-fast-*: the golden check's fast corpus (`tools/engine/golden.mjs --fast`, 316 entries in batch workers) on a
-//   cold and then a warm state folder. It runs from a copy of the check's files in the run's folder, with no frozen
-//   golden data beside it and Roblox Studio hidden, so every machine (a runner has no Studio) runs the same thing and
-//   nothing is written into the checkout. The entries whose text needs Studio's fonts differ there; what is measured
-//   is the work, not the verdict.
+// - golden-fast-*: the golden check's fast corpus (`tools/engine/golden.mjs --fast`: every fixture and probe in edit
+//   mode, and three live sessions, in batch workers) on a cold and then a warm state folder. It runs from a copy of the
+//   check's files in the run's folder, with no frozen golden data beside it and Roblox Studio hidden, so every machine
+//   (a runner has no Studio) runs the same thing and nothing is written into the checkout. The entries whose text needs
+//   Studio's fonts differ there; what is measured is the work, not the verdict. How many entries ran is golden's own
+//   count, checked against the fixtures and probes the copy has.
 // - batch-stress: 12 `rur-native engine-batch` workers sharing one cold state folder, each running 30 fixtures over a
 //   project this file generates (about 40 MB of bytecode), as the golden check's workers run a game's stories: where a
 //   module store that compacts too often, or reads each new pack whole, shows.
@@ -48,25 +49,41 @@ function hermetic(context, state) {
 	return { RUR_STATE_DIR: state, RUR_NATIVE_ENGINE: engine(context), ROBLOX_STUDIO_PATH: empty, LOCALAPPDATA: path.join(empty, "local") };
 }
 
+const leftOutOfPublic = () => () => false;
+const PUBLIC_CORPUS = "";
+
 // A copy of what the golden check needs (its scripts, the CLI, fixtures, data), made once per run folder
 function checkCopy(context) {
 	const copy = path.join(context.work, "rur");
 	if (fs.existsSync(path.join(copy, "done"))) return copy;
+	const leftOut = leftOutOfPublic(context.repo);
 	for (const name of ["cli", "tools", "fixtures", "data", "package.json"]) {
-		fs.cpSync(path.join(context.repo, name), path.join(copy, name), { recursive: true, filter: source => !source.includes(`${path.sep}resources${path.sep}`) });
+		fs.cpSync(path.join(context.repo, name), path.join(copy, name), {
+			recursive: true,
+			filter: source => !source.includes(`${path.sep}resources${path.sep}`) && !leftOut(path.relative(context.repo, source).split(path.sep).join("/")),
+		});
 	}
 	fs.writeFileSync(path.join(copy, "done"), "");
 	return copy;
 }
 
-// The golden check's last line: "<same>/<all> identical to the golden output[, <n> differ ...] in <s> s"
+// The fewest entries golden's fast corpus can have in `copy`: one per fixture and per probe (created-trace.luau is a
+// script, not a probe), and the three live sessions; actions and quarter-pixel text runs only add to it
+function fastFloor(copy) {
+	const luau = dir => fs.readdirSync(path.join(copy, dir)).filter(name => name.endsWith(".luau") && name !== "created-trace.luau").length;
+	return luau("fixtures") + luau(path.join("tools", "engine", "probes")) + 3;
+}
+
+// The golden check's last line: "<same>/<all> identical to the golden output[, <n> differ ...] in <s> s". Golden prints it
+// once every entry it chose has a verdict, so a crash or an early exit leaves none. How many it chose is its own count on
+// this machine; it may not be under `prepared.floor`.
 function verifyGolden(prepared) {
 	const log = fs.readFileSync(prepared.log, "utf8");
 	const match = log.match(/(\d+)\/(\d+) identical to the golden output(?:, (\d+) differ)?/);
-	if (!match) return "the golden check printed no result";
+	if (!match) return "the golden check printed no result (it crashed or stopped early)";
 	const [same, all, differ] = [Number(match[1]), Number(match[2]), Number(match[3] || 0)];
 	if (/\d+ timed out/.test(log)) return "entries timed out";
-	if (all < prepared.entries) return `only ${all} entries ran (expected ${prepared.entries})`;
+	if (all < prepared.floor) return `golden ran ${all} entries, fewer than the ${prepared.floor} its inputs make`;
 	if (same + differ !== all) return `${all - same - differ} entries have no golden`;
 	if (prepared.exact && differ) return `${differ} of ${all} entries differ from the golden output`;
 	return null;
@@ -87,8 +104,8 @@ function goldenFast({ id, title, about, fresh, requires }) {
 			return {
 				argv: [context.node, path.join(copy, "tools", "engine", "golden.mjs"), "--fast", "--rerun", "--jobs", "6"],
 				cwd: copy, log, env: hermetic(context, state), folders: folders(context, id, state, out),
-				// differences are reported (exit 1); every entry has to run
-				acceptExit: [0, 1], entries: 316,
+				// differences are reported (exit 1); every entry golden chose has to run
+				acceptExit: [0, 1], floor: fastFloor(copy),
 			};
 		},
 		verify: verifyGolden,
@@ -113,7 +130,7 @@ function goldenAll({ id, title, about, fresh, requires }) {
 					{ label: "Temp folder", dir: path.join(context.work, id, "temp"), kind: "temp" },
 				],
 				// a developer's machine: one CPU per worker
-				cpus: 12, entries: 1895, exact: true,
+				cpus: 12, floor: 1, exact: true,
 			};
 		},
 		verify: verifyGolden,
@@ -196,12 +213,12 @@ export function workloads() {
 	return [
 		goldenFast({
 			id: "golden-fast-cold", title: "Golden check (fast corpus), cold state",
-			about: "`tools/engine/golden.mjs --fast` with 6 batch workers on a new state folder: 316 fixtures, probes and live sessions, each module compiled and saved to the module store.",
+			about: `\`tools/engine/golden.mjs --fast\` with 6 batch workers on a new state folder: every fixture and probe in edit mode and three live sessions, each module compiled and saved to the module store.${PUBLIC_CORPUS}`,
 			fresh: true,
 		}),
 		goldenFast({
 			id: "golden-fast-warm", title: "Golden check (fast corpus), warm state",
-			about: "The same check again on the state folder the cold run left: modules come from the store, so little should be written.",
+			about: `The same check again on the state folder the cold run left: modules come from the store, so little should be written.${PUBLIC_CORPUS}`,
 			fresh: false, requires: ["golden-fast-cold"],
 		}),
 		{
@@ -248,7 +265,7 @@ export function workloads() {
 		},
 		goldenAll({
 			id: "golden-all-cold", title: "Whole golden check, cold state",
-			about: "`tools/engine/golden.mjs --all` with 12 batch workers on a new state folder: 1895 entries over the frozen project, every module compiled and saved to the module store (about 40 MB).",
+			about: "`tools/engine/golden.mjs --all` with 12 batch workers on a new state folder: every corpus over the frozen project (1895 entries when measured), every module compiled and saved to the module store (about 40 MB).",
 			fresh: true,
 		}),
 		goldenAll({
