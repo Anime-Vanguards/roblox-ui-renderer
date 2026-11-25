@@ -5652,7 +5652,7 @@ end
 
         // Sequence mode: each steady-state 60 Hz frame applies 1 scroll moving 301 records (not 1204)
         // and prices it at 62 us + 301 * 0.312 us = 0.155912 ms
-        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let seq_rep = run_sequence_cost(&args, &spec, &repo).unwrap();
         let frames = seq_rep["sequence"]["frames"].as_array().unwrap();
         for f in &frames[1..] {
@@ -5775,7 +5775,7 @@ end
             argv.extend(extra.iter().map(|s| s.to_string()));
             engine::cli::parse(&argv).unwrap()
         };
-        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
 
         // 1. Default run (no --mode): runs play mode (1 Heartbeat/frame) and matches client 0.09944 ms
         let default_rep = run_sequence_cost(&make_args(&counter_fixture, &[]), &spec, &repo).unwrap();
@@ -5972,7 +5972,7 @@ end
 
         // 1. Static fixture (corners.luau): frame 0 lays out; frames 1..4 have 0 layout churn
         let static_args = make_args(&repo.join("fixtures/corners.luau"), &[]);
-        let static_spec = engine::cli::SequenceSpec { from: 0.0, frames: 5, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let static_spec = engine::cli::SequenceSpec { from: 0.0, frames: 5, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let static_rep = run_sequence_cost(&static_args, &static_spec, &repo).unwrap();
         let s_frames = static_rep["sequence"]["frames"].as_array().unwrap();
         assert_eq!(s_frames.len(), 5);
@@ -5987,7 +5987,7 @@ end
         // 2. Animated fixture (anim-tweens.luau): positive churn on frames 1..3 AND exact single-moment parity
         let anim_path = repo.join("fixtures/anim-tweens.luau");
         let anim_args = make_args(&anim_path, &[]);
-        let anim_spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 30.0, client_hz: Some(60.0), collect_cost: true };
+        let anim_spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 30.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let anim_rep = run_sequence_cost(&anim_args, &anim_spec, &repo).unwrap();
         let a_frames = anim_rep["sequence"]["frames"].as_array().unwrap();
         assert_eq!(a_frames.len(), 4);
@@ -6082,7 +6082,7 @@ end
             argv.extend(extra.iter().map(|s| s.to_string()));
             engine::cli::parse(&argv).unwrap()
         };
-        let seq_spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let seq_spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let dest = Path::new("out/cost.json");
 
         // 1. assert(not RunService:IsRunning()) -> error with cause, refused ms, and edit-mode fallback note
@@ -6208,7 +6208,7 @@ end
         // 1. --fps 60 (60 Hz client): 1 client frame per sample -> 1.0 sp / 111.0 sm / 0.096632 ms
         let rep60 = run_sequence_cost(
             &args,
-            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 60.0, client_hz: Some(60.0), collect_cost: true },
+            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
             &repo,
         )
         .unwrap();
@@ -6227,7 +6227,7 @@ end
         //    Individual 2-client-frame samples refuse per-frame layoutCpuMs so they are never printed as 1 client frame.
         let rep30 = run_sequence_cost(
             &args,
-            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 30.0, client_hz: Some(60.0), collect_cost: true },
+            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 30.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
             &repo,
         )
         .unwrap();
@@ -6249,7 +6249,7 @@ end
         // 3. --fps 120 (60 Hz client): 0 or 1 client frames per sample, normalized per 1 client frame -> 0.096632 ms
         let rep120 = run_sequence_cost(
             &args,
-            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 120.0, client_hz: Some(60.0), collect_cost: true },
+            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 120.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
             &repo,
         )
         .unwrap();
@@ -6269,7 +6269,7 @@ end
         // 4. --fps 120 --client-hz 120: explicitly runs 120 Hz client cadence and labels it 120 Hz
         let rep120_hz = run_sequence_cost(
             &args,
-            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 120.0, client_hz: Some(120.0), collect_cost: true },
+            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 120.0, client_hz: Some(120.0), collect_cost: true, collect_cursor: false },
             &repo,
         )
         .unwrap();
@@ -6289,7 +6289,7 @@ end
         // 5. --fps 120 --frames 2 (60 Hz client -> 0 steady client frames): must refuse layoutCpuMs, never 0.0000 ms
         let rep_zero = run_sequence_cost(
             &args,
-            &engine::cli::SequenceSpec { from: 0.5, frames: 2, fps: 120.0, client_hz: Some(60.0), collect_cost: true },
+            &engine::cli::SequenceSpec { from: 0.5, frames: 2, fps: 120.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
             &repo,
         )
         .unwrap();
@@ -6533,7 +6533,7 @@ end
         let args = engine::cli::parse(&argv).unwrap();
         let rep = run_sequence_cost(
             &args,
-            &engine::cli::SequenceSpec { from: 0.0, frames: 5, fps: 60.0, client_hz: Some(60.0), collect_cost: true },
+            &engine::cli::SequenceSpec { from: 0.0, frames: 5, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
             &repo,
         )
         .unwrap();
@@ -6675,7 +6675,7 @@ end
             ];
             engine::cli::parse(&argv).unwrap()
         };
-        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
 
         // 1. Hand case: 5 Rows x 1 changing Icon
         let rep = run_sequence_cost(&make_args(&rows_fx), &spec, &repo).unwrap();
@@ -6820,7 +6820,7 @@ end
             engine::cli::parse(&argv).unwrap()
         };
         let dest = Path::new("out/cost.json");
-        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
 
         // Case 1a: Play sequence on edit-only wait story prints exact file:line waiting location + end-state note
         let rep_play = run_sequence_cost(&make_args(&edit_only_wait, &[]), &spec, &repo).unwrap();
@@ -6884,7 +6884,7 @@ end
         assert!(nested_reason.contains("attempt to call a nil value"), "{nested_reason}");
 
         // Case 4: Delayed edit-only mount probed at --from (0.5), not hardcoded 0.05
-        let delayed_spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let delayed_spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let rep_delayed = run_sequence_cost(&make_args(&delayed_edit, &[]), &delayed_spec, &repo).unwrap();
         assert_eq!(rep_delayed["status"], "empty");
         assert_eq!(rep_delayed["editModeFallback"]["mountsInEditMode"], true, "edit probe must run at --from (0.5)");
@@ -7580,7 +7580,7 @@ end
             ];
             engine::cli::parse(&argv).unwrap()
         };
-        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 3, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 3, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let rep_inv = run_sequence_cost(&make_args(&inv_fixture, &inv_dir.to_string_lossy()), &spec, &repo).unwrap();
         assert_eq!(rep_inv["status"], "yielded");
         assert!(rep_inv["totals"]["drawnNodes"].as_u64().unwrap_or(0) >= 1);
@@ -8008,7 +8008,7 @@ end
             "--no-snapshots".into(),
         ];
         let args = engine::cli::parse(&argv).unwrap();
-        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 8, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 8, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let report = run_sequence_cost(&args, &spec, &repo).unwrap();
         assert_eq!(report["status"], "ok");
 
@@ -8253,7 +8253,7 @@ end
             ];
             engine::cli::parse(&argv).unwrap()
         };
-        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let rep_remote = run_sequence_cost(&make_args(&wait_remote), &spec, &repo).unwrap();
         assert_eq!(rep_remote["status"], "yielded");
         assert_ne!(rep_remote.get("waitingInLoop").and_then(Value::as_bool), Some(true));

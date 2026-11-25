@@ -126,7 +126,7 @@ pub fn parse_options(value: &Value, offline: bool) -> Result<(SequenceSpec, Sequ
     let cost = flag("cost", false);
     let cursor = flag("cursor", false);
     Ok((
-        SequenceSpec { from, frames: frames as u32, fps, client_hz: None, collect_cost: cost },
+        SequenceSpec { from, frames: frames as u32, fps, client_hz: None, collect_cost: cost, collect_cursor: cursor },
         SequenceOutput { fps, crop, pad, png: flag("png", true), scenes: flag("scenes", false), video: flag("video", true), cost, cursor, offline },
     ))
 }
@@ -1026,7 +1026,7 @@ mod tests {
     fn a_profiled_sequence_writes_its_profile_before_it_ends() {
         let _profile = one_profile_at_a_time();
         let args = fixture_args(&[]);
-        let spec = SequenceSpec { from: 0.0, frames: 12, fps: 60.0, client_hz: None, collect_cost: false };
+        let spec = SequenceSpec { from: 0.0, frames: 12, fps: 60.0, client_hz: None, collect_cost: false, collect_cursor: false };
         let dir = temp_profile("sequence");
         let config = profiler::Config::new(profiler::Kinds::parse("work,heap,caches").unwrap(), dir.clone());
         let frames = start_fresh_profiled(&args, &spec, Some(config)).unwrap();
@@ -1086,7 +1086,7 @@ mod tests {
         let args = fixture_args(&[]);
         for (from, fps, frames, first_frame, step) in [(0.0167, 60.0, 8u32, 1u32, 1u32), (0.5, 30.0, 4, 30, 2)] {
             let mut scene = SceneStore::default();
-            let messages = capture(&args, &SequenceSpec { from, frames, fps, client_hz: None, collect_cost: false });
+            let messages = capture(&args, &SequenceSpec { from, frames, fps, client_hz: None, collect_cost: false, collect_cursor: false });
             assert_eq!(messages.len(), frames as usize + 1, "every frame, then the end");
             for message in messages {
                 match message {
@@ -1103,7 +1103,7 @@ mod tests {
                 }
             }
         }
-        let times: Vec<f64> = capture(&args, &SequenceSpec { from: 0.0, frames: 5, fps: 144.0, client_hz: None, collect_cost: false })
+        let times: Vec<f64> = capture(&args, &SequenceSpec { from: 0.0, frames: 5, fps: 144.0, client_hz: None, collect_cost: false, collect_cursor: false })
             .into_iter()
             .filter_map(|message| match message {
                 SequenceMessage::Frame(frame) => Some(frame.time),
@@ -1133,7 +1133,9 @@ mod tests {
         assert_eq!((spec.from, spec.frames, spec.fps), (0.0, 240, 60.0));
         assert!(matches!(output.crop, Some(Crop::Node(ref node)) if node == "Stage"));
         assert_eq!((output.pad, output.png, output.video, output.scenes, output.cursor), (8.0, true, true, false, false));
-        assert!(parse_options(&json!({"cursor": true}), false).unwrap().1.cursor);
+        assert!(!spec.collect_cursor);
+        let (cursor_spec, cursor_output) = parse_options(&json!({"cursor": true}), false).unwrap();
+        assert!(cursor_spec.collect_cursor && cursor_output.cursor);
         assert_eq!(parse_options(&json!({"duration": 2, "fps": 30}), false).unwrap().0.frames, 60);
         assert_eq!(parse_options(&json!({"frames": 7, "to": 9}), false).unwrap().0.frames, 7);
         assert_eq!(parse_options(&json!({}), true).unwrap().0.frames, 60);
@@ -1256,7 +1258,7 @@ end
             "--actions".into(), actions,
         ];
         let args = parse(&argv).unwrap();
-        let spec = SequenceSpec { from: 0.0, frames: 8, fps: 10.0, client_hz: None, collect_cost: false };
+        let spec = SequenceSpec { from: 0.0, frames: 8, fps: 10.0, client_hz: None, collect_cost: false, collect_cursor: true };
 
         let frames: Vec<SequenceFrame> = capture(&args, &spec)
             .into_iter()
@@ -1365,6 +1367,109 @@ end
             expected_crop.extend_from_slice(&on[3][start..start + (cw * 4) as usize]);
         }
         assert_eq!(cropped[3].as_slice(), expected_crop.as_slice(), "cropped --cursor frame must match uncropped pixels at the crop offset");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// With `--cursor` off (`collect_cursor: false`), `run_sequence` must skip `pointer_state`
+    /// completely so pending mouse moves at capture time do not run extra hit tests or alter
+    /// `--profile` hit counters (`hitQueries` / `hitQueryHits`) or caches.
+    #[test]
+    fn sequence_without_cursor_skips_pointer_hit_testing_and_keeps_profile_unchanged() {
+        let _profile = one_profile_at_a_time();
+        let dir = temp_profile("sequence-no-cursor-profile");
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("move-story.luau");
+        std::fs::write(
+            &fixture,
+            r#"
+return function(Target)
+	local Btn = Instance.new("TextButton")
+	Btn.Name = "Btn"
+	Btn.Position = UDim2.fromOffset(100, 60)
+	Btn.Size = UDim2.fromOffset(100, 60)
+	Btn.Text = ""
+	Btn.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+        // Frame 0 is at t=0.0, frame 1 at t=1/60, frame 2 at t=2/60, frame 3 at t=3/60.
+        // Moves land right at t=0.0 and t=0.05 (frame 3) so `mouse.pending` is true at capture.
+        let actions = json!([
+            {"t": 0.0, "type": "move", "x": 150, "y": 90},
+            {"t": 0.05, "type": "move", "x": 160, "y": 90}
+        ])
+        .to_string();
+        let repo = crate::engine::default_repo();
+        let argv: Vec<String> = vec![
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--roots".into(), repo.join("tools/tests/oracle-root").to_string_lossy().into_owned(),
+            "--fixture".into(), fixture.to_string_lossy().into_owned(),
+            "--viewport".into(), "400x240".into(),
+            "--no-snapshots".into(),
+            "--actions".into(), actions,
+        ];
+        let args = parse(&argv).unwrap();
+        let run_counts = |collect_cursor: bool| -> (Vec<Option<crate::engine::input::PointerState>>, Value) {
+            let spec = SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: None, collect_cost: false, collect_cursor };
+            crate::engine::profile::begin(Box::new(|| 0.0), None);
+            let messages = capture(&args, &spec);
+            let report = crate::engine::profile::finish().unwrap();
+            let pointers: Vec<_> = messages
+                .into_iter()
+                .filter_map(|m| match m {
+                    SequenceMessage::Frame(frame) => Some(frame.pointer),
+                    SequenceMessage::End(end) => {
+                        assert_eq!(end.unwrap()["status"], "ok");
+                        None
+                    }
+                })
+                .collect();
+            (pointers, report.counts_json())
+        };
+
+        let (pointers_off, counts_off) = run_counts(false);
+        let (pointers_on, counts_on) = run_counts(true);
+
+        assert!(pointers_off.iter().all(Option::is_none), "pointer_state must not run when collect_cursor is false");
+        assert!(pointers_on[0].as_ref().is_some_and(|p| p.visible), "collect_cursor=true should capture frame 0 pointer");
+        assert!(pointers_on[3].as_ref().is_some_and(|p| p.visible), "collect_cursor=true should capture frame 3 pointer");
+
+        // Frame 1's move_to handles the t=0.0 move (1 hit query); frames 0 and 3 have pending moves
+        // that must NOT be hit-tested when --cursor is off, and must NOT fabricate hitQueryHits.
+        let queries_off = counts_off["hitQueries"].as_u64().unwrap_or(0);
+        let repeated_off = counts_off["hitQueryHits"].as_u64().unwrap_or(0);
+        let queries_on = counts_on["hitQueries"].as_u64().unwrap_or(0);
+        let repeated_on = counts_on["hitQueryHits"].as_u64().unwrap_or(0);
+        assert_eq!(queries_off, 1, "without --cursor, only frame 1's move_to runs hit_at: {counts_off}");
+        assert_eq!(repeated_off, 0, "without --cursor, no repeated hit query is fabricated: {counts_off}");
+        assert!(queries_on > queries_off, "with --cursor, pending moves are hit-tested for hover cursor: on={counts_on} off={counts_off}");
+        assert!(repeated_on >= 1, "with --cursor, frame 0 pending hit query causes frame 1 move_to to hit the cache: {counts_on}");
+
+        // Also run a `--profile` sequence (`start_fresh_profiled`) with `--cursor` off: every frame
+        // has `pointer: None` and the profile completes cleanly with no warnings.
+        let prof_dir = dir.join("profile");
+        let spec_off = SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: None, collect_cost: false, collect_cursor: false };
+        let config = profiler::Config::new(profiler::Kinds::parse("work,heap,caches").unwrap(), prof_dir.clone());
+        let frames = start_fresh_profiled(&args, &spec_off, Some(config)).unwrap();
+        let mut seen = 0;
+        loop {
+            match frames.recv().unwrap() {
+                SequenceMessage::Frame(frame) => {
+                    assert!(frame.pointer.is_none());
+                    seen += 1;
+                }
+                SequenceMessage::End(end) => {
+                    assert_eq!(end.unwrap()["status"], "ok");
+                    break;
+                }
+            }
+        }
+        assert_eq!(seen, 4);
+        let profile = profile_json(&prof_dir);
+        assert_eq!(profile["run"]["command"], "sequence");
+        assert_profiled(&profile);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

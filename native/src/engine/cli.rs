@@ -1436,6 +1436,8 @@ pub struct SequenceSpec {
     pub client_hz: Option<f64>,
     /// Collect per-frame `Layout.Stats` deltas and live-DOM hidden-in-shown counts (`rur cost`, `rur sequence --cost`)
     pub collect_cost: bool,
+    /// Capture per-frame pointer position and cursor state (`rur sequence --cursor`); skipped when false so `--profile` hit counters stay untouched.
+    pub collect_cursor: bool,
 }
 
 /// One captured moment of a sequence: the session's reply (the first, "ready", holds the whole scene and
@@ -1566,7 +1568,7 @@ fn run_sequence(
     #[cfg(feature = "desktop")]
     let dom_hidden_0 = spec.collect_cost.then(|| crate::cost::collect_dom_hidden(engine, &session.story.roots));
     let now = |engine: &Rc<Engine>| engine.state.borrow().sched.now;
-    let pointer_0 = super::input::get(engine).map(|input| input.pointer_state(engine));
+    let pointer_0 = spec.collect_cursor.then(|| super::input::get(engine).map(|input| input.pointer_state(engine))).flatten();
     if !sink(SequenceMessage::Frame(SequenceFrame {
         index: 0,
         time: now(engine),
@@ -1587,8 +1589,10 @@ fn run_sequence(
     let frames_started = Instant::now();
     let mut blocked = std::time::Duration::ZERO;
     for index in 1..spec.frames {
-        if let Some(input) = super::input::get(engine) {
-            input.clear_frame_click();
+        if spec.collect_cursor {
+            if let Some(input) = super::input::get(engine) {
+                input.clear_frame_click();
+            }
         }
         let until = moment(index);
         let last = index + 1 == spec.frames;
@@ -1618,7 +1622,7 @@ fn run_sequence(
         let reply = session.capture(lua, steps);
         let layout_delta = super::layout::stats_snapshot(engine).delta_since(&layout_before);
         let layout_churn = if spec.collect_cost { super::layout::take_churn(engine) } else { Vec::new() };
-        let pointer = super::input::get(engine).map(|input| input.pointer_state(engine));
+        let pointer = spec.collect_cursor.then(|| super::input::get(engine).map(|input| input.pointer_state(engine))).flatten();
         let unchanged = reply["unchanged"] == true;
         #[cfg(feature = "desktop")]
         let dom_hidden = (spec.collect_cost && !unchanged)
