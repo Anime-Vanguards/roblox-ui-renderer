@@ -293,6 +293,17 @@ pub const BATCH_JOB_COMMAND: &str = "engine-batch-job";
 pub fn batch() -> i32 {
     use std::io::{BufRead, Write};
     super::lua::modules::reuse_compiled_modules();
+    super::lua::modules::set_deferred_store_flush(true);
+    struct FlushOnExit;
+    impl Drop for FlushOnExit {
+        fn drop(&mut self) {
+            super::lua::modules::flush_module_store();
+            super::lua::modules::set_deferred_store_flush(false);
+        }
+    }
+    let _flush_on_exit = FlushOnExit;
+    #[cfg(not(target_os = "emscripten"))]
+    let mut jobs_since_full_collect: u32 = 0;
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
@@ -303,11 +314,20 @@ pub fn batch() -> i32 {
             Ok(job) => batch_job(&job),
             Err(error) => json!({"code": 2, "error": format!("unreadable job: {error}")}),
         };
-        // What the run freed goes back to the system before the next (a process of its own would end)
+        // Reclaim empty pages between jobs without purging the working set on every run; force a full
+        // collect periodically or when resident memory exceeds 512 MiB.
         #[cfg(not(target_os = "emscripten"))]
-        unsafe {
-            libmimalloc_sys::mi_collect(true)
-        };
+        {
+            jobs_since_full_collect += 1;
+            let high_memory = crate::memtrace::process_bytes().is_some_and(|(_, ws)| ws > 512 * 1024 * 1024);
+            let force = jobs_since_full_collect >= 32 || high_memory;
+            if force {
+                jobs_since_full_collect = 0;
+            }
+            unsafe {
+                libmimalloc_sys::mi_collect(force);
+            }
+        }
         let _ = std::io::stderr().flush();
         let mut out = std::io::stdout().lock();
         let _ = writeln!(out, "{BATCH_ANSWER}{answer}");
