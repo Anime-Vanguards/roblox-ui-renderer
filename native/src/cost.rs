@@ -2807,12 +2807,25 @@ fn check_compare_equivalence(before: &Value, after: &Value) -> EquivalenceResult
     if b_mode == "single" && a_mode == "single" && !both_scene {
         let b_time = before.get("time").and_then(Value::as_f64);
         let a_time = after.get("time").and_then(Value::as_f64);
-        if b_time.is_none() || a_time.is_none() {
-            unchecked.push(UncheckedField {
-                field: "time",
-                missing_before: b_time.is_none(),
-                missing_after: a_time.is_none(),
-            });
+        match (b_time, a_time) {
+            (Some(bt), Some(at)) => {
+                if (bt - at).abs() > 1e-6 {
+                    mismatches.push(EquivalenceMismatch {
+                        field: "time",
+                        before: json!(bt),
+                        after: json!(at),
+                        reason: format!("single-moment capture time differs (before --time={bt}, after --time={at})"),
+                        remedy: "Re-run both single-moment arms with the same --time.".into(),
+                    });
+                }
+            }
+            (b, a) => {
+                unchecked.push(UncheckedField {
+                    field: "time",
+                    missing_before: b.is_none(),
+                    missing_after: a.is_none(),
+                });
+            }
         }
     }
 
@@ -2828,7 +2841,10 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
     let eq = check_compare_equivalence(before, after);
     let unchecked_fields: Vec<&str> = eq.unchecked.iter().map(|u| u.field).collect();
     let unchecked_note = format_unchecked_note(&eq.unchecked);
-    let checks: Vec<&str> = [
+    let is_single_live = before["mode"].as_str() == Some("single")
+        && after["mode"].as_str() == Some("single")
+        && !(before["input"].as_str() == Some("scene") && after["input"].as_str() == Some("scene"));
+    let mut all_checks = vec![
         "schema",
         "status",
         "source",
@@ -2841,10 +2857,14 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         "scale",
         "device",
         "controls",
-    ]
-    .into_iter()
-    .filter(|c| !unchecked_fields.contains(c))
-    .collect();
+    ];
+    if is_single_live {
+        all_checks.push("time");
+    }
+    let checks: Vec<&str> = all_checks
+        .into_iter()
+        .filter(|c| !unchecked_fields.contains(c))
+        .collect();
     let checks = json!(checks);
     let mismatches = eq.mismatches;
     if !mismatches.is_empty() {
@@ -7692,5 +7712,96 @@ end
             .collect();
         assert_ne!(dup_lines[0], dup_lines[1], "colliding labels must fall back to #index @x,y:\n{dup_text}");
         assert!(dup_lines[0].contains("@100,30") && dup_lines[1].contains("@100,90"), "{dup_text}");
+    }
+
+    #[test]
+    fn compare_checks_single_moment_time() {
+        let dir = std::env::temp_dir().join(format!("rur-cost-cmp-time-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("timed_card.luau");
+        std::fs::write(
+            &fixture,
+            r#"return function(Target)
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromOffset(100, 50)
+	f.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+        let repo = crate::engine::default_repo().to_string_lossy().into_owned();
+        let roots = crate::engine::default_repo()
+            .join("tools/tests/oracle-root")
+            .to_string_lossy()
+            .into_owned();
+        let fixture_s = fixture.to_string_lossy().into_owned();
+
+        let run_at = |name: &str, t: &str| {
+            let out_dir = dir.join(name);
+            let out = run_cli(&[
+                "--repo".into(),
+                repo.clone(),
+                "--roots".into(),
+                roots.clone(),
+                "--no-snapshots".into(),
+                "--viewport".into(),
+                "800x600".into(),
+                "--scale".into(),
+                "1".into(),
+                "--fixture".into(),
+                fixture_s.clone(),
+                "--time".into(),
+                t.into(),
+                "--out".into(),
+                out_dir.to_string_lossy().into_owned(),
+            ])
+            .unwrap();
+            assert!(!out.failed, "arm {name} failed:\n{}", out.summary);
+            out_dir.join("cost.json")
+        };
+
+        let t05_a = run_at("t05_a", "0.5");
+        let t05_b = run_at("t05_b", "0.5");
+        let t15 = run_at("t15", "1.5");
+
+        let cmp_diff = run_cli(&[
+            "compare".into(),
+            t05_a.to_string_lossy().into_owned(),
+            t15.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(cmp_diff.failed, "compare must refuse --time 0.5 vs --time 1.5:\n{}", cmp_diff.summary);
+        assert_eq!(cmp_diff.value["verdict"], "refused");
+        assert!(
+            cmp_diff.value["reason"].as_str().unwrap_or("").contains("--time"),
+            "{}",
+            cmp_diff.value
+        );
+        assert!(
+            cmp_diff.value["equivalence"]["mismatches"]
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|m| m["field"] == "time")),
+            "{}",
+            cmp_diff.value
+        );
+
+        let cmp_same = run_cli(&[
+            "compare".into(),
+            t05_a.to_string_lossy().into_owned(),
+            t05_b.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(!cmp_same.failed, "matching --time arms must compare:\n{}", cmp_same.summary);
+        assert_eq!(cmp_same.value["verdict"], "unchanged");
+        assert!(
+            cmp_same.value["equivalence"]["checks"]
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|c| c == "time")),
+            "{}",
+            cmp_same.value
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
