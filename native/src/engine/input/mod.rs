@@ -80,7 +80,8 @@ names!(
     GetMouseButtonsPressed, IsKeyDown, GetKeysPressed, GetFocusedTextBox, GetLastInputType, CreateVirtualInput,
     IsModifierKeyDown, GetGuiObjectsAtPosition, ScrollToTop, GetScrollVelocity, GetSampledInertialVelocity,
     ResetScrollVelocity, ClearInertialScrolling, CaptureFocus, ReleaseFocus, IsFocused,
-    BindAction, BindActionAtPriority, UnbindAction, UnbindAllActions, Select, Selectable, SelectionOrder, PreferredInput,
+    BindAction, BindActionAtPriority, UnbindAction, UnbindAllActions, SetTitle, SetPosition, SetImage, SetDescription,
+    GetBoundActionInfo, GetAllBoundActionInfo, Select, Selectable, SelectionOrder, PreferredInput,
     IsGamepadButtonDown, GetGamepadConnected, GetImageForKeyCode,
 );
 
@@ -691,7 +692,7 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     }
 
     let active = cx.any_active(&list);
-    if cx.engine.options.device == "touch" {
+    if matches!(cx.engine.options.device.as_str(), "touch" | "phone") {
         if primary {
             let finger = cx.input_object("Touch", "Touch");
             let (position, delta) = position_delta(cx, finger, x, y);
@@ -760,7 +761,7 @@ fn leave(cx: &Cx) -> LuaResult<()> {
 /// --device touch: the primary pointer is a finger. UserInputService and GuiObject input events carry
 /// one Touch InputObject from down through its moves to up; GuiButton click events stay as they are.
 fn pointer_type(cx: &Cx, button: f64) -> &'static str {
-    if button == 1.0 && cx.engine.options.device == "touch" { "Touch" } else { button_type(button) }
+    if button == 1.0 && matches!(cx.engine.options.device.as_str(), "touch" | "phone") { "Touch" } else { button_type(button) }
 }
 
 /// A gamepad's buttons, D-pad and sticks arrive as Gamepad1, a keyboard's keys as Keyboard.
@@ -1812,7 +1813,7 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
     if let Some(uis) = c.UserInputService {
         if valid(n.PreferredInput) {
             let item = match engine.options.device.as_str() {
-                "touch" => "Touch",
+                "touch" | "phone" => "Touch",
                 "gamepad" => "Gamepad",
                 _ => "KeyboardAndMouse",
             };

@@ -993,3 +993,92 @@ assert(Joined == "began Space,jump pressed true,jump released false,began MouseB
 "#,
     );
 }
+
+#[test]
+fn context_action_touch_settings_and_info_match_client() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r#"
+local CAS = game:GetService("ContextActionService")
+local function noop() return Enum.ContextActionResult.Pass end
+
+-- Unbound actions succeed silently; GetBoundActionInfo returns an empty table.
+CAS:SetTitle("NoSuch", "Ignored")
+CAS:SetPosition("NoSuch", UDim2.fromOffset(10, 20))
+CAS:SetImage("NoSuch", "rbxassetid://1")
+CAS:SetDescription("NoSuch", "Desc")
+assert(next(CAS:GetBoundActionInfo("NoSuch")) == nil, "unbound info must be empty")
+
+-- Bound with createTouchButton = true vs false.
+CAS:BindAction("ActTouch", noop, true, Enum.KeyCode.E)
+CAS:BindActionAtPriority("ActNoTouch", noop, false, 3000, Enum.KeyCode.Q)
+CAS:SetTitle("ActTouch", "Jump!")
+CAS:SetImage("ActTouch", "rbxassetid://12345")
+CAS:SetDescription("ActTouch", "Does jump")
+CAS:SetPosition("ActTouch", UDim2.new(0.5, 10, 0.25, -5))
+CAS:SetTitle("ActNoTouch", "HiddenTitle")
+CAS:SetPosition("ActNoTouch", UDim2.fromOffset(1, 2))
+
+local info = CAS:GetBoundActionInfo("ActTouch")
+assert(info.title == "Jump!", tostring(info.title))
+assert(info.image == "rbxassetid://12345", tostring(info.image))
+assert(info.description == "Does jump", tostring(info.description))
+assert(info.createTouchButton == true, tostring(info.createTouchButton))
+assert(info.priorityLevel == 2000, tostring(info.priorityLevel))
+assert(info.stackOrder == 1, tostring(info.stackOrder))
+assert(info.position == nil, "SetPosition does not add a position field to GetBoundActionInfo")
+assert(#info.inputTypes == 1 and info.inputTypes[1] == Enum.KeyCode.E, "inputTypes")
+
+local noTouch = CAS:GetBoundActionInfo("ActNoTouch")
+assert(noTouch.title == "HiddenTitle", tostring(noTouch.title))
+assert(noTouch.createTouchButton == nil, "createTouchButton omitted when false")
+assert(noTouch.priorityLevel == 3000 and noTouch.stackOrder == 2)
+
+local all = CAS:GetAllBoundActionInfo()
+assert(all.ActTouch and all.ActTouch.title == "Jump!" and all.ActNoTouch and all.ActNoTouch.title == "HiddenTitle")
+
+-- String parameter coercion (measured: numbers, booleans, tables stringify).
+CAS:SetTitle("ActTouch", 456)
+assert(CAS:GetBoundActionInfo("ActTouch").title == "456")
+CAS:SetTitle("ActTouch", true)
+assert(CAS:GetBoundActionInfo("ActTouch").title == "true")
+CAS:SetTitle("ActTouch", {})
+assert(CAS:GetBoundActionInfo("ActTouch").title == "{}")
+
+-- Rebinding clears title/image/description and increments stackOrder.
+CAS:BindAction("ActTouch", noop, true, Enum.KeyCode.F)
+local rebound = CAS:GetBoundActionInfo("ActTouch")
+assert(rebound.title == nil and rebound.image == nil and rebound.description == nil, "rebind resets touch settings")
+assert(rebound.stackOrder == 3 and rebound.inputTypes[1] == Enum.KeyCode.F)
+
+-- Argument validation order and messages (arg 2 checked before arg 1).
+local function expectErr(expected, fn, ...)
+	local ok, err = pcall(fn, ...)
+	assert(not ok and string.find(tostring(err), expected, 1, true), `expected "{expected}", got ok={ok} err={err}`)
+end
+expectErr("Argument 2 missing or nil", CAS.SetTitle, CAS)
+expectErr("Argument 2 missing or nil", CAS.SetTitle, CAS, "ActTouch")
+expectErr("Argument 2 missing or nil", CAS.SetTitle, CAS, "ActTouch", nil)
+expectErr("Argument 1 missing or nil", CAS.SetTitle, CAS, nil, "Ok")
+expectErr("Argument 2 missing or nil", CAS.SetPosition, CAS)
+expectErr("Argument 2 missing or nil", CAS.SetPosition, CAS, "ActTouch")
+expectErr("Argument 2 missing or nil", CAS.SetPosition, CAS, "ActTouch", nil)
+expectErr("Argument 1 missing or nil", CAS.SetPosition, CAS, nil, UDim2.new())
+expectErr("Unable to cast string to UDim2", CAS.SetPosition, CAS, "ActTouch", "bad")
+expectErr("Unable to cast Vector2 to UDim2", CAS.SetPosition, CAS, "ActTouch", Vector2.new(1, 2))
+
+CAS:UnbindAction("ActTouch")
+assert(next(CAS:GetBoundActionInfo("ActTouch")) == nil)
+CAS:UnbindAllActions()
+assert(next(CAS:GetAllBoundActionInfo()) == nil)
+"#,
+    );
+    let unemulated = engine.state.borrow().output.unemulated();
+    assert!(unemulated.is_empty(), "ContextActionService setters must not report unemulated: {unemulated:?}");
+}
+
+/// Horizontal and Shift+wheel scrolling rules measured in a playing client (Studio 0.747.0.7471481):
+/// X-only frames (including Battle Pass's AutomaticCanvasSize=X shape), XY frames with/without Shift,
+/// vertical-ancestor priority on nested scrollers, ancestor-only pass-through, and the X spring.

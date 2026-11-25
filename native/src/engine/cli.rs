@@ -2081,6 +2081,9 @@ mod device_tests {
         let phone = flow("touch");
         assert!(phone.contains("preferred=Touch"), "{phone}");
         assert!(phone.contains("touch=Touch same=true"), "{phone}");
+        let handset = flow("phone");
+        assert!(handset.contains("preferred=Touch"), "{handset}");
+        assert!(handset.contains("touch=Touch same=true"), "{handset}");
         assert!(flow("desktop").contains("preferred=KeyboardAndMouse glyph= "), "desktop");
     }
 
