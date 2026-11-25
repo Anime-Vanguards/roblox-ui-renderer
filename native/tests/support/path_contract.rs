@@ -280,7 +280,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Engine,
         "src/record/run.rs",
         "pub fn parse(",
-        0x8d2cb867f9db6e8c,
+        0x74cb591a33c8541b,
     ),
     (
         Crate::Engine,
