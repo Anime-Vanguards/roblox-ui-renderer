@@ -104,6 +104,17 @@ export function outDir(env = process.env) {
 export const STATE_DIR = stateDir();
 export const OUT_DIR = outDir();
 
+// A file or folder name made from free text (an instance's name, a --tag) that every OS creates and reads back as
+// given: the characters Windows refuses (< > : " / \ | ? * and control characters) become "_", a device name (CON,
+// NUL, COM1, ...) gets a "_", the stem is cut to fit 255 UTF-8 bytes with `extension`, and trailing dots and spaces,
+// which Windows drops, go. Everything else is kept, so different names still name different files.
+export function fileName(text, extension = "") {
+	const stem = String(text).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^(con|prn|aux|nul|com[\d¹²³]|lpt[\d¹²³])(?=[. ]|$)/i, "$1_");
+	const characters = [...stem];
+	while (Buffer.byteLength(characters.join("") + extension) > 255) characters.pop();
+	return (characters.join("") + extension).replace(/[. ]+$/, "") || "_";
+}
+
 const same = (a, b) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 export const isDefaultStateDir = (dir = stateDir()) => same(path.resolve(dir), DEFAULT_STATE_DIR);
 

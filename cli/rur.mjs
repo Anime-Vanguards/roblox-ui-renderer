@@ -83,7 +83,7 @@ import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 // First: applies the global --state-dir flag before anything resolves a path (cli/paths.mjs)
-import { OUT_DIR, sharedStatePath, stateDir } from "./paths.mjs";
+import { fileName, OUT_DIR, sharedStatePath, stateDir } from "./paths.mjs";
 import { accountAccess, studioContentRoots, withoutCookie, CACHE_DIR } from "./assets.mjs";
 import { engineBaseArgs, ensureEngine } from "./engine.mjs";
 import { detectRojoProject, mountArgs, rojoFileOf, runMounts } from "./rojo.mjs";
@@ -351,7 +351,7 @@ function asArray(value) {
 // replacing an earlier render there. The summary's `out` is the directory used.
 export function renderOutDir(args, name) {
 	let dir = path.resolve(args.out && args.out !== true ? String(args.out) : path.join(OUT_DIR, name));
-	if (args.tag && args.tag !== true) dir = path.join(dir, String(args.tag).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_"));
+	if (args.tag && args.tag !== true) dir = path.join(dir, fileName(String(args.tag)));
 	if (args.keep) {
 		const used = candidate => fs.existsSync(path.join(candidate, "summary.json")) || fs.existsSync(path.join(candidate, "scene.json"));
 		let candidate = dir;

@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { pathMatches, sceneDiagnostics } from "./diagnostics.mjs";
 import { isMain } from "./entry.mjs";
+import { fileName } from "./paths.mjs";
 
 function parseArgs(argv) {
 	const args = { _: [] };
@@ -263,7 +264,7 @@ function crop(target, query, args) {
 			for (let k = 0; k < 4; k++) out.data[dst + k] = png.data[src + k];
 		}
 	}
-	const file = path.resolve(args.out || path.join(dir, `crop-${node.name}.png`));
+	const file = path.resolve(args.out || path.join(dir, fileName(`crop-${node.name}`, ".png")));
 	fs.writeFileSync(file, PNG.sync.write(out));
 	console.log(`${pathOf(node)}\n    ${describe(node)}\n    crop → ${file}`);
 }

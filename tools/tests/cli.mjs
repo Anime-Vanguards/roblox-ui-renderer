@@ -5,8 +5,24 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { recordSummary, snapshotDir } from "../../cli/rur.mjs";
+import { recordSummary, renderOutDir, snapshotDir } from "../../cli/rur.mjs";
 import { luauString } from "../../cli/studio.mjs";
+import { fileName } from "../../cli/paths.mjs";
+
+// File names from free text: what Windows refuses becomes "_", a device name gets a "_", a long stem is cut to 255
+// UTF-8 bytes with its extension kept, trailing dots and spaces go, and the rest is kept as written
+assert.equal(fileName('crop-Row:1 (Two) <a/b\\c|d?e*f"\tg', ".png"), "crop-Row_1 (Two) _a_b_c_d_e_f__g.png");
+assert.equal(fileName("crop-H:One", ".png"), "crop-H_One.png");
+assert.equal(fileName("crop-Ends. .", ".png"), "crop-Ends. ..png");
+assert.equal(fileName("tag. ."), "tag");
+assert.equal(fileName(". ."), "_");
+assert.equal(fileName("con"), "con_");
+assert.equal(fileName("NUL", ".png"), "NUL_.png");
+assert.equal(fileName("Com1.tar"), "Com1_.tar");
+assert.equal(fileName("console"), "console");
+assert.equal(fileName("é".repeat(200), ".png"), `${"é".repeat(125)}.png`);
+assert.equal(fileName("\u{1f600}".repeat(70)), "\u{1f600}".repeat(63));
+assert.equal(renderOutDir({ out: "out/tags", tag: "pc:1 ." }, "Story"), path.resolve("out/tags", "pc_1"));
 
 // Luau string literals: quotes and backslashes escaped, control characters as Luau's \ddd (not JSON's \uXXXX)
 assert.equal(luauString('a"b\\c'), '"a\\"b\\\\c"');
@@ -509,6 +525,13 @@ end
 		Badge.Size = UDim2.fromOffset(20, 20)
 		Badge.Parent = Holder
 	end
+	for Index, Name in { "Row:1 (Two) <a/b\\\\c|d?e*f>", "H:One" } do
+		local Row = Instance.new("Frame")
+		Row.Name = Name
+		Row.Position = UDim2.fromOffset(200 + Index * 50, 100)
+		Row.Size = UDim2.fromOffset(40, 40)
+		Row.Parent = Target
+	end
 end
 `);
 	const out = path.join(dir, "out");
@@ -534,8 +557,18 @@ end
 	assert.equal(outside.status, 1, outside.stderr);
 	assert.match(outside.stderr, /^CoreGui\.RURStory\.StoryTarget\.Strip\.Item14 is outside the image: rect \[520, 0, 40, 40\], image 400x200 \(logical px; render\.png \d+x\d+\)\n$/);
 	assert.equal(fs.existsSync(path.join(dir, "item14.png")), false);
+	// Without --out the crop is crop-<name>.png beside render.png, named so every OS keeps it as one file of that name
+	// (a colon made Windows write the PNG to an alternate stream of "crop-H", a slash a missing folder)
+	for (const [query, file] of [["Row:1", "crop-Row_1 (Two) _a_b_c_d_e_f_.png"], ["H:One", "crop-H_One.png"]]) {
+		const picked = spawnSync(process.execPath, ["cli/inspect.mjs", "crop", out, query, "--zoom", "1"], { cwd: root, encoding: "utf8", windowsHide: true });
+		assert.equal(picked.status, 0, picked.stderr);
+		assert.ok(picked.stdout.trimEnd().endsWith(`crop → ${path.join(out, file)}`), picked.stdout);
+		assert.ok(fs.readdirSync(out).includes(file), `${file} in ${fs.readdirSync(out).join(", ")}`);
+		assert.ok(PNG.sync.read(fs.readFileSync(path.join(out, file))).width > 0);
+	}
+	assert.deepEqual(fs.readdirSync(out).filter(name => name.startsWith("crop-")).sort(), ["crop-H_One.png", "crop-Row_1 (Two) _a_b_c_d_e_f_.png"]);
 	fs.rmSync(dir, { recursive: true, force: true });
-	console.log("CLI inspect crop: PASS (named node before substring matches, inside the image before outside, outside is an error)");
+	console.log("CLI inspect crop: PASS (named node before substring matches, inside the image before outside, outside is an error, a default name every OS keeps)");
 }
 
 // --actions: a bad list is a usage error before anything runs (exit 64, no output directory);

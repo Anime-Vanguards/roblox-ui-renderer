@@ -162,4 +162,6 @@ node cli/inspect.mjs crop out/Button "Primary" --zoom 3   # Zoomed PNG crop of o
 node cli/inspect.mjs diff out/before out/after            # Layout, visual, and pixel diff of two renders
 ```
 
+`crop` writes `crop-<node name>.png` beside `render.png` unless `--out` names the file. Characters a file name can't hold on some OS (`< > : " / \ | ? *` and control characters) become `_`, so the name is the same everywhere; `--tag` folder names follow the same rule.
+
 Rects are reported in logical pixels (`AbsolutePosition` / `AbsoluteSize`; with `--topbar-inset`, scripts see `ScreenGui` content shifted up by the inset like Roblox). `Path2D` entries report `GetBoundingRect` and `path=<thickness>#<hex> segments=<n>`. Undrawn or clipped content is flagged inline (`[culled, not drawn: AutomaticSize, centre outside clip]`, `[2 wrapped lines dropped]`, `[missing glyph ...]`).
