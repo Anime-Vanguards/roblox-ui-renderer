@@ -471,7 +471,14 @@ pub fn gradient_mesh(
     // entries around it (white, black at 0.3, white: 11 of 255 across one entry, never 0)
     // (fixtures/gradient-probe-table.luau, gradient-probe-valley.luau)
     if !even {
-        if !close {
+        // A radial or elliptical list with close keypoints cut at exactly 0 and 1 (Scale 1) also has its last
+        // keypoint 1 / 2048 past 1, as a list without close keypoints does: black past t = 1 (a corner) reads 3,
+        // not 0 (fixtures/gradient-probe-cut.luau tile 13, radial at Scale 1, 8,106 px up to 4 levels off without
+        // it, and 300x160 radial and elliptical tiles of a scratch probe, 32,492 and 23,210 px: all 0 with it). A
+        // window ending before 1 (Scale above 1) holds the colour of its exact end, and one past 1 (below Scale 1)
+        // ends on the last keypoint's colour either way
+        let radial = matches!(kind, Kind::Radial | Kind::Elliptical) && form.cut && window == [0., 1.];
+        if !close || radial {
             if let Some(last) = form.knots.last_mut() {
                 last[0] += LAST;
             }
@@ -625,6 +632,28 @@ mod tests {
         assert_eq!(radial.value(0.74), radial.value(0.5));
         // Below Scale 1 t past 1 reads the last keypoint's black
         assert_eq!(form("Radial", 0.5).value(1.5)[0], 0.);
+    }
+    /// At Scale 1 a radial or elliptical list with close keypoints, cut at exactly 0 and 1, has its last keypoint
+    /// 1 / 2048 past 1 as a list without close keypoints does, so black past t = 1 reads 3.4, the grey-to-black
+    /// segment's colour 1 / 2048 before its end; a conical list cut at 0 and 1 ends on the exact black
+    /// (fixtures/gradient-probe-cut.luau tile 13)
+    #[test]
+    fn centred_lists_cut_at_one_keep_the_last_keypoint_past_one() {
+        let keys = json!([[0, 0, 0, 0], [0.3, 1, 1, 1], [0.3001, 0.5, 0.5, 0.5], [1, 0, 0, 0]]);
+        let form = |kind: &str| gradient_mesh(&json!({"type":kind,"color":keys}), [10., 20., 225., 120.], [255.; 3], 255., [0.; 4]).form;
+        // The grey keypoint's squared colour, held in 8 bits (64 / 255), 1 / 2048 of the way to black's
+        let grey = (0.5f64 * 0.5 * 255.).round() / 255.;
+        let tail = grey * LAST / (1. - 0.3001 + LAST);
+        assert!((tail.sqrt() * 255. - 3.37).abs() < 0.01);
+        for kind in ["Radial", "Elliptical"] {
+            let form = form(kind);
+            assert!(form.cut, "{kind}");
+            for t in [1., 1.3] {
+                let at = form.value(t)[0];
+                assert!((at - tail).abs() < 1e-9, "{kind} at t {t}: {at}, not {tail}");
+            }
+        }
+        assert_eq!(form("Conical").value(1.)[0], 0.);
     }
     /// An evenly spaced list is drawn in 256 steps between two keypoints, the colour of the nearest step
     /// (fixtures/gradient-probe-table.luau strips 7 to 14)
