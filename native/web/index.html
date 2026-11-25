@@ -71,7 +71,7 @@
 		canvas.addEventListener("wheel", event => {
 			event.preventDefault();
 			const notches = RurHost.wheelNotches(event, host.ready.viewport.height);
-			if (notches) host.queue({ type: "wheel", ...logical(event), dx: event.deltaX, dy: event.deltaY, notches });
+			if (notches) host.queue({ type: "wheel", ...logical(event), dx: event.deltaX, dy: event.deltaY, notches, shift: Boolean(event.shiftKey) });
 		}, { passive: false });
 		canvas.addEventListener("keydown", event => {
 			RurHost.keyEvents(event, true).forEach(e => host.queue(e));

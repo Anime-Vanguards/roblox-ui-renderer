@@ -466,27 +466,7 @@ fn prepare_command(
     presentation: &mut ScrollPresentation,
     drawn: Option<&Value>,
 ) {
-    if command["cmd"] != "frame" || command.get("presentation").is_some() {
-        return;
-    }
-    if let Some(events) = command.get_mut("events").and_then(Value::as_array_mut) {
-        for event in events {
-            if event["type"] == "wheel" {
-                let x = event["x"].as_f64().unwrap_or(0.0);
-                let y = event["y"].as_f64().unwrap_or(0.0);
-                let notches = event["notches"]
-                    .as_f64()
-                    .unwrap_or_else(|| -event["dy"].as_f64().unwrap_or(0.0) / 100.0);
-                if let Some(taker) = presentation.wheel(scene, x, y, notches) {
-                    event["presentationTaker"] = json!(taker);
-                }
-                event["presentation"] = presentation.snapshot();
-            } else {
-                event["presentation"] = presentation.snapshot_at(drawn);
-            }
-        }
-    }
-    command["presentation"] = presentation.snapshot();
+    presentation.prepare_command(command, scene, drawn);
 }
 
 fn receive(worker: &RuntimeWorker) -> Result<Value> {
@@ -786,6 +766,103 @@ mod tests {
                 dir.join("dev.project.json").display()
             )
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Headless / web `prepare_command` must pass Shift (both explicit `event.shift` and held
+    /// Shift keys) to `ScrollPresentation`, so prediction and the engine agree and scroll an XY
+    /// ScrollingFrame horizontally rather than vertically (and skip a Y-only ScrollingFrame).
+    #[test]
+    fn headless_prepare_command_and_session_agree_on_shift_wheel() {
+        let dir = std::env::temp_dir().join(format!("rur-headless-shift-wheel-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("shift-wheel.luau");
+        fs::write(
+            &fixture,
+            r#"
+return function(Target)
+	local function make(name, x, dir)
+		local sf = Instance.new("ScrollingFrame")
+		sf.Name = name
+		sf.Position = UDim2.fromOffset(x, 0)
+		sf.Size = UDim2.fromOffset(180, 180)
+		sf.CanvasSize = UDim2.fromOffset(1500, 1500)
+		sf.ScrollingDirection = dir
+		sf.ScrollBarThickness = 0
+		sf.Parent = Target
+		return sf
+	end
+	make("Both", 0, Enum.ScrollingDirection.XY)
+	make("OnlyY", 200, Enum.ScrollingDirection.Y)
+end
+"#,
+        )
+        .unwrap();
+        let repo = crate::engine::default_repo();
+        let argv: Vec<String> = vec![
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--roots".into(), repo.join("tools/tests/oracle-root").to_string_lossy().into_owned(),
+            "--fixture".into(), fixture.to_string_lossy().into_owned(),
+            "--viewport".into(), "400x200".into(),
+            "--no-snapshots".into(),
+            "--session".into(), "1".into(),
+        ];
+        let args = crate::engine::cli::parse(&argv).unwrap();
+        let mut host = crate::engine::cli::Host::start(&args).unwrap();
+        let ready = host.mount(&args).unwrap();
+        let mut scene = SceneStore::default();
+        scene.apply(&ready).unwrap();
+        let mut presentation = ScrollPresentation::default();
+        presentation.update(&scene, None);
+        let mut last_drawn = None;
+
+        let step = |host: &mut crate::engine::cli::Host,
+                    scene: &mut SceneStore,
+                    presentation: &mut ScrollPresentation,
+                    last_drawn: &mut Option<Value>,
+                    events: Value| {
+            let mut cmd = json!({"cmd": "frame", "dt": 1.0 / 60.0, "cadence": "display", "events": events});
+            prepare_command(&mut cmd, scene, presentation, last_drawn.as_ref());
+            let mut reply = host.handle(&cmd).unwrap();
+            assert_ne!(reply["type"], "error", "{reply}");
+            scene.apply_owned(&mut reply).unwrap();
+            presentation.update(scene, reply.get("presentation"));
+            presentation.advance(scene, 1.0 / 60.0);
+            *last_drawn = Some(presentation.inspect());
+        };
+        let canvas_pos = |scene: &SceneStore, name: &str| -> [f64; 2] {
+            let node = scene
+                .ordered_nodes()
+                .find(|n| n["name"].as_str() == Some(name))
+                .unwrap();
+            let pos = node["scroll"]["canvasPosition"].as_array().unwrap();
+            [pos[0].as_f64().unwrap(), pos[1].as_f64().unwrap()]
+        };
+
+        // 1. Explicit `shift: true` on wheel over XY frame scrolls X (+100), not Y (0).
+        step(&mut host, &mut scene, &mut presentation, &mut last_drawn, json!([
+            {"type": "wheel", "x": 90.0, "y": 90.0, "notches": -1.0, "shift": true}
+        ]));
+        for _ in 0..45 {
+            step(&mut host, &mut scene, &mut presentation, &mut last_drawn, json!([]));
+        }
+        assert_eq!(canvas_pos(&scene, "Both"), [100.0, 0.0], "explicit shift+wheel over XY must scroll horizontally");
+
+        // 2. Held LeftShift + wheel without explicit `shift` scrolls XY horizontally again and leaves Y-only unmoved.
+        step(&mut host, &mut scene, &mut presentation, &mut last_drawn, json!([
+            {"type": "key", "key": "LeftShift", "down": true}
+        ]));
+        step(&mut host, &mut scene, &mut presentation, &mut last_drawn, json!([
+            {"type": "wheel", "x": 90.0, "y": 90.0, "notches": -1.0},
+            {"type": "wheel", "x": 290.0, "y": 90.0, "notches": -1.0}
+        ]));
+        for _ in 0..45 {
+            step(&mut host, &mut scene, &mut presentation, &mut last_drawn, json!([]));
+        }
+        assert_eq!(canvas_pos(&scene, "Both"), [200.0, 0.0], "held Shift+wheel over XY must scroll horizontally");
+        assert_eq!(canvas_pos(&scene, "OnlyY"), [0.0, 0.0], "held Shift+wheel over Y-only must not scroll");
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

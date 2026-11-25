@@ -796,6 +796,8 @@ pub struct ScrollPresentation {
     memo: ProjectionMemo,
     /// Nodes the last project() gave new values (0 when it drew the authoritative scene or the last projection)
     pub projected_nodes: usize,
+    /// LeftShift / RightShift held state tracked from session `key` events (`note_key` / `prepare_command`).
+    shift_held: [bool; 2],
 }
 /// Prediction stays within 200 logical px of the latest authoritative CanvasPosition: rows further
 /// out may not be instantiated in the retained scene yet.
@@ -828,6 +830,7 @@ impl ScrollPresentation {
             projection: None,
             memo: ProjectionMemo::default(),
             projected_nodes: 0,
+            shift_held: [false; 2],
         }
     }
     pub fn reset(&mut self) {
@@ -1159,6 +1162,53 @@ impl ScrollPresentation {
             }
         }
         None
+    }
+    /// Tracks LeftShift / RightShift transitions from session `key` events so wheel prediction
+    /// without an explicit `shift` field matches `engine/input/mod.rs::modifiers()`.
+    pub fn note_key(&mut self, event: &Value) {
+        if event["type"] == "key" {
+            let down = event["down"].as_bool().unwrap_or(false);
+            match event["key"].as_str() {
+                Some("LeftShift") => self.shift_held[0] = down,
+                Some("RightShift") => self.shift_held[1] = down,
+                _ => {}
+            }
+        }
+    }
+    /// Whether Shift applies to a wheel event: explicit `event.shift` boolean, else held Shift keys.
+    pub fn wheel_shift(&self, event: &Value) -> bool {
+        event
+            .get("shift")
+            .and_then(Value::as_bool)
+            .unwrap_or(self.shift_held[0] || self.shift_held[1])
+    }
+    /// Prepares a session `"frame"` command for presentation-owned scrolling (shared by
+    /// `headless.rs` and `web.rs`): tracks held Shift keys, routes wheel events through
+    /// [`Self::wheel_with_shift`], tags `presentationTaker`, and attaches presentation snapshots.
+    pub fn prepare_command(&mut self, command: &mut Value, scene: &SceneStore, drawn: Option<&Value>) {
+        if command["cmd"] != "frame" || command.get("presentation").is_some() {
+            return;
+        }
+        if let Some(events) = command.get_mut("events").and_then(Value::as_array_mut) {
+            for event in events {
+                if event["type"] == "wheel" {
+                    let x = event["x"].as_f64().unwrap_or(0.0);
+                    let y = event["y"].as_f64().unwrap_or(0.0);
+                    let notches = event["notches"]
+                        .as_f64()
+                        .unwrap_or_else(|| -event["dy"].as_f64().unwrap_or(0.0) / 100.0);
+                    let shift = self.wheel_shift(event);
+                    if let Some(taker) = self.wheel_with_shift(scene, x, y, notches, shift) {
+                        event["presentationTaker"] = json!(taker);
+                    }
+                    event["presentation"] = self.snapshot();
+                } else {
+                    self.note_key(event);
+                    event["presentation"] = self.snapshot_at(drawn);
+                }
+            }
+        }
+        command["presentation"] = self.snapshot();
     }
     pub fn advance(&mut self, scene: &SceneStore, dt: f64) -> bool {
         let _memory = crate::memtrace::scope(crate::memtrace::Tag::Presentation);
@@ -1663,5 +1713,54 @@ mod tests {
         assert_eq!(motion.states[&1].target, [0.0, 100.0]);
         assert_eq!(motion.wheel_with_shift(&both, 50.0, 50.0, -1.0, true), Some(1));
         assert_eq!(motion.states[&1].target, [100.0, 100.0]);
+    }
+
+    #[test]
+    fn prepare_command_forwards_explicit_and_held_shift_for_wheel() {
+        let both = scene(&json!({
+            "viewport": {"width": 400, "height": 300, "scale": 1.0},
+            "layers": [{"draw": [1, 2]}],
+            "nodes": [
+                {"id": 1, "rect": [0, 0, 200, 300], "clipOwners": [], "scroll": {
+                    "window": [0, 0, 200, 300], "canvas": [0, 0, 1500, 1500], "canvasPosition": [0, 0], "maxRange": [1300, 1200], "direction": "XY", "epoch": 0
+                }},
+                {"id": 2, "rect": [200, 0, 200, 300], "clipOwners": [], "scroll": {
+                    "window": [200, 0, 200, 300], "canvas": [0, 0, 1500, 1500], "canvasPosition": [0, 0], "maxRange": [1300, 1200], "direction": "Y", "epoch": 0
+                }}
+            ]
+        }));
+        let mut motion = ScrollPresentation::default();
+        motion.update(&both, None);
+
+        // Explicit `shift: true` on wheel over XY frame predicts horizontal scroll (not vertical).
+        let mut cmd = json!({"cmd": "frame", "dt": 1.0 / 60.0, "events": [
+            {"type": "wheel", "x": 50.0, "y": 50.0, "notches": -1.0, "shift": true}
+        ]});
+        motion.prepare_command(&mut cmd, &both, None);
+        assert_eq!(cmd["events"][0]["presentationTaker"], json!(1));
+        assert_eq!(motion.states[&1].target, [100.0, 0.0]);
+
+        // Held LeftShift across frames predicts horizontal scroll on XY and refuses Y-only frame.
+        let mut down = json!({"cmd": "frame", "dt": 1.0 / 60.0, "events": [
+            {"type": "key", "key": "LeftShift", "down": true}
+        ]});
+        motion.prepare_command(&mut down, &both, None);
+        let mut held = json!({"cmd": "frame", "dt": 1.0 / 60.0, "events": [
+            {"type": "wheel", "x": 50.0, "y": 50.0, "notches": -1.0},
+            {"type": "wheel", "x": 250.0, "y": 50.0, "notches": -1.0}
+        ]});
+        motion.prepare_command(&mut held, &both, None);
+        assert_eq!(held["events"][0]["presentationTaker"], json!(1));
+        assert_eq!(motion.states[&1].target, [200.0, 0.0]);
+        assert!(held["events"][1].get("presentationTaker").is_none(), "Y-only frame must not take Shift+wheel");
+        assert_eq!(motion.states[&2].target, [0.0, 0.0]);
+
+        // Releasing LeftShift restores vertical scrolling on XY.
+        let mut up = json!({"cmd": "frame", "dt": 1.0 / 60.0, "events": [
+            {"type": "key", "key": "LeftShift", "down": false},
+            {"type": "wheel", "x": 50.0, "y": 50.0, "notches": -1.0}
+        ]});
+        motion.prepare_command(&mut up, &both, None);
+        assert_eq!(motion.states[&1].target, [200.0, 100.0]);
     }
 }

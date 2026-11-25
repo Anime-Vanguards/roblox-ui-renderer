@@ -279,22 +279,7 @@ impl Story {
 /// headless.rs prepare_command: wheel events take their scroll owner from the presentation, every event
 /// carries the presentation state it was aimed at
 fn prepare_command(command: &mut Value, scene: &SceneStore, presentation: &mut ScrollPresentation, drawn: Option<&Value>) {
-    if let Some(events) = command.get_mut("events").and_then(Value::as_array_mut) {
-        for event in events {
-            if event["type"] == "wheel" {
-                let x = event["x"].as_f64().unwrap_or(0.0);
-                let y = event["y"].as_f64().unwrap_or(0.0);
-                let notches = event["notches"].as_f64().unwrap_or_else(|| -event["dy"].as_f64().unwrap_or(0.0) / 100.0);
-                if let Some(taker) = presentation.wheel(scene, x, y, notches) {
-                    event["presentationTaker"] = json!(taker);
-                }
-                event["presentation"] = presentation.snapshot();
-            } else {
-                event["presentation"] = presentation.snapshot_at(drawn);
-            }
-        }
-    }
-    command["presentation"] = presentation.snapshot();
+    presentation.prepare_command(command, scene, drawn);
 }
 
 /// The canvas: a WebGL2 surface (Emscripten's EGL on `Module.canvas`) and a blit of the renderer's

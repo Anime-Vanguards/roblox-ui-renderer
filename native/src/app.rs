@@ -647,18 +647,20 @@ impl NativeApp {
                 self.control_queued.get_or_insert_with(Instant::now);
             }
             if event["type"] == "wheel" {
+                let shift = self.presentation.wheel_shift(&event);
                 let taker = self.presentation.wheel_with_shift(
                     &self.scene,
                     event["x"].as_f64().unwrap_or_default(),
                     event["y"].as_f64().unwrap_or_default(),
                     event["notches"].as_f64().unwrap_or_default(),
-                    event["shift"].as_bool().unwrap_or(false),
+                    shift,
                 );
                 if let Some(taker) = taker {
                     event["presentationTaker"] = json!(taker);
                 }
                 event["presentation"] = self.presentation.snapshot();
             } else {
+                self.presentation.note_key(&event);
                 event["presentation"] = self.presentation.snapshot_at(self.drawn_motion.as_ref());
             }
             push(&mut self.pending_events, event);

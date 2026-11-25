@@ -129,9 +129,10 @@
 
 	// Wheel notches of a DOM wheel event (+1 = one notch away from the user). A mouse notch arrives as
 	// ~100 px (or 3 lines) and is half a notch, as the desktop app's winit line delta is
-	// (native/src/input.rs wheel_notches); trackpad deltas stay proportional
+	// (native/src/input.rs wheel_notches); trackpad deltas stay proportional. Browsers usually convert
+	// Shift+wheel into a horizontal deltaX, so fall back to -deltaX when shiftKey is held and deltaY is 0.
 	function wheelNotches(event, pageHeight) {
-		const delta = -event.deltaY;
+		const delta = event.deltaY ? -event.deltaY : event.shiftKey ? -event.deltaX : 0;
 		if (!Number.isFinite(delta) || !delta) return 0;
 		const lines = event.deltaMode === 1 ? delta / 3 : event.deltaMode === 2 ? delta * pageHeight / 100 : delta / 100;
 		return 0.5 * lines;

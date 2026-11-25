@@ -3,7 +3,7 @@
 // engine's (native/src/engine/input/actions.rs, which checks it again); docs/stories.md "Timed input".
 //
 //   {t?, type:"move", x, y}   {t?, type:"down"|"up", x?, y?, button?: 1|2|3}   {t?, type:"leave"}
-//   {t?, type:"wheel", x?, y? (or a node <point>), notches | dy, dx?}
+//   {t?, type:"wheel", x?, y? (or a node <point>), notches | dy, dx?, shift?}
 //   {t?, type:"key", key, down?, shift?, ctrl?, alt?}   {t?, type:"text"|"paste", text}
 //   {t?, type:"click", <point>, button?, hold?}
 //   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?, steps?, duration?}
