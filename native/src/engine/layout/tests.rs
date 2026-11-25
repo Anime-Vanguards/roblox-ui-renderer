@@ -530,3 +530,225 @@ fn slots_are_guarded_by_generation_and_grow_by_chunks() {
     assert_eq!(slots.get(id(3, 1)), None);
     assert_eq!(slots.get(id(3, 2)).map(String::as_str), Some("again"));
 }
+
+/// Moving a non-scroll parent shifts its same-shape subtree via `store` -> `moved(id, false)` ->
+/// `shift_children(id, false)`. Every shifted record must count under `stats.moved`, never
+/// `stats.scroll_moved` or `stats.scroll_passes`, so `desktop_layout_cpu_ms` does not charge
+/// the 62 us scroll base.
+#[test]
+fn non_scroll_parent_move_counts_moved_descendants_not_scroll_moved() {
+    let (lua, engine) = start(1.0);
+    let script = {
+        let mut state = engine.state.borrow_mut();
+        let class = engine.reflection.class_id("ModuleScript").unwrap();
+        crate::engine::instance::create_named(&mut state, &engine.reflection, class, "Test")
+    };
+    let env = engine_lua::modules::environment(&lua, &engine, script).expect("environment");
+    let exports = lua.create_table().expect("exports");
+    env.set("Exports", exports.clone()).expect("set Exports");
+    let source = r#"
+        local Gui = Instance.new("ScreenGui")
+        Gui.Name = "Story"
+        Gui.Parent = game:GetService("CoreGui")
+        local Target = Instance.new("Frame")
+        Target.Size = UDim2.fromScale(1, 1)
+        Target.Parent = Gui
+        local Panel = Instance.new("Frame")
+        Panel.Size = UDim2.fromOffset(200, 200)
+        Panel.Position = UDim2.fromOffset(0, 0)
+        Panel.Parent = Target
+        local Wrapper = Instance.new("Frame")
+        Wrapper.Size = UDim2.fromOffset(180, 180)
+        Wrapper.Position = UDim2.fromOffset(10, 10)
+        Wrapper.Parent = Panel
+        for I = 1, 20 do
+            local Child = Instance.new("Frame")
+            Child.Size = UDim2.fromOffset(40, 20)
+            Child.Position = UDim2.fromOffset(0, (I - 1) * 8)
+            Child.Parent = Wrapper
+        end
+        Exports.move_panel = function(X, Y)
+            Panel.Position = UDim2.fromOffset(X, Y)
+        end
+    "#;
+    let setup = lua.load(source).set_name("=Test").set_environment(env).into_function().expect("compile");
+    let call = engine_lua::globals::call(&lua, &engine, setup, LuaMultiValue::new()).expect("call");
+    if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+        panic!("setup failed: {message}");
+    }
+    let move_panel: LuaFunction = exports.get("move_panel").expect("move_panel fn");
+    scheduler::run_until(&lua, &engine, 0.1).expect("initial layout");
+
+    let before = super::stats_snapshot(&engine);
+    let call = engine_lua::globals::call(
+        &lua,
+        &engine,
+        move_panel,
+        LuaMultiValue::from_vec(vec![LuaValue::Number(40.0), LuaValue::Number(25.0)]),
+    )
+    .expect("move");
+    if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+        panic!("move_panel failed: {message}");
+    }
+    super::update_all(&engine);
+    let after = super::stats_snapshot(&engine);
+    let delta = after.delta_since(&before);
+
+    assert_eq!(delta.passes, 1, "expected 1 layout pass: {delta:?}");
+    assert_eq!(delta.scroll_moved, 0, "non-scroll parent move must not increment scroll_moved: {delta:?}");
+    assert_eq!(delta.scroll_passes, 0, "non-scroll parent move must not increment scroll_passes: {delta:?}");
+    assert_eq!(delta.moved, 22, "expected Panel + Wrapper + 20 children moved via same_shape/shift_children: {delta:?}");
+    let ms = crate::cost::desktop_layout_cpu_ms(delta);
+    assert!(
+        ms > 0.005 && ms < 0.020,
+        "non-scroll parent move must price at ~9 us, not >= 62 us scroll base: got {ms} ms ({delta:?})"
+    );
+    drop(lua);
+}
+
+/// Pins `shift_children`'s `stats.moved += 1` feeding `lazy_layout_price` (`install.rs`):
+/// moving a non-scroll parent with 100 nested children and reading a child's `AbsolutePosition`
+/// in the same Heartbeat charges `2.3 + (stored + 101) * 0.312` us (~34 us), not just the
+/// parent (~3 us) and not a 62 us scroll pass.
+#[test]
+fn lazy_layout_read_after_non_scroll_parent_move_charges_moved_descendants() {
+    let output = run(
+        r#"
+        return function(Target)
+            local Panel = Instance.new("Frame")
+            Panel.Size = UDim2.fromOffset(200, 200)
+            Panel.Position = UDim2.fromOffset(0, 0)
+            Panel.Parent = Target
+            local Wrapper = Instance.new("Frame")
+            Wrapper.Size = UDim2.fromOffset(180, 180)
+            Wrapper.Parent = Panel
+            local Children = {}
+            for I = 1, 100 do
+                local Child = Instance.new("Frame")
+                Child.Size = UDim2.fromOffset(40, 10)
+                Child.Position = UDim2.fromOffset(0, I)
+                Child.Parent = Wrapper
+                Children[I] = Child
+            end
+            local RunService = game:GetService("RunService")
+            local function Twice()
+                local T0 = os.clock()
+                local _ = Children[1].AbsolutePosition
+                local T1 = os.clock()
+                local _ = Children[1].AbsolutePosition
+                local T2 = os.clock()
+                return ((T1 - T0) - (T2 - T1)) * 1e6
+            end
+            task.spawn(function()
+                RunService.Heartbeat:Wait()
+                RunService.Heartbeat:Wait()
+                local _ = Children[1].AbsolutePosition
+                Panel.Position = UDim2.fromOffset(30, 15)
+                print(string.format("same %.3f", Twice()))
+                RunService.Heartbeat:Wait()
+                Panel.Position = UDim2.fromOffset(60, 15)
+                RunService.PreRender:Wait()
+                local _ = Children[2].AbsolutePosition
+                local _ = Children[1].Name
+                print(string.format("prerender %.3f", Twice()))
+            end)
+        end
+        "#,
+        1.0,
+        1.0,
+    );
+    let value = |name: &str| -> f64 {
+        let line = output
+            .iter()
+            .find(|line| line.contains(&format!(": {name} ")))
+            .unwrap_or_else(|| panic!("{name} missing: {output:?}"));
+        line.rsplit(' ').next().unwrap().parse().unwrap()
+    };
+    let same = value("same");
+    assert!(
+        (30.0..45.0).contains(&same),
+        "same-Heartbeat read after moving parent + 101 descendants should pay ~34 us (2.3 + ~102 * 0.312), got {same:.2} us"
+    );
+    let after = value("prerender");
+    assert!(
+        after.abs() < 0.05,
+        "PreRender read after the frame's layout point should pay ~0 us, got {after:.3} us"
+    );
+}
+
+/// Direct `engine::layout` stats check for ScrollingFrame coalescing (`clamp_canvas_position`
+/// does not force `ensure` on write) and separation of `scroll_moved`/`scroll_passes` from `moved`.
+#[test]
+fn scroll_stats_coalesce_within_frame_and_separate_from_moved() {
+    let (lua, engine) = start(1.0);
+    let script = {
+        let mut state = engine.state.borrow_mut();
+        let class = engine.reflection.class_id("ModuleScript").unwrap();
+        crate::engine::instance::create_named(&mut state, &engine.reflection, class, "Test")
+    };
+    let env = engine_lua::modules::environment(&lua, &engine, script).expect("environment");
+    let exports = lua.create_table().expect("exports");
+    env.set("Exports", exports.clone()).expect("set Exports");
+    let source = r#"
+        local Gui = Instance.new("ScreenGui")
+        Gui.Name = "Story"
+        Gui.Parent = game:GetService("CoreGui")
+        local Target = Instance.new("Frame")
+        Target.Size = UDim2.fromScale(1, 1)
+        Target.Parent = Gui
+        local Scroller = Instance.new("ScrollingFrame")
+        Scroller.Size = UDim2.fromOffset(200, 200)
+        Scroller.CanvasSize = UDim2.fromOffset(0, 2000)
+        Scroller.Parent = Target
+        local First
+        for I = 1, 15 do
+            local Card = Instance.new("Frame")
+            Card.Size = UDim2.fromOffset(100, 40)
+            Card.Position = UDim2.fromOffset(0, (I - 1) * 50)
+            Card.Parent = Scroller
+            if I == 1 then First = Card end
+        end
+        Exports.act = function(Mode)
+            if Mode == "coalesce" then
+                Scroller.CanvasPosition = Vector2.new(0, 100)
+                Scroller.CanvasPosition = Vector2.new(0, 200)
+            elseif Mode == "read_between" then
+                Scroller.CanvasPosition = Vector2.new(0, 300)
+                local _ = First.AbsolutePosition
+                Scroller.CanvasPosition = Vector2.new(0, 400)
+                local _ = First.AbsolutePosition
+            end
+        end
+    "#;
+    let setup = lua.load(source).set_name("=Test").set_environment(env).into_function().expect("compile");
+    let call = engine_lua::globals::call(&lua, &engine, setup, LuaMultiValue::new()).expect("call");
+    if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+        panic!("setup failed: {message}");
+    }
+    let act: LuaFunction = exports.get("act").expect("act fn");
+    scheduler::run_until(&lua, &engine, 0.1).expect("initial layout");
+
+    // Two writes with no read between them coalesce into 1 scroll pass moving 15 records.
+    let before = super::stats_snapshot(&engine);
+    let call = engine_lua::globals::call(&lua, &engine, act.clone(), LuaMultiValue::from_vec(vec![LuaValue::String(lua.create_string("coalesce").unwrap())])).expect("coalesce");
+    if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+        panic!("coalesce failed: {message}");
+    }
+    super::update_all(&engine);
+    let delta = super::stats_snapshot(&engine).delta_since(&before);
+    assert_eq!(delta.scroll_passes, 1, "two writes without a read must coalesce to 1 scroll pass: {delta:?}");
+    assert_eq!(delta.scroll_moved, 15, "expected 15 scrolled cards: {delta:?}");
+    assert_eq!(delta.moved, 0, "scroll must not count under non-scroll moved: {delta:?}");
+
+    // Write -> read -> write -> read forces 2 scroll passes moving 30 records total.
+    let before2 = super::stats_snapshot(&engine);
+    let call2 = engine_lua::globals::call(&lua, &engine, act, LuaMultiValue::from_vec(vec![LuaValue::String(lua.create_string("read_between").unwrap())])).expect("read_between");
+    if let CallOutcome::Failed(message, _) = call2.outcome().unwrap() {
+        panic!("read_between failed: {message}");
+    }
+    let delta2 = super::stats_snapshot(&engine).delta_since(&before2);
+    assert_eq!(delta2.scroll_passes, 2, "read between writes must force 2 scroll passes: {delta2:?}");
+    assert_eq!(delta2.scroll_moved, 30, "expected 30 scrolled card moves across 2 passes: {delta2:?}");
+    assert_eq!(delta2.moved, 0, "scroll must not count under non-scroll moved: {delta2:?}");
+    drop(lua);
+}
