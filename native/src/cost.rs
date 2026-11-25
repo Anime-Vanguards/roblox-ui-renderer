@@ -2492,8 +2492,65 @@ struct EquivalenceMismatch {
     remedy: String,
 }
 
-fn check_compare_equivalence(before: &Value, after: &Value) -> Vec<EquivalenceMismatch> {
+struct UncheckedField {
+    field: &'static str,
+    missing_before: bool,
+    missing_after: bool,
+}
+
+struct EquivalenceResult {
+    mismatches: Vec<EquivalenceMismatch>,
+    unchecked: Vec<UncheckedField>,
+}
+
+fn format_unchecked_note(unchecked: &[UncheckedField]) -> Option<String> {
+    if unchecked.is_empty() {
+        return None;
+    }
+    let before_only: Vec<&str> = unchecked
+        .iter()
+        .filter(|u| u.missing_before && !u.missing_after)
+        .map(|u| u.field)
+        .collect();
+    let after_only: Vec<&str> = unchecked
+        .iter()
+        .filter(|u| !u.missing_before && u.missing_after)
+        .map(|u| u.field)
+        .collect();
+    let both: Vec<&str> = unchecked
+        .iter()
+        .filter(|u| u.missing_before && u.missing_after)
+        .map(|u| u.field)
+        .collect();
+    let pronoun = |items: &[&str]| if items.len() == 1 { "it" } else { "them" };
+    let mut parts: Vec<String> = Vec::new();
+    if !before_only.is_empty() {
+        parts.push(format!(
+            "{} not checked (before report predates {})",
+            before_only.join(", "),
+            pronoun(&before_only)
+        ));
+    }
+    if !after_only.is_empty() {
+        parts.push(format!(
+            "{} not checked (after report predates {})",
+            after_only.join(", "),
+            pronoun(&after_only)
+        ));
+    }
+    if !both.is_empty() {
+        parts.push(format!(
+            "{} not checked (both reports predate {})",
+            both.join(", "),
+            pronoun(&both)
+        ));
+    }
+    Some(parts.join("; "))
+}
+
+fn check_compare_equivalence(before: &Value, after: &Value) -> EquivalenceResult {
     let mut mismatches = Vec::new();
+    let mut unchecked = Vec::new();
 
     let b_status = before["status"].as_str().unwrap_or("");
     let a_status = after["status"].as_str().unwrap_or("");
@@ -2642,52 +2699,102 @@ fn check_compare_equivalence(before: &Value, after: &Value) -> Vec<EquivalenceMi
         });
     }
 
-    if before.get("source").is_some() || after.get("source").is_some() {
-        let b_src = before.get("source").cloned().unwrap_or(Value::Null);
-        let a_src = after.get("source").cloned().unwrap_or(Value::Null);
-        if sort_json(b_src.clone()) != sort_json(a_src.clone()) {
-            let fmt_src = |v: &Value| {
-                if let (Some(k), Some(t)) = (v.get("kind").and_then(Value::as_str), v.get("target").and_then(Value::as_str)) {
-                    format!("{k}:{t}")
-                } else {
-                    "unspecified".to_string()
-                }
-            };
-            mismatches.push(EquivalenceMismatch {
+    let both_scene = b_input == "scene" && a_input == "scene";
+
+    let b_src = before.get("source").filter(|v| !v.is_null());
+    let a_src = after.get("source").filter(|v| !v.is_null());
+    match (b_src, a_src) {
+        (Some(b_src), Some(a_src)) => {
+            if sort_json(b_src.clone()) != sort_json(a_src.clone()) {
+                let fmt_src = |v: &Value| {
+                    if let (Some(k), Some(t)) = (v.get("kind").and_then(Value::as_str), v.get("target").and_then(Value::as_str)) {
+                        format!("{k}:{t}")
+                    } else {
+                        "unspecified".to_string()
+                    }
+                };
+                mismatches.push(EquivalenceMismatch {
+                    field: "source",
+                    before: b_src.clone(),
+                    after: a_src.clone(),
+                    reason: format!("source differs (before={}, after={})", fmt_src(b_src), fmt_src(a_src)),
+                    remedy: "Compare two runs of the same story/fixture/module/model (use --git-ref to compare revisions of one source).".into(),
+                });
+            }
+        }
+        (b, a) if !both_scene => {
+            unchecked.push(UncheckedField {
                 field: "source",
-                before: b_src.clone(),
-                after: a_src.clone(),
-                reason: format!("source differs (before={}, after={})", fmt_src(&b_src), fmt_src(&a_src)),
-                remedy: "Compare two runs of the same story/fixture/module/model (use --git-ref to compare revisions of one source).".into(),
+                missing_before: b.is_none(),
+                missing_after: a.is_none(),
+            });
+        }
+        _ => {}
+    }
+
+    let b_dev = before.get("device").and_then(Value::as_str);
+    let a_dev = after.get("device").and_then(Value::as_str);
+    match (b_dev, a_dev) {
+        (Some(b_dev), Some(a_dev)) => {
+            if b_dev != a_dev {
+                mismatches.push(EquivalenceMismatch {
+                    field: "device",
+                    before: json!(b_dev),
+                    after: json!(a_dev),
+                    reason: format!("device differs (before=\"{b_dev}\", after=\"{a_dev}\")"),
+                    remedy: "Re-run both arms with the same --device (desktop, touch, or gamepad).".into(),
+                });
+            }
+        }
+        (b, a) if !both_scene => {
+            unchecked.push(UncheckedField {
+                field: "device",
+                missing_before: b.is_none(),
+                missing_after: a.is_none(),
+            });
+        }
+        _ => {}
+    }
+
+    let b_ctrl = before.get("controls").filter(|v| !v.is_null());
+    let a_ctrl = after.get("controls").filter(|v| !v.is_null());
+    match (b_ctrl, a_ctrl) {
+        (Some(b_ctrl), Some(a_ctrl)) => {
+            let b_ctrl = sort_json(b_ctrl.clone());
+            let a_ctrl = sort_json(a_ctrl.clone());
+            if b_ctrl != a_ctrl {
+                mismatches.push(EquivalenceMismatch {
+                    field: "controls",
+                    before: b_ctrl.clone(),
+                    after: a_ctrl.clone(),
+                    reason: format!("controls differ (before={b_ctrl}, after={a_ctrl})"),
+                    remedy: "Re-run both arms with the same --controls values.".into(),
+                });
+            }
+        }
+        (b, a) if !both_scene => {
+            unchecked.push(UncheckedField {
+                field: "controls",
+                missing_before: b.is_none(),
+                missing_after: a.is_none(),
+            });
+        }
+        _ => {}
+    }
+
+    if b_mode == "single" && a_mode == "single" && !both_scene {
+        let b_time = before.get("time").and_then(Value::as_f64);
+        let a_time = after.get("time").and_then(Value::as_f64);
+        if b_time.is_none() || a_time.is_none() {
+            unchecked.push(UncheckedField {
+                field: "time",
+                missing_before: b_time.is_none(),
+                missing_after: a_time.is_none(),
             });
         }
     }
 
-    let b_dev = before.get("device").and_then(Value::as_str).unwrap_or("desktop");
-    let a_dev = after.get("device").and_then(Value::as_str).unwrap_or("desktop");
-    if b_dev != a_dev {
-        mismatches.push(EquivalenceMismatch {
-            field: "device",
-            before: json!(b_dev),
-            after: json!(a_dev),
-            reason: format!("device differs (before=\"{b_dev}\", after=\"{a_dev}\")"),
-            remedy: "Re-run both arms with the same --device (desktop, touch, or gamepad).".into(),
-        });
-    }
-
-    let b_ctrl = sort_json(before.get("controls").cloned().unwrap_or_else(|| json!({})));
-    let a_ctrl = sort_json(after.get("controls").cloned().unwrap_or_else(|| json!({})));
-    if b_ctrl != a_ctrl {
-        mismatches.push(EquivalenceMismatch {
-            field: "controls",
-            before: b_ctrl.clone(),
-            after: a_ctrl.clone(),
-            reason: format!("controls differ (before={b_ctrl}, after={a_ctrl})"),
-            remedy: "Re-run both arms with the same --controls values.".into(),
-        });
-    }
-
-    mismatches
+    EquivalenceResult { mismatches, unchecked }
 }
 
 /// Deterministic A/B comparison between two `rur-cost/1` reports (`rrr-ab/1`).
@@ -2696,7 +2803,10 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
     validate_cost_report(before, "before", None)?;
     validate_cost_report(after, "after", None)?;
 
-    let checks = json!([
+    let eq = check_compare_equivalence(before, after);
+    let unchecked_fields: Vec<&str> = eq.unchecked.iter().map(|u| u.field).collect();
+    let unchecked_note = format_unchecked_note(&eq.unchecked);
+    let checks: Vec<&str> = [
         "schema",
         "status",
         "source",
@@ -2708,9 +2818,13 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         "viewport",
         "scale",
         "device",
-        "controls"
-    ]);
-    let mismatches = check_compare_equivalence(before, after);
+        "controls",
+    ]
+    .into_iter()
+    .filter(|c| !unchecked_fields.contains(c))
+    .collect();
+    let checks = json!(checks);
+    let mismatches = eq.mismatches;
     if !mismatches.is_empty() {
         let reasons: Vec<String> = mismatches.iter().map(|m| m.reason.clone()).collect();
         let mut remedies: Vec<String> = Vec::new();
@@ -2891,14 +3005,21 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         }
     }
 
+    let mut equivalence = Map::new();
+    equivalence.insert("passed".into(), json!(true));
+    equivalence.insert("checks".into(), checks);
+    if !unchecked_fields.is_empty() {
+        equivalence.insert("unchecked".into(), json!(unchecked_fields));
+    }
+    if let Some(note) = unchecked_note {
+        equivalence.insert("uncheckedNote".into(), json!(note));
+    }
+
     Ok(sort_json(json!({
         "schema": "rrr-ab/1",
         "verdict": verdict,
         "verdictBasis": "measured_counts_only (quads, glyphQuads, canvasRtBytes, screenOverdrawViewports, offscreenOverdrawViewports, hiddenGuiObjects, and sequence layout churn; unmeasured model drawCalls and batchBreaks are informational only)",
-        "equivalence": {
-            "passed": true,
-            "checks": checks,
-        },
+        "equivalence": Value::Object(equivalence),
         "measurementNoise": 0.0,
         "counts": {
             "before": before_counts,
@@ -4023,6 +4144,9 @@ pub fn format_one_screen_compare(diff: &Value, dest: Option<&Path>) -> String {
     }
 
     let _ = writeln!(out, "rur cost compare: {verdict} (measured counts only; noise=0.0)");
+    if let Some(note) = diff.pointer("/equivalence/uncheckedNote").and_then(Value::as_str) {
+        let _ = writeln!(out, "  note:      {note}");
+    }
     let num = |ptr: &str| diff.pointer(ptr).and_then(Value::as_f64).unwrap_or(0.0);
     let _ = writeln!(
         out,
@@ -6939,6 +7063,161 @@ end
             "refusal must name device: {}",
             cmp_seq.value
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compare_accepts_legacy_report_missing_metadata_fields_with_note() {
+        let dir = std::env::temp_dir().join(format!("rur-cost-legacy-cmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("legacy_card.luau");
+        std::fs::write(
+            &fixture,
+            r#"return function(Target)
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromOffset(100, 50)
+	f.BorderSizePixel = 0
+	f.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+        let repo = crate::engine::default_repo().to_string_lossy().into_owned();
+        let roots = crate::engine::default_repo()
+            .join("tools/tests/oracle-root")
+            .to_string_lossy()
+            .into_owned();
+        let fixture_s = fixture.to_string_lossy().into_owned();
+
+        // 1. Real single-moment report with non-default device & controls, compared against a copy
+        //    with `source`, `device`, `controls`, and `time` removed (matching a pre-branch report).
+        let after_single_dir = dir.join("after_single");
+        let after_single = run_cli(&[
+            "--repo".into(),
+            repo.clone(),
+            "--roots".into(),
+            roots.clone(),
+            "--no-snapshots".into(),
+            "--viewport".into(),
+            "800x600".into(),
+            "--scale".into(),
+            "1".into(),
+            "--fixture".into(),
+            fixture_s.clone(),
+            "--time".into(),
+            "0.2".into(),
+            "--device".into(),
+            "touch".into(),
+            "--controls".into(),
+            r#"{"Scale":2}"#.into(),
+            "--out".into(),
+            after_single_dir.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(!after_single.failed);
+
+        let mut legacy_single = after_single.value.clone();
+        if let Some(obj) = legacy_single.as_object_mut() {
+            obj.remove("source");
+            obj.remove("device");
+            obj.remove("controls");
+            obj.remove("time");
+        }
+        let legacy_single_path = dir.join("legacy_single.json");
+        write_report(&legacy_single_path, &legacy_single).unwrap();
+
+        let cmp_single = run_cli(&[
+            "compare".into(),
+            legacy_single_path.to_string_lossy().into_owned(),
+            after_single_dir.join("cost.json").to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(
+            !cmp_single.failed,
+            "pre-branch single report must compare, not refuse:\n{}",
+            cmp_single.summary
+        );
+        assert_eq!(cmp_single.value["verdict"], "unchanged");
+        assert_eq!(
+            cmp_single.value["equivalence"]["unchecked"],
+            json!(["source", "device", "controls", "time"])
+        );
+        let note_lines: Vec<&str> = cmp_single
+            .summary
+            .lines()
+            .filter(|l| l.trim_start().starts_with("note:"))
+            .collect();
+        assert_eq!(note_lines.len(), 1, "expected exactly one unchecked note line:\n{}", cmp_single.summary);
+        assert!(
+            note_lines[0].contains("source, device, controls, time")
+                && note_lines[0].contains("before report predates"),
+            "{}",
+            note_lines[0]
+        );
+
+        // 2. Real sequence report vs pre-branch copy lacking source, device, controls
+        let after_seq_dir = dir.join("after_seq");
+        let after_seq = run_cli(&[
+            "--repo".into(),
+            repo,
+            "--roots".into(),
+            roots,
+            "--no-snapshots".into(),
+            "--viewport".into(),
+            "800x600".into(),
+            "--scale".into(),
+            "1".into(),
+            "--fixture".into(),
+            fixture_s,
+            "--from".into(),
+            "0".into(),
+            "--frames".into(),
+            "3".into(),
+            "--fps".into(),
+            "60".into(),
+            "--device".into(),
+            "touch".into(),
+            "--out".into(),
+            after_seq_dir.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(!after_seq.failed);
+        let mut legacy_seq = after_seq.value.clone();
+        if let Some(obj) = legacy_seq.as_object_mut() {
+            obj.remove("source");
+            obj.remove("device");
+            obj.remove("controls");
+        }
+        let legacy_seq_path = dir.join("legacy_seq.json");
+        write_report(&legacy_seq_path, &legacy_seq).unwrap();
+
+        let cmp_seq = run_cli(&[
+            "compare".into(),
+            legacy_seq_path.to_string_lossy().into_owned(),
+            after_seq_dir.join("cost.json").to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(!cmp_seq.failed, "pre-branch sequence report must compare:\n{}", cmp_seq.summary);
+        assert_eq!(cmp_seq.value["verdict"], "unchanged");
+        assert_eq!(
+            cmp_seq.value["equivalence"]["unchecked"],
+            json!(["source", "device", "controls"])
+        );
+        assert!(
+            cmp_seq.summary.contains("source, device, controls not checked (before report predates them)"),
+            "{}",
+            cmp_seq.summary
+        );
+
+        // 3. Partial legacy report (only `device` missing) still checks `source` when both have it
+        let mut partial = after_seq.value.clone();
+        partial.as_object_mut().unwrap().remove("device");
+        partial["source"] = json!({"kind": "fixture", "target": "other.luau"});
+        let diff_src = compare_reports(&partial, &after_seq.value).unwrap();
+        assert_eq!(diff_src["verdict"], "refused");
+        assert!(diff_src["reason"].as_str().unwrap_or("").contains("source"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
