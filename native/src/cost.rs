@@ -1772,7 +1772,23 @@ pub fn extract_run_outcome(value: &Value) -> RunOutcome {
         .get("failure")
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
-        .map(|raw| crate::hints::failure_cause(raw, output).to_string())
+        .map(|raw| {
+            let cause = crate::hints::failure_cause(raw, output);
+            if cause != raw {
+                let mut combined = cause.to_string();
+                let (_, raw_ctx) = summarize_failure_lines(raw);
+                let cause_has_ctx = summarize_failure_lines(cause).1.is_some();
+                if !cause_has_ctx {
+                    if let Some(ctx) = raw_ctx.filter(|c| !cause.contains(c)) {
+                        combined.push('\n');
+                        combined.push_str(&ctx);
+                    }
+                }
+                combined
+            } else {
+                raw.to_string()
+            }
+        })
         .or_else(|| {
             if status.as_deref() == Some("error") {
                 output
@@ -1781,7 +1797,16 @@ pub fn extract_run_outcome(value: &Value) -> RunOutcome {
                     .flatten()
                     .filter(|e| e["kind"] == "error")
                     .filter_map(|e| e["message"].as_str())
-                    .find(|s| !s.trim().is_empty())
+                    .find(|s| !s.trim().is_empty() && !crate::hints::is_require_wrapper(s))
+                    .or_else(|| {
+                        output
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|e| e["kind"] == "error")
+                            .filter_map(|e| e["message"].as_str())
+                            .find(|s| !s.trim().is_empty())
+                    })
                     .map(str::to_string)
             } else {
                 None
@@ -7937,5 +7962,78 @@ end
                 "{label} screen must report `{expected}` matching factors ({factors:?}):\n{screen}"
             );
         }
+    }
+
+    #[test]
+    fn required_module_load_error_is_unwrapped_even_inside_multiline_wrapper() {
+        let dir = std::env::temp_dir().join(format!("rur-cost-req-unwrap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("ReplicatedStorage")).unwrap();
+        std::fs::write(
+            dir.join("ReplicatedStorage/BrokenHelper.luau"),
+            "local function init()\n\terror(\"missing helper table\")\nend\ninit()\nreturn {}\n",
+        )
+        .unwrap();
+        let wrapped_story = dir.join("ReplicatedStorage/WrappedRequire.story.luau");
+        std::fs::write(
+            &wrapped_story,
+            r#"local ReplicatedStorage = game:GetService("ReplicatedStorage")
+return function(_Target)
+	local ok, err = xpcall(function()
+		return require(ReplicatedStorage.BrokenHelper)
+	end, function(msg)
+		return "error while running root():\n\neffect error:\nerror while running branch():\n\n"
+			.. tostring(msg)
+			.. "\nReplicatedStorage.WrappedRequire.story:4 function FullPanel"
+	end)
+	if not ok then
+		error(err, 0)
+	end
+end
+"#,
+        )
+        .unwrap();
+
+        let repo = crate::engine::default_repo();
+        let out_dir = dir.join("out");
+        let out = run_cli(&[
+            "--repo".into(),
+            repo.to_string_lossy().into_owned(),
+            "--roots".into(),
+            dir.to_string_lossy().into_owned(),
+            "--no-snapshots".into(),
+            "--viewport".into(),
+            "800x600".into(),
+            "--scale".into(),
+            "1".into(),
+            "--story".into(),
+            wrapped_story.to_string_lossy().into_owned(),
+            "--out".into(),
+            out_dir.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(out.failed);
+        assert_eq!(out.value["status"], "error");
+        let failure = out.value["failure"].as_str().unwrap_or("");
+        assert!(
+            failure.contains("BrokenHelper") && failure.contains("missing helper table"),
+            "cost.json failure must name the required module and its error, got:\n{failure}"
+        );
+        assert!(
+            !failure.contains("Requested module experienced an error while loading"),
+            "cost.json failure must unwrap require() wrapper, got:\n{failure}"
+        );
+        assert!(
+            out.summary.contains("BrokenHelper") && out.summary.contains("missing helper table"),
+            "screen must name the required module and its error:\n{}",
+            out.summary
+        );
+        assert!(
+            !out.summary.contains("Requested module experienced an error while loading"),
+            "screen must not show generic require() wrapper:\n{}",
+            out.summary
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

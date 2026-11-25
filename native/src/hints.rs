@@ -14,12 +14,18 @@ use crate::rojo;
 /// What Roblox raises to require()'s caller when the module it requires raised an error while loading
 const REQUIRE_WRAPPER: &str = "Requested module experienced an error while loading";
 
+/// Whether `message` is Luau's generic `require()` wrapper, either on its own or inside a
+/// multiline framework wrapper (such as Vide's `error while running root(): ...` traceback).
+pub fn is_require_wrapper(message: &str) -> bool {
+    message.lines().any(|line| line.trim().ends_with(REQUIRE_WRAPPER))
+}
+
 /// A story's failure as a person needs to read it, and as its hint is worked out from: when a required module fails,
 /// Roblox logs the module's own error to output and raises a generic wrapper to the caller (ree does the same), so the
 /// first logged script error that is not the wrapper stands in for it. `output` is the run's script output (a scene's
 /// `diagnostics.output`: entries of `kind` and `message`).
 pub fn failure_cause<'a>(failure: &'a str, output: &'a Value) -> &'a str {
-    if !failure.ends_with(REQUIRE_WRAPPER) {
+    if !is_require_wrapper(failure) {
         return failure;
     }
     output
@@ -28,7 +34,7 @@ pub fn failure_cause<'a>(failure: &'a str, output: &'a Value) -> &'a str {
         .flatten()
         .filter(|entry| entry["kind"] == "error")
         .filter_map(|entry| entry["message"].as_str())
-        .find(|message| !message.ends_with(REQUIRE_WRAPPER))
+        .find(|message| !is_require_wrapper(message))
         .unwrap_or(failure)
 }
 
@@ -728,6 +734,15 @@ mod tests {
         ]);
         assert_eq!(failure_cause(wrapper, &output), "Packages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"");
         assert_eq!(failure_cause(&format!("ReplicatedStorage.Stories.A.story:1: {wrapper}"), &output), "Packages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"");
+        let multiline_wrapped = format!(
+            "error while running root():\n\neffect error:\nerror while running branch():\n\n{wrapper}\nReplicatedStorage.ui.vide.branch:10 function traceback\nReplicatedStorage.Stories.A.story:96 function Panel\n"
+        );
+        let output_with_wrapped = serde_json::json!([
+            { "kind": "error", "message": "ReplicatedStorage.BrokenMod:4: missing config" },
+            { "kind": "error", "message": wrapper },
+            { "kind": "error", "message": multiline_wrapped }
+        ]);
+        assert_eq!(failure_cause(&multiline_wrapped, &output_with_wrapped), "ReplicatedStorage.BrokenMod:4: missing config");
         assert_eq!(failure_cause("boom", &output), "boom");
         assert_eq!(failure_cause(wrapper, &serde_json::json!([{ "kind": "error", "message": wrapper }])), wrapper);
         assert_eq!(failure_cause(wrapper, &Value::Null), wrapper);
