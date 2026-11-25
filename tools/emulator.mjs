@@ -7,7 +7,8 @@
 //                                           edits there rebuild rur like edits here (co-development)
 //   node tools/emulator.mjs unlink          back to the pinned commit (Cargo.lock restored to it)
 //   node tools/emulator.mjs pin [<commit>]  pin another commit (default: the local checkout's HEAD, which must
-//                                           be pushed); updates Cargo.toml and Cargo.lock
+//                                           be pushed); updates Cargo.toml and Cargo.lock, and moves rur's own
+//                                           ror-archive entry to the commit that engine reads archives with
 //
 // A link is an untracked cargo config, <checkout>/.cargo/config.toml, patching the git dependency with
 // the local path; plain cargo commands in native/ use it too. While linked, Cargo.lock names the
@@ -91,6 +92,21 @@ function settleLock() {
 	return changed ? `Cargo.lock: ${changed.split("\n").pop().trim()}` : "Cargo.lock unchanged";
 }
 
+// The engine reads Roblox archives (.rbx) through ror-archive at a commit of its own, and rur depends on the same
+// crate itself (native/src/resolve.rs). The two stay at one commit, so both read an archive the same way and cargo
+// builds the reader once. When a pin moves the engine to one that reads with another commit, the settled lock names
+// the crate twice: at the manifest's commit and at the engine's. This is the manifest with its entry at the
+// engine's commit, and both commits; null when they agree already or the manifest has no such entry.
+export function archiveReaderWithEngine(manifest, lock) {
+	const own = /^ror-archive\s*=\s*\{\s*git\s*=\s*"[^"]+",\s*rev\s*=\s*"([0-9a-f]+)"/m.exec(manifest);
+	if (!own) return null;
+	const locked = new Set([...lock.matchAll(/name = "ror-archive"\r?\nversion = "[^"]*"\r?\nsource = "git\+[^"]*[?&]rev=([0-9a-f]+)/g)].map(match => match[1]));
+	const others = [...locked].filter(commit => commit !== own[1]);
+	if (!others.length) return null;
+	if (others.length > 1) throw new Error(`Cargo.lock names ror-archive at ${locked.size} commits: set the one in native/Cargo.toml by hand`);
+	return { manifest: manifest.replace(own[0], own[0].replace(own[1], others[0])), from: own[1], to: others[0] };
+}
+
 function describeCheckout(dir) {
 	const head = git(dir, "log", "-1", "--format=%h %cs %s");
 	if (!head) return `${dir}: not a git checkout`;
@@ -154,7 +170,13 @@ function pin(commit) {
 	const before = pinnedCommit();
 	const text = fs.readFileSync(MANIFEST, "utf8").replaceAll(`rev = "${before}"`, `rev = "${rev}"`);
 	fs.writeFileSync(MANIFEST, text);
-	console.log(`pinned ${rev.slice(0, 12)} (was ${before.slice(0, 12)}); ${settleLock()}`);
+	let settled = settleLock();
+	const reader = archiveReaderWithEngine(fs.readFileSync(MANIFEST, "utf8"), fs.readFileSync(LOCK, "utf8"));
+	if (reader) {
+		fs.writeFileSync(MANIFEST, reader.manifest);
+		settled = `${settleLock()}; ror-archive ${reader.to.slice(0, 12)}, the engine's (was ${reader.from.slice(0, 12)})`;
+	}
+	console.log(`pinned ${rev.slice(0, 12)} (was ${before.slice(0, 12)}); ${settled}`);
 }
 
 if (isMain(import.meta.url)) {

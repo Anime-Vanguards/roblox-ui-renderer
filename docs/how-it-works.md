@@ -31,6 +31,8 @@ node tools/emulator.mjs unlink     # Remove local path override
 
 `link` writes an untracked `.cargo/config.toml` patching the git source to a local path. (The vendored Luau VM stays at the pinned commit even while linked.)
 
+`pin` also moves rur's own `ror-archive` dependency, the reader of Roblox archives (`.rbx`), to the commit the pinned engine reads them with, so both read an archive the same way.
+
 
 ### How scripts run
 

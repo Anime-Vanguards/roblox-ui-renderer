@@ -61,7 +61,7 @@ rbx_binary = "=2.0.1"
 rbx_dom_weak = "=4.2.0"
 # Roblox archives (.rbx) among downloaded assets: a decal model's texture read from the model an archive holds
 # (resolve.rs model_text). roblox-object-renderer's reader, at the commit the emulator depends on (which reads every
-# model file through it), so cargo checks the repository out once.
+# model file through it), so cargo checks the repository out once; `node tools/emulator.mjs pin` moves it with the engine.
 ror-archive = { git = "https://github.com/Anime-Vanguards/roblox-object-renderer", rev = "5ba32b5432f7799f16f6ee5664497753c6cf7814" }
 rustc-hash = "=2.1.3"
 chrono = "=0.4.45"

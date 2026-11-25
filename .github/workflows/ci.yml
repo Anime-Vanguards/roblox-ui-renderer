@@ -86,7 +86,7 @@ jobs:
         run: |
           set -e
           for check in tools/tests/native-assets.mjs tools/tests/native-build-lock.mjs tools/tests/places.mjs \
-            tools/tests/web-bundle-directories.mjs; do
+            tools/tests/web-bundle-directories.mjs tools/tests/emulator-pin.mjs; do
             echo "== $check"
             node "$check"
           done

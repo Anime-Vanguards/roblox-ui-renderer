@@ -21,6 +21,7 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/packages.mjs"]],
 		[process.execPath, ["tools/tests/kept-runs.mjs"]],
 		[process.execPath, ["tools/tests/native-build-lock.mjs"]],
+		[process.execPath, ["tools/tests/emulator-pin.mjs"]],
 		// Downloads, the account and the cache rules are the engine's own tests (cargo test download::)
 		[process.execPath, ["tools/tests/native-assets.mjs"]],
 		[process.execPath, ["tools/tests/asset_studio.mjs"]],
