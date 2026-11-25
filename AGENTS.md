@@ -41,7 +41,8 @@ engine binary frozen while `native/` is being edited; `--no-service` skips the r
 - `fixtures/`: measurement scenes, each run by the golden suite. `tools/engine/golden.mjs` and `golden.json`:
   the engine's recorded output. `data/studio/`: frozen Studio measurements.
 - `tools/analysis/`: fitting scripts; `tools/studio/`, `tools/interaction/`: Studio probes and input
-  experiments; `tools/regress/`: renderer pixel hashes; `tools/web/`: the browser build.
+  experiments; `tools/regress/`: renderer pixel hashes; `tools/web/`: the browser build; `tools/resources/`: resource
+  budgets (disk writes, disk space, memory, page faults of the heavy workloads).
 - `docs/`: the rules and formats; `examples/project/`: a small project the defaults point at.
 
 ## Rules
@@ -62,4 +63,34 @@ engine binary frozen while `native/` is being edited; `--no-service` skips the r
 - **Never put stand-ins into the asset cache.** Draw a local image through a `file://` URI instead.
 - **Fixtures build their own scenes.** Use Studio's `rbxasset://` textures or local files, and generic text.
 - **Bundles stay local.** `tools/web/bundle.mjs` output holds Roblox Studio's fonts: never commit or publish it.
+
+## Resource budgets
+
+`tools/resources/` runs rur's heavy workloads (the golden check's fast corpus on a cold and a warm state folder, many
+`engine-batch` workers sharing one cold module store, and on a machine with a frozen project the whole golden check
+cold and warm) and measures what each costs the machine: data written, disk space kept, leftover temporary files, files
+created, memory (the biggest process, all of them together, memory reserved), page faults and processes, checked
+against `tools/resources/baseline.json`; time and CPU are shown only. CI runs the `ci` suite after the build and fails
+on a figure over its budget; the job summary explains each figure in plain words.
+
+- Run it before and after any change to caches (the module store, assets, fonts), to file or process I/O, to the
+  golden check's or the render service's workers, or to memory use, and put the comparison in your report. An engine
+  pin counts: the engine's module store and workers are measured here.
+
+  ```powershell
+  node tools/resources/measure.mjs --suite full --out ..\before.json       # with the base commit's rur-native
+  node tools/resources/measure.mjs --suite full --compare ..\before.json   # with the change's
+  ```
+
+  `--engine <rur-native>` picks the binary (default: `RUR_NATIVE_ENGINE`, else native/target), `--workload <id,...>`
+  some workloads (`--list` names them), `--repeat 3` checks medians. The `ci` workloads are held to 4 CPUs, as on a
+  runner.
+- Over budget: find what made the run do more work and fix it. Only an increase the change means to make goes into the
+  baseline, rewritten in the same commit so a reviewer sees it: `node tools/resources/measure.mjs --suite ci --repeat 3
+  --write-baseline` (or `--write-baseline --from <run.json>` with the `resource-figures` artifact of a CI run). Never
+  widen a tolerance or skip the step to get a run through.
+- Under the baseline by more than its tolerance ("lower it too"): rewrite the baseline in the same commit, so the gain
+  is kept.
+- `node tools/resources/history.mjs --github <owner>/<repo>` prints the figures CI kept for main as a table per
+  workload; `node --test tools/resources/test.mjs` (also in `npm test`) tests the tools.
 

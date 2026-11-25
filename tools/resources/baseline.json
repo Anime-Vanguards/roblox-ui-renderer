@@ -1,0 +1,256 @@
+{
+	"version": 1,
+	"about": "Resource budgets (measure.mjs): per platform and workload, the median figures of a few runs of main and their spread (largest run / smallest). A workload's tolerances override metrics.mjs's defaults; each says why. The golden-all workloads need a frozen project, so CI never runs them: their figures are a developer machine's, for comparisons there.",
+	"tolerances": {},
+	"platforms": {
+		"win32-x64": {
+			"batch-stress": {
+				"recorded": {
+					"commit": "6fa7b050b61efe58999014f1becff502a6278641",
+					"date": "2026-11-25T21:14:59.559Z",
+					"where": "a local machine, 4 of 24 CPUs",
+					"runs": 3,
+					"engine": "rur 6fa7b05 built against ree 8065021 (the engine pin after ba54201)"
+				},
+				"metrics": {
+					"ioWriteBytes": 514898597,
+					"diskGrowth": 46576918,
+					"filesLeft": 0,
+					"filesCreated": 36,
+					"peakWorkingSetMax": 182980608,
+					"peakWorkingSetSum": 1220460544,
+					"peakPrivateSum": 1402449920,
+					"pageFaults": 2466888,
+					"processes": 13,
+					"leftRunning": 0,
+					"ioReadBytes": 146909934,
+					"peakDiskGrowth": 54946976,
+					"peakHandlesMax": 230,
+					"peakProcesses": 13,
+					"wallMs": 11084,
+					"cpuMs": 33859,
+					"cpuKernelMs": 6906
+				},
+				"spread": {
+					"ioWriteBytes": 1.066,
+					"diskGrowth": 1.005,
+					"filesLeft": 1,
+					"filesCreated": 1.233,
+					"peakWorkingSetMax": 1.014,
+					"peakWorkingSetSum": 1.06,
+					"peakPrivateSum": 1.074,
+					"pageFaults": 1.035,
+					"processes": 1,
+					"leftRunning": 1,
+					"ioReadBytes": 1,
+					"peakDiskGrowth": 1.823,
+					"peakHandlesMax": 1.004,
+					"peakProcesses": 1,
+					"wallMs": 1.328,
+					"cpuMs": 1.098,
+					"cpuKernelMs": 1.154
+				},
+				"tolerances": {
+					"peakWorkingSetSum": {
+						"ratio": 1.3,
+						"slack": 67108864,
+						"why": "steady within 1.06x over three runs of main; workers that read each compacted pack whole add 1.6x"
+					},
+					"pageFaults": {
+						"ratio": 1.25,
+						"slack": 40000,
+						"why": "steady within 1.04x over three runs of main; the same pack reads add 1.3x"
+					}
+				}
+			},
+			"golden-all-cold": {
+				"recorded": {
+					"commit": "6fa7b050b61efe58999014f1becff502a6278641",
+					"date": "2026-11-25T21:25:48.321Z",
+					"where": "a local machine, 4 of 24 CPUs",
+					"runs": 2,
+					"engine": "rur 6fa7b05 built against ree 8065021 (the engine pin after ba54201)"
+				},
+				"metrics": {
+					"ioWriteBytes": 3857568464,
+					"diskGrowth": 44234402,
+					"filesLeft": 0,
+					"filesCreated": 43,
+					"peakWorkingSetMax": 1098926080,
+					"peakWorkingSetSum": 3754924032,
+					"peakPrivateSum": 3312310272,
+					"pageFaults": 11738850,
+					"processes": 185,
+					"leftRunning": 0,
+					"ioReadBytes": 6484602959,
+					"peakDiskGrowth": 86335641,
+					"peakHandlesMax": 296,
+					"peakProcesses": 34,
+					"wallMs": 161215,
+					"cpuMs": 677101,
+					"cpuKernelMs": 227164
+				},
+				"spread": {
+					"ioWriteBytes": 1.003,
+					"diskGrowth": 1,
+					"filesLeft": 1,
+					"filesCreated": 1.024,
+					"peakWorkingSetMax": 1.181,
+					"peakWorkingSetSum": 1.021,
+					"peakPrivateSum": 1.027,
+					"pageFaults": 1.003,
+					"processes": 1,
+					"leftRunning": 1,
+					"ioReadBytes": 1.001,
+					"peakDiskGrowth": 1.033,
+					"peakHandlesMax": 1.07,
+					"peakProcesses": 1.194,
+					"wallMs": 1.163,
+					"cpuMs": 1.032,
+					"cpuKernelMs": 1.218
+				}
+			},
+			"golden-all-warm": {
+				"recorded": {
+					"commit": "6fa7b050b61efe58999014f1becff502a6278641",
+					"date": "2026-11-25T21:25:48.321Z",
+					"where": "a local machine, 4 of 24 CPUs",
+					"runs": 2,
+					"engine": "rur 6fa7b05 built against ree 8065021 (the engine pin after ba54201)"
+				},
+				"metrics": {
+					"ioWriteBytes": 1310090154,
+					"diskGrowth": 58568,
+					"filesLeft": 0,
+					"filesCreated": 18,
+					"peakWorkingSetMax": 1216577536,
+					"peakWorkingSetSum": 2998798336,
+					"peakPrivateSum": 3515465728,
+					"pageFaults": 10688100,
+					"processes": 185,
+					"leftRunning": 0,
+					"ioReadBytes": 6489579447,
+					"peakDiskGrowth": 58568,
+					"peakHandlesMax": 306,
+					"peakProcesses": 38,
+					"wallMs": 162466,
+					"cpuMs": 654836,
+					"cpuKernelMs": 193891
+				},
+				"spread": {
+					"ioWriteBytes": 1,
+					"diskGrowth": 1,
+					"filesLeft": 1,
+					"filesCreated": 1,
+					"peakWorkingSetMax": 1.059,
+					"peakWorkingSetSum": 1.019,
+					"peakPrivateSum": 1.039,
+					"pageFaults": 1.001,
+					"processes": 1,
+					"leftRunning": 1,
+					"ioReadBytes": 1,
+					"peakDiskGrowth": 1,
+					"peakHandlesMax": 1.103,
+					"peakProcesses": 1.303,
+					"wallMs": 1.007,
+					"cpuMs": 1.048,
+					"cpuKernelMs": 1.646
+				}
+			},
+			"golden-fast-cold": {
+				"recorded": {
+					"commit": "6fa7b050b61efe58999014f1becff502a6278641",
+					"date": "2026-11-25T21:14:59.559Z",
+					"where": "a local machine, 4 of 24 CPUs",
+					"runs": 3,
+					"engine": "rur 6fa7b05 built against ree 8065021 (the engine pin after ba54201)"
+				},
+				"metrics": {
+					"ioWriteBytes": 75195192,
+					"diskGrowth": 1560731,
+					"filesLeft": 0,
+					"filesCreated": 199,
+					"peakWorkingSetMax": 350982144,
+					"peakWorkingSetSum": 636088320,
+					"peakPrivateSum": 694132736,
+					"pageFaults": 506592,
+					"processes": 19,
+					"leftRunning": 0,
+					"ioReadBytes": 129819920,
+					"peakDiskGrowth": 1702393,
+					"peakHandlesMax": 223,
+					"peakProcesses": 13,
+					"wallMs": 6390,
+					"cpuMs": 12358,
+					"cpuKernelMs": 2171
+				},
+				"spread": {
+					"ioWriteBytes": 1.011,
+					"diskGrowth": 1.001,
+					"filesLeft": 1,
+					"filesCreated": 1.082,
+					"peakWorkingSetMax": 1.007,
+					"peakWorkingSetSum": 1.011,
+					"peakPrivateSum": 1.036,
+					"pageFaults": 1.004,
+					"processes": 1,
+					"leftRunning": 1,
+					"ioReadBytes": 1,
+					"peakDiskGrowth": 1.308,
+					"peakHandlesMax": 1.004,
+					"peakProcesses": 1,
+					"wallMs": 1.223,
+					"cpuMs": 1.118,
+					"cpuKernelMs": 1.186
+				}
+			},
+			"golden-fast-warm": {
+				"recorded": {
+					"commit": "6fa7b050b61efe58999014f1becff502a6278641",
+					"date": "2026-11-25T21:14:59.559Z",
+					"where": "a local machine, 4 of 24 CPUs",
+					"runs": 3,
+					"engine": "rur 6fa7b05 built against ree 8065021 (the engine pin after ba54201)"
+				},
+				"metrics": {
+					"ioWriteBytes": 68106480,
+					"diskGrowth": 765431,
+					"filesLeft": 0,
+					"filesCreated": 194,
+					"peakWorkingSetMax": 341037056,
+					"peakWorkingSetSum": 445210624,
+					"peakPrivateSum": 527060992,
+					"pageFaults": 484734,
+					"processes": 17,
+					"leftRunning": 0,
+					"ioReadBytes": 129820009,
+					"peakDiskGrowth": 1146087,
+					"peakHandlesMax": 223,
+					"peakProcesses": 13,
+					"wallMs": 5825,
+					"cpuMs": 10640,
+					"cpuKernelMs": 1750
+				},
+				"spread": {
+					"ioWriteBytes": 1,
+					"diskGrowth": 1,
+					"filesLeft": 1,
+					"filesCreated": 1,
+					"peakWorkingSetMax": 1.017,
+					"peakWorkingSetSum": 1.017,
+					"peakPrivateSum": 1.044,
+					"pageFaults": 1.001,
+					"processes": 1,
+					"leftRunning": 1,
+					"ioReadBytes": 1,
+					"peakDiskGrowth": 2.975,
+					"peakHandlesMax": 1,
+					"peakProcesses": 1,
+					"wallMs": 2.204,
+					"cpuMs": 1.345,
+					"cpuKernelMs": 1.314
+				}
+			}
+		}
+	}
+}

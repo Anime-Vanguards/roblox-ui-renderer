@@ -56,4 +56,4 @@ Renders saved scenes via `rur-native --batch` and compares output frame hashes. 
 
 ## Continuous integration
 
-GitHub Actions Windows runners have neither a GPU nor Roblox Studio. CI compiles `rur-native`, runs the headless Rust unit tests, and executes the Node-only test scripts; font, GPU, and Studio suites run locally on contributor machines.
+GitHub Actions Windows runners have neither a GPU nor Roblox Studio. CI compiles `rur-native`, runs the headless Rust unit tests, and executes the Node-only test scripts; font, GPU, and Studio suites run locally on contributor machines. It then runs the resource budgets (`tools/resources/measure.mjs --suite ci`: the golden check's fast corpus cold and warm and a batch-worker stress, checked for disk writes, disk space, memory and page faults against `tools/resources/baseline.json`; AGENTS.md "Resource budgets").

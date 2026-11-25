@@ -33,6 +33,8 @@ export async function selftest() {
 		[process.execPath, ["tools/tests/compare_reports.mjs"]],
 		[process.execPath, ["tools/tests/compare_project.mjs"]],
 		[process.execPath, ["tools/tests/examples.mjs"]],
+		// The resource-budget tools (tools/resources: the budget arithmetic, the report, a measured process tree)
+		[process.execPath, ["--test", "tools/resources/test.mjs"]],
 	];
 	// The checks are independent (each writes its own out/ directory): they run concurrently and each
 	// one's output is printed whole, in the list's order
