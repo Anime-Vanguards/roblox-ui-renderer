@@ -522,16 +522,20 @@ impl Session {
     pub fn end_report(&mut self, lua: &Lua) -> Json {
         let (status, failure) = self.status(lua).unwrap_or_else(|error| ("error".into(), Some(scheduler::error_message(&error))));
         let diagnostics = story::diagnostics(&self.engine, &self.project, &self.story, self.run_time);
-        let mut report = json!({ "status": status, "failure": failure, "diagnostics": diagnostics });
-        if status == "yielded" {
+        let mut report = Map::new();
+        let is_yielded = status == "yielded";
+        report.insert("status".into(), Json::String(status));
+        report.insert("failure".into(), failure.map(Json::String).unwrap_or(Json::Null));
+        report.insert("diagnostics".into(), diagnostics);
+        if is_yielded {
             if let Some(at) = &self.story.waiting_at {
-                report["waiting"] = Json::String(at.clone());
+                report.insert("waiting".into(), Json::String(at.clone()));
             }
             if self.story.wait_in_loop {
-                report["waitingInLoop"] = Json::Bool(true);
+                report.insert("waitingInLoop".into(), Json::Bool(true));
             }
         }
-        report
+        Json::Object(report)
     }
 
     /// {"cmd":"control"}: sets a UI Labs control source, runs the resumption point, answers a frame.
@@ -561,7 +565,11 @@ impl Session {
         match self.build(lua) {
             Ok(scene) => {
                 let time = super::export::number(self.engine.state.borrow().sched.now);
-                json!({ "type": "scene", "time": time, "scene": scene })
+                let mut reply = Map::new();
+                reply.insert("type".into(), Json::String("scene".into()));
+                reply.insert("time".into(), time);
+                reply.insert("scene".into(), scene);
+                Json::Object(reply)
             }
             Err(error) => error_reply(&error),
         }
@@ -622,21 +630,30 @@ fn empty_arrays_as_objects(value: &mut Json) {
     }
 }
 
-fn write_reply(out: &mut impl Write, mut reply: Json) -> std::io::Result<()> {
+fn write_reply(out: &mut impl Write, buf: &mut Vec<u8>, mut reply: Json, flush: bool) -> std::io::Result<()> {
     empty_arrays_as_objects(&mut reply);
-    let text = serde_json::to_string(&reply).unwrap_or_else(|e| format!("{{\"type\":\"error\",\"message\":\"{e}\"}}"));
-    out.write_all(PREFIX.as_bytes())?;
-    out.write_all(text.as_bytes())?;
-    out.write_all(b"\n")?;
-    out.flush()
+    buf.clear();
+    buf.extend_from_slice(PREFIX.as_bytes());
+    if let Err(e) = serde_json::to_writer(&mut *buf, &reply) {
+        buf.clear();
+        buf.extend_from_slice(PREFIX.as_bytes());
+        let _ = write!(buf, "{{\"type\":\"error\",\"message\":\"{e}\"}}");
+    }
+    buf.push(b'\n');
+    out.write_all(buf)?;
+    if flush {
+        out.flush()?;
+    }
+    Ok(())
 }
 
 /// The stdio session loop (runtime/session.luau without a native transport).
 pub fn run_stdio(lua: &Lua, session: &mut Session) -> Result<(), String> {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
+    let mut buf = Vec::with_capacity(64 * 1024);
     let ready = session.ready(lua).unwrap_or_else(|error| error_reply(&error));
-    write_reply(&mut out, ready).map_err(|e| e.to_string())?;
+    write_reply(&mut out, &mut buf, ready, true).map_err(|e| e.to_string())?;
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let line = line.map_err(|e| e.to_string())?;
@@ -647,12 +664,12 @@ pub fn run_stdio(lua: &Lua, session: &mut Session) -> Result<(), String> {
         let command: Json = match super::lune_json::decode(line) {
             Ok(command @ Json::Object(_)) => command,
             _ => {
-                write_reply(&mut out, json!({ "type": "error", "message": format!("bad command: {line}") })).map_err(|e| e.to_string())?;
+                write_reply(&mut out, &mut buf, json!({ "type": "error", "message": format!("bad command: {line}") }), true).map_err(|e| e.to_string())?;
                 continue;
             }
         };
         match session.handle(lua, &command) {
-            Some(reply) => write_reply(&mut out, reply).map_err(|e| e.to_string())?,
+            Some(reply) => write_reply(&mut out, &mut buf, reply, true).map_err(|e| e.to_string())?,
             None => break,
         }
     }

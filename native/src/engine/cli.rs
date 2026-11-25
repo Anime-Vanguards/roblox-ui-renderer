@@ -532,15 +532,14 @@ fn install_test_hooks(lua: &Lua, engine: &Rc<Engine>) -> LuaResult<()> {
         let mut cache = export::retained::Retained::new(&e);
         cache.set_presentation(presentation.unwrap_or(false));
         let update = cache.build(&e, &roots);
-        let scene = json!({
-            "version": 1,
-            "viewport": export::viewport_json(&e),
-            "nodes": update.nodes,
-            "layers": update.layers.unwrap_or(Json::Array(Vec::new())),
-            "fonts": update.fonts.unwrap_or(Json::Array(Vec::new())),
-            "images": update.images,
-        });
-        lua.to_value(&scene)
+        let mut scene = Map::new();
+        scene.insert("version".into(), Json::from(1));
+        scene.insert("viewport".into(), export::viewport_json(&e));
+        scene.insert("nodes".into(), Json::Array(update.nodes));
+        scene.insert("layers".into(), update.layers.unwrap_or_else(|| Json::Array(Vec::new())));
+        scene.insert("fonts".into(), update.fonts.unwrap_or_else(|| Json::Array(Vec::new())));
+        scene.insert("images".into(), Json::Array(update.images.into_iter().map(Json::String).collect()));
+        lua.to_value(&Json::Object(scene))
     })?)?;
     let e = engine.clone();
     rur.set("id", lua.create_function(move |_, value: LuaValue| {
@@ -1731,7 +1730,7 @@ fn scene_output(
         (state.output.entries.len(), state.sched.frame, state.sched.now, 1.0 / state.sched.frame_duration)
     };
     let status = mounted.status.clone();
-    let scene = sort_keys(scene);
+    // serde_json::Map is backed by BTreeMap (no preserve_order), so every object's keys are already sorted.
     let text = serde_json::to_string(&scene).map_err(|e| e.to_string())?;
     Ok(SceneOutput { text, scene, status, nodes, lines, dependencies: super::lua::modules::required_files(engine), frames, seconds, fps })
 }
@@ -1743,23 +1742,6 @@ fn empty_arrays_as_objects(value: &mut Json) {
         Json::Array(items) => items.iter_mut().for_each(empty_arrays_as_objects),
         Json::Object(map) => map.values_mut().for_each(empty_arrays_as_objects),
         _ => {}
-    }
-}
-
-/// Keys in sorted order (the Luau runtime's encoder sorts them).
-fn sort_keys(value: Json) -> Json {
-    match value {
-        Json::Object(map) => {
-            let mut entries: Vec<(String, Json)> = map.into_iter().collect();
-            entries.sort_by(|a, b| a.0.cmp(&b.0));
-            let mut sorted = Map::new();
-            for (key, value) in entries {
-                sorted.insert(key, sort_keys(value));
-            }
-            Json::Object(sorted)
-        }
-        Json::Array(items) => Json::Array(items.into_iter().map(sort_keys).collect()),
-        other => other,
     }
 }
 

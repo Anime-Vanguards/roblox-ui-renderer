@@ -30,6 +30,56 @@ use super::{
 
 const HOST: &str = include_str!("story/host.luau");
 const PLUGIN: &str = include_str!("story/plugin.luau");
+const FIXTURE_FOLDER: &str = "local Folder = Instance.new('Folder') Folder.Name = 'RURFixtures' Folder.Parent = game:GetService('ReplicatedStorage') return Folder";
+const ACTIONS_SORT: &str = "local List = ... table.sort(List, function(A, B) return (A.t or 0) < (B.t or 0) end) return List";
+
+fn host_bytecode() -> &'static [u8] {
+    static BYTECODE: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
+    BYTECODE.get_or_init(|| {
+        super::alloc::long_lived(|| {
+            mlua::chunk::Compiler::new()
+                .compile(HOST)
+                .expect("story host bytecode")
+                .into_boxed_slice()
+        })
+    })
+}
+
+fn plugin_bytecode() -> &'static [u8] {
+    static BYTECODE: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
+    BYTECODE.get_or_init(|| {
+        super::alloc::long_lived(|| {
+            mlua::chunk::Compiler::new()
+                .compile(PLUGIN)
+                .expect("story plugin bytecode")
+                .into_boxed_slice()
+        })
+    })
+}
+
+fn fixture_folder_bytecode() -> &'static [u8] {
+    static BYTECODE: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
+    BYTECODE.get_or_init(|| {
+        super::alloc::long_lived(|| {
+            mlua::chunk::Compiler::new()
+                .compile(FIXTURE_FOLDER)
+                .expect("fixture folder bytecode")
+                .into_boxed_slice()
+        })
+    })
+}
+
+fn actions_sort_bytecode() -> &'static [u8] {
+    static BYTECODE: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
+    BYTECODE.get_or_init(|| {
+        super::alloc::long_lived(|| {
+            mlua::chunk::Compiler::new()
+                .compile(ACTIONS_SORT)
+                .expect("actions sort bytecode")
+                .into_boxed_slice()
+        })
+    })
+}
 
 /// What to mount (main.luau --story / --module / --fixture / --model).
 #[derive(Clone, Debug, PartialEq)]
@@ -99,7 +149,13 @@ pub fn mount_project(lua: &Lua, engine: &Rc<Engine>, spec: &ProjectSpec, started
     let mounting = mount::begin_project(lua, engine, &core, started)?;
 
     let host_env = engine.lua.borrow().shared.clone().ok_or("no shared globals")?;
-    let host: LuaTable = lua.load(HOST).set_name("=rur.host").set_environment(host_env.clone()).call(()).map_err(lua_error)?;
+    let host: LuaTable = lua
+        .load(host_bytecode())
+        .set_mode(mlua::chunk::ChunkMode::Binary)
+        .set_name("=rur.host")
+        .set_environment(host_env.clone())
+        .call(())
+        .map_err(lua_error)?;
     let plugin_widgets = match &spec.plugin {
         Some(settings) => Some(install_plugin(lua, engine, &host_env, settings).map_err(lua_error)?),
         None => None,
@@ -162,8 +218,12 @@ fn install_plugin(lua: &Lua, engine: &Rc<Engine>, shared: &LuaTable, settings: &
         Json::Object(_) => lua.to_value(settings)?,
         _ => LuaValue::Table(lua.create_table()?),
     };
-    let (plugin, widgets): (LuaTable, LuaTable) =
-        lua.load(PLUGIN).set_name("=rur.plugin").set_environment(shared.clone()).call((new_widget, settings))?;
+    let (plugin, widgets): (LuaTable, LuaTable) = lua
+        .load(plugin_bytecode())
+        .set_mode(mlua::chunk::ChunkMode::Binary)
+        .set_name("=rur.plugin")
+        .set_environment(shared.clone())
+        .call((new_widget, settings))?;
     shared.raw_set("plugin", plugin)?;
     Ok(widgets)
 }
@@ -476,7 +536,8 @@ fn mount_fixture(lua: &Lua, engine: &Rc<Engine>, fixture: &str) -> Result<(), St
         Some(folder) => folder,
         None => {
             let new_folder: LuaFunction = lua
-                .load("local Folder = Instance.new('Folder') Folder.Name = 'RURFixtures' Folder.Parent = game:GetService('ReplicatedStorage') return Folder")
+                .load(fixture_folder_bytecode())
+                .set_mode(mlua::chunk::ChunkMode::Binary)
                 .set_name("=rur.fixture")
                 .set_environment(engine.lua.borrow().shared.clone().unwrap())
                 .into_function()
@@ -572,22 +633,25 @@ pub fn mount(
     let Some(source) = source else {
         return Ok(story);
     };
-    let outside_roots = source.kind != SourceKind::Model
-        && source.kind != SourceKind::Fixture
-        && project::find_module_by_path(engine, &source.path).is_none()
-        && std::path::Path::new(&source.path).is_file();
-    if source.kind == SourceKind::Fixture || outside_roots {
+    let module = if source.kind == SourceKind::Model {
+        None
+    } else if source.kind == SourceKind::Fixture {
         mount_fixture(lua, engine, &source.path)?;
-    }
-    let (_gui, target_frame, gui_id, target_id) = if source.kind == SourceKind::Model {
-        make_story_gui(project, margin, target)?
-    } else {
-        // (the module must exist before the story gui is made, as in main.luau)
-        let _ = project::find_module_by_path(engine, &source.path).ok_or_else(|| {
+        Some(project::find_module_by_path(engine, &source.path).ok_or_else(|| {
             format!("{} is not part of the mounted roots", source.path)
-        })?;
-        make_story_gui(project, margin, target)?
+        })?)
+    } else {
+        let mut found = project::find_module_by_path(engine, &source.path);
+        if found.is_none() && std::path::Path::new(&source.path).is_file() {
+            mount_fixture(lua, engine, &source.path)?;
+            found = project::find_module_by_path(engine, &source.path);
+        }
+        Some(found.ok_or_else(|| {
+            format!("{} is not part of the mounted roots", source.path)
+        })?)
     };
+    // (the module must exist before the story gui is made, as in main.luau)
+    let (_gui, target_frame, gui_id, target_id) = make_story_gui(project, margin, target)?;
     story.roots.push(gui_id);
 
     let e = engine.clone();
@@ -623,7 +687,7 @@ pub fn mount(
         return Ok(story);
     }
 
-    let module = project::find_module_by_path(engine, &source.path).expect("checked above");
+    let module = module.expect("checked above");
     let is_module = source.kind != SourceKind::Story;
     let load_and_mount: LuaFunction = project.host.get("LoadAndMount").map_err(lua_error)?;
     let mount_story: LuaFunction = project.host.get("MountStory").map_err(lua_error)?;
@@ -677,46 +741,96 @@ pub fn mount(
     Ok(story)
 }
 
+fn normalize_dir_prefix(dir: &Path) -> String {
+    let mut out = dir.to_string_lossy().replace('\\', "/").to_lowercase();
+    while out.ends_with('/') {
+        out.pop();
+    }
+    out.push('/');
+    out
+}
+
+fn strip_dir_prefix<'a>(orig: &'a str, lower: &str, dir_lower: &str) -> Option<&'a str> {
+    if !lower.starts_with(dir_lower) {
+        return None;
+    }
+    if orig.is_ascii() && dir_lower.is_ascii() {
+        return orig.get(dir_lower.len()..);
+    }
+    let skip_chars = dir_lower.chars().count();
+    orig.char_indices().nth(skip_chars).map(|(byte_idx, _)| &orig[byte_idx..])
+}
+
 /// The storybook ModuleScripts (`*.storybook.luau` / `.lua`) among the files of the run's roots and mounted folders,
 /// listed when a Flipbook story asks (story/host.luau FindStorybook), by path; Wally's `_Index`, `node_modules` and
-/// dot folders are skipped. Reading the files finds them without loading any instance the project imports lazily.
+/// dot folders are skipped. Walking the already-mounted DOM finds the exact same ModuleScripts without touching the
+/// filesystem or loading any instance the project imports lazily.
 fn storybook_finder(lua: &Lua, engine: &Rc<Engine>, project: &Project) -> LuaResult<LuaFunction> {
-    let mut dirs: Vec<PathBuf> = project.sources.roots.clone();
-    dirs.extend(project.sources.mounts.iter().map(|(_, path)| path.clone()).filter(|path| path.is_dir()));
+    let mut dirs: Vec<String> = Vec::with_capacity(project.sources.roots.len() + project.sources.mounts.len());
+    for dir in &project.sources.roots {
+        dirs.push(normalize_dir_prefix(dir));
+    }
+    for (_, path) in &project.sources.mounts {
+        if path.is_dir() {
+            dirs.push(normalize_dir_prefix(path));
+        }
+    }
     let e = engine.clone();
     lua.create_function(move |lua, ()| {
-        let mut files = Vec::new();
-        for dir in &dirs {
-            find_storybooks(dir, 0, &mut files);
-        }
-        let mut modules = Vec::new();
-        for file in files {
-            if let Some(id) = project::find_module_by_path(&e, &file.to_string_lossy()) {
-                modules.push(instance_value(lua, &e, id)?);
+        let candidates: Vec<(String, String, InstanceId)> = {
+            let state = e.state.borrow();
+            let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+            let mut found = Vec::new();
+            let mut stack = vec![e.world().game];
+            while let Some(node) = stack.pop() {
+                let instance = state.dom.at(node);
+                if let Some(source) = instance.source_path() {
+                    if source.ends_with(".storybook.luau") || source.ends_with(".storybook.lua") {
+                        let normalized = source.replace('\\', "/");
+                        let lower = normalized.to_lowercase();
+                        if seen.insert(lower.clone()) {
+                            found.push((normalized, lower, node));
+                        }
+                    }
+                }
+                for &child in instance.children.iter().rev() {
+                    stack.push(child);
+                }
             }
+            found
+        };
+        let mut ids: Vec<InstanceId> = Vec::new();
+        for dir_lower in &dirs {
+            if ids.len() >= 256 {
+                break;
+            }
+            let mut in_dir: Vec<(Vec<&str>, InstanceId)> = Vec::new();
+            for (orig, lower, id) in &candidates {
+                let Some(rel) = strip_dir_prefix(orig, lower, dir_lower) else { continue };
+                let segments: Vec<&str> = rel.split('/').filter(|s| !s.is_empty()).collect();
+                let Some((_, parents)) = segments.split_last() else { continue };
+                if parents.len() > 16 {
+                    continue;
+                }
+                if parents.iter().any(|&seg| seg.starts_with('.') || seg == "_Index" || seg == "node_modules") {
+                    continue;
+                }
+                in_dir.push((segments, *id));
+            }
+            in_dir.sort_by(|a, b| a.0.cmp(&b.0));
+            for (_, id) in in_dir {
+                if ids.len() >= 256 {
+                    break;
+                }
+                ids.push(id);
+            }
+        }
+        let mut modules = Vec::with_capacity(ids.len());
+        for id in ids {
+            modules.push(instance_value(lua, &e, id)?);
         }
         lua.create_sequence_from(modules)
     })
-}
-
-fn find_storybooks(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
-    if depth > 16 || out.len() >= 256 {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    let mut entries: Vec<_> = entries.flatten().collect();
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let Ok(kind) = entry.file_type() else { continue };
-        if kind.is_dir() {
-            if !(name.starts_with('.') || name == "_Index" || name == "node_modules") {
-                find_storybooks(&entry.path(), depth + 1, out);
-            }
-        } else if name.ends_with(".storybook.luau") || name.ends_with(".storybook.lua") {
-            out.push(entry.path());
-        }
-    }
 }
 
 /// An input event handler (runtime/input Dispatch): the input port installs one; without it
@@ -768,7 +882,8 @@ pub fn load_actions(lua: &Lua, spec: &str) -> Result<Vec<Json>, String> {
         keys.raw_push(entry).map_err(lua_error)?;
     }
     let sort: LuaFunction = lua
-        .load("local List = ... table.sort(List, function(A, B) return (A.t or 0) < (B.t or 0) end) return List")
+        .load(actions_sort_bytecode())
+        .set_mode(mlua::chunk::ChunkMode::Binary)
         .set_name("=rur.actions")
         .into_function()
         .map_err(lua_error)?;
@@ -935,34 +1050,32 @@ pub fn diagnostics(engine: &Rc<Engine>, project: &Project, story: &Story, run_ti
     studio.insert("gui".into(), json!(project_state.studio_only_gui));
     // Fonts.Diagnostics / Fonts.MissingAssets (the app downloads the missing font assets), and the families whose
     // text is not drawn because no face of them nor the fallback could be read
-    let (fonts, missing_fonts, unavailable): (Vec<Json>, Vec<Json>, Vec<Json>) = {
-        let mut text = engine.text().borrow_mut();
-        let text = text.get_or_insert_with(|| super::text::TextEngine::new(super::text::FontPaths::for_repo(&engine.options.repo.to_string_lossy())));
-        (
+    let (fonts, missing_fonts, unavailable): (Vec<Json>, Vec<Json>, Vec<Json>) = match engine.text().borrow().as_ref() {
+        Some(text) => (
             text.fonts.diagnostics.iter().map(|(key, message)| json!({ "key": key, "message": message })).collect(),
             text.fonts.missing_assets.iter().map(|id| json!(id)).collect(),
             text.fonts.unavailable.iter().map(|family| json!(family)).collect(),
-        )
+        ),
+        None => (Vec::new(), Vec::new(), Vec::new()),
     };
-    let mut result = json!({
-        "output": output,
-        "unemulated": unemulated,
-        "fonts": fonts,
-        "missingFontAssets": missing_fonts,
-        "studioOnly": Json::Object(studio),
-        "timings": {
-            "mount": project.mount_time,
-            "story": story.story_time,
-            "run": run_time,
-            "total": project.started.elapsed().as_secs_f64(),
-        },
-    });
+    let mut timings = Map::new();
+    timings.insert("mount".into(), json!(project.mount_time));
+    timings.insert("story".into(), json!(story.story_time));
+    timings.insert("run".into(), json!(run_time));
+    timings.insert("total".into(), json!(project.started.elapsed().as_secs_f64()));
+    let mut result = Map::new();
+    result.insert("output".into(), Json::Array(output));
+    result.insert("unemulated".into(), Json::Array(unemulated));
+    result.insert("fonts".into(), Json::Array(fonts));
+    result.insert("missingFontAssets".into(), Json::Array(missing_fonts));
+    result.insert("studioOnly".into(), Json::Object(studio));
+    result.insert("timings".into(), Json::Object(timings));
     // (only when there are any: a machine with Studio's fonts writes the scene it always did)
     if !unavailable.is_empty() {
-        result["unavailableFonts"] = Json::Array(unavailable);
+        result.insert("unavailableFonts".into(), Json::Array(unavailable));
     }
     if let Some(order) = &story.order {
-        result["order"] = order.clone();
+        result.insert("order".into(), order.clone());
     }
     // A failure that reads an instance nothing mounted (a Packages folder), or a mount that still waits: the cause rur
     // finds in the project files on disk (crate::hints)
@@ -984,9 +1097,9 @@ pub fn diagnostics(engine: &Rc<Engine>, project: &Project, story: &Story, run_ti
         .find_map(|message| crate::hints::missing_child_hint(message, &project.sources, source))
         .or_else(|| (story.status == "yielded").then(|| crate::hints::waiting_hint(&project.sources, source, wait_cause.as_ref())).flatten());
     if let Some(hint) = hint {
-        result["hint"] = json!(hint);
+        result.insert("hint".into(), Json::String(hint));
     }
-    result
+    Json::Object(result)
 }
 
 /// Layout.UpdateAll: the geometry records the export reads (kept in `engine.layout`; the returned
