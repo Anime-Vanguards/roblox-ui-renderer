@@ -56,6 +56,7 @@ enum Kind {
     Linear,
     Radial,
     Conical,
+    Elliptical,
 }
 
 /// What lies beyond the gradient's ends (UIGradient.TileMode)
@@ -111,6 +112,9 @@ struct Form {
     slope: [f64; 2],
     /// Conical: the rotation in turns and 1 / min(Scale, 1)
     turn: [f64; 2],
+    /// Elliptical: the map from p - c to the ellipse's unit circle, by rows: the first axis (along the
+    /// rotation) over half the rect's width times Scale, the second over half its height times Scale
+    ellipse: [f64; 4],
     /// The keypoints of colour and transparency merged: t, the squared colour (0-1) and the opacity (0-1)
     knots: Vec<[f64; 5]>,
     /// The table of an unevenly spaced list: the t of its first and last entry and the entries
@@ -161,6 +165,11 @@ impl Form {
             Kind::Conical => {
                 let angle = (y + CONICAL_NUDGE).atan2(x + CONICAL_NUDGE);
                 (angle / std::f64::consts::TAU - self.turn[0]).rem_euclid(1.) * self.turn[1]
+            }
+            Kind::Elliptical => {
+                let u = x * self.ellipse[0] + y * self.ellipse[1];
+                let v = x * self.ellipse[2] + y * self.ellipse[3];
+                (u * u + v * v).sqrt()
             }
         }
     }
@@ -257,7 +266,7 @@ impl GradientMesh {
     pub fn bits(&self) -> Vec<u64> {
         let form = &self.form;
         let mut bits = vec![form.kind as u64, form.tile as u64, form.centre.is_some() as u64, form.middle.to_bits()];
-        let numbers = self.origin.iter().chain(form.centre.iter().flatten()).chain(&form.slope).chain(&form.turn).chain(&form.colour);
+        let numbers = self.origin.iter().chain(form.centre.iter().flatten()).chain(&form.slope).chain(&form.turn).chain(&form.ellipse).chain(&form.colour);
         bits.extend(numbers.chain([&form.alpha]).chain(form.knots.iter().flatten()).map(|v| v.to_bits()));
         if let Some((lo, hi, entries)) = &form.table {
             bits.extend([lo.to_bits(), hi.to_bits()]);
@@ -363,6 +372,7 @@ pub fn gradient_mesh(
     let kind = match g["type"].as_str() {
         Some("Radial") => Kind::Radial,
         Some("Conical") => Kind::Conical,
+        Some("Elliptical") => Kind::Elliptical,
         _ => Kind::Linear,
     };
     let tile = match g["tile"].as_str() {
@@ -387,10 +397,23 @@ pub fn gradient_mesh(
             [dx / span, dy / span]
         }
         Kind::Radial => [1. / ((w + h) / 4. * scale), 0.],
-        Kind::Conical => [0., 0.],
+        Kind::Conical | Kind::Elliptical => [0., 0.],
     };
     let turn = [angle / std::f64::consts::TAU, 1. / scale.min(1.)];
-    let mut form = Form { kind, tile, centre, middle: w.max(0.) / 2., slope, turn, knots: Vec::new(), table: None, cut: false, colour, alpha };
+    // Elliptical: t is the distance from the centre in an ellipse that touches the rect's edges, w / 2 along
+    // Rotation's direction and h / 2 across it (the rect's own axes at Rotation 0), both times Scale: the
+    // centre's t is 0, the edges' middles 1, the corners sqrt(2). The ellipse turns with Rotation (clockwise on
+    // the screen, as a linear gradient's direction) and is clipped by the rect, so at 90 degrees on a wide rect
+    // it runs off its top and bottom; Offset moves the centre along the screen's axes. Measured in Studio
+    // 0.747 on 18 tiles of a white frame under a transparency of 0 to 1 (fixtures/gradient-probe-elliptical.luau:
+    // 100x100, 150x60, 60x100, 150x30 and a fractional tile, Rotation 30, 45 and 90, Offset, Scale 0.5 and 2):
+    // a conic fitted to t^2 has its centre within 0.02 px of c and semi-axes within 0.2 px of these, and this
+    // t is within 1 level (rms 0.41) of every pixel's
+    let ellipse = {
+        let (a, b) = (w / 2. * scale, h / 2. * scale);
+        [dx / a, dy / a, -dy / b, dx / b]
+    };
+    let mut form = Form { kind, tile, centre, middle: w.max(0.) / 2., slope, turn, ellipse, knots: Vec::new(), table: None, cut: false, colour, alpha };
 
     // The keypoints of the two sequences merged; a keypoint of one takes the other's value there, which
     // is interpolated between that one's keypoints without the squaring
@@ -411,6 +434,11 @@ pub fn gradient_mesh(
         let shown = match kind {
             Kind::Linear => [low, high],
             Kind::Radial => [0., high.min(1.)],
+            // An elliptical list is cut at 0 and 1 / Scale (at most 1), whatever the rect's shape, Offset and
+            // Rotation: Studio holds the colour of t = 1 / Scale beyond it (fixtures/gradient-probe-elliptical.luau
+            // row 6 and tile 22, Scale 1.25, 2, 3 and 4: the hold starts at 0.8, 0.5, 0.333 and 0.25, also with the
+            // centre beyond the rect's edge, where the corners' t is 0.6)
+            Kind::Elliptical => [0., (1. / scale).min(1.)],
             Kind::Conical => [0., 1.],
         };
         if shown[1] > shown[0] {
@@ -515,6 +543,51 @@ mod tests {
         assert_eq!(repeated.value(-0.25)[0], repeated.value(0.75)[0]);
         // A pixel centred on a seam takes the end's colour
         assert_eq!((repeated.value(0.)[0], repeated.value(1.)[0], repeated.value(2.)[0]), (1., 1., 1.));
+    }
+    /// Elliptical: t is the distance from the centre in the ellipse that touches the rect's edges (0 at the
+    /// centre, 1 at the edges' middles), turned by Rotation, its axes times Scale, Offset moving the centre
+    /// along the screen's axes; a list with close keypoints is cut at 0 and 1 / Scale and holds the colour of
+    /// 1 / Scale beyond it (fixtures/gradient-probe-elliptical.luau)
+    #[test]
+    fn elliptical_fills_the_rect_and_turns_with_rotation() {
+        let raw = [10., 20., 180., 120.];
+        let form = |g: Value| gradient_mesh(&g, raw, [255.; 3], 255., [0.; 4]).form;
+        let near = |form: &Form, p: [f64; 2], t: f64| {
+            let at = form.parameter(p);
+            assert!((at - t).abs() < 1e-9, "t at {p:?} is {at}, not {t}");
+        };
+        let plain = form(json!({"type":"Elliptical"}));
+        near(&plain, [90., 60.], 0.);
+        for p in [[0., 60.], [180., 60.], [90., 0.], [90., 120.]] {
+            near(&plain, p, 1.);
+        }
+        near(&plain, [180., 120.], 2f64.sqrt());
+        near(&plain, [135., 90.], 0.5f64.sqrt());
+        // Rotation 90: the axis half the rect's width long runs down the screen, the other across it
+        let down = form(json!({"type":"Elliptical","rotation":90}));
+        near(&down, [90., 150.], 1.);
+        near(&down, [150., 60.], 1.);
+        near(&down, [180., 60.], 1.5);
+        let (cos, sin) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let turned = form(json!({"type":"Elliptical","rotation":30}));
+        near(&turned, [90. + 90. * cos, 60. + 90. * sin], 1.);
+        near(&turned, [90. - 60. * sin, 60. + 60. * cos], 1.);
+        // Offset moves the centre by a quarter of the width to the right, whatever the rotation
+        let moved = form(json!({"type":"Elliptical","rotation":30,"offset":[0.25,0],"scale":2}));
+        near(&moved, [135., 60.], 0.);
+        near(&moved, [135. + 180. * cos, 60. + 180. * sin], 1.);
+        near(&moved, [135. - 120. * sin, 60. + 120. * cos], 1.);
+        // Close keypoints under Scale 2: the table spans t 0 to 0.5 (the corners lie at 0.71), and the grey
+        // at 0.5, interpolated plainly from 0.5 at 0.3001 to 0 at 1, holds beyond
+        let close = form(json!({"type":"Elliptical","scale":2,"color":[[0,0,0,0],[0.3,1,1,1],[0.3001,0.5,0.5,0.5],[1,0,0,0]]}));
+        let (lo, hi, _) = close.table.as_ref().expect("a table");
+        assert_eq!((*lo, *hi), (0., 0.5));
+        let grey: f64 = 0.5 * (1. - (0.5 - 0.3001) / (1. - 0.3001));
+        assert!((close.value(0.5)[0] - (grey * grey * 255.).round() / 255.).abs() < 1e-9);
+        assert_eq!(close.value(0.7), close.value(0.5));
+        // Under Scale 0.5 the cut list is the whole gradient
+        let small = form(json!({"type":"Elliptical","scale":0.5,"color":[[0,0,0,0],[0.3,1,1,1],[0.3001,0.5,0.5,0.5],[1,0,0,0]]}));
+        assert_eq!(small.table.as_ref().map(|t| (t.0, t.1)), Some((0., 1.)));
     }
     /// An evenly spaced list is drawn in 256 steps between two keypoints, the colour of the nearest step
     /// (fixtures/gradient-probe-table.luau strips 7 to 14)

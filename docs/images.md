@@ -43,10 +43,14 @@ Evaluated per pixel (measured in Studio 0.747):
   - `Linear`: screen-space angle from `Rotation` across the unsnapped rect, shifted by `Offset * size`.
   - `Radial`: distance from shifted center divided by `(width + height) / 4`.
   - `Conical`: normalized angle from `Rotation` in turns.
-  - `Scale` scales `t` around its midpoint; `TileMode` repeats or mirrors.
-- Keypoints spaced closer than `1/256` sample from a 512-entry lookup table over the visible gradient range.
+  - `Elliptical`: distance from the shifted center in the ellipse that touches the rect's edges (`0` at the center,
+    `1` at the middle of each edge, so the corners take the last keypoint's value). The ellipse turns with `Rotation`
+    (its `width / 2` axis along the rotation's direction); `Offset` moves the center in screen axes.
+  - `Scale` scales `t` around its midpoint (the center for `Radial` and `Elliptical`); `TileMode` repeats or mirrors.
+- Keypoints spaced closer than `1/256` sample from a 512-entry lookup table over the visible gradient range
+  (for `Elliptical`, `t` from 0 to `1 / Scale`, at most 1).
 
-Fixtures: `gradients`, `gradient-edges`, `gradient-probe-*`, `stroke-gradient`.
+Fixtures: `gradients`, `gradient-edges`, `gradient-probe-*` (`gradient-probe-elliptical` for `Elliptical`), `stroke-gradient`.
 
 ## UICorner, borders, and UIStroke
 

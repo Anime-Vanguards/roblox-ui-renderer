@@ -40,6 +40,10 @@
 			"digest": "c0527c565c33f4558b52b1954f382173ad38bb561eda0523848ad78c68f57256",
 			"status": "ok"
 		},
+		"fast/edit/gradient-probe-elliptical": {
+			"digest": "6e1fb2541bf250fbe5ab15f556d9cb82b0976f908245384ae80693d18d5e7ddc",
+			"status": "ok"
+		},
 		"fast/edit/gradient-probe-ends": {
 			"digest": "ac14e13198e351e07ffdcab8c03fbc83865c87ecd8cf2a6ba8e13e0dfa7ba72f",
 			"status": "ok"
@@ -1156,6 +1160,10 @@
 			"digest": "dd10ce8b4631001a61660ca6b75e779b73cfd71fae9c8ea5463af17b05438704",
 			"status": "ok"
 		},
+		"fixtures/edit/gradient-probe-elliptical": {
+			"digest": "02387b4ef783a2fd57ec71269cb0cfc336902ecb38f74213e3d34196e855f16c",
+			"status": "ok"
+		},
 		"fixtures/edit/gradient-probe-ends": {
 			"digest": "dd21360b3ae3125ada3177fa7318013c4c5315cd5b557cc2185c0c0670e84aab",
 			"status": "ok"
@@ -2260,6 +2268,10 @@
 			"digest": "ec13d5a74e5f1810790241adc9e5169fa361225bb39f3324ba7caa77e2a9d16e",
 			"status": "ok"
 		},
+		"fixtures/play/gradient-probe-elliptical": {
+			"digest": "5b4cccff69fd841da367038b3ede2a700efda16841a27f32dc17f278117e3e77",
+			"status": "ok"
+		},
 		"fixtures/play/gradient-probe-ends": {
 			"digest": "67f851d909c6b453cbd982e7e608f5553475030859103b99293a9e78b154d504",
 			"status": "ok"
@@ -3313,7 +3325,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-25T01:16:59.312Z",
+	"recorded": "2026-11-25T12:19:22.267Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
