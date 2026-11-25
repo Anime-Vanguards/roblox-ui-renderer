@@ -1058,8 +1058,51 @@ impl ScrollPresentation {
         candidates.sort_by_key(|id| std::cmp::Reverse(self.ranks.get(id).copied()));
         Ok(candidates)
     }
+    fn is_ancestor(scene: &SceneStore, ancestor: NodeId, descendant: NodeId) -> bool {
+        let mut current = scene.node(descendant).and_then(|node| node.get("parent")).and_then(node_id);
+        while let Some(id) = current {
+            if id == ancestor {
+                return true;
+            }
+            current = scene.node(id).and_then(|node| node.get("parent")).and_then(node_id);
+        }
+        false
+    }
+    fn has_vertical_ancestor(&self, scene: &SceneStore, id: NodeId) -> bool {
+        let mut current = scene.node(id).and_then(|node| node.get("parent")).and_then(node_id);
+        while let Some(anc) = current {
+            if let Some(state) = self.states.get(&anc) {
+                if state.direction != "X" && state.range[1] > 0.0 {
+                    return true;
+                }
+            }
+            current = scene.node(anc).and_then(|node| node.get("parent")).and_then(node_id);
+        }
+        false
+    }
+    fn has_scrolling_ancestor(&self, scene: &SceneStore, id: NodeId) -> bool {
+        let mut current = scene.node(id).and_then(|node| node.get("parent")).and_then(node_id);
+        while let Some(anc) = current {
+            if self.states.contains_key(&anc) || scene.node(anc).is_some_and(|node| node.get("scroll").is_some()) {
+                return true;
+            }
+            current = scene.node(anc).and_then(|node| node.get("parent")).and_then(node_id);
+        }
+        false
+    }
     /// Returns the predicted recipient. Always forward the wheel event to the runtime too.
     pub fn wheel(&mut self, scene: &SceneStore, x: f64, y: f64, notches: f64) -> Option<NodeId> {
+        self.wheel_with_shift(scene, x, y, notches, false)
+    }
+    /// [`Self::wheel`] with Shift held (`shift`: horizontal-only axis selection, matching Studio 0.747).
+    pub fn wheel_with_shift(
+        &mut self,
+        scene: &SceneStore,
+        x: f64,
+        y: f64,
+        notches: f64,
+        shift: bool,
+    ) -> Option<NodeId> {
         if !x.is_finite() || !y.is_finite() || !notches.is_finite() || notches == 0.0 {
             return None;
         }
@@ -1070,24 +1113,50 @@ impl ScrollPresentation {
                 return None;
             }
         };
+        let mut tried: Option<NodeId> = None;
         for id in candidates {
-            let state = self.states.get_mut(&id).unwrap();
-            let target = clamp(state.target[1] - notches * 100.0, state.range[1]);
-            if (target - state.target[1]).abs() <= 1e-6 {
+            if let Some(prev) = tried {
+                if !Self::is_ancestor(scene, id, prev) {
+                    continue;
+                }
+            }
+            let (direction, range) = {
+                let state = &self.states[&id];
+                (state.direction.as_str(), state.range)
+            };
+            if range[0] <= 0.0 && range[1] <= 0.0 {
                 continue;
             }
-            // ScrollingDirection X frames take a vertical wheel without moving (measured): no
-            // prediction, the runtime handles it.
-            if state.direction == "X" {
+            let allows_y = direction != "X" && range[1] > 0.0;
+            let allows_x = direction != "Y" && range[0] > 0.0;
+            let axis = if shift {
+                allows_x.then_some(0usize)
+            } else if allows_y {
+                Some(1usize)
+            } else if allows_x && !self.has_vertical_ancestor(scene, id) {
+                Some(0usize)
+            } else {
+                None
+            };
+            if let Some(axis) = axis {
+                let state = self.states.get_mut(&id).unwrap();
+                let target = clamp(state.target[axis] - notches * 100.0, state.range[axis]);
+                if (target - state.target[axis]).abs() > 1e-6 {
+                    let other = 1 - axis;
+                    if state.zero_sensitive && target == 0.0 && state.target[other] == 0.0 {
+                        state.owned = false;
+                        return None;
+                    }
+                    state.target[axis] = target;
+                    state.owned = true;
+                    return Some(id);
+                }
+            }
+            if self.has_scrolling_ancestor(scene, id) {
+                tried = Some(id);
+            } else {
                 return None;
             }
-            if state.zero_sensitive && target == 0.0 && state.target[0] == 0.0 {
-                state.owned = false;
-                return None;
-            }
-            state.target[1] = target;
-            state.owned = true;
-            return Some(id);
         }
         None
     }
@@ -1565,5 +1634,34 @@ mod tests {
             }
         }
         assert!(transitions >= 2, "must reveal and hide rotated edges");
+    }
+
+    #[test]
+    fn horizontal_and_shift_wheel_prediction_matches_client() {
+        let x_only = scene(&json!({
+            "viewport": {"width": 400, "height": 300, "scale": 1.0},
+            "layers": [{"draw": [1]}],
+            "nodes": [{"id": 1, "rect": [0, 0, 400, 300], "clipOwners": [], "scroll": {
+                "window": [0, 0, 400, 300], "canvas": [0, 0, 1500, 300], "canvasPosition": [0, 0], "maxRange": [1100, 0], "direction": "X", "epoch": 0
+            }}]
+        }));
+        let mut motion = ScrollPresentation::default();
+        motion.update(&x_only, None);
+        assert_eq!(motion.wheel(&x_only, 50.0, 50.0, -1.0), Some(1));
+        assert_eq!(motion.states[&1].target, [100.0, 0.0]);
+
+        let both = scene(&json!({
+            "viewport": {"width": 400, "height": 300, "scale": 1.0},
+            "layers": [{"draw": [1]}],
+            "nodes": [{"id": 1, "rect": [0, 0, 400, 300], "clipOwners": [], "scroll": {
+                "window": [0, 0, 400, 300], "canvas": [0, 0, 1500, 1500], "canvasPosition": [0, 0], "maxRange": [1100, 1200], "direction": "XY", "epoch": 0
+            }}]
+        }));
+        let mut motion = ScrollPresentation::default();
+        motion.update(&both, None);
+        assert_eq!(motion.wheel_with_shift(&both, 50.0, 50.0, -1.0, false), Some(1));
+        assert_eq!(motion.states[&1].target, [0.0, 100.0]);
+        assert_eq!(motion.wheel_with_shift(&both, 50.0, 50.0, -1.0, true), Some(1));
+        assert_eq!(motion.states[&1].target, [100.0, 100.0]);
     }
 }

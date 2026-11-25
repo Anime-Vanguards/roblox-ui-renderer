@@ -1010,7 +1010,8 @@ fn wheel(cx: &Cx, event: &Json) -> LuaResult<()> {
     cx.set_input(object, "Change", vector3(x, y - cx.inset(), notches), Some(vector3(0.0, 0.0, 0.0)));
 
     let list = cx.hit_list(x, y);
-    let (taker, failed) = scrolling::route(cx, &list, notches, event.get("presentationTaker"));
+    let shift = modifiers(cx, event).shift;
+    let (taker, failed) = scrolling::route(cx, &list, notches, shift, event.get("presentationTaker"));
     let event_name = if notches > 0.0 { n.MouseWheelForward } else { n.MouseWheelBackward };
     let repeats = (notches.abs() + 0.5).floor().max(1.0) as usize;
 

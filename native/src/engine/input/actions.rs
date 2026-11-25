@@ -6,7 +6,7 @@
 //! schema in the JS CLI.
 //!
 //!   {t?, type:"move", x, y}   {t?, type:"down"|"up", x?, y?, button?: 1|2|3}   {t?, type:"leave"}
-//!   {t?, type:"wheel", x?, y? (or a node <point>), notches | dy, dx?}
+//!   {t?, type:"wheel", x?, y? (or a node <point>), notches | dy, dx?, shift?}
 //!   {t?, type:"key", key, down?, shift?, ctrl?, alt?}   {t?, type:"text"|"paste", text}
 //!   {t?, type:"click", <point>, button?, hold?: seconds between down and up (0)}
 //!   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?,
@@ -217,6 +217,7 @@ fn check(action: &Json) -> Result<(), String> {
                 let notches = optional_number(object, "notches")?;
                 let dy = optional_number(object, "dy")?;
                 optional_number(object, "dx")?;
+                optional_bool(object, "shift")?;
                 if notches.is_none() && dy.is_none() {
                     return Err("wheel: needs `notches` (+1 = one notch away from the user) or `dy` (px, 100 per notch)".into());
                 }
@@ -415,7 +416,7 @@ pub fn expand(engine: &std::rc::Rc<Engine>, action: &Json, now: f64) -> Result<V
             let point = wheel_point(action)?.ok_or("wheel: needs `node` (or `target`)")?;
             let at = resolve(engine, &point)?;
             let mut wheel = event("wheel", at, None);
-            for key in ["notches", "dy", "dx"] {
+            for key in ["notches", "dy", "dx", "shift"] {
                 if let Some(value) = action.get(key) {
                     wheel[key] = value.clone();
                 }
@@ -444,7 +445,7 @@ mod schema_tests {
             {"type": "click", "x": 10, "y": 20}, {"frame": 3, "type": "click", "x": 10, "y": 20},
             {"type": "drag", "from": "A", "to": {"x": 5, "y": 6}, "steps": 4, "duration": 0.5},
             {"type": "drag", "node": "A", "to": {"node": "B", "anchor": {"x": 1, "y": 1}}},
-            {"type": "wheel", "node": "Scroll", "notches": -1}, {"type": "wheel", "target": "Scroll", "anchor": {"x": 0.2}, "offset": {"x": 1, "y": 2}, "dy": 100}
+            {"type": "wheel", "node": "Scroll", "notches": -1}, {"type": "wheel", "target": "Scroll", "anchor": {"x": 0.2}, "offset": {"x": 1, "y": 2}, "dy": 100, "shift": true}
         ]"#;
         validate(&serde_json::from_str(ok).unwrap()).unwrap();
         validate(&json!([])).unwrap();
@@ -483,6 +484,7 @@ mod schema_tests {
         assert_eq!(error(r#"[{"type": "wheel", "x": 1, "y": 1, "anchor": {"x": 0}, "notches": 1}]"#), "--actions[0] (wheel): wheel: `anchor` needs a `node`");
         assert_eq!(error(r#"[{"type": "wheel", "target": 5, "notches": 1}]"#), "--actions[0] (wheel): wheel: `target` must be a node path string, not a number");
         assert_eq!(error(r#"[{"type": "wheel", "node": "A"}]"#).split(": ").nth(1), Some("wheel"));
+        assert_eq!(error(r#"[{"type": "wheel", "x": 1, "y": 1, "notches": -1, "shift": "yes"}]"#), "--actions[0] (wheel): `shift` must be true or false, not a string");
     }
 
     #[test]

@@ -99,13 +99,13 @@ fn hooks(lua: &Lua, engine: &Rc<Engine>, env: &LuaTable) -> LuaResult<()> {
         Some(snapshot) => to_lua(lua, &snapshot),
         None => Ok(LuaValue::Nil),
     });
-    hook!(engine, input, "Route", |lua, (list, notches, taker): (LuaTable, f64, Option<f64>)| {
+    hook!(engine, input, "Route", |lua, (list, notches, taker, shift): (LuaTable, f64, Option<f64>, Option<bool>)| {
         let mut ids = Vec::new();
         for value in list.sequence_values::<LuaValue>() {
             ids.push(id_of(&value?)?);
         }
         let taker = taker.map(|t| json!(t));
-        let (taken, _) = scrolling::route(&Cx { lua, engine, i: input }, &ids, notches, taker.as_ref());
+        let (taken, _) = scrolling::route(&Cx { lua, engine, i: input }, &ids, notches, shift.unwrap_or(false), taker.as_ref());
         match taken {
             Some(id) => instance_value(lua, engine, id),
             None => Ok(LuaValue::Nil),
@@ -994,6 +994,9 @@ assert(Joined == "began Space,jump pressed true,jump released false,began MouseB
     );
 }
 
+/// ContextActionService:SetTitle / SetPosition / SetImage / SetDescription / GetBoundActionInfo /
+/// GetAllBoundActionInfo, measured in a playing client (Studio 0.747.0.7471481, desktop / touch /
+/// gamepad): no unemulated diagnostics, exact argument errors and info table shape.
 #[test]
 fn context_action_touch_settings_and_info_match_client() {
     let (lua, engine) = start(800.0, 600.0);
@@ -1082,3 +1085,173 @@ assert(next(CAS:GetAllBoundActionInfo()) == nil)
 /// Horizontal and Shift+wheel scrolling rules measured in a playing client (Studio 0.747.0.7471481):
 /// X-only frames (including Battle Pass's AutomaticCanvasSize=X shape), XY frames with/without Shift,
 /// vertical-ancestor priority on nested scrollers, ancestor-only pass-through, and the X spring.
+#[test]
+fn horizontal_and_shift_wheel_match_client() {
+    let (lua, engine) = start(1600.0, 1000.0);
+    run(
+        &lua,
+        &engine,
+        r#"
+local Root = Instance.new("ScreenGui")
+Root.IgnoreGuiInset = true
+Root.Parent = game:GetService("CoreGui")
+
+local function makeScroller(name, x, y, w, h, cw, ch, dir, props, parent)
+	local s = Instance.new("ScrollingFrame")
+	s.Name = name
+	s.Position = UDim2.fromOffset(x, y)
+	s.Size = UDim2.fromOffset(w, h)
+	s.CanvasSize = UDim2.fromOffset(cw, ch)
+	s.ScrollingDirection = dir
+	s.BorderSizePixel = 0
+	s.ScrollBarThickness = 0
+	for k, v in props or {} do s[k] = v end
+	s.Parent = parent or Root
+	return s
+end
+
+local Catcher = makeScroller("Catcher", 0, 0, 1500, 900, 1500, 5000, Enum.ScrollingDirection.Y, { ZIndex = -5 })
+local X_Xonly = makeScroller("X_Xonly", 20, 20, 200, 150, 1500, 150, Enum.ScrollingDirection.X)
+local X_Auto = makeScroller("X_Auto", 250, 20, 200, 150, 0, 0, Enum.ScrollingDirection.X, {
+	AutomaticCanvasSize = Enum.AutomaticSize.X,
+	ScrollBarThickness = 6,
+	HorizontalScrollBarInset = Enum.ScrollBarInset.Always,
+})
+local Wide = Instance.new("Frame")
+Wide.Size = UDim2.fromOffset(1500, 100)
+Wide.Parent = X_Auto
+local XY_Xonly = makeScroller("XY_Xonly", 480, 20, 200, 150, 1500, 100, Enum.ScrollingDirection.XY)
+local XY_XonlyBar = makeScroller("XY_XonlyBar", 710, 20, 200, 150, 1500, 150, Enum.ScrollingDirection.XY, { ScrollBarThickness = 12 })
+local XY_Both = makeScroller("XY_Both", 940, 20, 200, 150, 1500, 1500, Enum.ScrollingDirection.XY)
+local X_Both = makeScroller("X_Both", 20, 220, 200, 150, 1500, 1500, Enum.ScrollingDirection.X)
+local X_Yonly = makeScroller("X_Yonly", 250, 220, 200, 150, 200, 1500, Enum.ScrollingDirection.X)
+local Y_Both = makeScroller("Y_Both", 480, 220, 200, 150, 1500, 1500, Enum.ScrollingDirection.Y)
+local X_Disabled = makeScroller("X_Disabled", 710, 220, 200, 150, 1500, 150, Enum.ScrollingDirection.X, { ScrollingEnabled = false })
+
+local OuterY = makeScroller("OuterY", 940, 220, 300, 250, 300, 1500, Enum.ScrollingDirection.Y)
+local InnerX_in_Y = makeScroller("InnerX_in_Y", 20, 20, 200, 150, 1500, 150, Enum.ScrollingDirection.X, nil, OuterY)
+
+local OuterY0 = makeScroller("OuterY0", 20, 420, 300, 250, 300, 250, Enum.ScrollingDirection.Y)
+local InnerX_in_Y0 = makeScroller("InnerX_in_Y0", 20, 20, 200, 150, 1500, 150, Enum.ScrollingDirection.X, nil, OuterY0)
+
+local OuterX2 = makeScroller("OuterX2", 360, 420, 300, 250, 1500, 250, Enum.ScrollingDirection.X)
+local InnerX2 = makeScroller("InnerX2", 20, 20, 200, 150, 350, 150, Enum.ScrollingDirection.X, nil, OuterX2)
+
+local OuterX3 = makeScroller("OuterX3", 700, 420, 300, 250, 1500, 250, Enum.ScrollingDirection.X)
+local InnerY3 = makeScroller("InnerY3", 20, 20, 200, 150, 200, 350, Enum.ScrollingDirection.Y, nil, OuterX3)
+
+local BackY = makeScroller("BackY", 1040, 420, 300, 250, 300, 1500, Enum.ScrollingDirection.Y, { ZIndex = 1 })
+local FrontX = makeScroller("FrontX", 1060, 440, 200, 150, 350, 150, Enum.ScrollingDirection.X, { ZIndex = 5 })
+
+UpdateAll()
+local all = { Catcher, X_Xonly, X_Auto, XY_Xonly, XY_XonlyBar, XY_Both, X_Both, X_Yonly, Y_Both, X_Disabled, OuterY, InnerX_in_Y, OuterY0, InnerX_in_Y0, OuterX2, InnerX2, OuterX3, InnerY3, BackY, FrontX }
+
+local function settle()
+	for _ = 1, 45 do Step(1 / 60) end
+	UpdateAll()
+end
+
+local function wheelAt(target, notches, shiftKey, startPos)
+	for _, f in all do
+		Stop(f)
+		f.CanvasPosition = Vector2.zero
+	end
+	if startPos then
+		for f, pos in startPos do f.CanvasPosition = pos end
+	end
+	UpdateAll()
+	local x = target.AbsolutePosition.X + target.AbsoluteSize.X * 0.5
+	local y = target.AbsolutePosition.Y + target.AbsoluteSize.Y * 0.5
+	local send = Dispatch
+	if shiftKey then
+		send({ type = "key", key = shiftKey, down = true })
+	end
+	send({ type = "wheel", x = x, y = y, notches = notches })
+	settle()
+	if shiftKey then
+		send({ type = "key", key = shiftKey, down = false })
+	end
+end
+
+-- X-only and auto-sized AutomaticCanvasSize=X frames scroll horizontally on normal wheel.
+wheelAt(X_Xonly, -1)
+assert(X_Xonly.CanvasPosition == Vector2.new(100, 0), `X_Xonly: {X_Xonly.CanvasPosition}`)
+wheelAt(X_Xonly, 1, nil, { [X_Xonly] = Vector2.new(300, 0) })
+assert(X_Xonly.CanvasPosition == Vector2.new(200, 0), `X_Xonly fwd: {X_Xonly.CanvasPosition}`)
+wheelAt(X_Auto, -1)
+assert(X_Auto.CanvasPosition == Vector2.new(100, 0), `X_Auto: {X_Auto.CanvasPosition}`)
+
+-- XY with strictly X overflow scrolls X; XY with small Y overflow (12 px from bar) scrolls Y without Shift and X with Shift.
+wheelAt(XY_Xonly, -1)
+assert(XY_Xonly.CanvasPosition == Vector2.new(100, 0), `XY_Xonly: {XY_Xonly.CanvasPosition}`)
+wheelAt(XY_XonlyBar, -1)
+assert(XY_XonlyBar.CanvasPosition == Vector2.new(0, 12), `XY_XonlyBar: {XY_XonlyBar.CanvasPosition}`)
+wheelAt(XY_XonlyBar, -1, "LeftShift")
+assert(XY_XonlyBar.CanvasPosition == Vector2.new(100, 0), `XY_XonlyBar + Shift: {XY_XonlyBar.CanvasPosition}`)
+
+-- XY with both axes: Y without Shift, X with LeftShift or RightShift; at end of Y does not spill to X.
+wheelAt(XY_Both, -1)
+assert(XY_Both.CanvasPosition == Vector2.new(0, 100), `XY_Both: {XY_Both.CanvasPosition}`)
+wheelAt(XY_Both, -1, "LeftShift")
+assert(XY_Both.CanvasPosition == Vector2.new(100, 0), `XY_Both + LeftShift: {XY_Both.CanvasPosition}`)
+wheelAt(XY_Both, -1, "RightShift")
+assert(XY_Both.CanvasPosition == Vector2.new(100, 0), `XY_Both + RightShift: {XY_Both.CanvasPosition}`)
+wheelAt(XY_Both, 1, "LeftShift", { [XY_Both] = Vector2.new(300, 300) })
+assert(XY_Both.CanvasPosition == Vector2.new(200, 300), `XY_Both + Shift fwd: {XY_Both.CanvasPosition}`)
+wheelAt(XY_Both, -1, nil, { [XY_Both] = Vector2.new(0, 1350) })
+assert(XY_Both.CanvasPosition == Vector2.new(0, 1350) and Catcher.CanvasPosition.Y == 0, "XY at Y-end does not spill to X or sibling")
+
+-- Direction X with both overflows scrolls X; direction X with Y-only overflow does not move; direction Y + Shift does not move.
+wheelAt(X_Both, -1)
+assert(X_Both.CanvasPosition == Vector2.new(100, 0), `X_Both: {X_Both.CanvasPosition}`)
+wheelAt(X_Yonly, -1)
+assert(X_Yonly.CanvasPosition == Vector2.zero and Catcher.CanvasPosition.Y == 0, `X_Yonly: {X_Yonly.CanvasPosition}`)
+wheelAt(Y_Both, -1, "LeftShift")
+assert(Y_Both.CanvasPosition == Vector2.zero and Catcher.CanvasPosition.Y == 0, `Y_Both + Shift: {Y_Both.CanvasPosition}`)
+
+-- Disabled X frame is skipped so sibling behind it scrolls.
+wheelAt(X_Disabled, -1)
+assert(X_Disabled.CanvasPosition == Vector2.zero and Catcher.CanvasPosition.Y == 100, `X_Disabled -> Catcher: {Catcher.CanvasPosition}`)
+
+-- Nested: vertical ancestor wins over horizontal child without Shift; Shift overrides to scroll child X.
+wheelAt(InnerX_in_Y, -1)
+assert(InnerX_in_Y.CanvasPosition == Vector2.zero and OuterY.CanvasPosition == Vector2.new(0, 100), `InnerX_in_Y -> OuterY: {InnerX_in_Y.CanvasPosition} / {OuterY.CanvasPosition}`)
+wheelAt(InnerX_in_Y, -1, "LeftShift")
+assert(InnerX_in_Y.CanvasPosition == Vector2.new(100, 0) and OuterY.CanvasPosition == Vector2.zero, `InnerX_in_Y + Shift: {InnerX_in_Y.CanvasPosition}`)
+
+-- Nested: non-overflowing vertical ancestor does not block horizontal child.
+wheelAt(InnerX_in_Y0, -1)
+assert(InnerX_in_Y0.CanvasPosition == Vector2.new(100, 0), `InnerX_in_Y0: {InnerX_in_Y0.CanvasPosition}`)
+
+-- Nested X inside X: inner scrolls first, then at max passes to outer X.
+wheelAt(InnerX2, -1)
+assert(InnerX2.CanvasPosition == Vector2.new(100, 0) and OuterX2.CanvasPosition == Vector2.zero)
+wheelAt(InnerX2, -1, nil, { [InnerX2] = Vector2.new(150, 0) })
+assert(InnerX2.CanvasPosition == Vector2.new(150, 0) and OuterX2.CanvasPosition == Vector2.new(100, 0))
+
+-- Nested Y inside X: Y at max passes to outer X; Y + Shift passes to outer X.
+wheelAt(InnerY3, -1, nil, { [InnerY3] = Vector2.new(0, 200) })
+assert(OuterX3.CanvasPosition == Vector2.new(100, 0), `InnerY3 at max -> OuterX3: {OuterX3.CanvasPosition}`)
+wheelAt(InnerY3, -1, "LeftShift")
+assert(InnerY3.CanvasPosition == Vector2.zero and OuterX3.CanvasPosition == Vector2.new(100, 0), `InnerY3 + Shift -> OuterX3: {OuterX3.CanvasPosition}`)
+
+-- Sibling FrontX over BackY scrolls FrontX (BackY is not an ancestor), and at max does not pass to sibling BackY.
+wheelAt(FrontX, -1)
+assert(FrontX.CanvasPosition == Vector2.new(100, 0) and BackY.CanvasPosition == Vector2.zero)
+wheelAt(FrontX, -1, nil, { [FrontX] = Vector2.new(150, 0) })
+assert(FrontX.CanvasPosition == Vector2.new(150, 0) and BackY.CanvasPosition == Vector2.zero)
+
+-- X spring matches Studio 0.747.0.7471481 measured frame trace (dt = 1/60: 8.161, 24.309, 41.289, ... -> 100).
+Stop(X_Xonly)
+X_Xonly.CanvasPosition = Vector2.zero
+UpdateAll()
+Dispatch({ type = "wheel", x = 120, y = 95, notches = -1 })
+Step(1 / 60)
+assert(math.abs(X_Xonly.CanvasPosition.X - 8.161087) < 0.05, `frame 1 X={X_Xonly.CanvasPosition.X}`)
+Step(1 / 60)
+assert(math.abs(X_Xonly.CanvasPosition.X - 24.309196) < 0.05, `frame 2 X={X_Xonly.CanvasPosition.X}`)
+settle()
+assert(X_Xonly.CanvasPosition == Vector2.new(100, 0))
+"#,
+    );
+}

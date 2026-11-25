@@ -119,6 +119,7 @@ function check(action) {
 				const notches = optionalNumber(action, "notches");
 				const dy = optionalNumber(action, "dy");
 				optionalNumber(action, "dx");
+				optionalBool(action, "shift");
 				if (notches === undefined && dy === undefined) throw new Error("wheel: needs `notches` (+1 = one notch away from the user) or `dy` (px, 100 per notch)");
 			}
 			break;

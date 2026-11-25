@@ -683,10 +683,67 @@ fn current_target(cx: &Cx, id: InstanceId, vertical: bool) -> f64 {
     if vertical { y } else { x }
 }
 
-/// Scrolling.Route: offers a vertical wheel of `notches` (+ = away from the user = up) to the
-/// ScrollingFrames of `list` (topmost first). Returns the frame that took it and the frames tried
-/// at the end of their range (they fire a MouseWheel event of their own, measured).
-pub(crate) fn route(cx: &Cx, list: &[InstanceId], notches: f64, taker: Option<&Json>) -> (Option<InstanceId>, Vec<InstanceId>) {
+/// Whether `ancestor` is a strict ancestor of `descendant` in the DOM.
+fn is_ancestor(engine: &Engine, ancestor: InstanceId, descendant: InstanceId) -> bool {
+    let state = engine.state.borrow();
+    let mut current = state.dom.get(descendant).and_then(|instance| instance.parent);
+    while let Some(id) = current {
+        if id == ancestor {
+            return true;
+        }
+        current = state.dom.get(id).and_then(|instance| instance.parent);
+    }
+    false
+}
+
+/// Whether `id` has any ancestor ScrollingFrame (even if ScrollingEnabled = false).
+/// Whether `id` has any ancestor ScrollingFrame that can scroll vertically (`ScrollingDirection != X`
+/// and `max_y > 0`, even if `ScrollingEnabled = false` or already at its top/bottom; measured in
+/// Studio 0.747.0.7471481). When true, an unshifted vertical wheel over a horizontal-only inner
+/// frame does not scroll it horizontally and passes up to the outer frame instead.
+fn has_vertical_ancestor(cx: &Cx, id: InstanceId) -> bool {
+    let ancestors: Vec<InstanceId> = {
+        let state = cx.engine.state.borrow();
+        let mut out = Vec::new();
+        let mut current = state.dom.get(id).and_then(|instance| instance.parent);
+        while let Some(anc) = current {
+            if state.dom.get(anc).is_some_and(|i| Some(i.class) == cx.i.c.ScrollingFrame) {
+                out.push(anc);
+            }
+            current = state.dom.get(anc).and_then(|instance| instance.parent);
+        }
+        out
+    };
+    ancestors.into_iter().any(|anc| cx.enum_name(anc, cx.i.n.ScrollingDirection) != "X" && range(cx, anc).1 > 0.0)
+}
+
+/// The axis a vertical mouse wheel scrolls on `id` (`Some(true)` = Y, `Some(false)` = X, `None` =
+/// cannot scroll with this wheel), as measured in a playing client (Studio 0.747.0.7471481):
+///   - With Shift (LeftShift or RightShift): horizontal only (`ScrollingDirection != Y && max_x > 0`);
+///     never falls back to Y, and ignores any vertical ancestor.
+///   - Without Shift: vertical when `ScrollingDirection != X && max_y > 0` (never spills to X when Y
+///     is at its end); otherwise horizontal when `ScrollingDirection != Y && max_x > 0` and no
+///     ancestor ScrollingFrame is vertically scrollable.
+fn wheel_axis(cx: &Cx, id: InstanceId, max_x: f64, max_y: f64, shift: bool) -> Option<bool> {
+    let dir = cx.enum_name(id, cx.i.n.ScrollingDirection);
+    let allows_y = dir != "X" && max_y > 0.0;
+    let allows_x = dir != "Y" && max_x > 0.0;
+    if shift {
+        allows_x.then_some(false)
+    } else if allows_y {
+        Some(true)
+    } else if allows_x && !has_vertical_ancestor(cx, id) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Scrolling.Route: offers a vertical wheel of `notches` (+ = away from the user = up, `shift` =
+/// LeftShift or RightShift held) to the ScrollingFrames of `list` (topmost first). Returns the
+/// frame that took it and the frames tried along the ancestor chain that could not scroll and
+/// passed it on (they fire a MouseWheel event of their own, measured).
+pub(crate) fn route(cx: &Cx, list: &[InstanceId], notches: f64, shift: bool, taker: Option<&Json>) -> (Option<InstanceId>, Vec<InstanceId>) {
     let scroll = &cx.i.scroll;
     scroll.init();
     let mut preferred = None;
@@ -702,13 +759,21 @@ pub(crate) fn route(cx: &Cx, list: &[InstanceId], notches: f64, taker: Option<&J
         }
     }
     let mut failed = Vec::new();
+    let mut tried: Option<InstanceId> = None;
     for &id in list {
         let is_frame = with_view(cx.engine, cx.i, |v| v.is_scrolling_frame(id));
         if !is_frame || cx.is_false(id, cx.i.n.ScrollingEnabled) {
             continue;
         }
-        let (_, max_y) = range(cx, id);
-        if max_y <= 0.0 {
+        // Once a ScrollingFrame has been tried and failed, only its ancestor ScrollingFrames can
+        // take the passed-on wheel; unrelated siblings behind it do not (measured, Studio 0.747).
+        if let Some(prev) = tried {
+            if !is_ancestor(cx.engine, id, prev) {
+                continue;
+            }
+        }
+        let (max_x, max_y) = range(cx, id);
+        if max_x <= 0.0 && max_y <= 0.0 {
             continue;
         }
         // The browser already accumulated this notch; its selected recipient remains valid when
@@ -716,26 +781,36 @@ pub(crate) fn route(cx: &Cx, list: &[InstanceId], notches: f64, taker: Option<&J
         if Some(id) == preferred {
             return (Some(id), failed);
         }
-        let target = current_target(cx, id, true);
-        let wanted = target - notches * NOTCH_PIXELS;
-        let clamped = clamp(wanted, 0.0, max_y);
-        if (clamped - target).abs() > 1e-6 && preferred.is_none() {
-            // ScrollingDirection X frames take a vertical wheel without moving (measured)
-            let owned = scroll.enabled.get() && scroll.presented(id).is_some_and(|p| p.owned);
-            if cx.enum_name(id, cx.i.n.ScrollingDirection) != "X" && !owned {
-                let mut motion = scroll.motion(id).unwrap_or_default();
-                let (_, position_y) = cx.vector2(id, cx.i.n.CanvasPosition);
-                let mut axis = motion.y.unwrap_or(Axis { position: position_y, velocity: 0.0, target: position_y });
-                axis.target = clamped;
-                motion.y = Some(axis);
-                scroll.set_motion(id, motion);
+        if let Some(vertical) = wheel_axis(cx, id, max_x, max_y, shift) {
+            let max = if vertical { max_y } else { max_x };
+            let target = current_target(cx, id, vertical);
+            let wanted = target - notches * NOTCH_PIXELS;
+            let clamped = clamp(wanted, 0.0, max);
+            if (clamped - target).abs() > 1e-6 && preferred.is_none() {
+                let owned = scroll.enabled.get() && scroll.presented(id).is_some_and(|p| p.owned);
+                if !owned {
+                    let mut motion = scroll.motion(id).unwrap_or_default();
+                    let (position_x, position_y) = cx.vector2(id, cx.i.n.CanvasPosition);
+                    if vertical {
+                        let mut axis = motion.y.unwrap_or(Axis { position: position_y, velocity: 0.0, target: position_y });
+                        axis.target = clamped;
+                        motion.y = Some(axis);
+                    } else {
+                        let mut axis = motion.x.unwrap_or(Axis { position: position_x, velocity: 0.0, target: position_x });
+                        axis.target = clamped;
+                        motion.x = Some(axis);
+                    }
+                    scroll.set_motion(id, motion);
+                }
+                return (Some(id), failed);
             }
-            return (Some(id), failed);
+            if preferred.is_some() && (clamped - target).abs() > 1e-6 {
+                continue;
+            }
         }
-        if preferred.is_some() && (clamped - target).abs() > 1e-6 {
-            continue;
-        }
-        // At the end of its range: its own MouseWheel event fires, the next frame gets the wheel
+        // Cannot scroll on this frame: fire its own MouseWheel event and pass the wheel up only
+        // to ancestor ScrollingFrames (not unrelated siblings behind it; measured, Studio 0.747).
+        tried = Some(id);
         failed.push(id);
     }
     (None, failed)

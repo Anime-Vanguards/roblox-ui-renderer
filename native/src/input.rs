@@ -82,14 +82,15 @@ impl PreviewInput {
                     && !modifiers.command =>
                 {
                     let [x, y] = logical(self.pointer.unwrap(), rect, viewport);
+                    let primary = if delta.y != 0.0 { delta.y } else if modifiers.shift { delta.x } else { 0.0 };
                     let notches = wheel_notches(
                         *unit,
-                        delta.y as f64,
+                        primary as f64,
                         viewport[1] / rect.height().max(1.0) as f64,
                         viewport[1],
                     );
                     if notches != 0.0 {
-                        output.push(json!({"type":"wheel", "x":x, "y":y, "dx":-delta.x, "dy":-delta.y, "notches":notches}));
+                        output.push(json!({"type":"wheel", "x":x, "y":y, "dx":-delta.x, "dy":-delta.y, "notches":notches, "shift":modifiers.shift}));
                     }
                 }
                 Event::Key {
