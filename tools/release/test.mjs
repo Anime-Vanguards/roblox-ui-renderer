@@ -463,9 +463,9 @@ test("canary notes list at most 100 subjects and count the rest", () => temporar
 test("the canary tag publishes the passing run's zips under fixed names and never builds or moves a tag", () => {
 	const workflow = fs.readFileSync(path.join(ROOT, ".github/workflows/release.yml"), "utf8").replace(/\r\n/g, "\n");
 	const job = name => workflow.split(new RegExp(`^  ${name}:\\n`, "m"))[1].split(/^  \S/m)[0];
-	// Triggers: the canary tag besides version tags, and the nightly run
+	// Triggers: the canary tag besides version tags, and the scheduled sweep every 2 hours
 	assert.match(workflow, /^    tags: \['v\[0-9\]\+\.\[0-9\]\+\.\[0-9\]\+', canary\]$/m);
-	assert.match(workflow, /^  schedule:\n    - cron: "51 1 \* \* \*"$/m);
+	assert.match(workflow, /^  schedule:\n    - cron: "51 \*\/2 \* \* \*"$/m);
 	// Nightly and canary runs have groups of their own, and nothing cancels a run in progress
 	assert.match(workflow, /^  group: release-\$\{\{ github.event_name == 'schedule' && 'nightly' \|\| github.event_name == 'push' && github.ref == 'refs\/tags\/canary' && 'canary' \|\| github.event_name == 'push' && github.ref_type == 'branch' && github.ref \|\| github.run_id \}\}\n  cancel-in-progress: false$/m);
 	// The version check of a tag skips the canary, which is not a version
@@ -489,9 +489,11 @@ test("the canary tag publishes the passing run's zips under fixed names and neve
 	// A prerelease, never latest, created only for the existing tag; never a target or a tag change
 	assert.match(canary, /gh release create canary -R "\$GITHUB_REPOSITORY" --verify-tag --prerelease --latest=false --title "\$title"/);
 	assert.match(canary, /gh release edit canary -R "\$GITHUB_REPOSITORY" --prerelease --latest=false --title "\$title"/);
-	assert.match(canary, /title="Canary \(main \$\{GITHUB_SHA:0:10\}\)"/);
+	assert.match(canary, /BUILT: \$\{\{ needs\.version\.outputs\.dry-run-date \}\}/);
+	assert.match(canary, /title="Canary \(main \$\{GITHUB_SHA:0:10\}, \$\{BUILT:0:10\} \$\{BUILT:11:5\}Z\)"/);
 	assert.doesNotMatch(canary, /--target|--tag |git push|git tag|refs\/tags\/canary"? -/);
-	// Upload first, then delete what the new set no longer has, then the title and notes
+	// Upload first (with retry on transient 5xx), then delete what the new set no longer has, then the title and notes
+	assert.match(canary, /for attempt in 1 2 3; do\n\s+if gh release upload canary -R "\$GITHUB_REPOSITORY" --clobber assets\/\*; then break; fi\n\s+if \[ "\$attempt" -eq 3 \]; then exit 1; fi\n\s+sleep \$\(\(attempt \* 5\)\)\n\s+done/);
 	const order = ["gh release upload canary -R \"$GITHUB_REPOSITORY\" --clobber assets/*", "gh release delete-asset", "gh release edit"].map(text => canary.indexOf(text));
 	assert.ok(order.every(index => index > 0) && order[0] < order[1] && order[1] < order[2], order.join());
 	// The workflow itself never writes a ref (cargo's --target, a platform, is not a release target)

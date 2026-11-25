@@ -42,6 +42,7 @@ on:
       - native/Cargo.lock
       - native/.cargo/config.toml
       - native/build.rs
+      - native/src/**
       - native/tests/standalone.rs
       - native/tests/support/**
       - tools/native-app/build.mjs
@@ -57,9 +58,9 @@ on:
         description: Build every crate from nothing, without the build cache
         type: boolean
         default: false
-  # The nightly build of main's head, which the canary publishes
+  # Scheduled sweep every 2 hours at main's head (skips in seconds when nothing shipped)
   schedule:
-    - cron: "51 1 * * *"
+    - cron: "51 */2 * * *"
 
 permissions:
   contents: read
@@ -730,6 +731,7 @@ jobs:
       actions: read # to download the passing run's artifacts
     env:
       DRY_RUN: ${{ needs.version.outputs.dry-run }}
+      BUILT: ${{ needs.version.outputs.dry-run-date }}
       VERSION: ${{ needs.version.outputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -779,11 +781,15 @@ jobs:
       - name: Refresh the canary release for the existing tag
         run: |
           set -euo pipefail
-          title="Canary (main ${GITHUB_SHA:0:10})"
+          title="Canary (main ${GITHUB_SHA:0:10}, ${BUILT:0:10} ${BUILT:11:5}Z)"
           if ! gh release view canary -R "$GITHUB_REPOSITORY" --json tagName > /dev/null; then
             gh release create canary -R "$GITHUB_REPOSITORY" --verify-tag --prerelease --latest=false --title "$title" --notes-file notes/release-notes.md
           fi
-          gh release upload canary -R "$GITHUB_REPOSITORY" --clobber assets/*
+          for attempt in 1 2 3; do
+            if gh release upload canary -R "$GITHUB_REPOSITORY" --clobber assets/*; then break; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 5))
+          done
           gh release view canary -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | while IFS= read -r name; do
             if [ ! -e "assets/$name" ]; then
               gh release delete-asset canary "$name" -R "$GITHUB_REPOSITORY" --yes
