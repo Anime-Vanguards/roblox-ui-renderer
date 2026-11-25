@@ -433,13 +433,18 @@ pub fn gradient_mesh(
         let (low, high) = corners.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), t| (low.min(*t), high.max(*t)));
         let shown = match kind {
             Kind::Linear => [low, high],
-            Kind::Radial => [0., high.min(1.)],
-            // An elliptical list is cut at 0 and 1 / Scale (at most 1), whatever the rect's shape, Offset and
-            // Rotation: Studio holds the colour of t = 1 / Scale beyond it (fixtures/gradient-probe-elliptical.luau
-            // row 6 and tile 22, Scale 1.25, 2, 3 and 4: the hold starts at 0.8, 0.5, 0.333 and 0.25, also with the
-            // centre beyond the rect's edge, where the corners' t is 0.6)
-            Kind::Elliptical => [0., (1. / scale).min(1.)],
-            Kind::Conical => [0., 1.],
+            // A radial or elliptical list is cut at 0 and 1 / Scale, whatever the rect's shape, Offset and
+            // Rotation, not at the corners' t. Above Scale 1 Studio holds the colour of t = 1 / Scale beyond it
+            // (fixtures/gradient-probe-cut.luau, radial at Scale 1.1, 1.25, 2 and 4: the hold starts at 0.909,
+            // 0.8, 0.5 and 0.25, also with the centre beyond the rect's edge; gradient-probe-elliptical.luau row 6
+            // and tile 22). Below Scale 1 the list runs on to 1 / Scale, past its last keypoint: the table's
+            // entries spread over 0 to 2 at Scale 0.5, so the ramp across a step between close keypoints is
+            // twice as wide (gradient-probe-cut tiles 6 and 15, radial and elliptical at Scale 0.5)
+            Kind::Radial | Kind::Elliptical => [0., 1. / scale],
+            // A conical list's t runs from 0 to 1 / min(Scale, 1), and the list is cut there: at 0 and 1 above
+            // Scale 1, which draws as Scale 1 (gradient-probe-cut tiles 7 to 10, Scale 1.25, 2 and 4), at 0 and
+            // 1 / Scale below it (tiles 11 and 17, Scale 0.5 and 0.75)
+            Kind::Conical => [0., 1. / scale.min(1.)],
         };
         if shown[1] > shown[0] {
             window = shown;
@@ -585,9 +590,41 @@ mod tests {
         let grey: f64 = 0.5 * (1. - (0.5 - 0.3001) / (1. - 0.3001));
         assert!((close.value(0.5)[0] - (grey * grey * 255.).round() / 255.).abs() < 1e-9);
         assert_eq!(close.value(0.7), close.value(0.5));
-        // Under Scale 0.5 the cut list is the whole gradient
-        let small = form(json!({"type":"Elliptical","scale":0.5,"color":[[0,0,0,0],[0.3,1,1,1],[0.3001,0.5,0.5,0.5],[1,0,0,0]]}));
-        assert_eq!(small.table.as_ref().map(|t| (t.0, t.1)), Some((0., 1.)));
+    }
+    /// A radial or elliptical list with keypoints closer than 1 / 256 is cut at 0 and 1 / Scale, not at the
+    /// corners' t, and holds the colour of 1 / Scale beyond it; a conical one at 0 and 1 / min(Scale, 1), where
+    /// its t ends. Below Scale 1 the cut list runs on past its last keypoint, its table over 0 to 1 / Scale
+    /// (fixtures/gradient-probe-cut.luau)
+    #[test]
+    fn close_lists_of_centred_types_are_cut_at_one_over_scale() {
+        let keys = json!([[0, 0, 0, 0], [0.3, 1, 1, 1], [0.3001, 0.5, 0.5, 0.5], [1, 0, 0, 0]]);
+        // A 225 x 120 rect: a radial gradient's corners lie at t 1.48 / Scale (0.74 at Scale 2, 1.18 at 1.25)
+        let form = |kind: &str, scale: f64| gradient_mesh(&json!({"type":kind,"scale":scale,"color":keys}), [10., 20., 225., 120.], [255.; 3], 255., [0.; 4]).form;
+        // (the cut list's first and last keypoints: the window's ends; at Scale 4 they are all that is left)
+        let cut = |kind: &str, scale: f64| {
+            let form = form(kind, scale);
+            form.cut.then(|| (form.knots[0][0], form.knots[form.knots.len() - 1][0]))
+        };
+        for (kind, scale, end) in [
+            ("Radial", 2., 0.5),
+            ("Radial", 1.25, 0.8),
+            ("Radial", 4., 0.25),
+            ("Radial", 0.5, 2.),
+            ("Elliptical", 2., 0.5),
+            ("Elliptical", 0.5, 2.),
+            ("Conical", 2., 1.),
+            ("Conical", 0.5, 2.),
+            ("Conical", 0.75, 1. / 0.75),
+        ] {
+            assert_eq!(cut(kind, scale), Some((0., end)), "{kind} at Scale {scale}");
+        }
+        // Radial at Scale 2: the grey of t = 0.5 (interpolated plainly from 0.5 at 0.3001 to 0 at 1) holds beyond
+        let radial = form("Radial", 2.);
+        let grey: f64 = 0.5 * (1. - (0.5 - 0.3001) / (1. - 0.3001));
+        assert!((radial.value(0.5)[0] - (grey * grey * 255.).round() / 255.).abs() < 1e-9);
+        assert_eq!(radial.value(0.74), radial.value(0.5));
+        // Below Scale 1 t past 1 reads the last keypoint's black
+        assert_eq!(form("Radial", 0.5).value(1.5)[0], 0.);
     }
     /// An evenly spaced list is drawn in 256 steps between two keypoints, the colour of the nearest step
     /// (fixtures/gradient-probe-table.luau strips 7 to 14)

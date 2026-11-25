@@ -48,7 +48,7 @@ Evaluated per pixel (measured in Studio 0.747):
     (its `width / 2` axis along the rotation's direction); `Offset` moves the center in screen axes.
   - `Scale` scales `t` around its midpoint (the center for `Radial` and `Elliptical`); `TileMode` repeats or mirrors.
 - Keypoints spaced closer than `1/256` sample from a 512-entry lookup table over the visible gradient range
-  (for `Elliptical`, `t` from 0 to `1 / Scale`, at most 1).
+  (for `Radial` and `Elliptical`, `t` from 0 to `1 / Scale`; for `Conical`, 0 to `1 / min(Scale, 1)`).
 
 Fixtures: `gradients`, `gradient-edges`, `gradient-probe-*` (`gradient-probe-elliptical` for `Elliptical`), `stroke-gradient`.
 
