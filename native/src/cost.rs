@@ -3604,7 +3604,7 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
     if let Some(seq) = seq_summary {
         let _ = writeln!(
             out,
-            "rur cost: {status} (sequence, {} samples @ {} fps, mode={mode_cadence}) | {}x{} @ {}x ({}x{} px)",
+            "rur cost: {status} (sequence, {} samples @ {} fps, mode={mode_cadence}; headline=last sample; defaults: single=edit, seq=play) | {}x{} @ {}x ({}x{} px)",
             seq["frameCount"].as_u64().unwrap_or(0),
             format_hz(seq["fps"].as_f64().unwrap_or(60.0)),
             vp["width"].as_f64().unwrap_or(0.0),
@@ -3616,7 +3616,7 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
     } else {
         let _ = writeln!(
             out,
-            "rur cost: {status} ({mode}, mode={mode_cadence}) | {}x{} @ {}x ({}x{} px)",
+            "rur cost: {status} ({mode}, mode={mode_cadence}; defaults: single=edit, seq=play) | {}x{} @ {}x ({}x{} px)",
             vp["width"].as_f64().unwrap_or(0.0),
             vp["height"].as_f64().unwrap_or(0.0),
             vp["scale"].as_f64().unwrap_or(1.0),
@@ -3638,6 +3638,15 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
         }
         if let Some(hint) = report.get("hint").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
             let _ = writeln!(out, "  hint:      {}", first_line(hint, 180));
+        }
+        if status == "empty"
+            && seq_summary.is_none()
+            && report.get("time").and_then(Value::as_f64).unwrap_or(0.0) <= 1e-9
+        {
+            let _ = writeln!(
+                out,
+                "  time note: captured at --time 0; if this UI mounts after t=0, retry with a later --time (e.g. --time 0.5)",
+            );
         }
         if report.pointer("/editModeFallback/mountsInEditMode").and_then(Value::as_bool) == Some(true) {
             let _ = writeln!(
@@ -3673,29 +3682,60 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
     } else {
         format!(" ({})", kind_parts.join(", "))
     };
-    let _ = writeln!(
-        out,
-        "  quads:     {}{kind_str} | glyphs: {} ({} fill + {} stroke)",
-        t["quads"].as_u64().unwrap_or(0),
-        t["glyphQuads"].as_u64().unwrap_or(0),
-        t["fillGlyphQuads"].as_u64().unwrap_or(0),
-        t["strokeGlyphQuads"].as_u64().unwrap_or(0),
-    );
-    let _ = writeln!(
-        out,
-        "  canvasRT:  {} | {} targets, {} switches, max depth {}",
-        format_bytes(rt_bytes),
-        t["canvasGroupTargets"].as_u64().unwrap_or(0),
-        t["canvasRtSwitches"].as_u64().unwrap_or(0),
-        t["maxCanvasGroupDepth"].as_u64().unwrap_or(0),
-    );
-    let _ = writeln!(
-        out,
-        "  overdraw:  {:.3}x screen, {:.3}x offscreen, {:.3}x total",
-        t["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
-        t["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
-        t["totalOverdrawViewports"].as_f64().unwrap_or(0.0),
-    );
+    if let Some(peak) = seq_summary.and_then(|s| s.get("peak")) {
+        let _ = writeln!(
+            out,
+            "  quads:     {}{kind_str} (peak {}) | glyphs: {} ({} fill + {} stroke, peak {})",
+            t["quads"].as_u64().unwrap_or(0),
+            peak["quads"].as_f64().unwrap_or(0.0).round() as u64,
+            t["glyphQuads"].as_u64().unwrap_or(0),
+            t["fillGlyphQuads"].as_u64().unwrap_or(0),
+            t["strokeGlyphQuads"].as_u64().unwrap_or(0),
+            peak["glyphQuads"].as_f64().unwrap_or(0.0).round() as u64,
+        );
+        let _ = writeln!(
+            out,
+            "  canvasRT:  {} (peak {} B) | {} targets, {} switches, max depth {}",
+            format_bytes(rt_bytes),
+            peak["canvasRtBytes"].as_f64().unwrap_or(0.0).round() as u64,
+            t["canvasGroupTargets"].as_u64().unwrap_or(0),
+            t["canvasRtSwitches"].as_u64().unwrap_or(0),
+            t["maxCanvasGroupDepth"].as_u64().unwrap_or(0),
+        );
+        let _ = writeln!(
+            out,
+            "  overdraw:  {:.3}x screen (peak {:.3}x), {:.3}x offscreen (peak {:.3}x), {:.3}x total",
+            t["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            peak["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            t["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            peak["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            t["totalOverdrawViewports"].as_f64().unwrap_or(0.0),
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "  quads:     {}{kind_str} | glyphs: {} ({} fill + {} stroke)",
+            t["quads"].as_u64().unwrap_or(0),
+            t["glyphQuads"].as_u64().unwrap_or(0),
+            t["fillGlyphQuads"].as_u64().unwrap_or(0),
+            t["strokeGlyphQuads"].as_u64().unwrap_or(0),
+        );
+        let _ = writeln!(
+            out,
+            "  canvasRT:  {} | {} targets, {} switches, max depth {}",
+            format_bytes(rt_bytes),
+            t["canvasGroupTargets"].as_u64().unwrap_or(0),
+            t["canvasRtSwitches"].as_u64().unwrap_or(0),
+            t["maxCanvasGroupDepth"].as_u64().unwrap_or(0),
+        );
+        let _ = writeln!(
+            out,
+            "  overdraw:  {:.3}x screen, {:.3}x offscreen, {:.3}x total",
+            t["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            t["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            t["totalOverdrawViewports"].as_f64().unwrap_or(0.0),
+        );
+    }
     let hid = &t["hiddenInShown"];
     let hid_scope = if hid["complete"].as_bool() == Some(true) { "live DOM" } else { "scene.json incomplete" };
     let _ = writeln!(
@@ -3776,6 +3816,12 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
                 "  layoutMs:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
                 format_phone_range(&phone_range, &phone_band),
             );
+            if desk_ms <= 1e-12 && steady["passes"].as_f64().unwrap_or(0.0) <= 1e-12 {
+                let _ = writeln!(
+                    out,
+                    "  note:      0 steady churn; opening/full-tree layout cost is on the single-moment screen (omit --from/--frames)",
+                );
+            }
         }
     } else if let Some(ft) = report.get("fullTreeLayout") {
         let drawn_nodes = t["drawnNodes"].as_u64().unwrap_or(0);
@@ -6634,5 +6680,84 @@ end
             Err(other) => panic!("expected Usage error for multi-value --time, got: {other:?}"),
             Ok(_) => panic!("expected Usage error for multi-value --time, got Ok"),
         }
+    }
+
+    #[test]
+    fn non_uniform_size_cap_peaks_static_note_time0_empty_and_defaults_on_screen() {
+        // 1. Non-uniform CanvasGroup size cap (3000x15 @ 1x -> 2048x11 RT):
+        //    nw/w = 2048/3000 = 0.682667 vs nh/h = 11/15 = 0.733333 (7.4% apart).
+        //    True area scale = (2048/3000)*(11/15) = 0.5006222.
+        //    Group bg (3000x15 = 45,000) + Child (1500x15 = 22,500) = 67,500 -> 33,792.0 texels (0.070400x).
+        //    (nw/w)^2 would give 31,457.28 (0.065536x); (nh/h)^2 would give 36,300.0 (0.075625x).
+        let vp = 800.0 * 600.0;
+        let rep = run_cg_shape_fixture(
+            "non_uniform_cap",
+            r#"return function(Target)
+	local Group = Instance.new("CanvasGroup")
+	Group.Name = "Strip"
+	Group.Size = UDim2.fromOffset(3000, 15)
+	Group.BorderSizePixel = 0
+	Group.Parent = Target
+	local Child = Instance.new("Frame")
+	Child.Name = "Half"
+	Child.Size = UDim2.fromOffset(1500, 15)
+	Child.BorderSizePixel = 0
+	Child.Parent = Group
+end
+"#,
+        );
+        assert_eq!(rep["totals"]["canvasRtBytes"], 2048 * 11 * 4);
+        let texels = rep["totals"]["offscreenOverdrawViewports"].as_f64().unwrap() * vp;
+        assert!(
+            (texels - 33_792.0).abs() < 2.0,
+            "non-uniform 3000x15 -> 2048x11 cap must count 33,792 texels (not (nw/w)^2=31,457 or (nh/h)^2=36,300), got {texels}"
+        );
+
+        // 2. Sequence screen labels headline=last sample, prints peaks beside counts, shows defaults,
+        //    and on a static window (0 steady churn) notes that opening cost is on the single-moment screen.
+        let dest = Path::new("out/test/cost.json");
+        let full_scene = store_of(json!({
+            "viewport": {"width": 800, "height": 600, "scale": 1.0},
+            "status": "ok",
+            "nodes": [
+                {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true},
+                {"id": 2, "name": "Card", "path": "G.Card", "class": "Frame", "rect": [0, 0, 200, 100], "bg": {"color": [1, 1, 1], "transparency": 0}}
+            ],
+            "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": [2]}],
+            "fonts": [],
+            "images": []
+        }));
+        let empty_scene = store_of(json!({
+            "viewport": {"width": 800, "height": 600, "scale": 1.0},
+            "status": "ok",
+            "nodes": [
+                {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true}
+            ],
+            "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": []}],
+            "fonts": [],
+            "images": []
+        }));
+        let mut acc = SequenceAccumulator::new(60.0, "play");
+        acc.record_frame(0, 0.5, false, 1, 0, 1, &full_scene, LayoutStats { passes: 1, stored: 2, ..Default::default() }, Vec::new(), None);
+        acc.record_frame(1, 0.516667, false, 0, 1, 1, &empty_scene, LayoutStats::default(), Vec::new(), None);
+        let seq_rep = acc.finish(Some("ok"));
+        let seq_screen = format_one_screen_report(&seq_rep, dest);
+        assert!(seq_screen.contains("headline=last sample"), "sequence header must say last sample:\n{seq_screen}");
+        assert!(seq_screen.contains("defaults: single=edit, seq=play"), "header must state two defaults:\n{seq_screen}");
+        assert!(seq_screen.contains("quads:     0 (peak 1)"), "destroyed panel must still show peak quads:\n{seq_screen}");
+        assert!(seq_screen.contains("0.000x screen (peak 0.042x)"), "destroyed panel must still show peak overdraw:\n{seq_screen}");
+        assert!(seq_screen.contains("single-moment screen"), "static sequence must point to single-moment opening cost:\n{seq_screen}");
+
+        // 3. Single-moment --time 0 empty mount suggests retrying with a later --time; --time 0.5 does not.
+        let empty_hidden = DomHiddenSummary { complete: true, mounted_empty: true, ..Default::default() };
+        let mut empty_t0 = analyze_scene_with_mode(&empty_scene, LayoutStats::default(), Some(&empty_hidden), "edit");
+        empty_t0["time"] = json!(0.0);
+        let screen_t0 = format_one_screen_report(&empty_t0, dest);
+        assert!(screen_t0.contains("defaults: single=edit, seq=play"), "{screen_t0}");
+        assert!(screen_t0.contains("later --time"), "--time 0 empty screen must suggest a later --time:\n{screen_t0}");
+        let mut empty_t05 = empty_t0.clone();
+        empty_t05["time"] = json!(0.5);
+        let screen_t05 = format_one_screen_report(&empty_t05, dest);
+        assert!(!screen_t05.contains("captured at --time 0"), "--time 0.5 must not say captured at --time 0:\n{screen_t05}");
     }
 }
