@@ -72,7 +72,7 @@ node cli/rur.mjs sequence --story <file> --from 0 --to 4 --fps 60 --crop Stage
 Mounts the story once and captures frames at `from + i / fps`. Whenever `fps` divides 60, frame `i` is pixel-identical to `rur render --time <t>`.
 
 - **Range:** `--from` plus `--to` (exclusive), `--frames N`, or `--duration S` (default 1 s); `--fps` (default 60).
-- **Cropping & options:** `--crop <node>` (bounding box on frame 0, rounded to even dimensions for video) or `--crop x,y,w,h`; `--pad px`; `--actions`; `--no-png`; `--no-video`; `--scenes` (save every frame's `scene.json`); `--cost` (write per-frame deterministic `cost.json`, [cost.md](cost.md)).
+- **Cropping & options:** `--crop <node>` (bounding box on frame 0, rounded to even dimensions for video) or `--crop x,y,w,h`; `--pad px`; `--actions`; `--cursor` (draw the platform's default cursor at scripted pointer positions with hover, text, drag and click states at the device scale; off by default); `--no-png`; `--no-video`; `--scenes` (save every frame's `scene.json`); `--cost` (write per-frame deterministic `cost.json`, [cost.md](cost.md)).
 - **Output (`out/<name>-sequence`):** `frames/00000.png`..., `trace.json` (per-frame position/size/rotation changes), `video.mp4` (H.264 BT.709 via `ffmpeg` from `PATH` or `RUR_FFMPEG`), `video-quarter.mp4` (0.25x slow-motion), `cost.json` (with `--cost`), and `summary.json`.
 
 ## Rojo projects and explicit mounts

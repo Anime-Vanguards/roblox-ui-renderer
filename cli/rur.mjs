@@ -5,7 +5,7 @@
 //   rur render --model <file.rbxm|.rbxmx|.rbx> ...      render a saved instance tree (.rbx: a Roblox archive)
 //   rur render --module <file.luau> ...                 require a module (function(target) or Instance)
 //   rur sequence --story <file> [--from 0] [--to 4 | --frames 240 | --duration 4] [--fps 60] [--crop <node>|x,y,w,h]
-//             [--pad px] [--no-png] [--no-video] [--scenes] [--cost]  the story mounted once and captured frame by frame at
+//             [--pad px] [--no-png] [--no-video] [--scenes] [--cost] [--cursor]  the story mounted once and captured frame by frame at
 //                                                       exact moments: frames/, trace.json, video.mp4, video-quarter.mp4, cost.json
 //   rur stories [--filter a|b] [--place <name>|all]     list storybook stories in the project
 //   rur sweep [--filter a|b] [--jobs N] [--timeout s] [--no-png] [--out out/sweep]
@@ -471,6 +471,7 @@ export async function sequenceNative(argv, outDir, options, { offline = false, e
 	if (options.video === false) flags.push("--no-video");
 	if (options.scenes) flags.push("--scenes");
 	if (options.cost) flags.push("--cost");
+	if (options.cursor) flags.push("--cursor");
 	if (offline) flags.push("--offline");
 	return new Promise((resolve, reject) => {
 		const child = spawn(executable, ["sequence", "--dir", outDir, ...flags, ...argv], { cwd: ROOT, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -513,6 +514,7 @@ export async function sequence(args, { service = false, env = process.env } = {}
 	if (args["no-video"]) options.video = false;
 	if (args.scenes) options.scenes = true;
 	if (args.cost) options.cost = true;
+	if (args.cursor) options.cursor = true;
 	const frames = sequenceFrames(options);
 	if (!(frames >= 1 && frames <= 99999)) throw new UsageError(`a sequence takes 1 to 99999 frames (got ${frames}: check --to / --frames / --duration)`);
 	const fps = options.fps === undefined ? 60 : Number(options.fps);

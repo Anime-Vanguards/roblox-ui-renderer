@@ -13,6 +13,9 @@ pub mod catalog;
 /// hidden-in-shown DOM accounting, multi-frame layout churn, and calibrated/refused timing estimates
 #[cfg(feature = "desktop")]
 pub mod cost;
+/// Scripted cursor compositing for `rur sequence --cursor`
+#[cfg(feature = "desktop")]
+pub mod cursor;
 /// Asset downloads, the account and Studio reads (`rur-native assets`); the web build only draws its bundle
 #[cfg(feature = "desktop")]
 pub mod download;

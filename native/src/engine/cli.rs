@@ -1454,6 +1454,8 @@ pub struct SequenceFrame {
     /// Actual device the engine ran with (`Options::device`, e.g. `"desktop"`, `"touch"`, `"gamepad"`, `"phone"`).
     pub device: String,
     pub layout_churn: Vec<super::layout::LayoutChurnEntry>,
+    /// Pointer position and cursor state at this frame (`rur sequence --cursor`).
+    pub pointer: Option<super::input::PointerState>,
     #[cfg(feature = "desktop")]
     pub dom_hidden: Option<crate::cost::DomHiddenSummary>,
 }
@@ -1564,6 +1566,7 @@ fn run_sequence(
     #[cfg(feature = "desktop")]
     let dom_hidden_0 = spec.collect_cost.then(|| crate::cost::collect_dom_hidden(engine, &session.story.roots));
     let now = |engine: &Rc<Engine>| engine.state.borrow().sched.now;
+    let pointer_0 = super::input::get(engine).map(|input| input.pointer_state(engine));
     if !sink(SequenceMessage::Frame(SequenceFrame {
         index: 0,
         time: now(engine),
@@ -1574,6 +1577,7 @@ fn run_sequence(
         cadence_kind,
         device: engine.options.device.clone(),
         layout_churn: layout_churn_0,
+        pointer: pointer_0,
         #[cfg(feature = "desktop")]
         dom_hidden: dom_hidden_0,
     })) {
@@ -1583,6 +1587,9 @@ fn run_sequence(
     let frames_started = Instant::now();
     let mut blocked = std::time::Duration::ZERO;
     for index in 1..spec.frames {
+        if let Some(input) = super::input::get(engine) {
+            input.clear_frame_click();
+        }
         let until = moment(index);
         let last = index + 1 == spec.frames;
         let layout_before = super::layout::stats_snapshot(engine);
@@ -1611,6 +1618,7 @@ fn run_sequence(
         let reply = session.capture(lua, steps);
         let layout_delta = super::layout::stats_snapshot(engine).delta_since(&layout_before);
         let layout_churn = if spec.collect_cost { super::layout::take_churn(engine) } else { Vec::new() };
+        let pointer = super::input::get(engine).map(|input| input.pointer_state(engine));
         let unchanged = reply["unchanged"] == true;
         #[cfg(feature = "desktop")]
         let dom_hidden = (spec.collect_cost && !unchanged)
@@ -1626,6 +1634,7 @@ fn run_sequence(
             cadence_kind,
             device: engine.options.device.clone(),
             layout_churn,
+            pointer,
             #[cfg(feature = "desktop")]
             dom_hidden,
         })) {

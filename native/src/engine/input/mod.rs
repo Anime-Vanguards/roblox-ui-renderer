@@ -82,7 +82,7 @@ names!(
     ResetScrollVelocity, ClearInertialScrolling, CaptureFocus, ReleaseFocus, IsFocused,
     BindAction, BindActionAtPriority, UnbindAction, UnbindAllActions, SetTitle, SetPosition, SetImage, SetDescription,
     GetBoundActionInfo, GetAllBoundActionInfo, Select, Selectable, SelectionOrder, PreferredInput,
-    IsGamepadButtonDown, GetGamepadConnected, GetImageForKeyCode,
+    IsGamepadButtonDown, GetGamepadConnected, GetImageForKeyCode, MouseIcon, MouseIconEnabled,
 );
 
 macro_rules! classes {
@@ -110,10 +110,36 @@ struct Mouse {
     x: f64,
     y: f64,
     inside: bool,
+    /// True once any pointer event positioned the cursor inside the viewport, until `leave`.
+    positioned: bool,
     last_move_delta: (f32, f32),
     processed_x: f64,
     processed_y: f64,
     pending: bool,
+}
+
+/// Cursor appearance for `rur sequence --cursor`, derived from the device and the UI under the pointer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PointerKind {
+    Default,
+    Hover,
+    Text,
+    DragHover,
+    DragActive,
+    Gamepad,
+    GamepadHover,
+    Touch,
+}
+
+/// Snapshot of the scripted pointer at the end of a sequence frame (logical viewport pixels).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointerState {
+    pub visible: bool,
+    pub x: f64,
+    pub y: f64,
+    pub kind: PointerKind,
+    pub pressed: bool,
+    pub custom_icon: Option<String>,
 }
 
 /// Per mouse button: the GuiButton that took the press (MouseButton*Down), the first GuiButton /
@@ -182,6 +208,9 @@ pub struct Input {
     legacy: RefCell<Option<(LuaTable, FxHashMap<&'static str, SignalId>)>>,
     /// ContextActionService binds
     actions: context_actions::Actions,
+    /// True if a mouse button went down since the last `clear_frame_click`, so zero-hold `click`
+    /// actions still register a pressed state on the frame they occur (`rur sequence --cursor`).
+    clicked_this_frame: Cell<bool>,
 }
 
 /// The input of an engine (installed by Engine.Start).
@@ -405,7 +434,96 @@ impl Input {
             pinned: RefCell::default(),
             legacy: RefCell::new(None),
             actions: context_actions::Actions::default(),
+            clicked_this_frame: Cell::new(false),
         }
+    }
+
+    /// Clears the per-frame click latch before stepping into the next sequence frame.
+    pub fn clear_frame_click(&self) {
+        self.clicked_this_frame.set(false);
+    }
+
+    /// Snapshot of the current pointer position and cursor state (`rur sequence --cursor`).
+    pub fn pointer_state(&self, engine: &Engine) -> PointerState {
+        let mouse = self.mouse.get();
+        let device = engine.options.device.as_str();
+        let touch = matches!(device, "touch" | "phone");
+        let gamepad = device == "gamepad";
+        let (icon_enabled, custom_icon) = {
+            let mut enabled = true;
+            let mut custom = None;
+            if let Ok(uis) = services::get_service(engine, engine.world().game, "UserInputService") {
+                let state = engine.state.borrow();
+                if let Some(inst) = state.dom.get(uis) {
+                    // Reflection's default for MouseIconEnabled is false; Roblox starts with the
+                    // cursor visible unless a script explicitly sets MouseIconEnabled = false.
+                    if matches!(inst.stored(self.n.MouseIconEnabled), Some(Value::Bool(false))) {
+                        enabled = false;
+                    }
+                    if let Some(Value::String(s)) = inst.stored(self.n.MouseIcon) {
+                        let uri = s.to_str_lossy();
+                        if !uri.is_empty() {
+                            custom = Some(uri.into_owned());
+                        }
+                    }
+                }
+            }
+            (enabled, custom)
+        };
+        let pressed = !self.presses.borrow().is_empty() || self.clicked_this_frame.get();
+        let visible = mouse.positioned && icon_enabled && (!touch || pressed);
+        if !visible {
+            return PointerState {
+                visible: false,
+                x: mouse.x,
+                y: mouse.y,
+                kind: if touch { PointerKind::Touch } else if gamepad { PointerKind::Gamepad } else { PointerKind::Default },
+                pressed,
+                custom_icon,
+            };
+        }
+        let kind = if touch {
+            PointerKind::Touch
+        } else {
+            let hovered = if mouse.pending {
+                self.hit_at(engine, mouse.x, mouse.y)
+            } else {
+                self.hovered.borrow().clone()
+            };
+            let drag_active = self.drag.borrow().is_some();
+            if drag_active && !gamepad {
+                PointerKind::DragActive
+            } else {
+                let state = engine.state.borrow();
+                let mut kind = if gamepad { PointerKind::Gamepad } else { PointerKind::Default };
+                let edit_mode = engine.options.edit_mode();
+                for &id in &hovered {
+                    let Some(inst) = state.dom.get(id) else { continue };
+                    if !gamepad && !edit_mode {
+                        let has_drag = inst.children.iter().any(|&child| {
+                            state.dom.get(child).is_some_and(|c| {
+                                Some(c.class) == self.c.UIDragDetector
+                                    && !matches!(state.dom.raw_get(child, self.n.Enabled), Some(Value::Bool(false)))
+                            })
+                        });
+                        if has_drag {
+                            kind = PointerKind::DragHover;
+                            break;
+                        }
+                    }
+                    if self.class_is(inst.class, self.c.TextBox) {
+                        kind = if gamepad { PointerKind::GamepadHover } else { PointerKind::Text };
+                        break;
+                    }
+                    if self.class_is(inst.class, self.c.GuiButton) {
+                        kind = if gamepad { PointerKind::GamepadHover } else { PointerKind::Hover };
+                        break;
+                    }
+                }
+                kind
+            }
+        };
+        PointerState { visible: true, x: mouse.x, y: mouse.y, kind, pressed, custom_icon }
     }
 
     pub(crate) fn class_is(&self, class: ClassId, ancestor: Option<ClassId>) -> bool {
@@ -612,6 +730,7 @@ fn set_position(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     let mut mouse = cx.i.mouse.get();
     mouse.x = x;
     mouse.y = y;
+    mouse.positioned = true;
     mouse.pending = true;
     cx.i.mouse.set(mouse);
     cx.update_legacy_mouse()
@@ -632,6 +751,7 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     mouse.processed_y = y;
     mouse.pending = false;
     mouse.inside = true;
+    mouse.positioned = true;
     mouse.last_move_delta = (dx as f32, dy as f32);
     cx.i.mouse.set(mouse);
     cx.update_legacy_mouse()?;
@@ -709,11 +829,15 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
 /// A button / wheel event at (X, Y): the mouse position follows, the hover state does not.
 fn ensure_at(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     let mut mouse = cx.i.mouse.get();
-    if x != mouse.x || y != mouse.y {
+    let changed = x != mouse.x || y != mouse.y;
+    if changed || !mouse.positioned {
         mouse.x = x;
         mouse.y = y;
+        mouse.positioned = true;
         cx.i.mouse.set(mouse);
-        cx.update_legacy_mouse()?;
+        if changed {
+            cx.update_legacy_mouse()?;
+        }
     }
     Ok(())
 }
@@ -731,7 +855,9 @@ fn process_move(cx: &Cx) -> LuaResult<()> {
 fn leave(cx: &Cx) -> LuaResult<()> {
     process_move(cx)?;
     let mut mouse = cx.i.mouse.get();
+    mouse.positioned = false;
     if !mouse.inside {
+        cx.i.mouse.set(mouse);
         return Ok(());
     }
     let n = &cx.i.n;
@@ -815,6 +941,7 @@ fn position_delta(cx: &Cx, object: InstanceId, x: f64, y: f64) -> (Value, Value)
 
 fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
     ensure_at(cx, x, y)?;
+    cx.i.clicked_this_frame.set(true);
     let n = &cx.i.n;
     let type_name = pointer_type(cx, button);
     let object = cx.input_object(type_name, type_name);

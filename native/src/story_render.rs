@@ -548,7 +548,7 @@ fn pretty(value: &Value) -> Vec<u8> {
 }
 
 /// `rur-native sequence --dir <out> [--from s] [--to s | --frames n | --duration s] [--fps n]
-/// [--crop node|x,y,w,h] [--pad px] [--no-png] [--scenes] [--no-video] [--offline]
+/// [--crop node|x,y,w,h] [--pad px] [--no-png] [--scenes] [--no-video] [--cost] [--cursor] [--offline]
 /// [--profile <kinds> [--profile-out <dir>]] <engine arguments>`: one sequence (sequence.rs) in this process, the
 /// engine half in a fresh VM (profiled on its thread: [`crate::sequence::start_fresh_profiled`]). Prints the result as
 /// one JSON line on stdout; returns the exit code.
@@ -573,12 +573,13 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
             "--from" | "--to" | "--frames" | "--duration" | "--fps" | "--crop" | "--pad" => {
                 options.insert(key[2..].to_string(), value.map(Value::String).unwrap_or(Value::Null));
             }
-            "--no-png" | "--no-video" | "--scenes" | "--cost" | "--offline" => {
+            "--no-png" | "--no-video" | "--scenes" | "--cost" | "--cursor" | "--offline" => {
                 match key {
                     "--no-png" => options.insert("png".into(), Value::Bool(false)),
                     "--no-video" => options.insert("video".into(), Value::Bool(false)),
                     "--scenes" => options.insert("scenes".into(), Value::Bool(true)),
                     "--cost" => options.insert("cost".into(), Value::Bool(true)),
+                    "--cursor" => options.insert("cursor".into(), Value::Bool(true)),
                     _ => {
                         offline = true;
                         None

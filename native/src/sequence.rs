@@ -56,6 +56,8 @@ pub struct SequenceOutput {
     pub video: bool,
     /// cost.json: deterministic per-frame Roblox UI cost and layout churn (`rur sequence --cost`)
     pub cost: bool,
+    /// Draw the platform's default cursor at the scripted pointer position (`rur sequence --cursor`)
+    pub cursor: bool,
     /// No downloads: images and fonts from the caches only
     pub offline: bool,
 }
@@ -122,9 +124,10 @@ pub fn parse_options(value: &Value, offline: bool) -> Result<(SequenceSpec, Sequ
     let pad = number("pad")?.unwrap_or(0.0).max(0.0);
     let flag = |key: &str, default: bool| value.get(key).and_then(Value::as_bool).unwrap_or(default);
     let cost = flag("cost", false);
+    let cursor = flag("cursor", false);
     Ok((
         SequenceSpec { from, frames: frames as u32, fps, client_hz: None, collect_cost: cost },
-        SequenceOutput { fps, crop, pad, png: flag("png", true), scenes: flag("scenes", false), video: flag("video", true), cost, offline },
+        SequenceOutput { fps, crop, pad, png: flag("png", true), scenes: flag("scenes", false), video: flag("video", true), cost, cursor, offline },
     ))
 }
 
@@ -596,6 +599,26 @@ fn median(mut values: Vec<f64>) -> f64 {
     values[values.len() / 2]
 }
 
+/// Composites the scripted cursor over `raw_rgba` when `draw_cursor` is on and the pointer is visible.
+fn composite_cursor_frame(
+    cursor_renderer: &mut crate::cursor::CursorRenderer,
+    resolver: &mut Resolver,
+    draw_cursor: bool,
+    region: [u32; 4],
+    scale: f64,
+    pointer: Option<&crate::engine::input::PointerState>,
+    raw_rgba: Arc<Vec<u8>>,
+) -> Arc<Vec<u8>> {
+    if draw_cursor {
+        if let Some(state) = pointer.filter(|state| state.visible) {
+            let mut composited = (*raw_rgba).clone();
+            cursor_renderer.draw(resolver, &mut composited, region, scale, state);
+            return Arc::new(composited);
+        }
+    }
+    raw_rgba
+}
+
 /// The draw half: every frame of `frames` (the first already received) applied, drawn, read back and
 /// written into `out`. Returns the result cli/rur.mjs makes summary.json from.
 #[allow(clippy::too_many_arguments)]
@@ -630,20 +653,42 @@ pub fn draw_frames(
     let mut missing_images: Vec<String> = Vec::new();
     let mut times: Vec<Value> = Vec::new();
     let mut hashes: Vec<u64> = Vec::new();
-    let mut previous: Option<Arc<Vec<u8>>> = None;
+    let mut cursor_renderer = crate::cursor::CursorRenderer::new();
+    // Clean (un-cursored) pixels of the last drawn scene, plus the last delivered (pointer, pixels)
+    // so an unchanged UI frame whose cursor moved or changed state composites cleanly over the base
+    // frame without ghosting.
+    let mut base_previous: Option<Arc<Vec<u8>>> = None;
+    let mut previous: Option<(Option<crate::engine::input::PointerState>, Arc<Vec<u8>>)> = None;
     // The last frame drawn, its pixels still on their way out of the GPU: collected once the next frame
     // is prepared and submitted, so the GPU draws and copies while the CPU prepares
-    let mut in_flight: Option<(u32, PendingReadback)> = None;
+    let mut in_flight: Option<(u32, Option<crate::engine::input::PointerState>, PendingReadback)> = None;
     let (mut unchanged, mut waits, mut draws, mut prepares, mut gpus, mut readbacks) = (0u32, Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut ready = Value::Null;
     let actual_device = first.device.clone();
     let mut next = Some(first);
     let mut waited_at = Instant::now();
-    // A frame's pixels, in frame order, to the writers
-    fn deliver(writers: &mut Writers, hashes: &mut Vec<u64>, previous: &mut Option<Arc<Vec<u8>>>, index: u32, rgba: Arc<Vec<u8>>) -> Result<()> {
-        hashes.push(pixel_hash(&rgba));
-        writers.pixels(index, &rgba)?;
-        *previous = Some(rgba);
+    // Composites the cursor when `--cursor` is on, delivers the frame's pixels in frame order,
+    // and updates `base_previous` / `previous`.
+    #[allow(clippy::too_many_arguments)]
+    fn deliver(
+        writers: &mut Writers,
+        hashes: &mut Vec<u64>,
+        base_previous: &mut Option<Arc<Vec<u8>>>,
+        previous: &mut Option<(Option<crate::engine::input::PointerState>, Arc<Vec<u8>>)>,
+        cursor_renderer: &mut crate::cursor::CursorRenderer,
+        resolver: &mut Resolver,
+        draw_cursor: bool,
+        region: [u32; 4],
+        scale: f64,
+        index: u32,
+        pointer: Option<crate::engine::input::PointerState>,
+        raw_rgba: Arc<Vec<u8>>,
+    ) -> Result<()> {
+        *base_previous = Some(raw_rgba.clone());
+        let delivered = composite_cursor_frame(cursor_renderer, resolver, draw_cursor, region, scale, pointer.as_ref(), raw_rgba);
+        hashes.push(pixel_hash(&delivered));
+        writers.pixels(index, &delivered)?;
+        *previous = Some((pointer, delivered));
         Ok(())
     }
     let end = loop {
@@ -658,7 +703,7 @@ pub fn draw_frames(
         };
         let drawn_at = Instant::now();
         waits.push(drawn_at.duration_since(waited_at).as_secs_f64());
-        let SequenceFrame { index, time, mut reply, layout, client_frames, layout_churn, dom_hidden, .. } = frame;
+        let SequenceFrame { index, time, mut reply, layout, client_frames, layout_churn, pointer, dom_hidden, .. } = frame;
         if reply["type"] == "error" {
             bail!("frame {index}: {}", reply["message"].as_str().unwrap_or("the engine failed"));
         }
@@ -698,18 +743,53 @@ pub fn draw_frames(
         }
         trace.record(index, &scene);
         times.push(json!(time));
+        let scale = scene.viewport().scale;
         if still && (previous.is_some() || in_flight.is_some()) {
-            // The same pixels as the frame before (collected first if still in flight)
+            // The same UI pixels as the frame before (collected first if still in flight).
+            // With `--cursor`, re-composite over the clean base frame if the cursor changed.
             unchanged += 1;
             let writers = writers.as_mut().context("the first frame drew nothing")?;
-            if let Some((at, pending)) = in_flight.take() {
-                deliver(writers, &mut hashes, &mut previous, at, Arc::new(gpu.finish_readback(pending)?))?;
+            let region = crop.as_ref().context("no crop before an unchanged frame")?.0;
+            if let Some((at, prev_pointer, pending)) = in_flight.take() {
+                deliver(
+                    writers,
+                    &mut hashes,
+                    &mut base_previous,
+                    &mut previous,
+                    &mut cursor_renderer,
+                    resolver,
+                    options.cursor,
+                    region,
+                    scale,
+                    at,
+                    prev_pointer,
+                    Arc::new(gpu.finish_readback(pending)?),
+                )?;
             }
             if options.scenes {
                 writers.scene(index, &scene)?;
             }
-            let same = previous.clone().context("no frame before an unchanged one")?;
-            deliver(writers, &mut hashes, &mut previous, index, same)?;
+            if !options.cursor || previous.as_ref().is_some_and(|(prev_pointer, _)| *prev_pointer == pointer) {
+                let same = previous.as_ref().context("no frame before an unchanged one")?.1.clone();
+                hashes.push(pixel_hash(&same));
+                writers.pixels(index, &same)?;
+            } else {
+                let raw = base_previous.clone().context("no base frame before an unchanged one")?;
+                deliver(
+                    writers,
+                    &mut hashes,
+                    &mut base_previous,
+                    &mut previous,
+                    &mut cursor_renderer,
+                    resolver,
+                    true,
+                    region,
+                    scale,
+                    index,
+                    pointer,
+                    raw,
+                )?;
+            }
         } else {
             settle_assets(assets, &scene)?;
             presentation.update(&scene, None);
@@ -739,8 +819,21 @@ pub fn draw_frames(
             if options.scenes {
                 writers.scene(index, &scene)?;
             }
-            if let Some((at, previous_pending)) = in_flight.replace((index, pending)) {
-                deliver(writers, &mut hashes, &mut previous, at, Arc::new(gpu.finish_readback(previous_pending)?))?;
+            if let Some((at, prev_pointer, previous_pending)) = in_flight.replace((index, pointer, pending)) {
+                deliver(
+                    writers,
+                    &mut hashes,
+                    &mut base_previous,
+                    &mut previous,
+                    &mut cursor_renderer,
+                    resolver,
+                    options.cursor,
+                    region,
+                    scale,
+                    at,
+                    prev_pointer,
+                    Arc::new(gpu.finish_readback(previous_pending)?),
+                )?;
             }
             prepares.push(gpu_at.duration_since(prepared_at).as_secs_f64());
             gpus.push(read_at.duration_since(gpu_at).as_secs_f64());
@@ -749,8 +842,23 @@ pub fn draw_frames(
         draws.push(drawn_at.elapsed().as_secs_f64());
         waited_at = Instant::now();
     };
-    if let Some((at, pending)) = in_flight.take() {
-        deliver(writers.as_mut().context("the first frame drew nothing")?, &mut hashes, &mut previous, at, Arc::new(gpu.finish_readback(pending)?))?;
+    if let Some((at, prev_pointer, pending)) = in_flight.take() {
+        let region = crop.as_ref().context("the first frame drew nothing")?.0;
+        let scale = scene.viewport().scale;
+        deliver(
+            writers.as_mut().context("the first frame drew nothing")?,
+            &mut hashes,
+            &mut base_previous,
+            &mut previous,
+            &mut cursor_renderer,
+            resolver,
+            options.cursor,
+            region,
+            scale,
+            at,
+            prev_pointer,
+            Arc::new(gpu.finish_readback(pending)?),
+        )?;
     }
     let frames_done = started.elapsed().as_secs_f64();
     let count = times.len() as u32;
@@ -1024,7 +1132,8 @@ mod tests {
         let (spec, output) = parse_options(&json!({"from": "0", "to": "4", "fps": 60, "crop": "Stage", "pad": "8"}), false).unwrap();
         assert_eq!((spec.from, spec.frames, spec.fps), (0.0, 240, 60.0));
         assert!(matches!(output.crop, Some(Crop::Node(ref node)) if node == "Stage"));
-        assert_eq!((output.pad, output.png, output.video, output.scenes), (8.0, true, true, false));
+        assert_eq!((output.pad, output.png, output.video, output.scenes, output.cursor), (8.0, true, true, false, false));
+        assert!(parse_options(&json!({"cursor": true}), false).unwrap().1.cursor);
         assert_eq!(parse_options(&json!({"duration": 2, "fps": 30}), false).unwrap().0.frames, 60);
         assert_eq!(parse_options(&json!({"frames": 7, "to": 9}), false).unwrap().0.frames, 7);
         assert_eq!(parse_options(&json!({}), true).unwrap().0.frames, 60);
@@ -1075,5 +1184,188 @@ mod tests {
         assert_eq!(rows("Root.Spark"), json!([[0, 3.0, 5.0, 10.0, 10.0, 0.0], [1, 4.0, 5.0, 10.0, 10.0, 0.0], [2, null]]));
         assert_eq!(rows("Root.Spark#2"), json!([[2, 9.0, 5.0, 10.0, 10.0, 0.0]]));
         assert_eq!(value["nodes"][2]["id"], 3);
+    }
+
+    /// `--cursor` captures the platform pointer state on every sequence frame (including unchanged UI
+    /// frames), composites distinct default / hover / click / text states at device scale cleanly
+    /// without ghost trails, aligns with `--crop`, and stays off by default. Runs without a GPU or
+    /// Roblox Studio so headless CI covers the engine + compositor path directly.
+    #[test]
+    fn sequence_cursor_draws_hover_click_and_unchanged_moves_only_when_opted_in() {
+        use crate::engine::input::PointerKind;
+
+        let dir = temp_profile("sequence-cursor");
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("cursor-story.luau");
+        std::fs::write(
+            &fixture,
+            r#"
+return function(Target)
+	local Bg = Instance.new("Frame")
+	Bg.Size = UDim2.fromScale(1, 1)
+	Bg.BackgroundColor3 = Color3.fromRGB(24, 28, 36)
+	Bg.BorderSizePixel = 0
+	Bg.Parent = Target
+
+	local Btn = Instance.new("TextButton")
+	Btn.Name = "Btn"
+	Btn.Position = UDim2.fromOffset(100, 60)
+	Btn.Size = UDim2.fromOffset(100, 60)
+	Btn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)
+	Btn.AutoButtonColor = false
+	Btn.Text = ""
+	Btn.Parent = Target
+
+	local Box = Instance.new("TextBox")
+	Box.Name = "Box"
+	Box.Position = UDim2.fromOffset(240, 60)
+	Box.Size = UDim2.fromOffset(100, 60)
+	Box.BackgroundColor3 = Color3.fromRGB(40, 110, 70)
+	Box.Text = ""
+	Box.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+        // Frame cadence: 10 fps -> t = 0.0 (f0) .. 0.7 (f7)
+        //   f0: no pointer yet
+        //   f1: idle move (40, 40)
+        //   f2: move over static background (40, 160) -> old cursor position stays clean
+        //   f3: hover Btn (150, 90)
+        //   f4: zero-hold click Btn (150, 90) -> pressed cursor shown on click frame
+        //   f5: quiet frame (no action) -> UI unchanged (`unchanged == true`), cursor cleanly reverts from pressed to hover
+        //   f6: hover Box (290, 90) -> I-beam cursor
+        //   f7: leave -> cursor disappears
+        let actions = json!([
+            {"t": 0.08, "type": "move", "x": 40, "y": 40},
+            {"t": 0.18, "type": "move", "x": 40, "y": 160},
+            {"t": 0.28, "type": "move", "x": 150, "y": 90},
+            {"t": 0.38, "type": "click", "x": 150, "y": 90},
+            {"t": 0.58, "type": "move", "x": 290, "y": 90},
+            {"t": 0.68, "type": "leave"}
+        ])
+        .to_string();
+        let repo = crate::engine::default_repo();
+        let argv: Vec<String> = vec![
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--roots".into(), repo.join("tools/tests/oracle-root").to_string_lossy().into_owned(),
+            "--fixture".into(), fixture.to_string_lossy().into_owned(),
+            "--viewport".into(), "400x240".into(),
+            "--scale".into(), "1.5".into(),
+            "--no-snapshots".into(),
+            "--actions".into(), actions,
+        ];
+        let args = parse(&argv).unwrap();
+        let spec = SequenceSpec { from: 0.0, frames: 8, fps: 10.0, client_hz: None, collect_cost: false };
+
+        let frames: Vec<SequenceFrame> = capture(&args, &spec)
+            .into_iter()
+            .filter_map(|message| match message {
+                SequenceMessage::Frame(frame) => Some(frame),
+                SequenceMessage::End(end) => {
+                    assert_eq!(end.unwrap()["status"], "ok");
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(frames.len(), 8);
+
+        // Verify the engine's per-frame pointer state (including click -> unchanged quiet frame).
+        assert!(!frames[0].pointer.as_ref().is_some_and(|p| p.visible), "no visible pointer before first action");
+        let p1 = frames[1].pointer.as_ref().expect("f1 pointer");
+        assert_eq!((p1.visible, p1.x, p1.y, p1.kind, p1.pressed), (true, 40.0, 40.0, PointerKind::Default, false));
+        let p2 = frames[2].pointer.as_ref().expect("f2 pointer");
+        assert_eq!((p2.visible, p2.x, p2.y, p2.kind, p2.pressed), (true, 40.0, 160.0, PointerKind::Default, false));
+        let p3 = frames[3].pointer.as_ref().expect("f3 pointer");
+        assert_eq!((p3.visible, p3.x, p3.y, p3.kind, p3.pressed), (true, 150.0, 90.0, PointerKind::Hover, false));
+        let p4 = frames[4].pointer.as_ref().expect("f4 pointer");
+        assert_eq!((p4.visible, p4.x, p4.y, p4.kind, p4.pressed), (true, 150.0, 90.0, PointerKind::Hover, true));
+        assert_eq!(frames[5].reply["unchanged"], true, "f5 UI should be unchanged after click settles");
+        let p5 = frames[5].pointer.as_ref().expect("f5 pointer");
+        assert_eq!((p5.visible, p5.x, p5.y, p5.kind, p5.pressed), (true, 150.0, 90.0, PointerKind::Hover, false));
+        let p6 = frames[6].pointer.as_ref().expect("f6 pointer");
+        assert_eq!((p6.visible, p6.x, p6.y, p6.kind, p6.pressed), (true, 290.0, 90.0, PointerKind::Text, false));
+        assert!(!frames[7].pointer.as_ref().is_some_and(|p| p.visible), "no visible pointer after leave");
+
+        // Composite every frame through the same helper `draw_frames` uses (including clean base reuse
+        // on unchanged UI frames), at scale 1.5, with and without `--cursor` and with `--crop`.
+        let (w, h) = (600u32, 360u32);
+        let full_region = [0u32, 0, w, h];
+        let crop_region = [120u32, 60, 210, 150];
+        let make_base = |rw: u32, rh: u32| -> Arc<Vec<u8>> {
+            let mut buf = vec![0u8; (rw * rh * 4) as usize];
+            for px in buf.chunks_exact_mut(4) {
+                px.copy_from_slice(&[24, 28, 36, 255]);
+            }
+            Arc::new(buf)
+        };
+        let base_full = make_base(w, h);
+        let base_crop = make_base(crop_region[2], crop_region[3]);
+
+        let mut resolver = Resolver::new(&repo, true);
+        let mut renderer = crate::cursor::CursorRenderer::new();
+        let composite_seq = |draw_cursor: bool, region: [u32; 4], base: &Arc<Vec<u8>>, renderer: &mut crate::cursor::CursorRenderer, resolver: &mut Resolver| -> Vec<Arc<Vec<u8>>> {
+            let mut out = Vec::with_capacity(frames.len());
+            let mut last_pointer = None;
+            let mut last_delivered: Option<Arc<Vec<u8>>> = None;
+            for frame in &frames {
+                let still = frame.index > 0 && frame.reply["unchanged"] == true;
+                let delivered = if still && (!draw_cursor || last_pointer == frame.pointer) {
+                    last_delivered.clone().unwrap()
+                } else {
+                    composite_cursor_frame(renderer, resolver, draw_cursor, region, 1.5, frame.pointer.as_ref(), base.clone())
+                };
+                last_pointer = frame.pointer.clone();
+                last_delivered = Some(delivered.clone());
+                out.push(delivered);
+            }
+            out
+        };
+
+        let off = composite_seq(false, full_region, &base_full, &mut renderer, &mut resolver);
+        let on = composite_seq(true, full_region, &base_full, &mut renderer, &mut resolver);
+        let cropped = composite_seq(true, crop_region, &base_crop, &mut renderer, &mut resolver);
+
+        let diff_in = |a: &[u8], b: &[u8], stride_w: u32, rect: [u32; 4]| -> usize {
+            let mut n = 0;
+            for y in rect[1]..(rect[1] + rect[3]) {
+                for x in rect[0]..(rect[0] + rect[2]) {
+                    let o = ((y * stride_w + x) * 4) as usize;
+                    if a[o..o + 4] != b[o..o + 4] {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
+
+        // Default off: every frame equals base (no cursor pixels painted).
+        for (i, buf) in off.iter().enumerate() {
+            assert_eq!(buf.as_slice(), base_full.as_slice(), "frame {i} must stay clean when cursor is off");
+        }
+
+        // Opt-in on:
+        assert_eq!(on[0].as_slice(), base_full.as_slice(), "no cursor before first pointer action");
+        assert_eq!(on[7].as_slice(), base_full.as_slice(), "no cursor after pointer leaves");
+        assert!(diff_in(&on[1], &base_full, w, [20, 20, 90, 90]) > 80, "idle cursor drawn at (40,40)*1.5");
+        assert_eq!(diff_in(&on[1], &base_full, w, [20, 200, 90, 90]), 0, "no stray pixels at future position");
+        assert_eq!(diff_in(&on[2], &base_full, w, [20, 20, 90, 90]), 0, "old cursor position must not ghost");
+        assert!(diff_in(&on[2], &base_full, w, [20, 200, 90, 90]) > 80, "cursor moved to (40,160)*1.5");
+        assert!(diff_in(&on[3], &base_full, w, [175, 85, 100, 100]) > 80, "hover cursor drawn over Btn");
+        assert!(diff_in(&on[4], &base_full, w, [175, 85, 100, 100]) > 60, "click cursor drawn over Btn");
+        assert!(diff_in(&on[3], &on[4], w, [175, 85, 100, 100]) > 20, "click state must visually differ from hover state");
+        assert_eq!(on[5].as_slice(), on[3].as_slice(), "unchanged frame after click must cleanly revert to hover pixels");
+        assert!(diff_in(&on[6], &base_full, w, [395, 85, 80, 100]) > 30, "I-beam cursor drawn over TextBox");
+
+        // Cropped frame 3 matches uncropped slice at [120, 60, 210, 150] byte-for-byte.
+        let (cw, ch) = (crop_region[2], crop_region[3]);
+        let mut expected_crop = Vec::with_capacity((cw * ch * 4) as usize);
+        for y in crop_region[1]..(crop_region[1] + ch) {
+            let start = ((y * w + crop_region[0]) * 4) as usize;
+            expected_crop.extend_from_slice(&on[3][start..start + (cw * 4) as usize]);
+        }
+        assert_eq!(cropped[3].as_slice(), expected_crop.as_slice(), "cropped --cursor frame must match uncropped pixels at the crop offset");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -206,7 +206,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/story_render.rs",
         "pub fn sequence_cli(",
-        0xecd8d4b913570911,
+        0xbd9e8dc26096982d,
     ),
     (
         Crate::Native,
@@ -528,6 +528,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--code",
     "--cost",
     "--crop",
+    "--cursor",
     "--device",
     "--dt",
     "--duration",
@@ -683,7 +684,7 @@ const FIELD_READS: &[FieldReads] = &[
         readers: &["value.get(\"", "number(\"", "flag(\""],
         non_paths: &[
             "fps", "from", "frames", "to", "duration", "crop", "pad", "png", "scenes", "video",
-            "cost",
+            "cost", "cursor",
         ],
     },
 ];

@@ -1178,3 +1178,110 @@ end
 	}
 	console.log("Golden isolated state: PASS (RUR_STATE_DIR cloud fonts pass and skips are reported)");
 }
+
+// `rur sequence --cursor`: draws the platform pointer at scripted positions (scaled by device scale)
+// with hover/click/text states, re-composites cleanly over unchanged UI frames without ghosting,
+// aligns with `--crop`, and stays off by default.
+{
+	const os = await import("node:os");
+	const { PNG } = await import("pngjs");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-seq-cursor-"));
+	const env = { ...process.env, RUR_STATE_DIR: path.join(dir, "state"), RUR_NO_SERVICE: "1" };
+	const runSeq = (outDir, extra = []) => spawnSync(process.execPath, [
+		"cli/rur.mjs", "sequence", "--fixture", path.join(dir, "cursor-story.luau"),
+		"--viewport", "400x240", "--scale", "1.5", "--no-snapshots", "--no-video", "--offline", "--json",
+		"--from", "0", "--frames", "8", "--fps", "10", "--actions", actions, "--out", outDir, ...extra,
+	], { cwd: root, encoding: "utf8", windowsHide: true, env });
+	const actions = JSON.stringify([
+		{ t: 0.08, type: "move", x: 40, y: 40 },
+		{ t: 0.18, type: "move", x: 40, y: 160 },
+		{ t: 0.28, type: "move", x: 150, y: 90 },
+		{ t: 0.38, type: "click", x: 150, y: 90 },
+		{ t: 0.58, type: "move", x: 290, y: 90 },
+		{ t: 0.68, type: "leave" },
+	]);
+	try {
+		fs.writeFileSync(path.join(dir, "cursor-story.luau"), [
+			"return function(Target)",
+			"	local Bg = Instance.new(\"Frame\")",
+			"	Bg.Size = UDim2.fromScale(1, 1)",
+			"	Bg.BackgroundColor3 = Color3.fromRGB(24, 28, 36)",
+			"	Bg.BorderSizePixel = 0",
+			"	Bg.Parent = Target",
+			"	local Btn = Instance.new(\"TextButton\")",
+			"	Btn.Name = \"Btn\"",
+			"	Btn.Position = UDim2.fromOffset(100, 60)",
+			"	Btn.Size = UDim2.fromOffset(100, 60)",
+			"	Btn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)",
+			"	Btn.AutoButtonColor = false",
+			"	Btn.Text = \"\"",
+			"	Btn.Parent = Target",
+			"	local Box = Instance.new(\"TextBox\")",
+			"	Box.Name = \"Box\"",
+			"	Box.Position = UDim2.fromOffset(240, 60)",
+			"	Box.Size = UDim2.fromOffset(100, 60)",
+			"	Box.BackgroundColor3 = Color3.fromRGB(40, 110, 70)",
+			"	Box.Text = \"\"",
+			"	Box.Parent = Target",
+			"end",
+			"",
+		].join("\n"));
+
+		const offDir = path.join(dir, "off");
+		const onDir = path.join(dir, "on");
+		const cropDir = path.join(dir, "crop");
+		for (const [label, res] of [
+			["off", runSeq(offDir)],
+			["on", runSeq(onDir, ["--cursor"])],
+			["crop", runSeq(cropDir, ["--cursor", "--crop", "80,40,140,100"])],
+		]) {
+			assert.equal(res.status, 0, `sequence ${label} failed:\n${res.stdout}\n${res.stderr}`);
+		}
+
+		const readPng = (base, index) => PNG.sync.read(fs.readFileSync(path.join(base, "frames", `${String(index).padStart(5, "0")}.png`)));
+		const diffIn = (a, b, w, [rx, ry, rw, rh]) => {
+			let n = 0;
+			for (let y = ry; y < ry + rh; y++) {
+				for (let x = rx; x < rx + rw; x++) {
+					const o = (y * w + x) * 4;
+					if (a[o] !== b[o] || a[o + 1] !== b[o + 1] || a[o + 2] !== b[o + 2] || a[o + 3] !== b[o + 3]) n++;
+				}
+			}
+			return n;
+		};
+
+		const off0 = readPng(offDir, 0), off1 = readPng(offDir, 1), off3 = readPng(offDir, 3), off7 = readPng(offDir, 7);
+		assert.equal(off0.width, 600);
+		assert.equal(off0.height, 360);
+		assert.ok(off0.data.equals(off1.data), "cursor must stay off by default");
+		assert.ok(off0.data.equals(off3.data), "hover without --cursor must not paint cursor pixels");
+
+		const on = Array.from({ length: 8 }, (_, i) => readPng(onDir, i));
+		assert.ok(on[0].data.equals(off0.data), "no cursor before first pointer action");
+		assert.ok(on[7].data.equals(off7.data), "no cursor after pointer leaves");
+		assert.ok(diffIn(on[1].data, off1.data, 600, [20, 20, 90, 90]) > 80, "idle cursor drawn at (40,40)*1.5");
+		assert.equal(diffIn(on[1].data, off1.data, 600, [20, 200, 90, 90]), 0, "no stray pixels at future position");
+		assert.equal(diffIn(on[2].data, off1.data, 600, [20, 20, 90, 90]), 0, "old cursor must not ghost");
+		assert.ok(diffIn(on[2].data, off1.data, 600, [20, 200, 90, 90]) > 80, "cursor moved to (40,160)*1.5");
+		assert.ok(diffIn(on[3].data, off3.data, 600, [175, 85, 100, 100]) > 80, "hover cursor drawn over Btn");
+		assert.ok(diffIn(on[4].data, off3.data, 600, [175, 85, 100, 100]) > 60, "click cursor drawn over Btn");
+		assert.ok(diffIn(on[3].data, on[4].data, 600, [175, 85, 100, 100]) > 20, "click cursor must differ from hover cursor");
+		assert.ok(on[5].data.equals(on[3].data), "unchanged quiet frame after click must cleanly revert to hover pixels");
+		assert.ok(diffIn(on[6].data, off3.data, 600, [395, 85, 80, 100]) > 30, "I-beam cursor drawn over TextBox");
+
+		const crop3 = readPng(cropDir, 3);
+		assert.equal(crop3.width, 210);
+		assert.equal(crop3.height, 150);
+		for (let y = 0; y < crop3.height; y++) {
+			const srcStart = ((y + 60) * 600 + 120) * 4;
+			const dstStart = y * crop3.width * 4;
+			assert.ok(
+				crop3.data.subarray(dstStart, dstStart + crop3.width * 4).equals(on[3].data.subarray(srcStart, srcStart + crop3.width * 4)),
+				`cropped --cursor row ${y} must match uncropped slice`,
+			);
+		}
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+	console.log("CLI sequence --cursor: PASS (off by default, move/hover/click/text/leave, unchanged frames, and --crop)");
+}
