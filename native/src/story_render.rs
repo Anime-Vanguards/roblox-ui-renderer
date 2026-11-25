@@ -172,7 +172,8 @@ impl StoryRenderer {
         self.draw()?;
         let Self { draw, resolver, .. } = self;
         let draw = draw.as_mut().expect("the GPU device was started above");
-        crate::sequence::draw_frames(&mut draw.gpu, &mut draw.preparer, &mut draw.assets, resolver, frame, &frames, out, options, started)
+        let run_mode = args.mode.as_deref().unwrap_or("edit");
+        crate::sequence::draw_frames(&mut draw.gpu, &mut draw.preparer, &mut draw.assets, resolver, frame, &frames, out, options, run_mode, started)
     }
 
     fn draw(&mut self) -> Result<&mut Draw> {

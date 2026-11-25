@@ -72,7 +72,9 @@ In sequence mode (`rur cost --from/--to/--frames/--duration/--fps` or `rur seque
 - Incremental `Layout.Stats` counters for that frame (`passes`, `computed`, `memo`, `measures`, `stored`, `skipped`, `moved`, `texts`, `scrollPasses`, `scrollMoved`). Static UI incurs `0` layout churn on frames `1..N`; animated or resizing UI reports the exact objects laid out each frame, and scrolling reports `scrollPasses` and `scrollMoved` separately from non-scroll `moved` records.
 - `unchanged`, `changedNodes`, `removedNodes`, and full per-frame `totals` matching single-moment `rur cost --time <t>` when `fps` divides `60`.
 - `sequence.summary`: `mean`, `peak`, and `p95` across all frames, plus steady-state (`frames[1..]`) layout churn mean and extrapolated layout CPU ms.
-- Note on `--mode edit` vs `--mode play`: in default `--mode edit`, `Heartbeat` fires at Studio's 240 Hz edit-mode cadence (4 beats per 1/60 s frame), whereas `--mode play` runs `Heartbeat` once per 1/60 s frame like a playing client. Repeated `CanvasPosition` writes without an intervening `AbsolutePosition` read coalesce to one scroll pass per frame; pass `--mode play` when scripts do per-Heartbeat work that must run once per client frame.
+- `runMode` and `runModeInfo`: every `cost.json` records the engine run mode (`"play"`, `"edit"`, or `"scene"`) and its Heartbeat cadence.
+  - **`rur cost` sequence mode defaults to `--mode play`** (60 Hz client cadence, 1 `Heartbeat` per frame), so Heartbeat-driven UI is priced for one playing client frame.
+  - **Explicit `--mode edit`** (and `rur sequence --cost` without `--mode play`) runs Studio's 240 Hz edit-mode `Heartbeat` (4 beats per 60 Hz frame), which can fire Heartbeat-driven work up to 4x a client's rate. Because of this, `rur cost` **refuses** per-frame `layoutCpuMs` in `--mode edit` (`status: "refused"`, `ms: null`) and directs you to re-run with `--mode play`. Single-moment `rur cost` defaults to `--mode edit` (matching `rur render`) and already refuses per-frame `layoutCpuMs` in both modes.
 
 ### 5. Attribution, extrapolation, and explicit refusals
 
@@ -90,7 +92,7 @@ In sequence mode (`rur cost --from/--to/--frames/--duration/--fps` or `rur seque
 `rur cost compare <before> <after>` runs an **equivalence gate** before emitting any verdict:
 
 - **Input validation:** Both inputs must be well-formed `rur-cost/1` cost reports. Passing a non-cost file (such as `scene.json`, `summary.json`, `trace.json`, or a previous `rrr-ab/1` diff) exits non-zero with an error naming what the file is and what to run instead.
-- **Equivalence checks:** `schema`, `status` (both `"ok"`), `mode` (`single` vs. `sequence`, plus matching `frameCount` and `fps` for sequences), `input` (`live` vs. `scene`) and `totals.hiddenInShown.complete`, `viewport` (`width` and `height`), and `scale`. Any mismatch returns `verdict: "refused"` with `equivalence.passed: false`, lists every mismatch and remediation command, and exits non-zero.
+- **Equivalence checks:** `schema`, `status` (both `"ok"`), `mode` (`single` vs. `sequence`, plus matching `frameCount` and `fps` for sequences), `runMode` (`play` vs. `edit` vs. `scene`), `input` (`live` vs. `scene`) and `totals.hiddenInShown.complete`, `viewport` (`width` and `height`), and `scale`. Any mismatch returns `verdict: "refused"` with `equivalence.passed: false`, lists every mismatch and remediation command, and exits non-zero.
 - **Comparable arms (`rrr-ab/1`):**
   - `verdict`: `improved`, `regressed`, `mixed`, or `unchanged` (with `measurementNoise: 0.0`), driven only by measured counts (`quads`, `glyphQuads`, `canvasRtBytes`, screen/offscreen overdraw, `hiddenGuiObjects`, and sequence layout churn; unmeasured `drawCalls`/`batchBreaks` are informational only).
   - `equivalence`: `{ "passed": true, "checks": [...] }`.

@@ -608,6 +608,7 @@ pub fn draw_frames(
     frames: &mpsc::Receiver<SequenceMessage>,
     out: &Path,
     options: &SequenceOutput,
+    run_mode: &str,
     started: Instant,
 ) -> Result<Value> {
     let first_at = started.elapsed().as_secs_f64();
@@ -620,7 +621,7 @@ pub fn draw_frames(
     let mut scene = SceneStore::default();
     let mut presentation = ScrollPresentation::default();
     let mut trace = Trace::default();
-    let mut cost_acc = options.cost.then(|| crate::cost::SequenceAccumulator::new(options.fps));
+    let mut cost_acc = options.cost.then(|| crate::cost::SequenceAccumulator::new(options.fps, run_mode));
     let mut writers: Option<Writers> = None;
     let mut crop: Option<([u32; 4], Option<String>)> = None;
     let mut resolved: std::collections::HashSet<String> = Default::default();

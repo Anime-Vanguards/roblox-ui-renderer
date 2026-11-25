@@ -842,13 +842,73 @@ assert.throws(() => findEngine(), err => err.message.includes(${JSON.stringify(d
 		assert.equal(JSON.parse(singleVsSeq.stdout).verdict, "refused");
 		assert.match(singleVsSeq.stderr, /mode/i);
 
-		// `rur sequence --cost --no-png --no-video`: writes cost.json alongside trace.json
+		// `rur sequence --cost --no-png --no-video`: writes cost.json alongside trace.json (edit mode -> refuses per-frame layoutCpuMs)
 		const outSeqFlag = path.join(dir, "seq-with-cost");
 		const rSeqFlag = runRur("sequence", "--fixture", path.join(root, "fixtures", "corners.luau"), "--no-snapshots", "--from", "0", "--frames", "3", "--fps", "60", "--no-png", "--no-video", "--cost", "--json", "--out", outSeqFlag);
 		assert.equal(rSeqFlag.status, 0, rSeqFlag.stderr);
 		const seqSummary = JSON.parse(rSeqFlag.stdout);
 		assert.ok(seqSummary.cost && fs.existsSync(seqSummary.cost), "sequence --cost writes cost.json");
-		assert.equal(JSON.parse(fs.readFileSync(seqSummary.cost, "utf8")).sequence.frames.length, 3);
+		const seqFlagCost = JSON.parse(fs.readFileSync(seqSummary.cost, "utf8"));
+		assert.equal(seqFlagCost.sequence.frames.length, 3);
+		assert.equal(seqFlagCost.runMode, "edit");
+		assert.equal(seqFlagCost.predicted["desktop-ref"].layoutCpuMs.status, "refused");
+		assert.equal(seqFlagCost.predicted["desktop-ref"].layoutCpuMs.ms, null);
+
+		// Counter-driven Heartbeat scroll + AbsolutePosition read: default sequence runs in play mode (1 beat/frame),
+		// explicit --mode edit refuses per-frame layoutCpuMs, and compare refuses play vs edit.
+		const counterScroll = path.join(dir, "counter-scroll.luau");
+		fs.writeFileSync(counterScroll, `return function(Target)
+	local RunService = game:GetService("RunService")
+	local Scroller = Instance.new("ScrollingFrame")
+	Scroller.Size = UDim2.fromOffset(600, 400)
+	Scroller.CanvasSize = UDim2.fromOffset(0, 4000)
+	Scroller.Parent = Target
+	local Cards = {}
+	for i = 1, 60 do
+		local Card = Instance.new("Frame")
+		Card.Position = UDim2.fromOffset(0, (i - 1) * 50)
+		Card.Size = UDim2.fromOffset(200, 40)
+		Card.Parent = Scroller
+		local Inner = Instance.new("Frame")
+		Inner.Size = UDim2.fromScale(1, 1)
+		Inner.Parent = Card
+		Cards[i] = Card
+	end
+	local step = 0
+	RunService.Heartbeat:Connect(function()
+		step += 1
+		Scroller.CanvasPosition = Vector2.new(0, (step * 10) % 2000)
+		local _ = Cards[1].AbsolutePosition
+	end)
+end
+`);
+		const outPlay = path.join(dir, "counter-play");
+		const outEdit = path.join(dir, "counter-edit");
+		const rPlay = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "5", "--fps", "60", "--json", "--out", outPlay);
+		assert.equal(rPlay.status, 0, rPlay.stderr);
+		assert.match(rPlay.stderr, /mode=play/);
+		const cPlay = JSON.parse(fs.readFileSync(path.join(outPlay, "cost.json"), "utf8"));
+		assert.equal(cPlay.runMode, "play");
+		assert.equal(cPlay.layout.scrollPasses, 1);
+		assert.equal(cPlay.layout.scrollMoved, 120);
+		assert.ok(Math.abs(cPlay.predicted["desktop-ref"].layoutCpuMs.ms - 0.09944) < 1e-9, `expected 0.09944 ms, got ${cPlay.predicted["desktop-ref"].layoutCpuMs.ms}`);
+
+		const rEdit = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "5", "--fps", "60", "--mode", "edit", "--json", "--out", outEdit);
+		assert.equal(rEdit.status, 0, rEdit.stderr);
+		assert.match(rEdit.stderr, /mode=edit/);
+		assert.match(rEdit.stderr, /--mode play/);
+		const cEdit = JSON.parse(fs.readFileSync(path.join(outEdit, "cost.json"), "utf8"));
+		assert.equal(cEdit.runMode, "edit");
+		assert.equal(cEdit.predicted["desktop-ref"].layoutCpuMs.status, "refused");
+		assert.equal(cEdit.predicted["desktop-ref"].layoutCpuMs.ms, null);
+		assert.equal(cEdit.sequence.summary.steadyStateLayoutCpuMs.status, "refused");
+		assert.equal(cEdit.sequence.summary.steadyStateLayoutCpuMs["desktop-ref"], null);
+
+		const playVsEdit = runRur("cost", "compare", outPlay, outEdit, "--json");
+		assert.notEqual(playVsEdit.status, 0, "play vs edit comparison must be refused");
+		assert.equal(JSON.parse(playVsEdit.stdout).verdict, "refused");
+		assert.match(playVsEdit.stderr, /runMode/i);
+		assert.match(playVsEdit.stderr, /--mode/i);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
