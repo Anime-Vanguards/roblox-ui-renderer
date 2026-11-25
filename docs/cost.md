@@ -27,7 +27,7 @@ node cli/rur.mjs cost compare out/before/cost.json out/after/cost.json --json
 node cli/rur.mjs cost --story path/to/Hud.story.luau --compare out/before/cost.json --out out/after
 ```
 
-`rur cost` delegates directly to `rur-native cost`, so standalone release binaries support every flag without Node. Without `--json`, stdout prints a compact one-screen summary (disambiguating repeating sibling paths with `#index @x,y`, naming the `top layout` drivers behind per-frame layout cost, and pointing to `cost.json`) while the full deterministic JSON is written to `<out>/cost.json`; pass `--json` to print the exact pretty-printed JSON bytes written to `cost.json`. `--out` accepts either a directory (writes `<dir>/cost.json`) or a `.json` file path.
+`rur cost` delegates directly to `rur-native cost`, so standalone release binaries support every flag without Node. Without `--json`, stdout prints a compact one-screen summary (disambiguating repeating sibling paths with `#index @x,y`, naming the changed objects behind per-frame layout cost in `top layout` with each driver's attributed ancestor/descendant share and the listed share of total churn, and pointing to `cost.json`) while the full deterministic JSON is written to `<out>/cost.json`; pass `--json` to print the exact pretty-printed JSON bytes written to `cost.json`. `--out` accepts either a directory (writes `<dir>/cost.json`) or a `.json` file path.
 
 ## What `rur cost` counts
 

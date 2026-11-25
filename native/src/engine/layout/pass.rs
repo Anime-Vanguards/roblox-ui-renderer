@@ -2378,7 +2378,7 @@ impl<'a> Pass<'a> {
                 self.moved(id, false);
                 if self.l.track_churn {
                     let delta = self.l.stats.moved.saturating_sub(before_moved);
-                    self.l.churn.entry(id).or_default().moved += delta;
+                    self.l.pass_churn.entry(id).or_default().1 += delta;
                 }
                 self.l.stored_stamps.set(id, stamp);
                 return;
@@ -2387,7 +2387,7 @@ impl<'a> Pass<'a> {
 
         self.l.stats.stored += 1;
         if self.l.track_churn {
-            self.l.churn.entry(id).or_default().stored += 1;
+            self.l.pass_churn.entry(id).or_default().0 += 1;
         }
         cache_counts::miss(Cache::Records);
         self.l.stored_stamps.take(id);
@@ -2809,11 +2809,114 @@ impl<'a> Pass<'a> {
         crate::engine::profile::count("layoutPasses", 1);
         let _scope = crate::microprofile::scope("Layout pass");
         let started = std::time::Instant::now();
+        if self.l.track_churn {
+            self.l.pass_churn.clear();
+        }
         self.layout_root(root);
+        if self.l.track_churn {
+            self.attribute_pass_churn(root);
+        }
         let elapsed = super::elapsed(started);
         self.l.stats.time += elapsed;
         self.l.profile_time += elapsed;
         self.l.stats.passes += 1;
+    }
+
+    /// Attributes every `stored` and `moved` record produced by `layout_root(root)` back to the
+    /// object(s) in `root`'s tree whose change dirtied the pass (`dirty_sources`), so ancestors
+    /// re-stored only because a descendant changed transfer their records to the changed
+    /// descendant(s), and reflowed siblings/descendants transfer theirs to the nearest changed
+    /// container/source. Conserves exact totals across all attributed drivers.
+    fn attribute_pass_churn(&mut self, root: InstanceId) {
+        let raw = std::mem::take(&mut self.l.pass_churn);
+        let mut sources_in_root: Vec<InstanceId> = Vec::new();
+        let mut remove_sources: Vec<InstanceId> = Vec::new();
+        for &src in &self.l.dirty_sources {
+            if self.state.dom.get(src).is_none() {
+                remove_sources.push(src);
+            } else if self.find_root(src) == root {
+                sources_in_root.push(src);
+                remove_sources.push(src);
+            }
+        }
+        for src in remove_sources {
+            self.l.dirty_sources.remove(&src);
+        }
+        if raw.is_empty() {
+            return;
+        }
+        if sources_in_root.is_empty() {
+            // Full invalidation (`Layout::invalidate`) with no individual dirty source
+            for (id, (stored, moved)) in raw {
+                let entry = self.l.churn.entry(id).or_default();
+                entry.stored += stored as f64;
+                entry.moved += moved as f64;
+            }
+            return;
+        }
+        let source_set: rustc_hash::FxHashSet<InstanceId> = sources_in_root.iter().copied().collect();
+        let mut descendants: rustc_hash::FxHashMap<InstanceId, Vec<InstanceId>> = rustc_hash::FxHashMap::default();
+        for &src in &sources_in_root {
+            let mut cur = self.parent(src);
+            while let Some(ancestor) = cur {
+                descendants.entry(ancestor).or_default().push(src);
+                if ancestor == root {
+                    break;
+                }
+                cur = self.parent(ancestor);
+            }
+        }
+        for (id, (stored, moved)) in raw {
+            if stored == 0 && moved == 0 {
+                continue;
+            }
+            let (s_f, m_f) = (stored as f64, moved as f64);
+            if source_set.contains(&id) {
+                let entry = self.l.churn.entry(id).or_default();
+                entry.stored += s_f;
+                entry.moved += m_f;
+                continue;
+            }
+            if let Some(ds) = descendants.get(&id) {
+                let share = 1.0 / ds.len() as f64;
+                for &src in ds {
+                    let entry = self.l.churn.entry(src).or_default();
+                    entry.stored += s_f * share;
+                    entry.moved += m_f * share;
+                }
+                continue;
+            }
+            let mut attributed = false;
+            let mut cur = self.parent(id);
+            while let Some(ancestor) = cur {
+                if source_set.contains(&ancestor) {
+                    let entry = self.l.churn.entry(ancestor).or_default();
+                    entry.stored += s_f;
+                    entry.moved += m_f;
+                    attributed = true;
+                    break;
+                }
+                if let Some(ds) = descendants.get(&ancestor) {
+                    let share = 1.0 / ds.len() as f64;
+                    for &src in ds {
+                        let entry = self.l.churn.entry(src).or_default();
+                        entry.stored += s_f * share;
+                        entry.moved += m_f * share;
+                    }
+                    attributed = true;
+                    break;
+                }
+                if ancestor == root {
+                    break;
+                }
+                cur = self.parent(ancestor);
+            }
+            if !attributed {
+                let entry = self.l.churn.entry(id).or_default();
+                entry.stored += s_f;
+                entry.moved += m_f;
+            }
+        }
     }
 
     /// DisplayedRoots: LayerCollectors under CoreGui / StarterGui (edit mode) / the players'

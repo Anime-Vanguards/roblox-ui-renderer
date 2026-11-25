@@ -282,10 +282,12 @@ impl Stats {
 }
 
 /// Per-instance layout churn counters recorded when `Layout::track_churn` is enabled (`rur cost`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// `stored` and `moved` hold fractional attributed shares when an ancestor's record is shared by
+/// multiple changed descendants in the same pass.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ObjectChurn {
-    pub stored: u64,
-    pub moved: u64,
+    pub stored: f64,
+    pub moved: f64,
     pub scroll_passes: u64,
     pub scroll_moved: u64,
 }
@@ -300,8 +302,8 @@ pub struct LayoutChurnEntry {
     pub sibling_index: u32,
     pub path_count: u32,
     pub pos: [f64; 2],
-    pub stored: u64,
-    pub moved: u64,
+    pub stored: f64,
+    pub moved: f64,
     pub scroll_passes: u64,
     pub scroll_moved: u64,
 }
@@ -359,6 +361,11 @@ pub struct Layout {
     /// Per-instance churn attribution for `rur cost` sequences (off by default; zero cost when false)
     pub(crate) track_churn: bool,
     pub(crate) churn: FxHashMap<InstanceId, ObjectChurn>,
+    /// Instances directly mutated since the last layout pass (causes of pass work when `track_churn` is true)
+    pub(crate) dirty_sources: FxHashSet<InstanceId>,
+    /// Raw `(stored, moved)` counts recorded per node during the active `Pass::run`, attributed to
+    /// `dirty_sources` when the pass completes.
+    pub(crate) pass_churn: FxHashMap<InstanceId, (u64, u64)>,
 }
 
 impl Layout {
@@ -403,6 +410,8 @@ impl Layout {
             profile_time: 0.0,
             track_churn: false,
             churn: FxHashMap::default(),
+            dirty_sources: FxHashSet::default(),
+            pass_churn: FxHashMap::default(),
         }
     }
 
@@ -452,8 +461,7 @@ impl Layout {
         self.stamps.get(root).copied().unwrap_or(0) > self.frame_layout_clock
     }
 
-    /// `Layout.MarkChanged`: stamps `id` and every ancestor with a new clock value.
-    pub fn mark_changed(&mut self, state: &State, id: InstanceId) {
+    fn mark_changed_internal(&mut self, state: &State, id: InstanceId) {
         self.clock += 1;
         let clock = self.clock;
         let mut node = Some(id);
@@ -462,6 +470,14 @@ impl Layout {
             self.stamps.set(current, clock);
             node = instance.parent;
         }
+    }
+
+    /// `Layout.MarkChanged`: stamps `id` and every ancestor with a new clock value.
+    pub fn mark_changed(&mut self, state: &State, id: InstanceId) {
+        if self.track_churn {
+            self.dirty_sources.insert(id);
+        }
+        self.mark_changed_internal(state, id);
     }
 
     pub(crate) fn scrolled_is_empty(&self) -> bool {
@@ -504,10 +520,13 @@ impl Layout {
 
     /// `Layout.MarkPlaced`
     pub fn mark_placed(&mut self, state: &State, reflection: &Reflection, id: InstanceId) {
+        if self.track_churn {
+            self.dirty_sources.insert(id);
+        }
         let parent = state.dom.at(id).parent;
         match parent {
-            Some(parent) if self.find_root(state, reflection, id) != id => self.mark_changed(state, parent),
-            _ => self.mark_changed(state, id),
+            Some(parent) if self.find_root(state, reflection, id) != id => self.mark_changed_internal(state, parent),
+            _ => self.mark_changed_internal(state, id),
         }
     }
 
@@ -560,13 +579,23 @@ impl Layout {
         self.unmark_scrolled(id);
         self.changed.remove(&id);
         self.churn.remove(&id);
+        self.dirty_sources.remove(&id);
+        self.pass_churn.remove(&id);
     }
 
     /// install.luau's HierarchyChanged hook.
     pub fn hierarchy_changed(&mut self, state: &State, id: InstanceId, old_parent: Option<InstanceId>) {
-        self.mark_changed(state, id);
+        if self.track_churn {
+            if state.dom.get(id).and_then(|i| i.parent).is_some() {
+                self.dirty_sources.insert(id);
+            }
+            if let Some(old) = old_parent {
+                self.dirty_sources.insert(old);
+            }
+        }
+        self.mark_changed_internal(state, id);
         if let Some(old) = old_parent {
-            self.mark_changed(state, old);
+            self.mark_changed_internal(state, old);
         }
     }
 

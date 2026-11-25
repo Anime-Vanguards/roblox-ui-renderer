@@ -960,7 +960,7 @@ end
 		assert.ok(Buffer.byteLength(rPlainSeq.stdout, "utf8") <= 4096, `plain sequence stdout too large (${rPlainSeq.stdout.length} bytes)`);
 		assert.match(rPlainSeq.stdout, /mode=play 60 Hz/);
 		assert.match(rPlainSeq.stdout, /0\.0994 ms/);
-		assert.match(rPlainSeq.stdout, /top layout \(\d+\/\d+\):/);
+		assert.match(rPlainSeq.stdout, /top layout \(\d+\/\d+, \d+% of churn\):/);
 		assert.match(rPlainSeq.stdout, /ScrollingFrame.*1\.0sp\/120\.0sm/);
 		const seqObjLines = rPlainSeq.stdout.split(/\r?\n/).filter(l => l.startsWith("    ") && l.includes("| quads="));
 		assert.ok(seqObjLines.length >= 3, `expected 3 top objs lines:\n${rPlainSeq.stdout}`);

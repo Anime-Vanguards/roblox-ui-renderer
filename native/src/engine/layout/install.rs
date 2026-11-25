@@ -186,16 +186,20 @@ pub fn set_track_churn(engine: &Engine, enabled: bool) {
         if let Some(layout) = guard.as_mut() {
             layout.track_churn = enabled;
             layout.churn.clear();
+            layout.dirty_sources.clear();
+            layout.pass_churn.clear();
         }
     }
 }
 
 /// Drains per-instance layout churn recorded since the last call and resolves each live object's
-/// findable identity (path, class, same-named sibling index/count, and logical position).
+/// findable identity (path, class, full-path ordinal/count matching `top objs`, and logical position).
 pub fn take_churn(engine: &Engine) -> Vec<super::LayoutChurnEntry> {
     let raw = {
         let Ok(mut guard) = engine.layout().try_borrow_mut() else { return Vec::new() };
         let Some(layout) = guard.as_mut() else { return Vec::new() };
+        layout.dirty_sources.clear();
+        layout.pass_churn.clear();
         if layout.churn.is_empty() {
             return Vec::new();
         }
@@ -206,35 +210,70 @@ pub fn take_churn(engine: &Engine) -> Vec<super::LayoutChurnEntry> {
     let reflection = &engine.reflection;
     let layout_guard = engine.layout().borrow();
     let layout_ref = layout_guard.as_ref();
+
+    // Count repeating full paths across each churned object's root tree in pre-order (matching
+    // `top objs` per-path ordinals, so `Row.Icon` across 5 `Row` frames counts 1..=5 / 5).
+    let mut resolved_paths: rustc_hash::FxHashMap<InstanceId, String> = rustc_hash::FxHashMap::default();
+    let mut needed_paths: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let mut roots: Vec<InstanceId> = Vec::new();
+    let mut seen_roots: rustc_hash::FxHashSet<InstanceId> = rustc_hash::FxHashSet::default();
+    for &id in raw.keys() {
+        if dom.get(id).is_none() {
+            continue;
+        }
+        let path = dom.full_name(reflection, id);
+        needed_paths.insert(path.clone());
+        resolved_paths.insert(id, path);
+        if let Some(layout) = layout_ref {
+            let root = layout.find_root(&state, reflection, id);
+            if seen_roots.insert(root) {
+                roots.push(root);
+            }
+        }
+    }
+    let mut path_counts: rustc_hash::FxHashMap<String, u32> = rustc_hash::FxHashMap::default();
+    let mut path_indices: rustc_hash::FxHashMap<InstanceId, u32> = rustc_hash::FxHashMap::default();
+    for root in roots {
+        let root_path = dom.full_name(reflection, root);
+        let mut stack: Vec<(InstanceId, String)> = vec![(root, root_path)];
+        while let Some((node, node_path)) = stack.pop() {
+            if needed_paths.contains(&node_path) {
+                let count = path_counts.entry(node_path.clone()).or_insert(0);
+                *count += 1;
+                path_indices.insert(node, *count);
+            }
+            if let Some(inst) = dom.get(node) {
+                for &child in inst.children.iter().rev() {
+                    if let Some(child_inst) = dom.get(child) {
+                        let child_path = format!("{node_path}.{}", child_inst.name);
+                        stack.push((child, child_path));
+                    }
+                }
+            }
+        }
+    }
+
     let mut entries = Vec::with_capacity(raw.len());
     for (id, churn) in raw {
         let Some(inst) = dom.get(id) else { continue };
         let name = inst.name.to_string();
-        let path = dom.full_name(reflection, id);
+        let path = resolved_paths.remove(&id).unwrap_or_else(|| dom.full_name(reflection, id));
         let class = reflection.class(inst.class).name.to_string();
-        let (sibling_index, path_count) = match inst.parent.and_then(|p| dom.get(p)) {
-            Some(parent) => {
-                let mut idx = 0u32;
-                let mut count = 0u32;
-                for &sib in &parent.children {
-                    if dom.get(sib).is_some_and(|s| s.name == inst.name) {
-                        count += 1;
-                        if sib == id {
-                            idx = count;
-                        }
-                    }
+        let sibling_index = path_indices.get(&id).copied().unwrap_or(1);
+        let path_count = path_counts.get(&path).copied().unwrap_or(1);
+        let pos = {
+            let mut cur = Some(id);
+            let mut found = [0.0, 0.0];
+            while let Some(nid) = cur {
+                if let Some(rec) = layout_ref.and_then(|l| l.record(nid)) {
+                    let (x, y) = super::absolute_position(rec);
+                    found = [x, y];
+                    break;
                 }
-                (idx.max(1), count.max(1))
+                cur = dom.get(nid).and_then(|i| i.parent);
             }
-            None => (1, 1),
+            found
         };
-        let pos = layout_ref
-            .and_then(|l| l.record(id))
-            .map(|rec| {
-                let (x, y) = super::absolute_position(rec);
-                [x, y]
-            })
-            .unwrap_or([0.0, 0.0]);
         entries.push(super::LayoutChurnEntry {
             id: u64::from(inst.serial),
             name,

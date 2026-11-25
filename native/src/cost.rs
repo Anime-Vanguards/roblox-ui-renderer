@@ -72,6 +72,7 @@ pub const PHONE_UI_MAIN_HIGH: f64 =
 
 const MAX_OBJECTS_REPORTED: usize = 200;
 const MAX_HIDDEN_SUBTREES_REPORTED: usize = 100;
+const MAX_LAYOUT_DRIVERS_REPORTED: usize = 50;
 
 /// Per-root hidden-in-shown counts collected from the live DOM under an enabled LayerCollector.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -2605,8 +2606,23 @@ impl SequenceAccumulator {
         layout_churn: Vec<engine::layout::LayoutChurnEntry>,
         dom_hidden: Option<DomHiddenSummary>,
     ) {
-        if index >= 1 {
-            for entry in layout_churn {
+        if index >= 1 && !layout_churn.is_empty() {
+            // Align per-path ordinals with `top objs` (`scene.ordered_nodes()`) for scene nodes;
+            // non-scene nodes (e.g. UIComponents) keep `take_churn`'s DOM-wide per-path ordinal.
+            let mut scene_path_counts: BTreeMap<&str, u32> = BTreeMap::new();
+            let mut scene_path_indices: BTreeMap<u64, u32> = BTreeMap::new();
+            for node in scene.ordered_nodes() {
+                if let (Some(id), Some(path)) = (node.get("id").and_then(node_id), node["path"].as_str()) {
+                    let count = scene_path_counts.entry(path).or_insert(0);
+                    *count += 1;
+                    scene_path_indices.insert(id, *count);
+                }
+            }
+            for mut entry in layout_churn {
+                if let Some(&idx) = scene_path_indices.get(&entry.id) {
+                    entry.sibling_index = idx;
+                    entry.path_count = scene_path_counts.get(entry.path.as_str()).copied().unwrap_or(entry.path_count);
+                }
                 self.steady_churn
                     .entry(entry.id)
                     .and_modify(|acc| {
@@ -2863,45 +2879,70 @@ impl SequenceAccumulator {
             obj.insert("status".into(), json!(final_status));
             obj.remove("fullTreeLayout");
             obj.insert("layout".into(), steady_layout_json.clone());
-            let mut drivers: Vec<(f64, Value)> = if has_steady_client_frames {
+            let mut raw_drivers: Vec<(f64, f64, engine::layout::LayoutChurnEntry, f64, f64, f64, f64)> = if has_steady_client_frames {
                 self.steady_churn
                     .values()
-                    .filter(|c| c.stored > 0 || c.moved > 0 || c.scroll_passes > 0 || c.scroll_moved > 0)
+                    .filter(|c| c.stored > 1e-9 || c.moved > 1e-9 || c.scroll_passes > 0 || c.scroll_moved > 0)
                     .map(|c| {
-                        let s = c.stored as f64 / denom;
-                        let m = c.moved as f64 / denom;
+                        let s = c.stored / denom;
+                        let m = c.moved / denom;
                         let sp = c.scroll_passes as f64 / denom;
                         let sm = c.scroll_moved as f64 / denom;
-                        let est_ms = sp * STUDIO_SCROLL_PASS_MS + (s + m + sm) * STUDIO_LAYOUT_OBJECT_MS;
-                        (
-                            est_ms,
-                            json!({
-                                "id": c.id,
-                                "name": c.name,
-                                "path": c.path,
-                                "class": c.class,
-                                "siblingIndex": c.sibling_index,
-                                "pathCount": c.path_count,
-                                "position": [round4(c.pos[0]), round4(c.pos[1])],
-                                "stored": round6(s),
-                                "moved": round6(m),
-                                "scrollPasses": round6(sp),
-                                "scrollMoved": round6(sm),
-                                "desktopMs": round9(est_ms),
-                            }),
-                        )
+                        let records = s + m + sm;
+                        let est_ms = sp * STUDIO_SCROLL_PASS_MS + records * STUDIO_LAYOUT_OBJECT_MS;
+                        (est_ms, records, c.clone(), s, m, sp, sm)
                     })
                     .collect()
             } else {
                 Vec::new()
             };
-            drivers.sort_by(|a, b| {
+            let total_drivers = raw_drivers.len();
+            let total_driver_records: f64 = raw_drivers.iter().map(|(_, rec, ..)| *rec).sum();
+            let total_driver_ms: f64 = raw_drivers.iter().map(|(ms, ..)| *ms).sum();
+            raw_drivers.sort_by(|a, b| {
                 b.0.total_cmp(&a.0)
-                    .then_with(|| a.1["path"].as_str().unwrap_or("").cmp(b.1["path"].as_str().unwrap_or("")))
-                    .then_with(|| a.1["id"].as_u64().unwrap_or(0).cmp(&b.1["id"].as_u64().unwrap_or(0)))
+                    .then_with(|| b.1.total_cmp(&a.1))
+                    .then_with(|| a.2.path.cmp(&b.2.path))
+                    .then_with(|| a.2.sibling_index.cmp(&b.2.sibling_index))
+                    .then_with(|| a.2.id.cmp(&b.2.id))
             });
-            drivers.truncate(10);
-            obj.insert("layoutDrivers".into(), Value::Array(drivers.into_iter().map(|(_, v)| v).collect()));
+            raw_drivers.truncate(MAX_LAYOUT_DRIVERS_REPORTED);
+            let reported_driver_records: f64 = raw_drivers.iter().map(|(_, rec, ..)| *rec).sum();
+            let reported_driver_ms: f64 = raw_drivers.iter().map(|(ms, ..)| *ms).sum();
+            let drivers_json: Vec<Value> = raw_drivers
+                .into_iter()
+                .map(|(est_ms, _, c, s, m, sp, sm)| {
+                    let share = if total_driver_ms > 1e-12 { est_ms / total_driver_ms } else { 0.0 };
+                    json!({
+                        "id": c.id,
+                        "name": c.name,
+                        "path": c.path,
+                        "class": c.class,
+                        "siblingIndex": c.sibling_index,
+                        "pathCount": c.path_count,
+                        "position": [round4(c.pos[0]), round4(c.pos[1])],
+                        "stored": round6(s),
+                        "moved": round6(m),
+                        "scrollPasses": round6(sp),
+                        "scrollMoved": round6(sm),
+                        "desktopMs": round9(est_ms),
+                        "share": round6(share),
+                    })
+                })
+                .collect();
+            let reported_drivers = drivers_json.len();
+            obj.insert("layoutDrivers".into(), Value::Array(drivers_json));
+            obj.insert(
+                "layoutDriverSummary".into(),
+                json!({
+                    "totalDrivers": total_drivers,
+                    "reportedDrivers": reported_drivers,
+                    "totalRecords": round6(total_driver_records),
+                    "reportedRecords": round6(reported_driver_records),
+                    "totalDesktopMs": round9(total_driver_ms),
+                    "reportedDesktopMs": round9(reported_driver_ms),
+                }),
+            );
             obj.insert(
                 "predicted".into(),
                 if !is_play {
@@ -3423,9 +3464,27 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
     }
 
     if let Some(drivers) = report["layoutDrivers"].as_array().filter(|a| !a.is_empty()) {
-        let shown = drivers.len().min(3);
-        let _ = writeln!(out, "  top layout ({shown}/{}):", drivers.len());
-        for d in drivers.iter().take(3) {
+        let shown = drivers.len().min(5);
+        let total_drivers = report
+            .pointer("/layoutDriverSummary/totalDrivers")
+            .and_then(Value::as_u64)
+            .unwrap_or(drivers.len() as u64);
+        let total_driver_ms = report
+            .pointer("/layoutDriverSummary/totalDesktopMs")
+            .and_then(Value::as_f64)
+            .unwrap_or_else(|| drivers.iter().map(|d| d["desktopMs"].as_f64().unwrap_or(0.0)).sum());
+        let shown_ms: f64 = drivers
+            .iter()
+            .take(shown)
+            .map(|d| d["desktopMs"].as_f64().unwrap_or(0.0))
+            .sum();
+        let share_pct = if total_driver_ms > 1e-12 {
+            (shown_ms / total_driver_ms * 100.0).clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
+        let _ = writeln!(out, "  top layout ({shown}/{total_drivers}, {share_pct:.0}% of churn):");
+        for d in drivers.iter().take(shown) {
             let _ = writeln!(
                 out,
                 "    {} | {:.1}s/{:.1}m/{:.1}sp/{:.1}sm ({:.4} ms desk)",
@@ -5347,8 +5406,179 @@ end
         assert!(card_lines.len() >= 2, "expected repeating Card lines:\n{screen}");
         assert_ne!(card_lines[0], card_lines[1], "repeating sibling paths must be disambiguated:\n{screen}");
         assert!(card_lines.iter().all(|l| l.contains('#') && l.contains('@')), "expected #index and @x,y:\n{screen}");
-        assert!(screen.contains("top layout (1/1):"), "screen must show top layout section:\n{screen}");
+        assert!(screen.contains("top layout (1/1, 100% of churn):"), "screen must show top layout section with share:\n{screen}");
         assert!(screen.contains("CardList (ScrollingFrame)") && screen.contains("1.0sp/10.0sm"), "screen must name ScrollingFrame driver:\n{screen}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn top_layout_names_changed_objects_with_ancestor_share_and_counts_all_drivers() {
+        // Hand case: 5 Row frames, each with an Icon whose Size changes every frame.
+        // Total stored per frame = 11 (StoryTarget + 5 Rows + 5 Icons).
+        // `top layout` must list ONLY the 5 changed Icons (never StoryTarget or Rows), each with
+        // its exact share of the stored records (1 own + 1 Row + 1/5 StoryTarget = 2.2 stored),
+        // disambiguated by full-path ordinal (#1..#5) and position, with 100% share.
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+        let dir = std::env::temp_dir().join(format!("rur-cost-layout-drivers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let rows_fx = dir.join("five_rows_icons.luau");
+        std::fs::write(
+            &rows_fx,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	local icons = {}
+	for i = 1, 5 do
+		local Row = Instance.new("Frame")
+		Row.Name = "Row"
+		Row.Position = UDim2.fromOffset(0, (i - 1) * 60)
+		Row.Size = UDim2.fromOffset(300, 50)
+		Row.Parent = Target
+		local Icon = Instance.new("Frame")
+		Icon.Name = "Icon"
+		Icon.Size = UDim2.fromOffset(30, 30)
+		Icon.Parent = Row
+		icons[i] = Icon
+	end
+	local step = 0
+	RunService.Heartbeat:Connect(function()
+		step += 1
+		local sz = 20 + (step % 20)
+		for i = 1, 5 do
+			icons[i].Size = UDim2.fromOffset(sz, sz)
+		end
+	end)
+end
+"#,
+        )
+        .unwrap();
+
+        // 12 changing bars (> 10) to verify totalDrivers is counted before truncation and share reflects shown/total
+        let twelve_fx = dir.join("twelve_bars.luau");
+        std::fs::write(
+            &twelve_fx,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	local bars = {}
+	for i = 1, 12 do
+		local Bar = Instance.new("Frame")
+		Bar.Name = "Bar"
+		Bar.Position = UDim2.fromOffset((i - 1) * 20, 0)
+		Bar.Size = UDim2.fromOffset(16, 40)
+		Bar.Parent = Target
+		bars[i] = Bar
+	end
+	local step = 0
+	RunService.Heartbeat:Connect(function()
+		step += 1
+		local h = 20 + (step % 30)
+		for i = 1, 12 do
+			bars[i].Size = UDim2.fromOffset(16, h)
+		end
+	end)
+end
+"#,
+        )
+        .unwrap();
+
+        // Placement-property change (Rotation, as spinning rings): must name the rotating children, not parent
+        let rot_fx = dir.join("rotating_rings.luau");
+        std::fs::write(
+            &rot_fx,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	local Holder = Instance.new("Frame")
+	Holder.Name = "Holder"
+	Holder.Size = UDim2.fromOffset(200, 200)
+	Holder.Parent = Target
+	local rings = {}
+	for i = 1, 3 do
+		local Ring = Instance.new("Frame")
+		Ring.Name = "Ring" .. tostring(i)
+		Ring.Size = UDim2.fromOffset(40, 40)
+		Ring.Parent = Holder
+		rings[i] = Ring
+	end
+	local step = 0
+	RunService.Heartbeat:Connect(function()
+		step += 1
+		for i = 1, 3 do
+			rings[i].Rotation = (step * (3 + i)) % 360
+		end
+	end)
+end
+"#,
+        )
+        .unwrap();
+
+        let make_args = |fixture: &Path| {
+            let argv: Vec<String> = vec![
+                "--repo".into(), repo.to_string_lossy().into_owned(),
+                "--roots".into(), root.to_string_lossy().into_owned(),
+                "--fixture".into(), fixture.to_string_lossy().into_owned(),
+                "--viewport".into(), "800x600".into(),
+                "--scale".into(), "1".into(),
+                "--no-snapshots".into(),
+            ];
+            engine::cli::parse(&argv).unwrap()
+        };
+        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+
+        // 1. Hand case: 5 Rows x 1 changing Icon
+        let rep = run_sequence_cost(&make_args(&rows_fx), &spec, &repo).unwrap();
+        assert_eq!(rep["layout"]["stored"], 11.0);
+        assert_eq!(rep["layoutDriverSummary"]["totalDrivers"], 5);
+        assert_eq!(rep["layoutDriverSummary"]["reportedDrivers"], 5);
+        let drivers = rep["layoutDrivers"].as_array().unwrap();
+        assert_eq!(drivers.len(), 5, "expected only the 5 changed Icons, got: {drivers:?}");
+        let sum_stored: f64 = drivers.iter().map(|d| d["stored"].as_f64().unwrap()).sum();
+        assert!((sum_stored - 11.0).abs() < 1e-4, "driver stored shares must sum to total stored 11.0, got {sum_stored}");
+        for (idx, d) in drivers.iter().enumerate() {
+            assert_eq!(d["name"], "Icon", "driver {idx} must be Icon, got {d}");
+            assert_eq!(d["pathCount"], 5, "all 5 Icons share path and must have pathCount=5: {d}");
+            assert_eq!(d["siblingIndex"], (idx + 1) as u64, "distinct per-path ordinal expected: {d}");
+            let s = d["stored"].as_f64().unwrap();
+            assert!((s - 2.2).abs() < 1e-4, "each Icon causes 1 + 1 (Row) + 0.2 (StoryTarget) = 2.2 stored, got {s}");
+        }
+        let screen = format_one_screen_report(&rep, Path::new("out/cost.json"));
+        assert!(screen.contains("top layout (5/5, 100% of churn):"), "{screen}");
+        let layout_lines: Vec<&str> = screen
+            .lines()
+            .skip_while(|l| !l.trim_start().starts_with("top layout"))
+            .skip(1)
+            .take_while(|l| l.starts_with("    "))
+            .collect();
+        assert_eq!(layout_lines.len(), 5, "must print all 5 Icons:\n{screen}");
+        let unique: std::collections::HashSet<&str> = layout_lines.iter().copied().collect();
+        assert_eq!(unique.len(), 5, "all 5 Icon lines must be distinct:\n{screen}");
+        for (i, line) in layout_lines.iter().enumerate() {
+            assert!(line.contains(".Row.Icon ") && line.contains(&format!("#{}", i + 1)) && line.contains(&format!("@0,{}", i * 60)), "bad line {i}: {line}");
+            assert!(line.contains("2.2s/"), "expected 2.2s share on line {i}: {line}");
+        }
+
+        // 2. 12 changing Bars: totalDrivers=12 (not truncated to 10), screen prints 5/12 (~42% of churn)
+        let rep12 = run_sequence_cost(&make_args(&twelve_fx), &spec, &repo).unwrap();
+        assert_eq!(rep12["layout"]["stored"], 13.0);
+        assert_eq!(rep12["layoutDriverSummary"]["totalDrivers"], 12);
+        let d12 = rep12["layoutDrivers"].as_array().unwrap();
+        assert_eq!(d12.len(), 12);
+        let sum12: f64 = d12.iter().map(|d| d["stored"].as_f64().unwrap()).sum();
+        assert!((sum12 - 13.0).abs() < 1e-4, "12 bars stored must sum to 13.0, got {sum12}");
+        let screen12 = format_one_screen_report(&rep12, Path::new("out/cost.json"));
+        assert!(screen12.contains("top layout (5/12, 42% of churn):"), "{screen12}");
+
+        // 3. Rotating rings (placement property): names Ring1, Ring2, Ring3, NOT Holder or StoryTarget
+        let rep_rot = run_sequence_cost(&make_args(&rot_fx), &spec, &repo).unwrap();
+        assert_eq!(rep_rot["layoutDriverSummary"]["totalDrivers"], 3);
+        let d_rot = rep_rot["layoutDrivers"].as_array().unwrap();
+        let names: Vec<&str> = d_rot.iter().map(|d| d["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["Ring1", "Ring2", "Ring3"], "expected the 3 rotating rings: {d_rot:?}");
+        let sum_rot: f64 = d_rot.iter().map(|d| d["stored"].as_f64().unwrap()).sum();
+        let total_rot = rep_rot["layout"]["stored"].as_f64().unwrap();
+        assert!((sum_rot - total_rot).abs() < 1e-4, "ring shares {sum_rot} must equal total stored {total_rot}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
