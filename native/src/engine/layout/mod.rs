@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub use install::{displayed_roots, ensure, ensure_with_state, install, invalidate, mark_changed, pages, stats_snapshot, update_all};
+pub use install::{displayed_roots, ensure, ensure_with_state, install, invalidate, mark_changed, pages, set_track_churn, stats_snapshot, take_churn, update_all};
 pub use record::{Rect, Record, ScrollBars, TextInfo, Transform, absolute_position};
 
 use crate::engine::GuiEngine;
@@ -281,6 +281,31 @@ impl Stats {
     }
 }
 
+/// Per-instance layout churn counters recorded when `Layout::track_churn` is enabled (`rur cost`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ObjectChurn {
+    pub stored: u64,
+    pub moved: u64,
+    pub scroll_passes: u64,
+    pub scroll_moved: u64,
+}
+
+/// Resolved per-instance layout churn record emitted per sequence frame for `rur cost`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutChurnEntry {
+    pub id: u64,
+    pub name: String,
+    pub path: String,
+    pub class: String,
+    pub sibling_index: u32,
+    pub path_count: u32,
+    pub pos: [f64; 2],
+    pub stored: u64,
+    pub moved: u64,
+    pub scroll_passes: u64,
+    pub scroll_moved: u64,
+}
+
 /// The layout's persistent state (the module-level tables of runtime/layout/init.luau).
 pub struct Layout {
     pub ids: Ids,
@@ -331,6 +356,9 @@ pub struct Layout {
     list_scratch: pass::ListVectors,
     /// Total time spent in layout passes (seconds), for profiling
     pub profile_time: f64,
+    /// Per-instance churn attribution for `rur cost` sequences (off by default; zero cost when false)
+    pub(crate) track_churn: bool,
+    pub(crate) churn: FxHashMap<InstanceId, ObjectChurn>,
 }
 
 impl Layout {
@@ -373,6 +401,8 @@ impl Layout {
             scratch: Scratch::default(),
             list_scratch: Default::default(),
             profile_time: 0.0,
+            track_churn: false,
+            churn: FxHashMap::default(),
         }
     }
 
@@ -529,6 +559,7 @@ impl Layout {
         }
         self.unmark_scrolled(id);
         self.changed.remove(&id);
+        self.churn.remove(&id);
     }
 
     /// install.luau's HierarchyChanged hook.

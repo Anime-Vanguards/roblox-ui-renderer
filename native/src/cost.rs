@@ -659,6 +659,9 @@ struct ObjectAccum {
     path: String,
     class: String,
     screen_gui: String,
+    sibling_index: u32,
+    path_count: u32,
+    pos: [f64; 2],
     quads: u64,
     glyph_quads: u64,
     batch_breaks: u64,
@@ -694,6 +697,10 @@ struct Analyzer<'a> {
     scale: f64,
     /// Live-DOM `(clip_rects, parent_of)` when analyzing a live run (`None` for `--scene`).
     dom_clips: Option<(&'a BTreeMap<u64, [f64; 4]>, &'a BTreeMap<u64, u64>)>,
+    /// 1-based ordinal of each node among all nodes sharing its `path` in scene order.
+    path_indices: BTreeMap<u64, u32>,
+    /// Total count of nodes sharing each `path` in the scene.
+    path_counts: BTreeMap<String, u32>,
     totals: TotalsAccum,
     last_state_by_target: BTreeMap<u64, BatchState>,
     objects: BTreeMap<u64, ObjectAccum>,
@@ -708,10 +715,21 @@ impl<'a> Analyzer<'a> {
         for cause in ["layerPass", "renderTarget", "clip", "shader", "texture", "rotation"] {
             totals.batch_breaks_by_cause.insert(cause, 0);
         }
+        let mut path_counts: BTreeMap<String, u32> = BTreeMap::new();
+        let mut path_indices: BTreeMap<u64, u32> = BTreeMap::new();
+        for node in scene.ordered_nodes() {
+            if let (Some(id), Some(path)) = (node.get("id").and_then(node_id), node["path"].as_str()) {
+                let count = path_counts.entry(path.to_string()).or_insert(0);
+                *count += 1;
+                path_indices.insert(id, *count);
+            }
+        }
         Self {
             scene,
             scale,
             dom_clips: dom_hidden.filter(|h| h.complete).map(|h| (&h.clip_rects, &h.parent_of)),
+            path_indices,
+            path_counts,
             totals,
             last_state_by_target: BTreeMap::new(),
             objects: BTreeMap::new(),
@@ -772,13 +790,24 @@ impl<'a> Analyzer<'a> {
     }
 
     fn object_entry(&mut self, node: &Value, nid: u64, sg_name: &str) -> &mut ObjectAccum {
-        self.objects.entry(nid).or_insert_with(|| ObjectAccum {
-            id: nid,
-            name: node["name"].as_str().unwrap_or("?").to_string(),
-            path: node["path"].as_str().unwrap_or("?").to_string(),
-            class: node["class"].as_str().unwrap_or("?").to_string(),
-            screen_gui: sg_name.to_string(),
-            ..Default::default()
+        let path_indices = &self.path_indices;
+        let path_counts = &self.path_counts;
+        self.objects.entry(nid).or_insert_with(|| {
+            let path = node["path"].as_str().unwrap_or("?").to_string();
+            let rect = &node["rect"];
+            let x = rect.get(0).and_then(Value::as_f64).unwrap_or(0.0);
+            let y = rect.get(1).and_then(Value::as_f64).unwrap_or(0.0);
+            ObjectAccum {
+                id: nid,
+                name: node["name"].as_str().unwrap_or("?").to_string(),
+                sibling_index: path_indices.get(&nid).copied().unwrap_or(1),
+                path_count: path_counts.get(&path).copied().unwrap_or(1),
+                pos: [x, y],
+                path,
+                class: node["class"].as_str().unwrap_or("?").to_string(),
+                screen_gui: sg_name.to_string(),
+                ..Default::default()
+            }
         })
     }
 
@@ -1974,6 +2003,9 @@ pub fn analyze_scene_with_mode(
                 "path": o.path,
                 "class": o.class,
                 "screenGui": o.screen_gui,
+                "siblingIndex": o.sibling_index,
+                "pathCount": o.path_count,
+                "position": [round4(o.pos[0]), round4(o.pos[1])],
                 "quads": o.quads,
                 "glyphQuads": o.glyph_quads,
                 "batchBreaks": o.batch_breaks,
@@ -2523,6 +2555,7 @@ pub struct SequenceAccumulator {
     frames: Vec<Value>,
     metrics: Vec<FrameMetrics>,
     times: Vec<f64>,
+    steady_churn: BTreeMap<u64, engine::layout::LayoutChurnEntry>,
     last_dom_hidden: Option<DomHiddenSummary>,
     last_report: Option<Value>,
     unchanged_frames: u32,
@@ -2545,6 +2578,7 @@ impl SequenceAccumulator {
             frames: Vec::new(),
             metrics: Vec::new(),
             times: Vec::new(),
+            steady_churn: BTreeMap::new(),
             last_dom_hidden: None,
             last_report: None,
             unchanged_frames: 0,
@@ -2565,8 +2599,25 @@ impl SequenceAccumulator {
         client_frames: u32,
         scene: &SceneStore,
         layout: LayoutStats,
+        layout_churn: Vec<engine::layout::LayoutChurnEntry>,
         dom_hidden: Option<DomHiddenSummary>,
     ) {
+        if index >= 1 {
+            for entry in layout_churn {
+                self.steady_churn
+                    .entry(entry.id)
+                    .and_modify(|acc| {
+                        acc.stored += entry.stored;
+                        acc.moved += entry.moved;
+                        acc.scroll_passes += entry.scroll_passes;
+                        acc.scroll_moved += entry.scroll_moved;
+                        acc.pos = entry.pos;
+                        acc.sibling_index = entry.sibling_index;
+                        acc.path_count = entry.path_count;
+                    })
+                    .or_insert(entry);
+            }
+        }
         if dom_hidden.is_some() {
             self.saw_live_dom = true;
             self.last_dom_hidden = dom_hidden;
@@ -2809,6 +2860,45 @@ impl SequenceAccumulator {
             obj.insert("status".into(), json!(final_status));
             obj.remove("fullTreeLayout");
             obj.insert("layout".into(), steady_layout_json.clone());
+            let mut drivers: Vec<(f64, Value)> = if has_steady_client_frames {
+                self.steady_churn
+                    .values()
+                    .filter(|c| c.stored > 0 || c.moved > 0 || c.scroll_passes > 0 || c.scroll_moved > 0)
+                    .map(|c| {
+                        let s = c.stored as f64 / denom;
+                        let m = c.moved as f64 / denom;
+                        let sp = c.scroll_passes as f64 / denom;
+                        let sm = c.scroll_moved as f64 / denom;
+                        let est_ms = sp * STUDIO_SCROLL_PASS_MS + (s + m + sm) * STUDIO_LAYOUT_OBJECT_MS;
+                        (
+                            est_ms,
+                            json!({
+                                "id": c.id,
+                                "name": c.name,
+                                "path": c.path,
+                                "class": c.class,
+                                "siblingIndex": c.sibling_index,
+                                "pathCount": c.path_count,
+                                "position": [round4(c.pos[0]), round4(c.pos[1])],
+                                "stored": round6(s),
+                                "moved": round6(m),
+                                "scrollPasses": round6(sp),
+                                "scrollMoved": round6(sm),
+                                "desktopMs": round9(est_ms),
+                            }),
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            drivers.sort_by(|a, b| {
+                b.0.total_cmp(&a.0)
+                    .then_with(|| a.1["path"].as_str().unwrap_or("").cmp(b.1["path"].as_str().unwrap_or("")))
+                    .then_with(|| a.1["id"].as_u64().unwrap_or(0).cmp(&b.1["id"].as_u64().unwrap_or(0)))
+            });
+            drivers.truncate(10);
+            obj.insert("layoutDrivers".into(), Value::Array(drivers.into_iter().map(|(_, v)| v).collect()));
             obj.insert(
                 "predicted".into(),
                 if !is_play {
@@ -2924,7 +3014,7 @@ pub fn run_sequence_cost(
                 Err(_) => return Err("the sequence engine stopped without finishing".into()),
             },
         };
-        let engine::cli::SequenceFrame { index, time, mut reply, layout, client_frames, dom_hidden, .. } = frame;
+        let engine::cli::SequenceFrame { index, time, mut reply, layout, client_frames, layout_churn, dom_hidden, .. } = frame;
         if reply["type"] == "error" {
             return Err(format!("frame {index}: {}", reply["message"].as_str().unwrap_or("the engine failed")));
         }
@@ -2945,6 +3035,7 @@ pub fn run_sequence_cost(
             client_frames,
             &scene,
             layout,
+            layout_churn,
             dom_hidden,
         );
     };
@@ -3298,20 +3389,49 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
         }
     }
 
+    let format_object_label = |o: &Value, max_path: usize| -> String {
+        let path = trim_left(o["path"].as_str().unwrap_or("?"), max_path);
+        let class = o["class"].as_str().unwrap_or("?");
+        if o["pathCount"].as_u64().unwrap_or(1) > 1 {
+            let idx = o["siblingIndex"].as_u64().unwrap_or(1);
+            let x = o.pointer("/position/0").and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
+            let y = o.pointer("/position/1").and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
+            format!("{path} #{idx} ({class}) @{x},{y}")
+        } else {
+            format!("{path} ({class})")
+        }
+    };
+
     if let Some(objs) = report["objects"].as_array().filter(|a| !a.is_empty()) {
         let shown = objs.len().min(3);
         let _ = writeln!(out, "  top objs ({shown}/{}):", objs.len());
         for o in objs.iter().take(3) {
             let _ = writeln!(
                 out,
-                "    {} ({}) | quads={} glyphs={} rt={} B ov={:.3}x/{:.3}x",
-                trim_left(o["path"].as_str().unwrap_or("?"), 44),
-                o["class"].as_str().unwrap_or("?"),
+                "    {} | quads={} glyphs={} rt={} B ov={:.3}x/{:.3}x",
+                format_object_label(o, 44),
                 o["quads"].as_u64().unwrap_or(0),
                 o["glyphQuads"].as_u64().unwrap_or(0),
                 o["canvasRtBytes"].as_u64().unwrap_or(0),
                 o["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
                 o["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            );
+        }
+    }
+
+    if let Some(drivers) = report["layoutDrivers"].as_array().filter(|a| !a.is_empty()) {
+        let shown = drivers.len().min(3);
+        let _ = writeln!(out, "  top layout ({shown}/{}):", drivers.len());
+        for d in drivers.iter().take(3) {
+            let _ = writeln!(
+                out,
+                "    {} | {:.1}s/{:.1}m/{:.1}sp/{:.1}sm ({:.4} ms desk)",
+                format_object_label(d, 44),
+                d["stored"].as_f64().unwrap_or(0.0),
+                d["moved"].as_f64().unwrap_or(0.0),
+                d["scrollPasses"].as_f64().unwrap_or(0.0),
+                d["scrollMoved"].as_f64().unwrap_or(0.0),
+                d["desktopMs"].as_f64().unwrap_or(0.0),
             );
         }
     }
@@ -3878,7 +3998,7 @@ pub fn cli(argv: &[String]) -> i32 {
     match run_cli(argv) {
         Ok(out) => {
             if out.json {
-                if let Ok(text) = serde_json::to_string(&out.value) {
+                if let Ok(text) = serde_json::to_string_pretty(&out.value) {
                     println!("{text}");
                 }
             } else {
@@ -3947,8 +4067,8 @@ mod tests {
         let mut acc_edit = SequenceAccumulator::new(60.0, "edit");
         for i in 0..10u32 {
             let st = LayoutStats { scroll_passes: 1, scroll_moved: 120, ..Default::default() };
-            acc_play.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, st, if i == 0 { Some(hidden.clone()) } else { None });
-            acc_edit.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, st, if i == 0 { Some(hidden.clone()) } else { None });
+            acc_play.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, st, Vec::new(), if i == 0 { Some(hidden.clone()) } else { None });
+            acc_edit.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, st, Vec::new(), if i == 0 { Some(hidden.clone()) } else { None });
         }
         let play_text = format_one_screen_report(&acc_play.finish(Some("ok")), dest);
         let play_lines = play_text.lines().filter(|l| !l.trim().is_empty()).count();
@@ -5149,5 +5269,83 @@ end
         let live_rep = analyze_scene_with_mode(&scene, LayoutStats::default(), Some(&hidden), "edit");
         assert_eq!(live_rep["totals"]["offscreenOverdrawViewports"], 0.125);
         assert_eq!(live_rep["totals"]["screenOverdrawViewports"], 0.020833);
+    }
+
+    #[test]
+    fn screen_disambiguates_repeating_paths_and_names_layout_drivers() {
+        // Repeating sibling cards under a scrolling frame: top objs lines must each identify a
+        // distinct object (#index + class + @x,y) and top layout must name the ScrollingFrame driver.
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+        let dir = std::env::temp_dir().join(format!("rur-cost-screen-ids-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fx = dir.join("cards_scroll.luau");
+        std::fs::write(
+            &fx,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	local Scroller = Instance.new("ScrollingFrame")
+	Scroller.Name = "CardList"
+	Scroller.Size = UDim2.fromOffset(400, 400)
+	Scroller.CanvasSize = UDim2.fromOffset(0, 2000)
+	Scroller.Parent = Target
+	local Cards = {}
+	for i = 1, 10 do
+		local Card = Instance.new("Frame")
+		Card.Name = "Card"
+		Card.Position = UDim2.fromOffset(0, (i - 1) * 50)
+		Card.Size = UDim2.fromOffset(200, 40)
+		Card.Parent = Scroller
+		Cards[i] = Card
+	end
+	local step = 0
+	RunService.Heartbeat:Connect(function()
+		step += 1
+		Scroller.CanvasPosition = Vector2.new(0, (step * 5) % 500)
+		local _ = Cards[1].AbsolutePosition
+	end)
+end
+"#,
+        )
+        .unwrap();
+        let argv: Vec<String> = vec![
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--roots".into(), root.to_string_lossy().into_owned(),
+            "--fixture".into(), fx.to_string_lossy().into_owned(),
+            "--viewport".into(), "800x600".into(),
+            "--scale".into(), "1".into(),
+            "--no-snapshots".into(),
+        ];
+        let args = engine::cli::parse(&argv).unwrap();
+        let rep = run_sequence_cost(
+            &args,
+            &engine::cli::SequenceSpec { from: 0.0, frames: 5, fps: 60.0, client_hz: Some(60.0), collect_cost: true },
+            &repo,
+        )
+        .unwrap();
+        let drivers = rep["layoutDrivers"].as_array().expect("layoutDrivers array");
+        assert!(!drivers.is_empty(), "scrolling sequence must attribute layout drivers: {rep}");
+        assert_eq!(drivers[0]["name"], "CardList");
+        assert_eq!(drivers[0]["class"], "ScrollingFrame");
+        assert_eq!(drivers[0]["scrollPasses"], 1.0);
+        assert_eq!(drivers[0]["scrollMoved"], 10.0);
+
+        let screen = format_one_screen_report(&rep, Path::new("out/cost.json"));
+        let obj_lines: Vec<&str> = screen
+            .lines()
+            .skip_while(|l| !l.trim_start().starts_with("top objs"))
+            .skip(1)
+            .take_while(|l| l.starts_with("    "))
+            .collect();
+        assert!(obj_lines.len() >= 3, "expected 3 top objs lines:\n{screen}");
+        let card_lines: Vec<&&str> = obj_lines.iter().filter(|l| l.contains(".Card ")).collect();
+        assert!(card_lines.len() >= 2, "expected repeating Card lines:\n{screen}");
+        assert_ne!(card_lines[0], card_lines[1], "repeating sibling paths must be disambiguated:\n{screen}");
+        assert!(card_lines.iter().all(|l| l.contains('#') && l.contains('@')), "expected #index and @x,y:\n{screen}");
+        assert!(screen.contains("top layout (1/1):"), "screen must show top layout section:\n{screen}");
+        assert!(screen.contains("CardList (ScrollingFrame)") && screen.contains("1.0sp/10.0sm"), "screen must name ScrollingFrame driver:\n{screen}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -657,7 +657,7 @@ pub fn draw_frames(
         };
         let drawn_at = Instant::now();
         waits.push(drawn_at.duration_since(waited_at).as_secs_f64());
-        let SequenceFrame { index, time, mut reply, layout, client_frames, dom_hidden, .. } = frame;
+        let SequenceFrame { index, time, mut reply, layout, client_frames, layout_churn, dom_hidden, .. } = frame;
         if reply["type"] == "error" {
             bail!("frame {index}: {}", reply["message"].as_str().unwrap_or("the engine failed"));
         }
@@ -673,6 +673,7 @@ pub fn draw_frames(
                 client_frames,
                 &scene,
                 layout,
+                layout_churn,
                 dom_hidden,
             );
         }

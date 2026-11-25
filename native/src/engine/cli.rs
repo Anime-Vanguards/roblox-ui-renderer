@@ -1453,6 +1453,7 @@ pub struct SequenceFrame {
     pub client_hz: f64,
     /// `"client"` for fixed client frames (`1 / client_hz`) or `"display"` for display-cadence steps (`1 / fps`).
     pub cadence_kind: &'static str,
+    pub layout_churn: Vec<super::layout::LayoutChurnEntry>,
     #[cfg(feature = "desktop")]
     pub dom_hidden: Option<crate::cost::DomHiddenSummary>,
 }
@@ -1494,6 +1495,9 @@ fn run_sequence(
         }
     }
     let run_started = Instant::now();
+    if spec.collect_cost {
+        super::layout::set_track_churn(engine, true);
+    }
     let layout_start = super::layout::stats_snapshot(engine);
     let source = source_of(args);
     let mut mounted = mount_story(lua, engine, &project, args, source.as_ref(), target)?;
@@ -1555,6 +1559,7 @@ fn run_sequence(
     session.run_time = run_started.elapsed().as_secs_f64();
     let ready = session.ready(lua).map_err(lua_error)?;
     let layout_0 = super::layout::stats_snapshot(engine).delta_since(&layout_start);
+    let layout_churn_0 = if spec.collect_cost { super::layout::take_churn(engine) } else { Vec::new() };
     let steps_0 = engine.state.borrow().sched.frame as u32;
     #[cfg(feature = "desktop")]
     let dom_hidden_0 = spec.collect_cost.then(|| crate::cost::collect_dom_hidden(engine, &session.story.roots));
@@ -1567,6 +1572,7 @@ fn run_sequence(
         client_frames: steps_0,
         client_hz: effective_hz,
         cadence_kind,
+        layout_churn: layout_churn_0,
         #[cfg(feature = "desktop")]
         dom_hidden: dom_hidden_0,
     })) {
@@ -1603,6 +1609,7 @@ fn run_sequence(
         let steps = engine.state.borrow().sched.frame.saturating_sub(steps_before) as u32;
         let reply = session.capture(lua, steps);
         let layout_delta = super::layout::stats_snapshot(engine).delta_since(&layout_before);
+        let layout_churn = if spec.collect_cost { super::layout::take_churn(engine) } else { Vec::new() };
         let unchanged = reply["unchanged"] == true;
         #[cfg(feature = "desktop")]
         let dom_hidden = (spec.collect_cost && !unchanged)
@@ -1616,6 +1623,7 @@ fn run_sequence(
             client_frames: steps,
             client_hz: effective_hz,
             cadence_kind,
+            layout_churn,
             #[cfg(feature = "desktop")]
             dom_hidden,
         })) {

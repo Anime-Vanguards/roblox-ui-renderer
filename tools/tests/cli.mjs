@@ -947,7 +947,7 @@ end
 		assert.match(rPlainSingle.stdout, /cost\.json/);
 		assert.match(rPlainSingle.stdout, /derived 3\.9x\.\.6\.3x/);
 		assert.match(rPlainSingle.stdout, /2\.55x\.\.12\.32x/);
-		assert.deepEqual(JSON.parse(rA.stdout), costA, "`rur cost --json` stdout must equal cost.json");
+		assert.equal(rA.stdout, rawA, "`rur cost --json` stdout must be byte-for-byte identical to cost.json");
 
 		const outPlainSeq = path.join(dir, "plain-seq");
 		const rPlainSeq = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "6", "--fps", "60", "--out", outPlainSeq);
@@ -958,6 +958,12 @@ end
 		assert.ok(Buffer.byteLength(rPlainSeq.stdout, "utf8") <= 4096, `plain sequence stdout too large (${rPlainSeq.stdout.length} bytes)`);
 		assert.match(rPlainSeq.stdout, /mode=play 60 Hz/);
 		assert.match(rPlainSeq.stdout, /0\.0994 ms/);
+		assert.match(rPlainSeq.stdout, /top layout \(\d+\/\d+\):/);
+		assert.match(rPlainSeq.stdout, /ScrollingFrame.*1\.0sp\/120\.0sm/);
+		const seqObjLines = rPlainSeq.stdout.split(/\r?\n/).filter(l => l.startsWith("    ") && l.includes("| quads="));
+		assert.ok(seqObjLines.length >= 3, `expected 3 top objs lines:\n${rPlainSeq.stdout}`);
+		assert.equal(new Set(seqObjLines).size, seqObjLines.length, `repeating top objs lines must be distinct:\n${rPlainSeq.stdout}`);
+		assert.ok(seqObjLines.some(l => /#\d+ \(Frame\) @-?\d+,-?\d+/.test(l)), `expected disambiguated Frame (#index @x,y):\n${rPlainSeq.stdout}`);
 		assert.match(rPlainSeq.stdout, /cost\.json/);
 
 		const rPlainCmp = runRur("cost", "compare", outA, outB);

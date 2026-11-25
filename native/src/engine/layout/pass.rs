@@ -2329,6 +2329,11 @@ impl<'a> Pass<'a> {
                 let delta = self.l.stats.scroll_moved - before;
                 if delta > 0 {
                     self.l.stats.scroll_passes += 1;
+                    if self.l.track_churn {
+                        let entry = self.l.churn.entry(id).or_default();
+                        entry.scroll_passes += 1;
+                        entry.scroll_moved += delta;
+                    }
                 }
                 applied.push((id, delta, after));
             }
@@ -2356,6 +2361,7 @@ impl<'a> Pass<'a> {
             }
             if old.same_shape(&record) {
                 // Only moved: keep the record (and everything computed for it), take the new place.
+                let before_moved = self.l.stats.moved;
                 self.l.stats.moved += 1;
                 cache_counts::hit(Cache::Records);
                 self.l.stored_stamps.take(id);
@@ -2370,12 +2376,19 @@ impl<'a> Pass<'a> {
                 kept.visible = record.visible;
                 kept.place = record.place;
                 self.moved(id, false);
+                if self.l.track_churn {
+                    let delta = self.l.stats.moved.saturating_sub(before_moved);
+                    self.l.churn.entry(id).or_default().moved += delta;
+                }
                 self.l.stored_stamps.set(id, stamp);
                 return;
             }
         }
 
         self.l.stats.stored += 1;
+        if self.l.track_churn {
+            self.l.churn.entry(id).or_default().stored += 1;
+        }
         cache_counts::miss(Cache::Records);
         self.l.stored_stamps.take(id);
         let old = self.l.records.take(id);

@@ -180,6 +180,79 @@ pub fn stats_snapshot(engine: &Engine) -> super::Stats {
     engine.layout().borrow().as_ref().map(|layout| layout.total_stats()).unwrap_or_default()
 }
 
+/// Enables or disables per-instance layout churn tracking (`rur cost` sequences) and clears any buffered churn.
+pub fn set_track_churn(engine: &Engine, enabled: bool) {
+    if let Ok(mut guard) = engine.layout().try_borrow_mut() {
+        if let Some(layout) = guard.as_mut() {
+            layout.track_churn = enabled;
+            layout.churn.clear();
+        }
+    }
+}
+
+/// Drains per-instance layout churn recorded since the last call and resolves each live object's
+/// findable identity (path, class, same-named sibling index/count, and logical position).
+pub fn take_churn(engine: &Engine) -> Vec<super::LayoutChurnEntry> {
+    let raw = {
+        let Ok(mut guard) = engine.layout().try_borrow_mut() else { return Vec::new() };
+        let Some(layout) = guard.as_mut() else { return Vec::new() };
+        if layout.churn.is_empty() {
+            return Vec::new();
+        }
+        std::mem::take(&mut layout.churn)
+    };
+    let state = engine.state.borrow();
+    let dom = &state.dom;
+    let reflection = &engine.reflection;
+    let layout_guard = engine.layout().borrow();
+    let layout_ref = layout_guard.as_ref();
+    let mut entries = Vec::with_capacity(raw.len());
+    for (id, churn) in raw {
+        let Some(inst) = dom.get(id) else { continue };
+        let name = inst.name.to_string();
+        let path = dom.full_name(reflection, id);
+        let class = reflection.class(inst.class).name.to_string();
+        let (sibling_index, path_count) = match inst.parent.and_then(|p| dom.get(p)) {
+            Some(parent) => {
+                let mut idx = 0u32;
+                let mut count = 0u32;
+                for &sib in &parent.children {
+                    if dom.get(sib).is_some_and(|s| s.name == inst.name) {
+                        count += 1;
+                        if sib == id {
+                            idx = count;
+                        }
+                    }
+                }
+                (idx.max(1), count.max(1))
+            }
+            None => (1, 1),
+        };
+        let pos = layout_ref
+            .and_then(|l| l.record(id))
+            .map(|rec| {
+                let (x, y) = super::absolute_position(rec);
+                [x, y]
+            })
+            .unwrap_or([0.0, 0.0]);
+        entries.push(super::LayoutChurnEntry {
+            id: u64::from(inst.serial),
+            name,
+            path,
+            class,
+            sibling_index,
+            path_count,
+            pos,
+            stored: churn.stored,
+            moved: churn.moved,
+            scroll_passes: churn.scroll_passes,
+            scroll_moved: churn.scroll_moved,
+        });
+    }
+    entries.sort_by(|a, b| a.id.cmp(&b.id));
+    entries
+}
+
 /// The LayerCollectors that are displayed (`Pass::displayed_roots`), in draw order.
 pub fn displayed_roots(engine: &Engine) -> Vec<InstanceId> {
     let game = engine.world().game;
