@@ -783,7 +783,16 @@ assert.throws(() => findEngine(), err => err.message.includes(${JSON.stringify(d
 		assert.equal(costA.predicted["desktop-ref"].layoutCpuMs.status, "refused");
 		assert.equal(costA.predicted["desktop-ref"].layoutCpuMs.ms, null);
 		assert.equal(costA.predicted["desktop-ref"].fullTreeLayoutCpuMs.basis, "extrapolated");
-		assert.equal(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.basis, "anchored_extrapolation");
+		assert.equal(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.basis, "derived_extrapolation");
+		assert.equal(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.ratioBasis, "derived");
+		assert.equal(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.ms, undefined);
+		assert.ok(Math.abs(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.ratioRange[0] - 3.9366) < 1e-3);
+		assert.ok(Math.abs(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.ratioRange[1] - 6.2986) < 1e-3);
+		assert.ok(Math.abs(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.bandRatio[0] - 2.5506) < 1e-3);
+		assert.ok(Math.abs(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.bandRatio[1] - 12.32) < 1e-3);
+		assert.match(costA.predicted["phone-mid"].fullTreeLayoutCpuMs.settledBy, /UpdateUILayouts/);
+		assert.match(rA.stderr, /derived 3\.9x\.\.6\.3x/);
+		assert.match(rA.stderr, /2\.55x\.\.12\.32x/);
 		assert.equal(costA.predicted["phone-mid"].drawPassCpuMs.status, "refused");
 		assert.equal(costA.predicted["phone-mid"].drawPassCpuMs.ms, null);
 		assert.equal(costA.predicted["phone-mid"].gpuUiMs.status, "refused");

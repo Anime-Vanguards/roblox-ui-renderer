@@ -14,9 +14,10 @@
 //! - Live-DOM hidden-in-shown accounting (`Visible = false` roots and all descendant GuiObjects and
 //!   instances under enabled ScreenGuis), separated from disabled ScreenGuis (`Enabled = false`).
 //! - Deterministic `Layout.Stats` counters, extrapolated desktop layout CPU ms (Studio 0.744 client
-//!   lazy-layout slopes from `engine/layout/install.rs`), anchored `phone-mid` layout CPU ms with
-//!   uncertainty band, and explicit refusals (`status: "refused"`, `ms: null`) for uncalibrated
-//!   draw-pass CPU and mobile GPU UI milliseconds.
+//!   lazy-layout slopes from `engine/layout/install.rs`), derived `phone-mid` layout CPU ms range
+//!   (3.9x..6.3x central, 2.55x..12.32x full band from whole-UI captured ratio * assumed capture
+//!   factor * live frame weight), and explicit refusals (`status: "refused"`, `ms: null`) for
+//!   uncalibrated draw-pass CPU and mobile GPU UI milliseconds.
 //! - `rur cost compare <before> <after>` deterministic A/B diff (`rrr-ab/1`).
 
 use std::{
@@ -46,11 +47,28 @@ pub const STUDIO_LAYOUT_PASS_MS: f64 = 2.3e-3;
 pub const STUDIO_LAYOUT_OBJECT_MS: f64 = 0.312e-3;
 pub const STUDIO_SCROLL_PASS_MS: f64 = 62.0e-3;
 
-/// Recorded live frame-weighted mobile mid-tier UI main-thread scaling ratio and uncertainty band
-/// for uncaptured desktop timings (4.09 * 2.0 * 0.77 = 6.2986, band 4.081..12.32).
-pub const PHONE_UI_MAIN_RATIO: f64 = 4.09 * 2.0 * 0.77;
-pub const PHONE_UI_MAIN_LOW: f64 = 2.65 * 2.0 * 0.77;
-pub const PHONE_UI_MAIN_HIGH: f64 = 8.0 * 2.0 * 0.77;
+/// Derived live frame-weighted mobile mid-tier UI main-thread scaling factors for uncaptured
+/// desktop layout timings:
+/// - Whole-UI-pass captured phone/desktop ratio: central 4.09 (range 2.65..8.0)
+/// - Assumed profiler capture-overhead factor (unmeasured for layout): 1.25..2.0
+/// - Live frame weight: 0.77
+/// Central derived range: 4.09 * 1.25 * 0.77 = 3.936625 (~3.9x) .. 4.09 * 2.0 * 0.77 = 6.2986 (~6.3x).
+/// Full uncertainty band: 2.65 * 1.25 * 0.77 = 2.550625 (~2.55x) .. 8.0 * 2.0 * 0.77 = 12.32 (~12.32x).
+pub const PHONE_UI_CAPTURED_RATIO_CENTRAL: f64 = 4.09;
+pub const PHONE_UI_CAPTURED_RATIO_LOW: f64 = 2.65;
+pub const PHONE_UI_CAPTURED_RATIO_HIGH: f64 = 8.0;
+pub const PHONE_CAPTURE_FACTOR_LOW: f64 = 1.25;
+pub const PHONE_CAPTURE_FACTOR_HIGH: f64 = 2.0;
+pub const PHONE_UI_LIVE_WEIGHT: f64 = 0.77;
+
+pub const PHONE_UI_MAIN_RATIO_LOW: f64 =
+    PHONE_UI_CAPTURED_RATIO_CENTRAL * PHONE_CAPTURE_FACTOR_LOW * PHONE_UI_LIVE_WEIGHT;
+pub const PHONE_UI_MAIN_RATIO_HIGH: f64 =
+    PHONE_UI_CAPTURED_RATIO_CENTRAL * PHONE_CAPTURE_FACTOR_HIGH * PHONE_UI_LIVE_WEIGHT;
+pub const PHONE_UI_MAIN_LOW: f64 =
+    PHONE_UI_CAPTURED_RATIO_LOW * PHONE_CAPTURE_FACTOR_LOW * PHONE_UI_LIVE_WEIGHT;
+pub const PHONE_UI_MAIN_HIGH: f64 =
+    PHONE_UI_CAPTURED_RATIO_HIGH * PHONE_CAPTURE_FACTOR_HIGH * PHONE_UI_LIVE_WEIGHT;
 
 const MAX_OBJECTS_REPORTED: usize = 200;
 const MAX_HIDDEN_SUBTREES_REPORTED: usize = 100;
@@ -487,6 +505,14 @@ fn effective_text_clip(
             [x0, y0, own[2].min(c[2]).max(x0), own[3].min(c[3]).max(y0)]
         }
     })
+}
+
+fn round4(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    let rounded = (value * 10_000.0).round() / 10_000.0;
+    if rounded == 0.0 { 0.0 } else { rounded }
 }
 
 fn round6(value: f64) -> f64 {
@@ -1159,22 +1185,42 @@ fn desktop_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_
 }
 
 fn phone_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_from: &'static str) -> Value {
+    let central_low = round4(desk_ms * PHONE_UI_MAIN_RATIO_LOW);
+    let central_high = round4(desk_ms * PHONE_UI_MAIN_RATIO_HIGH);
+    let band_low = round4(desk_ms * PHONE_UI_MAIN_LOW);
+    let band_high = round4(desk_ms * PHONE_UI_MAIN_HIGH);
     json!({
         "status": "extrapolated",
-        "basis": "anchored_extrapolation",
+        "basis": "derived_extrapolation",
         "scope": scope,
-        "ms": round9(desk_ms * PHONE_UI_MAIN_RATIO),
-        "ratio": PHONE_UI_MAIN_RATIO,
-        "bandMs": [round9(desk_ms * PHONE_UI_MAIN_LOW), round9(desk_ms * PHONE_UI_MAIN_HIGH)],
+        "rangeMs": [central_low, central_high],
+        "bandMs": [band_low, band_high],
+        "ratioBasis": "derived",
+        "ratioRange": [round4(PHONE_UI_MAIN_RATIO_LOW), round4(PHONE_UI_MAIN_RATIO_HIGH)],
+        "bandRatio": [round4(PHONE_UI_MAIN_LOW), round4(PHONE_UI_MAIN_HIGH)],
+        "factors": {
+            "capturedWholeUiPhoneOverDesktop": {
+                "central": PHONE_UI_CAPTURED_RATIO_CENTRAL,
+                "range": [PHONE_UI_CAPTURED_RATIO_LOW, PHONE_UI_CAPTURED_RATIO_HIGH],
+                "basis": "recorded_whole_ui_pass"
+            },
+            "captureOverheadFactor": {
+                "range": [PHONE_CAPTURE_FACTOR_LOW, PHONE_CAPTURE_FACTOR_HIGH],
+                "basis": "assumed_unmeasured_for_layout"
+            },
+            "liveFrameWeight": PHONE_UI_LIVE_WEIGHT,
+            "formula": "capturedWholeUiPhoneOverDesktop * captureOverheadFactor * liveFrameWeight"
+        },
         "extrapolatedFrom": extrapolated_from,
-        "source": "Anchored to desktop-ref via recorded mobile mid-tier uncaptured UI main-thread ratio 6.2986x (band 4.081x..12.32x; whole-UI-pass ratio applied to layout)"
+        "source": "Derived from desktop-ref: 4.09 (range 2.65..8.0) whole-UI captured phone/desktop ratio * assumed 1.25..2.0 capture overhead factor (unmeasured for layout) * 0.77 live frame weight -> central ratio 3.94x..6.30x (3.9x..6.3x), full band 2.55x..12.32x",
+        "settledBy": "Record paired captured and uncaptured UpdateUILayouts timings on desktop to measure the layout capture overhead factor, and compare against recorded mobile mid-tier UI layout timings."
     })
 }
 
 pub fn predicted_sequence_json(desk_ms: f64, scope: &'static str) -> Value {
     let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
     let desk_from = "Studio 0.744 script-triggered lazy-layout probe (100-1,000 card scroll and single-card edit slopes) extrapolated to frame layout passes";
-    let phone_from = "desktop-ref extrapolated layoutCpuMs scaled by recorded mobile mid-tier uncaptured UI main-thread ratio 6.2986x (band 4.081x..12.32x)";
+    let phone_from = "desktop-ref extrapolated layoutCpuMs scaled by derived ratio 3.9x..6.3x (4.09 * assumed 1.25..2.0 capture factor * 0.77; full band 2.55x..12.32x)";
     json!({
         "desktop-ref": {
             "layoutCpuMs": desktop_layout_extrapolation(desk_ms, scope, desk_from),
@@ -1205,7 +1251,7 @@ fn predicted_single_live_json(stats: LayoutStats) -> Value {
         "settledBy": "Run `rur cost` with --from and --frames (and --fps) to measure per-frame layout churn."
     });
     let desk_from = "Studio 0.744 script-triggered lazy-layout probe (2.3 us/pass + 0.312 us/record) extrapolated to laying the whole tree out once during export";
-    let phone_from = "desktop-ref fullTreeLayoutCpuMs scaled by recorded mobile mid-tier uncaptured UI main-thread ratio 6.2986x (band 4.081x..12.32x)";
+    let phone_from = "desktop-ref fullTreeLayoutCpuMs scaled by derived ratio 3.9x..6.3x (4.09 * assumed 1.25..2.0 capture factor * 0.77; full band 2.55x..12.32x)";
     json!({
         "desktop-ref": {
             "layoutCpuMs": frame_refusal,
@@ -1904,6 +1950,21 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
     };
 
     let layout_delta = |tier: &str| {
+        let range_of = |rep: &Value| -> Option<[f64; 2]> {
+            let arr = rep.pointer(&format!("/predicted/{tier}/layoutCpuMs/rangeMs"))?.as_array()?;
+            if arr.len() < 2 {
+                return None;
+            }
+            Some([arr[0].as_f64()?, arr[1].as_f64()?])
+        };
+        if let (Some(b), Some(a)) = (range_of(before), range_of(after)) {
+            return json!({
+                "ratioBasis": "derived",
+                "beforeRangeMs": [round4(b[0]), round4(b[1])],
+                "afterRangeMs": [round4(a[0]), round4(a[1])],
+                "deltaRangeMs": [round4(a[0] - b[0]), round4(a[1] - b[1])],
+            });
+        }
         let b = before.pointer(&format!("/predicted/{tier}/layoutCpuMs/ms")).and_then(Value::as_f64);
         let a = after.pointer(&format!("/predicted/{tier}/layoutCpuMs/ms")).and_then(Value::as_f64);
         match (b, a) {
@@ -2161,10 +2222,22 @@ impl SequenceAccumulator {
                 "status": "extrapolated",
                 "basis": "extrapolated",
                 "desktop-ref": round9(steady_desk_ms),
-                "phone-mid": round9(steady_desk_ms * PHONE_UI_MAIN_RATIO),
+                "phone-mid-basis": "derived",
+                "phone-mid-range": [
+                    round4(steady_desk_ms * PHONE_UI_MAIN_RATIO_LOW),
+                    round4(steady_desk_ms * PHONE_UI_MAIN_RATIO_HIGH),
+                ],
+                "phone-mid-ratio-range": [
+                    round4(PHONE_UI_MAIN_RATIO_LOW),
+                    round4(PHONE_UI_MAIN_RATIO_HIGH),
+                ],
                 "phone-mid-band": [
-                    round9(steady_desk_ms * PHONE_UI_MAIN_LOW),
-                    round9(steady_desk_ms * PHONE_UI_MAIN_HIGH),
+                    round4(steady_desk_ms * PHONE_UI_MAIN_LOW),
+                    round4(steady_desk_ms * PHONE_UI_MAIN_HIGH),
+                ],
+                "phone-mid-band-ratio": [
+                    round4(PHONE_UI_MAIN_LOW),
+                    round4(PHONE_UI_MAIN_HIGH),
                 ],
             })
         } else {
@@ -2172,7 +2245,7 @@ impl SequenceAccumulator {
                 "status": "refused",
                 "basis": "edit_mode_cadence",
                 "desktop-ref": Value::Null,
-                "phone-mid": Value::Null,
+                "phone-mid-range": Value::Null,
                 "phone-mid-band": Value::Null,
                 "reason": "Run used --mode edit (Studio 240 Hz Heartbeat, 4 beats per 60 Hz frame), which can price Heartbeat-driven UI at up to 4x a playing client's per-frame layout cost.",
                 "settledBy": "Re-run with --mode play for a playing client's 60 Hz Heartbeat cadence (1 beat per frame).",
@@ -2199,7 +2272,7 @@ impl SequenceAccumulator {
                 fid.insert(
                     "layoutCpuMs".into(),
                     if is_play {
-                        json!("extrapolated_from_lazy_layout_probe (mode=play, 60 Hz client cadence, 1 Heartbeat/frame; desktop lazy-layout slope extrapolated to per-frame layout passes; phone-mid uses uncaptured 6.2986x UI ratio)")
+                        json!("extrapolated_from_lazy_layout_probe (mode=play, 60 Hz client cadence, 1 Heartbeat/frame; desktop lazy-layout slope extrapolated to per-frame layout passes; phone-mid uses derived 3.9x..6.3x ratio, band 2.55x..12.32x, capture factor 1.25..2.0 unmeasured for layout)")
                     } else {
                         json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz, 4 beats per 60 Hz frame; pass --mode play for client per-frame layoutCpuMs)")
                     },
@@ -2326,6 +2399,33 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+fn format_ms_approx(ms: f64) -> String {
+    if !ms.is_finite() || ms <= 0.0 {
+        "0".into()
+    } else if ms < 0.1 {
+        format!("{ms:.3}")
+    } else {
+        format!("{ms:.2}")
+    }
+}
+
+fn format_phone_range(range: &[f64; 2], band: &[f64; 2]) -> String {
+    format!(
+        "phone ~{}..{} ms (derived 3.9x..6.3x, band {}..{} ms [2.55x..12.32x])",
+        format_ms_approx(range[0]),
+        format_ms_approx(range[1]),
+        format_ms_approx(band[0]),
+        format_ms_approx(band[1]),
+    )
+}
+
+fn pair_at(value: &Value, ptr: &str) -> [f64; 2] {
+    let arr = value.pointer(ptr).and_then(Value::as_array);
+    let a = arr.and_then(|v| v.first()).and_then(Value::as_f64).unwrap_or(0.0);
+    let b = arr.and_then(|v| v.get(1)).and_then(Value::as_f64).unwrap_or(0.0);
+    [a, b]
+}
+
 fn print_summary(report: &Value, dest: &Path) {
     let t = &report["totals"];
     let rt_bytes = t["canvasRtBytes"].as_u64().unwrap_or(0);
@@ -2341,8 +2441,12 @@ fn print_summary(report: &Value, dest: &Path) {
         };
         let layout_timing = if run_mode == "play" {
             let desk_ms = seq.pointer("/steadyStateLayoutCpuMs/desktop-ref").and_then(Value::as_f64).unwrap_or(0.0);
-            let phone_ms = seq.pointer("/steadyStateLayoutCpuMs/phone-mid").and_then(Value::as_f64).unwrap_or(0.0);
-            format!("extrapolated desk {desk_ms:.4} ms, phone {phone_ms:.4} ms; draw/gpu refused")
+            let phone_range = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-range");
+            let phone_band = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-band");
+            format!(
+                "extrapolated desk {desk_ms:.4} ms, {}; draw/gpu refused",
+                format_phone_range(&phone_range, &phone_band)
+            )
         } else {
             "per-frame layout ms refused in edit mode (pass --mode play for 60 Hz client cadence); draw/gpu refused".to_string()
         };
@@ -2372,9 +2476,10 @@ fn print_summary(report: &Value, dest: &Path) {
     }
     if let Some(ft) = report.get("fullTreeLayout") {
         let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
-        let phone_ms = report.pointer("/predicted/phone-mid/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
+        let phone_range = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/rangeMs");
+        let phone_band = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/bandMs");
         eprintln!(
-            "rur cost: {} (mode={}) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s (extrapolated desk {:.4} ms, phone {:.4} ms; per-frame cost needs --from and --frames; draw/gpu refused) | model draws={} breaks={} (unmeasured) -> {}",
+            "rur cost: {} (mode={}) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s (extrapolated desk {:.4} ms, {}; per-frame cost needs --from and --frames; draw/gpu refused) | model draws={} breaks={} (unmeasured) -> {}",
             report["status"].as_str().unwrap_or("?"),
             run_mode,
             t["screenGuis"].as_u64().unwrap_or(0),
@@ -2391,7 +2496,7 @@ fn print_summary(report: &Value, dest: &Path) {
             ft["passes"].as_u64().unwrap_or(0),
             ft["stored"].as_u64().unwrap_or(0),
             desk_ms,
-            phone_ms,
+            format_phone_range(&phone_range, &phone_band),
             t["drawCalls"].as_u64().unwrap_or(0),
             t["batchBreaks"].as_u64().unwrap_or(0),
             dest.display(),
@@ -2911,7 +3016,8 @@ mod tests {
     #[test]
     fn calibration_and_refusal_contract() {
         // Non-scroll: 2 passes * 2.3 us + 15 records * 0.312 us = 4.6 + 4.68 = 9.28 us = 0.00928 ms
-        // phone-mid (6.2986x uncaptured UI main ratio): 0.00928 * 6.2986 = 0.058451008 ms
+        // phone-mid derived ratio: 4.09 * (1.25..2.0) * 0.77 = 3.936625..6.2986 (~3.9x..6.3x),
+        // full band: 2.65 * 1.25 * 0.77 = 2.550625 (~2.55x) .. 8.0 * 2.0 * 0.77 = 12.32 (~12.32x).
         let stats = LayoutStats {
             passes: 2,
             stored: 10,
@@ -2923,9 +3029,30 @@ mod tests {
         let pred = predicted_json(stats);
         assert_eq!(pred["desktop-ref"]["layoutCpuMs"]["basis"], "extrapolated");
         assert!((pred["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - 0.00928).abs() < 1e-9);
-        assert_eq!(pred["phone-mid"]["layoutCpuMs"]["basis"], "anchored_extrapolation");
-        assert!((pred["phone-mid"]["layoutCpuMs"]["ratio"].as_f64().unwrap() - 6.2986).abs() < 1e-9);
-        assert!((pred["phone-mid"]["layoutCpuMs"]["ms"].as_f64().unwrap() - 0.058451008).abs() < 1e-9);
+        let phone = &pred["phone-mid"]["layoutCpuMs"];
+        assert_eq!(phone["basis"], "derived_extrapolation");
+        assert_eq!(phone["ratioBasis"], "derived");
+        assert!(phone["ms"].is_null(), "derived phone layout must report a range, not a false-precision single point");
+        assert!((phone["ratioRange"][0].as_f64().unwrap() - 3.9366).abs() < 1e-4);
+        assert!((phone["ratioRange"][1].as_f64().unwrap() - 6.2986).abs() < 1e-4);
+        assert!((phone["bandRatio"][0].as_f64().unwrap() - 2.5506).abs() < 1e-4);
+        assert!((phone["bandRatio"][1].as_f64().unwrap() - 12.32).abs() < 1e-4);
+        assert!((phone["rangeMs"][0].as_f64().unwrap() - 0.0365).abs() < 1e-4);
+        assert!((phone["rangeMs"][1].as_f64().unwrap() - 0.0585).abs() < 1e-4);
+        assert!((phone["bandMs"][0].as_f64().unwrap() - 0.0237).abs() < 1e-4);
+        assert!((phone["bandMs"][1].as_f64().unwrap() - 0.1143).abs() < 1e-4);
+        assert_eq!(phone["factors"]["capturedWholeUiPhoneOverDesktop"]["central"], 4.09);
+        assert_eq!(phone["factors"]["captureOverheadFactor"]["basis"], "assumed_unmeasured_for_layout");
+        assert_eq!(phone["factors"]["liveFrameWeight"], 0.77);
+        assert!(phone["settledBy"].as_str().unwrap().contains("UpdateUILayouts"));
+        let phone_src = phone["source"].as_str().unwrap();
+        assert!(phone_src.starts_with("Derived"), "phone source must state derived: {phone_src}");
+        assert!(phone_src.contains("2.55x..12.32x"), "phone source must state full 2.55x..12.32x band: {phone_src}");
+        assert!(phone_src.contains("unmeasured for layout"), "phone source must disclose unmeasured capture factor: {phone_src}");
+        // Formatted summary prints derived range + 2.55x..12.32x band without 4-decimal false precision
+        let summary = format_phone_range(&[0.3915, 0.6263], &[0.2536, 1.2251]);
+        assert!(summary.contains("derived 3.9x..6.3x") && summary.contains("2.55x..12.32x"), "{summary}");
+        assert!(summary.contains("~0.39..0.63 ms") && summary.contains("0.25..1.23 ms"), "{summary}");
 
         // Scroll 100 cards with 2 children each (+ container = 301 records):
         // 62 us + 301 * 0.312 us = 155.912 us = 0.155912 ms (~156 us as recorded in install.rs)
