@@ -3703,6 +3703,128 @@ fn trim_left(s: &str, max_chars: usize) -> String {
     format!("...{tail}")
 }
 
+fn format_middle_elided(
+    segs: &[&str],
+    prefix_len: usize,
+    suffix_len: usize,
+    max_chars: usize,
+) -> String {
+    let diff_end = segs.len().saturating_sub(suffix_len);
+    let diff = segs[prefix_len..diff_end].join(".");
+    let prefix_dots = if prefix_len > 0 { "..." } else { "" };
+    if suffix_len == 0 {
+        let full = format!("{prefix_dots}{diff}");
+        return trim_left(&full, max_chars);
+    }
+    let suffix_segs = &segs[diff_end..];
+    let leaf = suffix_segs.last().copied().unwrap_or("");
+    let min_tail_chars = (leaf.chars().count() + 3).min(max_chars / 2);
+    let head_budget = max_chars.saturating_sub(min_tail_chars);
+    let mut head = format!("{prefix_dots}{diff}");
+    if head.chars().count() > head_budget {
+        head = head.chars().take(head_budget).collect();
+    }
+    let tail_budget = max_chars.saturating_sub(head.chars().count() + 3);
+    let mut chosen: Vec<&str> = Vec::new();
+    let mut used = 0usize;
+    for &seg in suffix_segs.iter().rev() {
+        let add = seg.chars().count() + usize::from(!chosen.is_empty());
+        if used + add <= tail_budget {
+            chosen.push(seg);
+            used += add;
+        } else {
+            break;
+        }
+    }
+    let tail = if !chosen.is_empty() {
+        chosen.reverse();
+        chosen.join(".")
+    } else if tail_budget > 0 {
+        let leaf_len = leaf.chars().count();
+        leaf.chars().skip(leaf_len.saturating_sub(tail_budget)).collect()
+    } else {
+        String::new()
+    };
+    if tail.is_empty() {
+        head
+    } else {
+        format!("{head}...{tail}")
+    }
+}
+
+/// Formats a displayed slice of `objects` or `layoutDrivers` labels so two different items never
+/// print the same line: when `trim_left` collapses distinct paths to the same tail, the middle is
+/// elided around the distinguishing segments, and any label whose printed path+class still repeats
+/// (or whose full path has `pathCount > 1`) appends `#index @x,y`.
+fn format_object_labels(items: &[Value], max_path: usize) -> Vec<String> {
+    let mut display_paths: Vec<String> = items
+        .iter()
+        .map(|o| trim_left(o["path"].as_str().unwrap_or("?"), max_path))
+        .collect();
+
+    let mut groups: std::collections::BTreeMap<String, Vec<usize>> = std::collections::BTreeMap::new();
+    for (idx, p) in display_paths.iter().enumerate() {
+        groups.entry(p.clone()).or_default().push(idx);
+    }
+    for indices in groups.values() {
+        if indices.len() < 2 {
+            continue;
+        }
+        let split: Vec<Vec<&str>> = indices
+            .iter()
+            .map(|&i| items[i]["path"].as_str().unwrap_or("?").split('.').collect())
+            .collect();
+        let all_identical = split.windows(2).all(|w| w[0] == w[1]);
+        if all_identical {
+            continue;
+        }
+        let min_len = split.iter().map(Vec::len).min().unwrap_or(0);
+        let mut prefix_len = 0usize;
+        while prefix_len < min_len && split.iter().all(|s| s[prefix_len] == split[0][prefix_len]) {
+            prefix_len += 1;
+        }
+        let mut suffix_len = 0usize;
+        while prefix_len + suffix_len + 1 < min_len
+            && split
+                .iter()
+                .all(|s| s[s.len() - 1 - suffix_len] == split[0][split[0].len() - 1 - suffix_len])
+        {
+            suffix_len += 1;
+        }
+        for (&i, segs) in indices.iter().zip(split.iter()) {
+            display_paths[i] = format_middle_elided(segs, prefix_len, suffix_len, max_path);
+        }
+    }
+
+    let mut key_counts: std::collections::BTreeMap<(String, String), usize> = std::collections::BTreeMap::new();
+    for (i, o) in items.iter().enumerate() {
+        let class = o["class"].as_str().unwrap_or("?").to_string();
+        *key_counts.entry((display_paths[i].clone(), class)).or_insert(0) += 1;
+    }
+
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, o)| {
+            let path = &display_paths[i];
+            let class = o["class"].as_str().unwrap_or("?");
+            let printed_repeats = key_counts
+                .get(&(path.clone(), class.to_string()))
+                .copied()
+                .unwrap_or(1)
+                > 1;
+            if o["pathCount"].as_u64().unwrap_or(1) > 1 || printed_repeats {
+                let idx = o["siblingIndex"].as_u64().unwrap_or((i + 1) as u64);
+                let x = o.pointer("/position/0").and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
+                let y = o.pointer("/position/1").and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
+                format!("{path} #{idx} ({class}) @{x},{y}")
+            } else {
+                format!("{path} ({class})")
+            }
+        })
+        .collect()
+}
+
 fn format_signed_num(v: f64) -> String {
     if !v.is_finite() || v.abs() < 1e-9 {
         "0".into()
@@ -4070,27 +4192,15 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
         }
     }
 
-    let format_object_label = |o: &Value, max_path: usize| -> String {
-        let path = trim_left(o["path"].as_str().unwrap_or("?"), max_path);
-        let class = o["class"].as_str().unwrap_or("?");
-        if o["pathCount"].as_u64().unwrap_or(1) > 1 {
-            let idx = o["siblingIndex"].as_u64().unwrap_or(1);
-            let x = o.pointer("/position/0").and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
-            let y = o.pointer("/position/1").and_then(Value::as_f64).unwrap_or(0.0).round() as i64;
-            format!("{path} #{idx} ({class}) @{x},{y}")
-        } else {
-            format!("{path} ({class})")
-        }
-    };
-
     if let Some(objs) = report["objects"].as_array().filter(|a| !a.is_empty()) {
         let shown = objs.len().min(3);
+        let labels = format_object_labels(&objs[..shown], 44);
         let _ = writeln!(out, "  top objs ({shown}/{}):", objs.len());
-        for o in objs.iter().take(3) {
+        for (o, label) in objs.iter().take(shown).zip(labels) {
             let _ = writeln!(
                 out,
                 "    {} | quads={} glyphs={} rt={} B ov={:.3}x/{:.3}x",
-                format_object_label(o, 44),
+                label,
                 o["quads"].as_u64().unwrap_or(0),
                 o["glyphQuads"].as_u64().unwrap_or(0),
                 o["canvasRtBytes"].as_u64().unwrap_or(0),
@@ -4102,6 +4212,7 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
 
     if let Some(drivers) = report["layoutDrivers"].as_array().filter(|a| !a.is_empty()) {
         let shown = drivers.len().min(5);
+        let labels = format_object_labels(&drivers[..shown], 44);
         let total_drivers = report
             .pointer("/layoutDriverSummary/totalDrivers")
             .and_then(Value::as_u64)
@@ -4121,11 +4232,11 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             0.0
         };
         let _ = writeln!(out, "  top layout ({shown}/{total_drivers}, {share_pct:.0}% of churn):");
-        for d in drivers.iter().take(shown) {
+        for (d, label) in drivers.iter().take(shown).zip(labels) {
             let _ = writeln!(
                 out,
                 "    {} | {:.1}s/{:.1}m/{:.1}sp/{:.1}sm ({:.4} ms desk)",
-                format_object_label(d, 44),
+                label,
                 d["stored"].as_f64().unwrap_or(0.0),
                 d["moved"].as_f64().unwrap_or(0.0),
                 d["scrollPasses"].as_f64().unwrap_or(0.0),
@@ -7500,5 +7611,86 @@ end
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn top_layout_disambiguates_paths_that_print_alike() {
+        let make_driver = |id: u64, path: &str, y: f64| {
+            json!({
+                "id": id,
+                "name": "Glow",
+                "path": path,
+                "class": "UIShadow",
+                "siblingIndex": 1,
+                "pathCount": 1,
+                "position": [100.0, y],
+                "stored": 10.0,
+                "moved": 0.0,
+                "scrollPasses": 0.0,
+                "scrollMoved": 0.0,
+                "desktopMs": 0.00312,
+                "share": 0.333333,
+            })
+        };
+
+        // 1. Three objects whose paths differ ONLY near the root, sharing a >44-char tail
+        let root_drivers = vec![
+            make_driver(1, "PanelAlpha.Subtree.Card.Control.Segmented.All.Face.Fill.Glow", 10.0),
+            make_driver(2, "PanelBeta.Subtree.Card.Control.Segmented.All.Face.Fill.Glow", 60.0),
+            make_driver(3, "PanelGamma.Subtree.Card.Control.Segmented.All.Face.Fill.Glow", 110.0),
+        ];
+        let mut report = analyze_scene(&SceneStore::default(), LayoutStats::default(), None);
+        report["status"] = json!("ok");
+        report["layoutDrivers"] = Value::Array(root_drivers);
+        report["layoutDriverSummary"] = json!({"totalDrivers": 3, "totalDesktopMs": 0.00936});
+        let text = format_one_screen_report(&report, Path::new("out/cost.json"));
+        let layout_lines: Vec<&str> = text
+            .lines()
+            .skip_while(|l| !l.contains("top layout"))
+            .skip(1)
+            .take(3)
+            .collect();
+        assert_eq!(layout_lines.len(), 3, "{text}");
+        let unique: std::collections::BTreeSet<&str> = layout_lines.iter().copied().collect();
+        assert_eq!(unique.len(), 3, "top layout lines must not print alike:\n{text}");
+        assert!(layout_lines[0].contains("PanelAlpha"), "{}", layout_lines[0]);
+        assert!(layout_lines[1].contains("PanelBeta"), "{}", layout_lines[1]);
+        assert!(layout_lines[2].contains("PanelGamma"), "{}", layout_lines[2]);
+
+        // 2. Three objects differing in the middle (common root + common >44-char tail, like settings rows)
+        let mid_drivers = vec![
+            make_driver(11, "CoreGui.Window.Holder.Main.Rows.Units.Visibility.Card.Control.Segmented.All.Face.Fill.Glow", 20.0),
+            make_driver(12, "CoreGui.Window.Holder.Main.Rows.Social.ShowUsers.Card.Control.Segmented.All.Face.Fill.Glow", 70.0),
+            make_driver(13, "CoreGui.Window.Holder.Main.Rows.Social.TradeMode.Card.Control.Segmented.All.Face.Fill.Glow", 120.0),
+        ];
+        report["layoutDrivers"] = Value::Array(mid_drivers);
+        let mid_text = format_one_screen_report(&report, Path::new("out/cost.json"));
+        let mid_lines: Vec<&str> = mid_text
+            .lines()
+            .skip_while(|l| !l.contains("top layout"))
+            .skip(1)
+            .take(3)
+            .collect();
+        let mid_unique: std::collections::BTreeSet<&str> = mid_lines.iter().copied().collect();
+        assert_eq!(mid_unique.len(), 3, "middle-differing top layout lines must be distinct:\n{mid_text}");
+        assert!(mid_lines[0].contains("Visibility"), "{}", mid_lines[0]);
+        assert!(mid_lines[1].contains("ShowUsers"), "{}", mid_lines[1]);
+        assert!(mid_lines[2].contains("TradeMode"), "{}", mid_lines[2]);
+
+        // 3. Fallback when printed path+class still collides (even with pathCount == 1): appends #index @x,y
+        let dup_drivers = vec![
+            make_driver(21, "CoreGui.Window.Rows.Item.Card.Control.Segmented.All.Face.Fill.Glow", 30.0),
+            make_driver(22, "CoreGui.Window.Rows.Item.Card.Control.Segmented.All.Face.Fill.Glow", 90.0),
+        ];
+        report["layoutDrivers"] = Value::Array(dup_drivers);
+        let dup_text = format_one_screen_report(&report, Path::new("out/cost.json"));
+        let dup_lines: Vec<&str> = dup_text
+            .lines()
+            .skip_while(|l| !l.contains("top layout"))
+            .skip(1)
+            .take(2)
+            .collect();
+        assert_ne!(dup_lines[0], dup_lines[1], "colliding labels must fall back to #index @x,y:\n{dup_text}");
+        assert!(dup_lines[0].contains("@100,30") && dup_lines[1].contains("@100,90"), "{dup_text}");
     }
 }
