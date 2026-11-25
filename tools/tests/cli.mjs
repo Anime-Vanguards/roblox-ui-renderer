@@ -916,6 +916,8 @@ end
 		assert.equal(cPlay.layout.scrollPasses, 1);
 		assert.equal(cPlay.layout.scrollMoved, 120);
 		assert.ok(Math.abs(cPlay.predicted["desktop-ref"].layoutCpuMs.ms - 0.09944) < 1e-9, `expected 0.09944 ms, got ${cPlay.predicted["desktop-ref"].layoutCpuMs.ms}`);
+		assert.equal(cPlay.predicted["phone-mid"].layoutCpuMs.factors.liveFrameWeight.value, 0.77);
+		assert.equal(cPlay.predicted["phone-mid"].layoutCpuMs.factors.liveFrameWeight.basis, "assumed_from_match_gui_weight");
 
 		const rEdit = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "5", "--fps", "60", "--mode", "edit", "--json", "--out", outEdit);
 		assert.equal(rEdit.status, 0, rEdit.stderr);

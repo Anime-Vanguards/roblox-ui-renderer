@@ -1346,11 +1346,14 @@ fn phone_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_fr
                 "range": [PHONE_CAPTURE_FACTOR_LOW, PHONE_CAPTURE_FACTOR_HIGH],
                 "basis": "assumed_unmeasured_for_layout"
             },
-            "liveFrameWeight": PHONE_UI_LIVE_WEIGHT,
+            "liveFrameWeight": {
+                "value": PHONE_UI_LIVE_WEIGHT,
+                "basis": "assumed_from_match_gui_weight"
+            },
             "formula": "capturedWholeUiPhoneOverDesktop * captureOverheadFactor * liveFrameWeight"
         },
         "extrapolatedFrom": extrapolated_from,
-        "source": "Derived from desktop-ref: 4.09 (range 2.65..8.0) whole-UI captured phone/desktop ratio * assumed 1.25..2.0 capture overhead factor (unmeasured for layout) * 0.77 live frame weight -> central ratio 3.94x..6.30x (3.9x..6.3x), full band 2.55x..12.32x",
+        "source": "Derived from desktop-ref: 4.09 (range 2.65..8.0) whole-UI captured phone/desktop ratio * assumed 1.25..2.0 capture overhead factor (unmeasured for layout) * assumed 0.77 live frame weight (from mobile live-gameplay GUI category) -> central ratio 3.94x..6.30x (3.9x..6.3x), full band 2.55x..12.32x",
         "settledBy": "Record paired captured and uncaptured UpdateUILayouts timings on desktop to measure the layout capture overhead factor, and compare against recorded mobile mid-tier UI layout timings."
     })
 }
@@ -4330,7 +4333,8 @@ mod tests {
         assert!((phone["bandMs"][1].as_f64().unwrap() - 0.1143).abs() < 1e-4);
         assert_eq!(phone["factors"]["capturedWholeUiPhoneOverDesktop"]["central"], 4.09);
         assert_eq!(phone["factors"]["captureOverheadFactor"]["basis"], "assumed_unmeasured_for_layout");
-        assert_eq!(phone["factors"]["liveFrameWeight"], 0.77);
+        assert_eq!(phone["factors"]["liveFrameWeight"]["value"], 0.77);
+        assert_eq!(phone["factors"]["liveFrameWeight"]["basis"], "assumed_from_match_gui_weight");
         assert!(phone["settledBy"].as_str().unwrap().contains("UpdateUILayouts"));
         let phone_src = phone["source"].as_str().unwrap();
         assert!(phone_src.starts_with("Derived"), "phone source must state derived: {phone_src}");
