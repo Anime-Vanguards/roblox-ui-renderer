@@ -522,7 +522,13 @@ impl Session {
     pub fn end_report(&mut self, lua: &Lua) -> Json {
         let (status, failure) = self.status(lua).unwrap_or_else(|error| ("error".into(), Some(scheduler::error_message(&error))));
         let diagnostics = story::diagnostics(&self.engine, &self.project, &self.story, self.run_time);
-        json!({ "status": status, "failure": failure, "diagnostics": diagnostics })
+        let mut report = json!({ "status": status, "failure": failure, "diagnostics": diagnostics });
+        if status == "yielded" {
+            if let Some(at) = &self.story.waiting_at {
+                report["waiting"] = Json::String(at.clone());
+            }
+        }
+        report
     }
 
     /// {"cmd":"control"}: sets a UI Labs control source, runs the resumption point, answers a frame.

@@ -779,6 +779,11 @@ pub fn draw_frames(
         if merged_end["diagnostics"].is_null() {
             merged_end["diagnostics"] = ready["diagnostics"].clone();
         }
+        if merged_end.get("waiting").is_none() {
+            if let Some(at) = ready.pointer("/delta/header/waiting").and_then(Value::as_str) {
+                merged_end["waiting"] = json!(at);
+            }
+        }
         let mut outcome = crate::cost::extract_run_outcome(&merged_end);
         outcome.status = Some(status_str.clone());
         let report = acc.finish_with_outcome(&outcome);

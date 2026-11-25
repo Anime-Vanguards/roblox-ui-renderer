@@ -1565,24 +1565,109 @@ fn predicted_no_client_frames_json(sample_count: usize, client_hz: f64, sample_f
     })
 }
 
-/// Failure, hint, and edit-mode fallback metadata carried from an engine run into `rur-cost/1`.
+/// Result of probing play mode from an explicit `--mode edit` sequence run so edit-only stories
+/// report the real end state instead of sending the caller back to `--mode play` in a circle.
+#[derive(Clone, Debug)]
+pub struct PlayModeProbe {
+    pub mounts_in_play_mode: bool,
+    pub status: String,
+    pub failure: Option<String>,
+    pub waiting_at: Option<String>,
+}
+
+/// Failure, hint, waiting location, and mode-probe metadata carried from an engine run into `rur-cost/1`.
 #[derive(Clone, Debug, Default)]
 pub struct RunOutcome {
     pub status: Option<String>,
     pub failure: Option<String>,
+    pub waiting_at: Option<String>,
     pub hint: Option<String>,
     pub edit_mode_mounts: Option<bool>,
+    pub play_mode_probe: Option<PlayModeProbe>,
 }
 
 const EMPTY_MOUNT_MESSAGE: &str =
     "story mounted nothing (0 instances under StoryTarget and 0 drawn nodes; zero counts are not a valid UI cost measurement)";
 
+fn extract_waiting_at(value: &Value) -> Option<String> {
+    if let Some(at) = value.get("waiting").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+        return Some(at.trim().to_string());
+    }
+    let output = value.pointer("/diagnostics/output").and_then(Value::as_array)?;
+    let waiting = output.iter().find(|entry| {
+        entry["kind"] == "warn"
+            && entry["message"]
+                .as_str()
+                .is_some_and(|message| message.starts_with("story mount is still yielding"))
+    })?;
+    let frame = waiting
+        .get("trace")
+        .and_then(Value::as_str)
+        .and_then(|trace| trace.lines().map(str::trim).find(|frame| !frame.is_empty() && !frame.starts_with("rur.")));
+    Some(match frame {
+        Some(f) => crate::hints::story_frame(f, None),
+        None => "the story's require".to_string(),
+    })
+}
+
+fn is_error_wrapper_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    let is_banner = trimmed.len() >= 12
+        && trimmed.bytes().take(6).all(|b| b == b'-')
+        && trimmed.bytes().rev().take(6).all(|b| b == b'-');
+    trimmed.ends_with(':') || is_banner || trimmed == "Stack Begin" || trimmed == "Stack End"
+}
+
+fn is_internal_trace_frame(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.ends_with("function traceback")
+        || trimmed.starts_with("rur.")
+        || trimmed.contains(".vide.")
+        || trimmed.starts_with("vide.")
+}
+
+/// Extracts `(cause_line, optional_context_frame)` from a raw Luau/Vide/React error string,
+/// skipping wrapper-only prefix lines (e.g. `error while running root():`, `effect error:`,
+/// `error while running branch():`) so the actual error cause and first user frame appear on screen.
+pub fn summarize_failure_lines(failure: &str) -> (String, Option<String>) {
+    let lines: Vec<&str> = failure.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if lines.is_empty() {
+        return (String::new(), None);
+    }
+    let cause_idx = lines
+        .iter()
+        .position(|line| !is_error_wrapper_line(line))
+        .unwrap_or(0);
+    let cause = lines[cause_idx].to_string();
+    let rest = &lines[cause_idx + 1..];
+    let context = rest
+        .iter()
+        .find(|line| !is_error_wrapper_line(line) && !is_internal_trace_frame(line) && !line.starts_with("... traceback"))
+        .or_else(|| {
+            rest.iter()
+                .find(|line| !is_error_wrapper_line(line) && !line.ends_with("function traceback"))
+        })
+        .map(|s| (*s).to_string());
+    (cause, context)
+}
+
+fn failure_headline(failure: &str, max_chars: usize) -> String {
+    let (cause, context) = summarize_failure_lines(failure);
+    let combined = match context {
+        Some(ctx) if !cause.contains(&ctx) && cause.len() < 80 => format!("{cause} [{ctx}]"),
+        _ => cause,
+    };
+    first_line(&combined, max_chars)
+}
+
 /// Extracts the story's status, root failure cause (unwrapping Luau's generic require wrapper via
-/// `crate::hints::failure_cause`), and optional hint from a scene or sequence end report.
+/// `crate::hints::failure_cause`), waiting location (for yielded mounts), and optional hint from
+/// a scene or sequence end report.
 pub fn extract_run_outcome(value: &Value) -> RunOutcome {
     let status = value.get("status").and_then(Value::as_str).map(str::to_string);
     let diagnostics = &value["diagnostics"];
     let output = &diagnostics["output"];
+    let waiting_at = extract_waiting_at(value);
     let failure = value
         .get("failure")
         .and_then(Value::as_str)
@@ -1610,19 +1695,19 @@ pub fn extract_run_outcome(value: &Value) -> RunOutcome {
     RunOutcome {
         status,
         failure,
+        waiting_at,
         hint,
         edit_mode_mounts: None,
+        play_mode_probe: None,
     }
 }
 
 /// Checks whether a source that failed or mounted nothing in play mode actually mounts UI under
-/// Studio `--mode edit`.
-fn probe_mounts_in_edit_mode(engine_args: &engine::cli::Args) -> bool {
+/// Studio `--mode edit` at `probe_time` (matching `--from` in sequence mode or `--time` in single mode).
+fn probe_mounts_in_edit_mode(engine_args: &engine::cli::Args, probe_time: f64) -> bool {
     let mut edit_args = engine_args.clone();
     edit_args.mode = Some("edit".into());
-    if edit_args.time.is_none() {
-        edit_args.time = Some(0.05);
-    }
+    edit_args.time = Some(probe_time.max(0.05));
     match engine::cli::run_once_with_cost(&edit_args) {
         Ok(run) => {
             run.scene.status == "ok"
@@ -1634,36 +1719,113 @@ fn probe_mounts_in_edit_mode(engine_args: &engine::cli::Args) -> bool {
     }
 }
 
-fn non_ok_reason(status: &str, failure: Option<&str>) -> String {
-    match status {
-        "empty" => EMPTY_MOUNT_MESSAGE.to_string(),
-        "yielded" => "Story mount yielded and did not finish before capture; counts are incomplete.".into(),
-        _ => match failure {
-            Some(msg) => format!("Story failed ({}); zero counts are not a valid UI cost measurement.", first_line(msg, 160)),
-            None => "Story failed to run; zero counts are not a valid UI cost measurement.".into(),
+/// Checks whether a source run in explicit `--mode edit` also mounts cleanly under `--mode play`.
+fn probe_mounts_in_play_mode(engine_args: &engine::cli::Args, probe_time: f64) -> PlayModeProbe {
+    let mut play_args = engine_args.clone();
+    play_args.mode = Some("play".into());
+    play_args.time = Some(probe_time.max(0.05));
+    match engine::cli::run_once_with_cost(&play_args) {
+        Ok(run) => {
+            let outcome = extract_run_outcome(&run.scene.scene);
+            let status = outcome.status.unwrap_or_else(|| run.scene.status.clone());
+            let mounted = !run.dom_hidden.mounted_empty
+                || run.dom_hidden.gui_objects > 0
+                || run.dom_hidden.disabled_screen_guis > 0;
+            if status == "ok" && mounted {
+                PlayModeProbe {
+                    mounts_in_play_mode: true,
+                    status: "ok".into(),
+                    failure: None,
+                    waiting_at: None,
+                }
+            } else {
+                let effective_status = if status == "ok" { "empty".into() } else { status };
+                let failure = if effective_status == "empty" {
+                    Some(EMPTY_MOUNT_MESSAGE.to_string())
+                } else if effective_status == "yielded" {
+                    outcome
+                        .waiting_at
+                        .as_ref()
+                        .map(|at| format!("the story's mount is still waiting, at {at}"))
+                        .or(outcome.failure)
+                } else {
+                    outcome.failure
+                };
+                PlayModeProbe {
+                    mounts_in_play_mode: false,
+                    status: effective_status,
+                    failure,
+                    waiting_at: outcome.waiting_at,
+                }
+            }
+        }
+        Err(err) => PlayModeProbe {
+            mounts_in_play_mode: false,
+            status: "error".into(),
+            failure: Some(err),
+            waiting_at: None,
         },
     }
 }
 
-fn non_ok_settled_by(edit_mode_mounts: Option<bool>) -> &'static str {
-    if edit_mode_mounts == Some(true) {
-        "Story mounts in edit mode, not play; re-run with --mode edit for static counts, CanvasGroup RT, overdraw, and hidden DOM (per-frame layoutCpuMs is refused in edit mode), or fix the story to mount in play mode."
+fn non_ok_reason(status: &str, failure: Option<&str>, drawn_nodes: u64) -> String {
+    match status {
+        "empty" => EMPTY_MOUNT_MESSAGE.to_string(),
+        "yielded" if drawn_nodes > 0 => format!(
+            "Story mount drew UI ({drawn_nodes} nodes) and then yielded without returning (for example, an inline loop in mount); per-frame layoutCpuMs is refused until mount returns."
+        ),
+        "yielded" => match failure {
+            Some(msg) => format!("{} (0 drawn nodes; zero counts are not a valid UI cost measurement).", first_line(msg, 160)),
+            None => "Story mount yielded before mounting UI; zero counts are not a valid UI cost measurement.".into(),
+        },
+        _ => match (failure, drawn_nodes > 0) {
+            (Some(msg), true) => format!("Story failed ({}); counts from a failed run are not a valid UI cost measurement.", failure_headline(msg, 160)),
+            (Some(msg), false) => format!("Story failed ({}); zero counts are not a valid UI cost measurement.", failure_headline(msg, 160)),
+            (None, true) => "Story failed to run; counts from a failed run are not a valid UI cost measurement.".into(),
+            (None, false) => "Story failed to run; zero counts are not a valid UI cost measurement.".into(),
+        },
+    }
+}
+
+fn non_ok_settled_by(status: &str, drawn_nodes: u64, edit_mode_mounts: Option<bool>) -> &'static str {
+    if status == "yielded" && drawn_nodes > 0 {
+        "Wrap any frame or animation loop inside task.spawn(...) or RunService.Heartbeat:Connect(...) so the mount function returns its cleanup handle."
+    } else if edit_mode_mounts == Some(true) {
+        "Story mounts in edit mode, not play, so it cannot get per-frame layoutCpuMs as-is; re-run with --mode edit for static counts, CanvasGroup RT, overdraw, and hidden DOM, or fix the play-mode wait/failure above."
     } else {
         "Fix the story failure or mount path so the UI mounts cleanly before reading cost figures."
     }
 }
 
-fn predicted_non_ok_json(status: &str, failure: Option<&str>, single_live: bool, edit_mode_mounts: Option<bool>) -> Value {
+fn predicted_non_ok_json(
+    status: &str,
+    failure: Option<&str>,
+    drawn_nodes: u64,
+    single_live: bool,
+    edit_mode_mounts: Option<bool>,
+) -> Value {
     let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
-    let basis = if status == "empty" { "nothing_mounted" } else { "story_failed" };
-    let scope = if status == "empty" { "refused_nothing_mounted" } else { "refused_story_failed" };
+    let basis = if status == "empty" {
+        "nothing_mounted"
+    } else if status == "yielded" && drawn_nodes > 0 {
+        "mount_did_not_return"
+    } else {
+        "story_failed"
+    };
+    let scope = if status == "empty" {
+        "refused_nothing_mounted"
+    } else if status == "yielded" && drawn_nodes > 0 {
+        "refused_mount_yielded_after_draw"
+    } else {
+        "refused_story_failed"
+    };
     let layout_refusal = json!({
         "status": "refused",
         "basis": basis,
         "scope": scope,
         "ms": Value::Null,
-        "reason": non_ok_reason(status, failure),
-        "settledBy": non_ok_settled_by(edit_mode_mounts),
+        "reason": non_ok_reason(status, failure, drawn_nodes),
+        "settledBy": non_ok_settled_by(status, drawn_nodes, edit_mode_mounts),
     });
     if single_live {
         json!({
@@ -1702,8 +1864,27 @@ fn edit_mode_fallback_json() -> Value {
         "flag": "--mode edit",
         "provides": ["quads", "glyphQuads", "canvasRtBytes", "overdraw", "hiddenInShown"],
         "refuses": ["per-frame layoutCpuMs (240 Hz edit-mode Heartbeat)"],
-        "note": "Story mounts in edit mode, not play; pass --mode edit for static counts (quads, glyphs, CanvasGroup RT, overdraw, hidden DOM). Per-frame layoutCpuMs is refused in edit mode."
+        "note": "Story mounts in edit mode, not play; this story cannot get per-frame layoutCpuMs as-is. Pass --mode edit for static counts (quads, glyphs, CanvasGroup RT, overdraw, hidden DOM), or fix the play-mode wait/failure above."
     })
+}
+
+fn play_mode_probe_json(probe: &PlayModeProbe) -> Value {
+    let mut obj = Map::new();
+    obj.insert("mountsInPlayMode".into(), json!(probe.mounts_in_play_mode));
+    obj.insert("status".into(), json!(probe.status));
+    if let Some(at) = &probe.waiting_at {
+        obj.insert("waitingAt".into(), json!(at));
+    }
+    if let Some(f) = &probe.failure {
+        obj.insert("failure".into(), json!(failure_headline(f, 200)));
+    }
+    if !probe.mounts_in_play_mode {
+        obj.insert(
+            "note".into(),
+            json!("This story does not mount in play mode, so per-frame layoutCpuMs is unavailable as-is. Fix the play-mode wait or failure to price per-frame layout, or use these edit-mode counts/RT/overdraw/hidden DOM only."),
+        );
+    }
+    Value::Object(obj)
 }
 
 fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool) {
@@ -1715,18 +1896,34 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
         }
     }
     let status = obj.get("status").and_then(Value::as_str).unwrap_or("ok").to_string();
+    let drawn_nodes = obj
+        .get("totals")
+        .and_then(|t| t.get("drawnNodes"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     if let Some(hint) = &outcome.hint {
         obj.insert("hint".into(), json!(hint));
     }
+    if let Some(probe) = &outcome.play_mode_probe {
+        obj.insert("playModeProbe".into(), play_mode_probe_json(probe));
+    }
     if status == "ok" {
         return;
+    }
+    if status == "yielded" {
+        if let Some(at) = &outcome.waiting_at {
+            obj.insert("waitingAt".into(), json!(at));
+        }
     }
     let failure_text = if status == "empty" {
         EMPTY_MOUNT_MESSAGE.to_string()
     } else if let Some(msg) = &outcome.failure {
         msg.clone()
     } else if status == "yielded" {
-        "story mount yielded and did not finish before capture".to_string()
+        match &outcome.waiting_at {
+            Some(at) => format!("the story's mount is still waiting, at {at}"),
+            None => "story mount yielded and did not finish before capture".to_string(),
+        }
     } else {
         format!("story run ended with status \"{status}\"")
     };
@@ -1736,12 +1933,12 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
     }
     obj.insert(
         "predicted".into(),
-        predicted_non_ok_json(&status, Some(&failure_text), single_live, outcome.edit_mode_mounts),
+        predicted_non_ok_json(&status, Some(&failure_text), drawn_nodes, single_live, outcome.edit_mode_mounts),
     );
     if let Some(fid) = obj.get_mut("fidelity").and_then(Value::as_object_mut) {
         fid.insert(
             "layoutCpuMs".into(),
-            json!(format!("refused ({status}: {})", non_ok_reason(&status, Some(&failure_text)))),
+            json!(format!("refused ({status}: {})", non_ok_reason(&status, Some(&failure_text), drawn_nodes))),
         );
     }
     if let Some(summary) = obj
@@ -1749,7 +1946,13 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
         .and_then(|s| s.get_mut("summary"))
         .and_then(Value::as_object_mut)
     {
-        let basis = if status == "empty" { "nothing_mounted" } else { "story_failed" };
+        let basis = if status == "empty" {
+            "nothing_mounted"
+        } else if status == "yielded" && drawn_nodes > 0 {
+            "mount_did_not_return"
+        } else {
+            "story_failed"
+        };
         summary.insert(
             "steadyStateLayoutCpuMs".into(),
             json!({
@@ -1758,8 +1961,8 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
                 "desktop-ref": Value::Null,
                 "phone-mid-range": Value::Null,
                 "phone-mid-band": Value::Null,
-                "reason": non_ok_reason(&status, Some(&failure_text)),
-                "settledBy": non_ok_settled_by(outcome.edit_mode_mounts),
+                "reason": non_ok_reason(&status, Some(&failure_text), drawn_nodes),
+                "settledBy": non_ok_settled_by(&status, drawn_nodes, outcome.edit_mode_mounts),
             }),
         );
     }
@@ -1775,7 +1978,24 @@ fn first_line(s: &str, max_chars: usize) -> String {
     }
 }
 
-fn predicted_edit_mode_sequence_json(run_mode: &str, scope: &'static str) -> Value {
+fn edit_mode_settled_by(play_probe: Option<&PlayModeProbe>) -> String {
+    match play_probe {
+        Some(probe) if !probe.mounts_in_play_mode => {
+            let detail = probe
+                .failure
+                .as_deref()
+                .map(|f| failure_headline(f, 140))
+                .or_else(|| probe.waiting_at.as_ref().map(|at| format!("mount still waiting at {at}")))
+                .unwrap_or_else(|| format!("play mode ended with status \"{}\"", probe.status));
+            format!(
+                "This story does not mount in play mode ({detail}), so per-frame layoutCpuMs is unavailable as-is; fix the play-mode wait/failure to price per-frame layout, or use these edit-mode static counts only."
+            )
+        }
+        _ => "Re-run with --mode play for a playing client's 60 Hz Heartbeat cadence (1 beat per frame).".into(),
+    }
+}
+
+fn predicted_edit_mode_sequence_json(run_mode: &str, scope: &'static str, play_probe: Option<&PlayModeProbe>) -> Value {
     let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
     let reason = if run_mode == "edit" {
         "Run used --mode edit (Studio 240 Hz Heartbeat, 4 beats per 60 Hz frame), which can price Heartbeat-driven UI at up to 4x a playing client's per-frame layout cost."
@@ -1788,7 +2008,7 @@ fn predicted_edit_mode_sequence_json(run_mode: &str, scope: &'static str) -> Val
         "scope": scope,
         "ms": Value::Null,
         "reason": reason,
-        "settledBy": "Re-run with --mode play for a playing client's 60 Hz Heartbeat cadence (1 beat per frame)."
+        "settledBy": edit_mode_settled_by(play_probe),
     });
     json!({
         "desktop-ref": {
@@ -2072,7 +2292,7 @@ pub fn analyze_scene_with_mode(
         if status == "ok" {
             report.insert("predicted".into(), predicted_single_live_json(layout));
         } else {
-            report.insert("predicted".into(), predicted_non_ok_json(status, None, true, None));
+            report.insert("predicted".into(), predicted_non_ok_json(status, None, analyzer.totals.drawn_nodes, true, None));
         }
     } else {
         report.insert("predicted".into(), predicted_scene_only_json());
@@ -2681,7 +2901,7 @@ impl SequenceAccumulator {
             "per_frame_edit_mode_240hz"
         };
         let frame_predicted = if !is_play {
-            predicted_edit_mode_sequence_json(&self.run_mode, "per_frame_refused_in_edit_mode")
+            predicted_edit_mode_sequence_json(&self.run_mode, "per_frame_refused_in_edit_mode", None)
         } else if index == 0 {
             predicted_non_single_client_frame_json(client_frames, self.client_hz, self.fps, true)
         } else if client_frames == 1 {
@@ -2815,6 +3035,7 @@ impl SequenceAccumulator {
             "scrollPasses": round6(steady_scroll_passes),
             "scrollMoved": round6(steady_scroll),
         });
+        let play_probe = outcome.play_mode_probe.as_ref();
         let steady_cpu_json = if !is_play {
             json!({
                 "status": "refused",
@@ -2823,7 +3044,7 @@ impl SequenceAccumulator {
                 "phone-mid-range": Value::Null,
                 "phone-mid-band": Value::Null,
                 "reason": "Run used --mode edit (Studio 240 Hz Heartbeat, 4 beats per 60 Hz frame), which can price Heartbeat-driven UI at up to 4x a playing client's per-frame layout cost.",
-                "settledBy": "Re-run with --mode play for a playing client's 60 Hz Heartbeat cadence (1 beat per frame).",
+                "settledBy": edit_mode_settled_by(play_probe),
             })
         } else if !has_steady_client_frames {
             json!({
@@ -2946,7 +3167,7 @@ impl SequenceAccumulator {
             obj.insert(
                 "predicted".into(),
                 if !is_play {
-                    predicted_edit_mode_sequence_json(&self.run_mode, "per_frame_refused_in_edit_mode")
+                    predicted_edit_mode_sequence_json(&self.run_mode, "per_frame_refused_in_edit_mode", play_probe)
                 } else if !has_steady_client_frames {
                     predicted_no_client_frames_json(count, self.client_hz, self.fps)
                 } else {
@@ -2957,7 +3178,11 @@ impl SequenceAccumulator {
                 fid.insert(
                     "layoutCpuMs".into(),
                     if !is_play {
-                        json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz, 4 beats per 60 Hz frame; pass --mode play for client per-frame layoutCpuMs)")
+                        if play_probe.is_some_and(|p| !p.mounts_in_play_mode) {
+                            json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz; play mode does not mount this story, so per-frame layoutCpuMs is unavailable as-is)")
+                        } else {
+                            json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz, 4 beats per 60 Hz frame; pass --mode play for client per-frame layoutCpuMs)")
+                        }
                     } else if !has_steady_client_frames {
                         json!(format!("refused_no_client_frames (0 client frames completed after frame 0 @ {fps_str} fps on {hz_str} Hz client)"))
                     } else {
@@ -3047,6 +3272,7 @@ pub fn run_sequence_cost(
     let mut acc = SequenceAccumulator::with_cadence(spec.fps, first.client_hz, first.cadence_kind, &run_mode);
     let mut next = Some(first);
     let mut ready_status: Option<String> = None;
+    let mut ready_waiting: Option<String> = None;
     let mut ready_diagnostics: Option<Value> = None;
     let end = loop {
         let frame = match next.take() {
@@ -3064,6 +3290,7 @@ pub fn run_sequence_cost(
         }
         if index == 0 {
             ready_status = reply.pointer("/delta/header/status").and_then(Value::as_str).map(str::to_string);
+            ready_waiting = reply.pointer("/delta/header/waiting").and_then(Value::as_str).map(str::to_string);
             if !reply["diagnostics"].is_null() {
                 ready_diagnostics = Some(reply["diagnostics"].clone());
             }
@@ -3089,6 +3316,11 @@ pub fn run_sequence_cost(
             merged_end["diagnostics"] = diag;
         }
     }
+    if merged_end.get("waiting").is_none() {
+        if let Some(at) = ready_waiting {
+            merged_end["waiting"] = json!(at);
+        }
+    }
     let mut run_outcome = extract_run_outcome(&merged_end);
     let status = run_outcome
         .status
@@ -3096,9 +3328,12 @@ pub fn run_sequence_cost(
         .or(ready_status)
         .unwrap_or_else(|| "ok".into());
     run_outcome.status = Some(status.clone());
+    let probe_time = spec.from.max(0.05);
     let is_empty_mount = status == "ok" && acc.saw_live_dom && !acc.any_non_empty;
     if run_mode == "play" && (status != "ok" || is_empty_mount) {
-        run_outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args));
+        run_outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args, probe_time));
+    } else if run_mode == "edit" && status == "ok" && !is_empty_mount {
+        run_outcome.play_mode_probe = Some(probe_mounts_in_play_mode(&engine_args, probe_time));
     }
     Ok(acc.finish_with_outcome(&run_outcome))
 }
@@ -3219,12 +3454,12 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
     if status != "ok" {
         if let Some(failure) = report.get("failure").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
             let label = if status == "empty" { "empty" } else { "failure" };
-            let mut lines = failure.lines().map(str::trim).filter(|l| !l.is_empty());
-            if let Some(first) = lines.next() {
-                let _ = writeln!(out, "  {label}:   {}", first_line(first, 180));
+            let (cause, context) = summarize_failure_lines(failure);
+            if !cause.is_empty() {
+                let _ = writeln!(out, "  {label}:   {}", first_line(&cause, 180));
             }
-            if let Some(second) = lines.next() {
-                let _ = writeln!(out, "             {}", first_line(second, 180));
+            if let Some(ctx) = context {
+                let _ = writeln!(out, "             {}", first_line(&ctx, 180));
             }
         }
         if let Some(hint) = report.get("hint").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
@@ -3233,7 +3468,7 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
         if report.pointer("/editModeFallback/mountsInEditMode").and_then(Value::as_bool) == Some(true) {
             let _ = writeln!(
                 out,
-                "  mode note: mounts in edit mode, not play; pass --mode edit for counts/RT/overdraw/hidden DOM (per-frame layoutCpuMs is refused in edit mode)",
+                "  mode note: mounts in edit mode, not play; per-frame layoutCpuMs is unavailable as-is (pass --mode edit for counts/RT/overdraw/hidden DOM, or fix the wait/error above)",
             );
         }
     }
@@ -3322,16 +3557,36 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             seq["unchangedFrames"].as_u64().unwrap_or(0),
         );
         let cpu_status = seq.pointer("/steadyStateLayoutCpuMs/status").and_then(Value::as_str);
+        let drawn_nodes = t["drawnNodes"].as_u64().unwrap_or(0);
         if status != "ok" {
-            let _ = writeln!(
-                out,
-                "  layoutMs:  refused ({status}; zero counts are not a valid UI cost measurement)",
-            );
+            let detail = if status == "yielded" && drawn_nodes > 0 {
+                format!("yielded after drawing {drawn_nodes} nodes; wrap the loop in task.spawn or Heartbeat:Connect so mount returns")
+            } else if drawn_nodes > 0 {
+                format!("{status} after drawing {drawn_nodes} nodes; counts from a failed run are not valid")
+            } else {
+                format!("{status}; zero counts are not a valid UI cost measurement")
+            };
+            let _ = writeln!(out, "  layoutMs:  refused ({detail})");
         } else if run_mode != "play" {
-            let _ = writeln!(
-                out,
-                "  layoutMs:  refused in edit mode (240 Hz, 4 beats/frame; pass --mode play for 60 Hz client per-frame ms)",
-            );
+            if report.pointer("/playModeProbe/mountsInPlayMode").and_then(Value::as_bool) == Some(false) {
+                let _ = writeln!(
+                    out,
+                    "  layoutMs:  refused in edit mode (240 Hz; play mode does not mount this story, so per-frame ms is unavailable as-is)",
+                );
+                let p_status = report.pointer("/playModeProbe/status").and_then(Value::as_str).unwrap_or("failed");
+                let p_detail = report
+                    .pointer("/playModeProbe/failure")
+                    .and_then(Value::as_str)
+                    .map(|f| failure_headline(f, 150))
+                    .or_else(|| report.pointer("/playModeProbe/waitingAt").and_then(Value::as_str).map(|at| format!("waiting at {at}")))
+                    .unwrap_or_else(|| format!("status \"{p_status}\""));
+                let _ = writeln!(out, "  play note: play mode {p_status}: {p_detail} (fix this to price per-frame layout)");
+            } else {
+                let _ = writeln!(
+                    out,
+                    "  layoutMs:  refused in edit mode (240 Hz, 4 beats/frame; pass --mode play for 60 Hz client per-frame ms)",
+                );
+            }
         } else if cpu_status == Some("refused") {
             let reason = seq
                 .pointer("/steadyStateLayoutCpuMs/reason")
@@ -3349,6 +3604,7 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             );
         }
     } else if let Some(ft) = report.get("fullTreeLayout") {
+        let drawn_nodes = t["drawnNodes"].as_u64().unwrap_or(0);
         let _ = writeln!(
             out,
             "  layout:    full-tree {}p / {}s / {}m (per-frame layoutCpuMs refused; use --from and --frames)",
@@ -3357,10 +3613,14 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             ft["moved"].as_u64().unwrap_or(0),
         );
         if status != "ok" {
-            let _ = writeln!(
-                out,
-                "  fullTree:  refused ({status}; zero counts are not a valid UI cost measurement)",
-            );
+            let detail = if status == "yielded" && drawn_nodes > 0 {
+                format!("yielded after drawing {drawn_nodes} nodes; wrap the loop in task.spawn or Heartbeat:Connect so mount returns")
+            } else if drawn_nodes > 0 {
+                format!("{status} after drawing {drawn_nodes} nodes; counts from a failed run are not valid")
+            } else {
+                format!("{status}; zero counts are not a valid UI cost measurement")
+            };
+            let _ = writeln!(out, "  fullTree:  refused ({detail})");
         } else {
             let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
             let phone_range = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/rangeMs");
@@ -3622,14 +3882,14 @@ fn print_summary(report: &Value, dest: &Path) {
     let run_mode = report["runMode"].as_str().unwrap_or("unknown");
     if status != "ok" {
         if let Some(failure) = report.get("failure").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
-            eprintln!("rur cost: {status}: {failure}");
+            eprintln!("rur cost: {status}: {}", failure_headline(failure, 200));
         }
         if let Some(hint) = report.get("hint").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
             eprintln!("rur cost: hint: {hint}");
         }
         if report.pointer("/editModeFallback/mountsInEditMode").and_then(Value::as_bool) == Some(true) {
             eprintln!(
-                "rur cost: story mounts in edit mode, not play; pass --mode edit for static counts/RT/overdraw/hidden DOM (per-frame layoutCpuMs is refused in edit mode)"
+                "rur cost: story mounts in edit mode, not play; per-frame layoutCpuMs is unavailable as-is (pass --mode edit for counts/RT/overdraw/hidden DOM, or fix the wait/error above)"
             );
         }
     }
@@ -3649,7 +3909,11 @@ fn print_summary(report: &Value, dest: &Path) {
         let layout_timing = if status != "ok" {
             format!("layout ms refused ({status}); draw/gpu refused")
         } else if run_mode != "play" {
-            "per-frame layout ms refused in edit mode (pass --mode play for 60 Hz client cadence); draw/gpu refused".to_string()
+            if report.pointer("/playModeProbe/mountsInPlayMode").and_then(Value::as_bool) == Some(false) {
+                "per-frame layout ms unavailable as-is (edit mode 240 Hz; play mode does not mount this story); draw/gpu refused".to_string()
+            } else {
+                "per-frame layout ms refused in edit mode (pass --mode play for 60 Hz client cadence); draw/gpu refused".to_string()
+            }
         } else if cpu_status == Some("refused") {
             let reason = seq
                 .pointer("/steadyStateLayoutCpuMs/reason")
@@ -3968,7 +4232,8 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
         let mut report = analyze_scene_with_mode(&store, run.layout, Some(&run.dom_hidden), run_mode);
         let mut outcome = extract_run_outcome(&run.scene.scene);
         if run_mode == "play" && (report["status"] != "ok" || outcome.status.as_deref().is_some_and(|s| s != "ok")) {
-            outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args));
+            let probe_time = engine_args.time.unwrap_or(0.05).max(0.05);
+            outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args, probe_time));
         }
         apply_run_outcome(&mut report, &outcome, true);
         let report = sort_json(report);
@@ -4970,7 +5235,7 @@ end
         assert!(screen_empty.contains("rur cost: empty"), "{screen_empty}");
         assert!(screen_empty.contains("mounted nothing"), "{screen_empty}");
         assert!(screen_empty.contains("--mode edit"), "{screen_empty}");
-        assert!(screen_empty.contains("per-frame layoutCpuMs is refused in edit mode"), "{screen_empty}");
+        assert!(screen_empty.contains("per-frame layoutCpuMs is unavailable as-is"), "{screen_empty}");
         assert!(!screen_empty.contains("0.0000 ms"), "must never print 0.0000 ms for empty mount:\n{screen_empty}");
 
         // Compare refuses empty reports
@@ -5579,6 +5844,165 @@ end
         let sum_rot: f64 = d_rot.iter().map(|d| d["stored"].as_f64().unwrap()).sum();
         let total_rot = rep_rot["layout"]["stored"].as_f64().unwrap();
         assert!((sum_rot - total_rot).abs() < 1e-4, "ring shares {sum_rot} must equal total stored {total_rot}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn edit_only_dead_end_yielded_location_inline_loop_and_nested_error() {
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+        let dir = std::env::temp_dir().join(format!("rur-cost-finding2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 1. Edit-only story that yields on WaitForChild in play mode and mounts cleanly in edit mode
+        let edit_only_wait = dir.join("edit_only_wait.luau");
+        std::fs::write(
+            &edit_only_wait,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	if RunService:IsRunning() then
+		game:GetService("ReplicatedStorage"):WaitForChild("NeverArrivesInPlay")
+	end
+	local F = Instance.new("Frame")
+	F.Size = UDim2.fromOffset(100, 50)
+	F.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+
+        // 2. Mount-then-loop story: draws UI then stays yielded in an inline loop
+        let inline_loop = dir.join("inline_loop.luau");
+        std::fs::write(
+            &inline_loop,
+            r#"return function(Target)
+	local F = Instance.new("Frame")
+	F.Size = UDim2.fromOffset(120, 40)
+	F.Parent = Target
+	local step = 0
+	while true do
+		step += 1
+		F.Position = UDim2.fromOffset(step % 50, 0)
+		task.wait()
+	end
+end
+"#,
+        )
+        .unwrap();
+
+        // 3. Playable story to verify --mode edit STILL recommends --mode play when play actually mounts
+        let playable = dir.join("playable.luau");
+        std::fs::write(
+            &playable,
+            r#"return function(Target)
+	local F = Instance.new("Frame")
+	F.Size = UDim2.fromOffset(80, 40)
+	F.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+
+        // 4. Delayed edit-only mount (only mounts after t = 0.25) to verify edit probe uses --from, not 0.05
+        let delayed_edit = dir.join("delayed_edit.luau");
+        std::fs::write(
+            &delayed_edit,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	if RunService:IsRunning() then return end
+	task.delay(0.25, function()
+		local F = Instance.new("Frame")
+		F.Size = UDim2.fromOffset(60, 60)
+		F.Parent = Target
+	end)
+end
+"#,
+        )
+        .unwrap();
+
+        let make_args = |fixture: &Path, extra: &[&str]| {
+            let mut argv: Vec<String> = vec![
+                "--repo".into(), repo.to_string_lossy().into_owned(),
+                "--roots".into(), root.to_string_lossy().into_owned(),
+                "--fixture".into(), fixture.to_string_lossy().into_owned(),
+                "--viewport".into(), "800x600".into(),
+                "--scale".into(), "1".into(),
+                "--no-snapshots".into(),
+            ];
+            argv.extend(extra.iter().map(|s| s.to_string()));
+            engine::cli::parse(&argv).unwrap()
+        };
+        let dest = Path::new("out/cost.json");
+        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+
+        // Case 1a: Play sequence on edit-only wait story prints exact file:line waiting location + end-state note
+        let rep_play = run_sequence_cost(&make_args(&edit_only_wait, &[]), &spec, &repo).unwrap();
+        assert_eq!(rep_play["status"], "yielded");
+        let waiting_at = rep_play["waitingAt"].as_str().expect("yielded report must carry waitingAt");
+        assert!(waiting_at.contains("edit_only_wait") && waiting_at.contains(":4"), "expected file:line in waitingAt, got: {waiting_at}");
+        assert!(rep_play["failure"].as_str().unwrap_or("").contains(":4"), "{rep_play}");
+        assert_eq!(rep_play["editModeFallback"]["mountsInEditMode"], true);
+        let screen_play = format_one_screen_report(&rep_play, dest);
+        assert!(screen_play.contains("edit_only_wait") && screen_play.contains(":4"), "play screen must print wait location:\n{screen_play}");
+        assert!(screen_play.contains("unavailable as-is"), "play screen must state end state:\n{screen_play}");
+
+        // Case 1b: --mode edit sequence on edit-only story must NOT say "pass --mode play" (no circular remedy)
+        let rep_edit = run_sequence_cost(&make_args(&edit_only_wait, &["--mode", "edit"]), &spec, &repo).unwrap();
+        assert_eq!(rep_edit["status"], "ok");
+        assert_eq!(rep_edit["playModeProbe"]["mountsInPlayMode"], false);
+        let probe_wait = rep_edit["playModeProbe"]["waitingAt"].as_str().unwrap_or("");
+        assert!(probe_wait.contains("edit_only_wait") && probe_wait.contains(":4"), "got: {probe_wait}");
+        let screen_edit = format_one_screen_report(&rep_edit, dest);
+        assert!(screen_edit.contains("unavailable as-is"), "edit screen must state end state:\n{screen_edit}");
+        assert!(screen_edit.contains("edit_only_wait") && screen_edit.contains(":4"), "edit screen must name play-mode wait to fix:\n{screen_edit}");
+        assert!(!screen_edit.contains("pass --mode play"), "edit-only screen must not loop back to --mode play:\n{screen_edit}");
+        let settled_by = rep_edit["predicted"]["desktop-ref"]["layoutCpuMs"]["settledBy"].as_str().unwrap_or("");
+        assert!(!settled_by.contains("Re-run with --mode play"), "settledBy must not loop back to --mode play: {settled_by}");
+
+        // Case 1c: Playable story run in --mode edit still points to --mode play
+        let rep_playable_edit = run_sequence_cost(&make_args(&playable, &["--mode", "edit"]), &spec, &repo).unwrap();
+        assert_eq!(rep_playable_edit["playModeProbe"]["mountsInPlayMode"], true);
+        let screen_playable_edit = format_one_screen_report(&rep_playable_edit, dest);
+        assert!(screen_playable_edit.contains("pass --mode play"), "{screen_playable_edit}");
+
+        // Case 2: Mount-then-loop draws UI then yields -> never claims "zero counts", names task.spawn remedy
+        let rep_loop = run_sequence_cost(&make_args(&inline_loop, &[]), &spec, &repo).unwrap();
+        assert_eq!(rep_loop["status"], "yielded");
+        assert!(rep_loop["totals"]["drawnNodes"].as_u64().unwrap_or(0) > 0, "inline loop drew UI: {rep_loop}");
+        let loop_wait = rep_loop["waitingAt"].as_str().unwrap_or("");
+        assert!(loop_wait.contains("inline_loop") && loop_wait.contains(":9"), "got: {loop_wait}");
+        let screen_loop = format_one_screen_report(&rep_loop, dest);
+        assert!(!screen_loop.contains("zero counts"), "drawn-then-yielded screen must not claim zero counts:\n{screen_loop}");
+        assert!(screen_loop.contains("task.spawn"), "drawn-then-yielded screen must name spawn remedy:\n{screen_loop}");
+        let loop_reason = rep_loop["predicted"]["desktop-ref"]["layoutCpuMs"]["reason"].as_str().unwrap_or("");
+        assert!(!loop_reason.contains("zero counts"), "reason must not claim zero counts: {loop_reason}");
+
+        // Case 3: Nested wrapper error (Vide root -> effect -> branch) surfaces root cause and user frame
+        let nested_failure = "error while running root():\n\neffect error:\nerror while running branch():\n\nattempt to call a nil value\nReplicatedStorage.Packages.vide.untrack:6 function traceback\nReplicatedStorage.Packages.vide.untrack:17 function untrack\nReplicatedStorage.Stories.Panel.story:604 function BuildPanelState\n";
+        let (cause, ctx) = summarize_failure_lines(nested_failure);
+        assert_eq!(cause, "attempt to call a nil value");
+        assert_eq!(ctx.as_deref(), Some("ReplicatedStorage.Stories.Panel.story:604 function BuildPanelState"));
+        let mut fake = analyze_scene(&SceneStore::default(), LayoutStats::default(), None);
+        let outcome = RunOutcome {
+            status: Some("error".into()),
+            failure: Some(nested_failure.into()),
+            ..Default::default()
+        };
+        apply_run_outcome(&mut fake, &outcome, false);
+        let screen_nested = format_one_screen_report(&fake, dest);
+        assert!(screen_nested.contains("attempt to call a nil value"), "{screen_nested}");
+        assert!(screen_nested.contains("Panel.story:604"), "{screen_nested}");
+        assert!(!screen_nested.contains("error while running root():"), "{screen_nested}");
+        let nested_reason = fake["predicted"]["desktop-ref"]["layoutCpuMs"]["reason"].as_str().unwrap_or("");
+        assert!(nested_reason.contains("attempt to call a nil value"), "{nested_reason}");
+
+        // Case 4: Delayed edit-only mount probed at --from (0.5), not hardcoded 0.05
+        let delayed_spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let rep_delayed = run_sequence_cost(&make_args(&delayed_edit, &[]), &delayed_spec, &repo).unwrap();
+        assert_eq!(rep_delayed["status"], "empty");
+        assert_eq!(rep_delayed["editModeFallback"]["mountsInEditMode"], true, "edit probe must run at --from (0.5)");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

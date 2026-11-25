@@ -58,7 +58,13 @@ impl Sources {
     }
 
     fn mounted(&self, at: &str, source: &Path) -> bool {
-        self.mounts.iter().any(|(path, mounted)| path == at && same_path(mounted, source))
+        if self.mounts.iter().any(|(path, mounted)| path == at && same_path(mounted, source)) {
+            return true;
+        }
+        self.roots.iter().any(|root| {
+            let via_root = at.split('/').fold(root.clone(), |dir, segment| dir.join(segment));
+            same_path(&via_root, source)
+        })
     }
 
     /// Whether the run mounted `file`'s project: every `$path` of it that exists, and at least one
@@ -159,6 +165,17 @@ fn file_name(file: &Path) -> String {
     file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// Whether `rur --rojo <file>` accepts this project file instead of exiting with an error
+/// (for example, a DataModel project with non-service top-level entries that `--rojo` rejects).
+fn rojo_mountable(file: &Path) -> bool {
+    let Ok(mounts) = rojo::mounts(file, None, &mut Vec::new()) else {
+        return false;
+    };
+    mounts
+        .iter()
+        .all(|m| m.path.split('/').next().is_some_and(|svc| SERVICES.contains(&svc)))
+}
+
 /// The hint for a failure that reads an instance nothing mounted, from the story at `story`
 pub fn missing_child_hint(message: &str, sources: &Sources, story: Option<&Path>) -> Option<String> {
     let (parent, child) = missing_member(message)?;
@@ -174,9 +191,15 @@ pub fn missing_child_hint(message: &str, sources: &Sources, story: Option<&Path>
         if sources.mounted(&wanted, &source) {
             continue;
         }
+        if !rojo_mountable(file) {
+            continue;
+        }
         // Several project files beside each other that map it, and the run used none of them
         let dir = file.parent().unwrap_or(Path::new(""));
-        let beside = projects.iter().filter(|other| other.parent() == Some(dir) && maps(other).is_some()).count();
+        let beside = projects
+            .iter()
+            .filter(|other| other.parent() == Some(dir) && maps(other).is_some() && rojo_mountable(other))
+            .count();
         if let (true, Err(several)) = (beside > 1, rojo::project_file_in(dir)) {
             return Some(rojo::several_projects(&several));
         }
@@ -232,7 +255,10 @@ pub fn missing_child_hint(message: &str, sources: &Sources, story: Option<&Path>
 /// The hint for a run that mounted `package`, a project whose tree is not a DataModel, when DataModel projects beside it
 /// mount the story ([`rojo::data_models_beside`]): the instance path `wanted` exists only in them
 fn data_model_hint(package: &Path, wanted: &str, story: Option<&Path>) -> Option<String> {
-    let beside = rojo::data_models_beside(package, story);
+    let beside: Vec<PathBuf> = rojo::data_models_beside(package, story)
+        .into_iter()
+        .filter(|file| rojo_mountable(file))
+        .collect();
     let mounted = format!("this run mounted {}, the package's own tree, not a DataModel, so nothing mounts {}", file_name(package), rojo::dotted(wanted));
     let what = rojo::source_name(story);
     match beside.as_slice() {
@@ -250,7 +276,10 @@ pub fn waiting_hint(sources: &Sources, story: Option<&Path>) -> Option<String> {
     let here: Vec<&PathBuf> = projects.iter().filter(|file| file.parent() == Some(dir)).collect();
     let nearest = match here.iter().find(|file| sources.used(file)) {
         Some(used) => *used,
-        None if here.len() > 1 => return Some(rojo::several_projects(&here.into_iter().cloned().collect::<Vec<_>>())),
+        None if here.len() > 1 => {
+            let mountable: Vec<PathBuf> = here.into_iter().filter(|f| rojo_mountable(f)).cloned().collect();
+            return (!mountable.is_empty()).then(|| rojo::several_projects(&mountable));
+        }
         None => here[0],
     };
     let mappings = rojo::mappings(nearest).ok()?;
@@ -258,7 +287,7 @@ pub fn waiting_hint(sources: &Sources, story: Option<&Path>) -> Option<String> {
         return Some(rojo::missing_path(nearest, at, source));
     }
     let unmounted: Vec<String> = mappings.iter().filter(|(at, source, _)| !sources.mounted(at, source)).map(|(at, _, _)| rojo::dotted(at)).collect();
-    if unmounted.is_empty() {
+    if unmounted.is_empty() || !rojo_mountable(nearest) {
         return None;
     }
     const SHOWN: usize = 4;
@@ -471,5 +500,39 @@ mod tests {
         assert!(missing_child_hint("attempt to index nil with 'Packages'", &Sources::default(), Some(&story)).is_none());
         assert!(missing_child_hint(r#"Foo is not a valid member of Frame "Frame""#, &Sources::default(), Some(&story)).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn waiting_hint_skips_mounted_roots_and_unmountable_rojo_projects() {
+        // 1. A project whose service folders are already mounted via --roots needs no --rojo hint
+        let dir = temp_dir("roots-mounted");
+        write(
+            &dir.join("default.project.json"),
+            r#"{"name":"g","tree":{"$className":"DataModel","ReplicatedFirst":{"$path":"ReplicatedFirst"},"ReplicatedStorage":{"$path":"ReplicatedStorage"}}}"#,
+        );
+        write(&dir.join("ReplicatedFirst/Init.luau"), "return {}");
+        let story = dir.join("ReplicatedStorage/Ui.story.luau");
+        write(&story, "return {}");
+        let via_roots = Sources { roots: vec![dir.clone()], mounts: Vec::new() };
+        assert!(waiting_hint(&via_roots, Some(&story)).is_none(), "folders mounted through --roots must not trigger a --rojo hint");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // 2. A DataModel project with a non-service top-level key (which `rur --rojo` rejects) must never be recommended
+        let bad = temp_dir("unmountable-rojo");
+        write(
+            &bad.join("default.project.json"),
+            r#"{"name":"g","tree":{"$className":"DataModel","ReplicatedFirst":{"$path":"rf"},"CustomTop":{"$path":"custom"}}}"#,
+        );
+        write(&bad.join("rf/Init.luau"), "return {}");
+        write(&bad.join("custom/A.luau"), "return {}");
+        let story = bad.join("custom/Ui.story.luau");
+        write(&story, "return {}");
+        let empty = Sources::default();
+        assert!(!rojo_mountable(&bad.join("default.project.json")));
+        assert!(waiting_hint(&empty, Some(&story)).is_none(), "must not recommend --rojo on a project that --rojo rejects");
+        let missing = r#"Init is not a valid member of ReplicatedFirst "ReplicatedFirst""#;
+        let hint = missing_child_hint(missing, &empty, Some(&story));
+        assert!(hint.as_deref().is_none_or(|h| !h.contains("pass --rojo")), "must not suggest broken --rojo: {hint:?}");
+        let _ = std::fs::remove_dir_all(&bad);
     }
 }
