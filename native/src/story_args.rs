@@ -169,6 +169,11 @@ impl Args {
             _ => Vec::new(),
         }
     }
+
+    /// Every option name passed on the command line, with its leading `--`.
+    pub fn option_names(&self) -> Vec<String> {
+        self.options.iter().map(|(name, _)| format!("--{name}")).collect()
+    }
 }
 
 /// The global options of cli/paths.mjs, taken out of `argv`: `--state-dir <dir>` (`=` too), `--text-subpixel on|off`,

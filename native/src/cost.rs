@@ -2526,6 +2526,20 @@ fn check_compare_equivalence(before: &Value, after: &Value) -> Vec<EquivalenceMi
             remedy: "Compare two single-moment reports (`rur cost ...`) or two matching sequence reports (`rur cost --from ... --frames ... --fps ...`).".into(),
         });
     } else if b_mode == "sequence" {
+        if let (Some(bfrom), Some(afrom)) = (
+            before.pointer("/sequence/summary/from").and_then(Value::as_f64),
+            after.pointer("/sequence/summary/from").and_then(Value::as_f64),
+        ) {
+            if (bfrom - afrom).abs() > 1e-6 {
+                mismatches.push(EquivalenceMismatch {
+                    field: "sequence.from",
+                    before: json!(bfrom),
+                    after: json!(afrom),
+                    reason: format!("sequence start time differs (before --from={bfrom}, after --from={afrom})"),
+                    remedy: "Re-run both sequence arms with the same --from start time.".into(),
+                });
+            }
+        }
         if let (Some(bf), Some(af)) = (
             before.pointer("/sequence/summary/frameCount").and_then(Value::as_u64),
             after.pointer("/sequence/summary/frameCount").and_then(Value::as_u64),
@@ -2628,6 +2642,51 @@ fn check_compare_equivalence(before: &Value, after: &Value) -> Vec<EquivalenceMi
         });
     }
 
+    if before.get("source").is_some() || after.get("source").is_some() {
+        let b_src = before.get("source").cloned().unwrap_or(Value::Null);
+        let a_src = after.get("source").cloned().unwrap_or(Value::Null);
+        if sort_json(b_src.clone()) != sort_json(a_src.clone()) {
+            let fmt_src = |v: &Value| {
+                if let (Some(k), Some(t)) = (v.get("kind").and_then(Value::as_str), v.get("target").and_then(Value::as_str)) {
+                    format!("{k}:{t}")
+                } else {
+                    "unspecified".to_string()
+                }
+            };
+            mismatches.push(EquivalenceMismatch {
+                field: "source",
+                before: b_src.clone(),
+                after: a_src.clone(),
+                reason: format!("source differs (before={}, after={})", fmt_src(&b_src), fmt_src(&a_src)),
+                remedy: "Compare two runs of the same story/fixture/module/model (use --git-ref to compare revisions of one source).".into(),
+            });
+        }
+    }
+
+    let b_dev = before.get("device").and_then(Value::as_str).unwrap_or("desktop");
+    let a_dev = after.get("device").and_then(Value::as_str).unwrap_or("desktop");
+    if b_dev != a_dev {
+        mismatches.push(EquivalenceMismatch {
+            field: "device",
+            before: json!(b_dev),
+            after: json!(a_dev),
+            reason: format!("device differs (before=\"{b_dev}\", after=\"{a_dev}\")"),
+            remedy: "Re-run both arms with the same --device (desktop, touch, or gamepad).".into(),
+        });
+    }
+
+    let b_ctrl = sort_json(before.get("controls").cloned().unwrap_or_else(|| json!({})));
+    let a_ctrl = sort_json(after.get("controls").cloned().unwrap_or_else(|| json!({})));
+    if b_ctrl != a_ctrl {
+        mismatches.push(EquivalenceMismatch {
+            field: "controls",
+            before: b_ctrl.clone(),
+            after: a_ctrl.clone(),
+            reason: format!("controls differ (before={b_ctrl}, after={a_ctrl})"),
+            remedy: "Re-run both arms with the same --controls values.".into(),
+        });
+    }
+
     mismatches
 }
 
@@ -2637,7 +2696,20 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
     validate_cost_report(before, "before", None)?;
     validate_cost_report(after, "after", None)?;
 
-    let checks = json!(["schema", "status", "mode", "runMode", "input", "hiddenInShown.complete", "viewport", "scale"]);
+    let checks = json!([
+        "schema",
+        "status",
+        "source",
+        "mode",
+        "sequence.from",
+        "runMode",
+        "input",
+        "hiddenInShown.complete",
+        "viewport",
+        "scale",
+        "device",
+        "controls"
+    ]);
     let mismatches = check_compare_equivalence(before, after);
     if !mismatches.is_empty() {
         let reasons: Vec<String> = mismatches.iter().map(|m| m.reason.clone()).collect();
@@ -3435,7 +3507,9 @@ pub fn run_sequence_cost(
     } else if run_mode == "edit" && status == "ok" && !is_empty_mount {
         run_outcome.play_mode_probe = Some(probe_mounts_in_play_mode(&engine_args, probe_time));
     }
-    Ok(acc.finish_with_outcome(&run_outcome))
+    let mut report = acc.finish_with_outcome(&run_outcome);
+    attach_engine_run_metadata(&mut report, &engine_args, repo);
+    Ok(sort_json(report))
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -4206,10 +4280,200 @@ struct CliOutput {
     failed: bool,
 }
 
+const COST_OPTIONS: &[&str] = &[
+    "--story",
+    "--module",
+    "--model",
+    "--fixture",
+    "--scene",
+    "--repo",
+    "--project",
+    "--place",
+    "--roots",
+    "--rojo",
+    "--rojo-at",
+    "--mount",
+    "--load",
+    "--snapshot-dir",
+    "--no-snapshots",
+    "--studio",
+    "--git-ref",
+    "--plugin",
+    "--offline",
+    "--viewport",
+    "--viewport-from",
+    "--scale",
+    "--time",
+    "--mode",
+    "--player",
+    "--background",
+    "--place-name",
+    "--actions",
+    "--controls",
+    "--camera",
+    "--place-id",
+    "--rotation-clipping",
+    "--topbar-inset",
+    "--device",
+    "--all-layers",
+    "--verbose",
+    "--from",
+    "--to",
+    "--frames",
+    "--duration",
+    "--fps",
+    "--client-hz",
+    "--out",
+    "--tag",
+    "--keep",
+    "--compare",
+    "--json",
+    "--help",
+];
+
+const COMPARE_OPTIONS: &[&str] = &["--out", "--tag", "--keep", "--json", "--repo", "--help"];
+
+fn validate_cost_cli_args(args: &Args, is_compare: bool) -> Result<(), Failure> {
+    let allowed = if is_compare { COMPARE_OPTIONS } else { COST_OPTIONS };
+    for opt in args.option_names() {
+        if !allowed.contains(&opt.as_str()) {
+            let cmd = if is_compare { "rur cost compare" } else { "rur cost" };
+            return Err(Failure::Usage(format!(
+                "unknown option for `{cmd}`: {opt} (run `rur cost --help` for supported options)"
+            )));
+        }
+    }
+    if is_compare {
+        if args.positional.len() > 3 {
+            return Err(Failure::Usage(format!(
+                "cost compare takes exactly two reports (<before> <after>), got unexpected argument \"{}\"",
+                args.positional[3]
+            )));
+        }
+    } else if let Some(extra) = args.positional.first() {
+        return Err(Failure::Usage(format!(
+            "unexpected positional argument for `rur cost`: \"{extra}\" (use --story/--fixture/--module/--model/--scene, or `rur cost compare <before> <after>`)"
+        )));
+    }
+    if !is_compare && args.present("--time") {
+        let raw = args.given("--time").ok_or_else(|| {
+            Failure::Usage("--time in `rur cost` takes a single moment in seconds (e.g. --time 0.5)".into())
+        })?;
+        let trimmed = raw.trim();
+        let valid = !trimmed.contains(',')
+            && !trimmed.contains("..")
+            && trimmed.parse::<f64>().is_ok_and(|v| v.is_finite() && v >= 0.0);
+        if !valid {
+            return Err(Failure::Usage(format!(
+                "--time in `rur cost` takes a single moment in seconds, got \"{raw}\" (use --from and --frames/--to/--duration with --fps for multiple moments)"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_source_path(path: &Path, bases: &[&Path]) -> String {
+    for base in bases {
+        if let Ok(rel) = path.strip_prefix(base) {
+            return rel.to_string_lossy().replace('\\', "/");
+        }
+    }
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn parse_controls_json(raw: Option<&str>, resolve_base: Option<&Context>) -> Value {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return json!({});
+    };
+    if raw.starts_with('{') {
+        if let Ok(v) = serde_json::from_str::<Value>(raw) {
+            return sort_json(v);
+        }
+        return json!(raw);
+    }
+    let path = match resolve_base {
+        Some(ctx) => ctx.resolve(raw),
+        None => PathBuf::from(raw),
+    };
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(v) = serde_json::from_str::<Value>(&text) {
+            return sort_json(v);
+        }
+    }
+    json!(raw.replace('\\', "/"))
+}
+
+fn source_from_engine_args(engine_args: &engine::cli::Args, repo: &Path) -> Option<Value> {
+    let (kind, raw) = if let Some(s) = engine_args.story.as_deref() {
+        ("story", s)
+    } else if let Some(s) = engine_args.module.as_deref() {
+        ("module", s)
+    } else if let Some(s) = engine_args.model.as_deref() {
+        ("model", s)
+    } else if let Some(s) = engine_args.fixture.as_deref() {
+        ("fixture", s)
+    } else {
+        return None;
+    };
+    let mut bases: Vec<&Path> = Vec::new();
+    if let Some(proj) = engine_args.project.as_deref() {
+        bases.push(Path::new(proj));
+    }
+    bases.push(repo);
+    let target = normalize_source_path(Path::new(raw), &bases);
+    Some(json!({ "kind": kind, "target": target }))
+}
+
+fn source_from_cli_args(context: &Context, args: &Args) -> Option<Value> {
+    for (flag, kind) in [
+        ("--story", "story"),
+        ("--module", "module"),
+        ("--model", "model"),
+        ("--fixture", "fixture"),
+    ] {
+        if let Some(raw) = args.value(flag) {
+            let abs = context.resolve(&raw);
+            let proj = context.project(args);
+            let target = normalize_source_path(&abs, &[proj.as_path(), context.repo.as_path()]);
+            return Some(json!({ "kind": kind, "target": target }));
+        }
+    }
+    None
+}
+
+fn attach_engine_run_metadata(report: &mut Value, engine_args: &engine::cli::Args, repo: &Path) {
+    let Some(obj) = report.as_object_mut() else { return };
+    if let Some(src) = source_from_engine_args(engine_args, repo) {
+        obj.insert("source".into(), src);
+    }
+    obj.insert("device".into(), json!(engine_args.device.as_deref().unwrap_or("desktop")));
+    obj.insert("controls".into(), parse_controls_json(engine_args.controls.as_deref(), None));
+}
+
+fn attach_cli_run_metadata(
+    report: &mut Value,
+    context: &Context,
+    args: &Args,
+    engine_args: &engine::cli::Args,
+    single_time: Option<f64>,
+) {
+    let Some(obj) = report.as_object_mut() else { return };
+    if let Some(src) = source_from_cli_args(context, args) {
+        obj.insert("source".into(), src);
+    }
+    obj.insert("device".into(), json!(engine_args.device.as_deref().unwrap_or("desktop")));
+    obj.insert("controls".into(), parse_controls_json(args.given("--controls").as_deref(), Some(context)));
+    if let Some(t) = single_time {
+        obj.insert("time".into(), json!(round9(t)));
+    }
+}
+
 fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
     let (context, args) = Context::new(argv)?;
+    let is_compare = args.positional.first().map(String::as_str) == Some("compare");
+    validate_cost_cli_args(&args, is_compare)?;
 
-    if args.positional.first().map(String::as_str) == Some("compare") {
+    if is_compare {
         if args.positional.len() < 3 {
             return Err(Failure::Usage("cost compare needs <before> <after>".into()));
         }
@@ -4294,7 +4558,9 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
         };
         spec.client_hz = Some(client_hz);
         let engine_args = build_engine_args(&context, &args)?;
-        let report = run_sequence_cost(&engine_args, &spec, &context.repo).map_err(Failure::Error)?;
+        let mut report = run_sequence_cost(&engine_args, &spec, &context.repo).map_err(Failure::Error)?;
+        attach_cli_run_metadata(&mut report, &context, &args, &engine_args, None);
+        let report = sort_json(report);
         let name = format!("{}-cost", crate::story_args::source_name(&source, false));
         (report, name)
     } else if let Some(scene_arg) = args.value("--scene") {
@@ -4336,6 +4602,7 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
             outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args, probe_time));
         }
         apply_run_outcome(&mut report, &outcome, true);
+        attach_cli_run_metadata(&mut report, &context, &args, &engine_args, Some(engine_args.time.unwrap_or(0.0)));
         let report = sort_json(report);
         let name = format!("{}-cost", crate::story_args::source_name(&source, false));
         (report, name)
@@ -6288,6 +6555,84 @@ end
                 "angle index {i} overdraw {ov} diverged from 0 deg ({})",
                 angle_overdraws[0]
             );
+        }
+    }
+
+    #[test]
+    fn compare_equivalence_source_controls_from_device_and_cli_option_validation() {
+        let mut base = sample_cost_report("sequence", "live", "ok", 1200.0, 900.0, 1.0, true, 10, 0, 0);
+        base["runMode"] = json!("play");
+        base["source"] = json!({"kind": "story", "target": "Stories/A.story.luau"});
+        base["device"] = json!("desktop");
+        base["controls"] = json!({"Theme": "Dark", "Count": 3});
+        base["sequence"] = json!({"summary": {"from": 0.5, "frameCount": 10, "fps": 60.0, "clientHz": 60.0}});
+
+        // Identical arms with reordered controls keys pass equivalence
+        let mut same = base.clone();
+        same["controls"] = json!({"Count": 3, "Theme": "Dark"});
+        let ok_diff = compare_reports(&base, &same).unwrap();
+        assert_eq!(ok_diff["verdict"], "unchanged");
+        assert_eq!(ok_diff["equivalence"]["passed"], true);
+
+        // 1. Different source -> refused
+        let mut diff_src = base.clone();
+        diff_src["source"] = json!({"kind": "story", "target": "Stories/B.story.luau"});
+        let r_src = compare_reports(&base, &diff_src).unwrap();
+        assert_eq!(r_src["verdict"], "refused");
+        assert!(r_src["reason"].as_str().unwrap().contains("source"), "{r_src}");
+
+        // 2. Different controls -> refused
+        let mut diff_ctrl = base.clone();
+        diff_ctrl["controls"] = json!({"Theme": "Light", "Count": 3});
+        let r_ctrl = compare_reports(&base, &diff_ctrl).unwrap();
+        assert_eq!(r_ctrl["verdict"], "refused");
+        assert!(r_ctrl["reason"].as_str().unwrap().contains("controls"), "{r_ctrl}");
+
+        // 3. Different --from -> refused
+        let mut diff_from = base.clone();
+        diff_from["sequence"]["summary"]["from"] = json!(0.0);
+        let r_from = compare_reports(&base, &diff_from).unwrap();
+        assert_eq!(r_from["verdict"], "refused");
+        assert!(r_from["reason"].as_str().unwrap().contains("--from"), "{r_from}");
+
+        // 4. Different --device -> refused
+        let mut diff_dev = base.clone();
+        diff_dev["device"] = json!("touch");
+        let r_dev = compare_reports(&base, &diff_dev).unwrap();
+        assert_eq!(r_dev["verdict"], "refused");
+        assert!(r_dev["reason"].as_str().unwrap().contains("device"), "{r_dev}");
+
+        // 5. Unknown option (e.g. typo in --frames) -> Usage error (exit 64)
+        let bad_frames = format!("{}frams", "--");
+        let typo = run_cli(&["--fixture".into(), "x.luau".into(), bad_frames.clone(), "10".into()]);
+        match typo {
+            Err(Failure::Usage(msg)) => {
+                assert!(msg.contains(&bad_frames), "expected unknown option name, got: {msg}");
+            }
+            Err(other) => panic!("expected Usage error for unknown option, got: {other:?}"),
+            Ok(_) => panic!("expected Usage error for unknown option, got Ok"),
+        }
+
+        // 6. Unknown option on `cost compare` -> Usage error (exit 64)
+        let bad_opt = format!("{}bogus", "--");
+        let cmp_typo = run_cli(&["compare".into(), "a.json".into(), "b.json".into(), bad_opt.clone(), "1".into()]);
+        match cmp_typo {
+            Err(Failure::Usage(msg)) => {
+                assert!(msg.contains(&bad_opt), "expected unknown compare option, got: {msg}");
+            }
+            Err(other) => panic!("expected Usage error for unknown compare option, got: {other:?}"),
+            Ok(_) => panic!("expected Usage error for unknown compare option, got Ok"),
+        }
+
+        // 7. --time list -> Usage error explaining cost takes a single moment
+        let multi_time = run_cli(&["--fixture".into(), "x.luau".into(), "--time".into(), "0.2,0.5".into()]);
+        match multi_time {
+            Err(Failure::Usage(msg)) => {
+                assert!(msg.contains("single moment"), "expected single-moment explanation, got: {msg}");
+                assert!(msg.contains("--from"), "expected sequence alternative, got: {msg}");
+            }
+            Err(other) => panic!("expected Usage error for multi-value --time, got: {other:?}"),
+            Ok(_) => panic!("expected Usage error for multi-value --time, got Ok"),
         }
     }
 }
