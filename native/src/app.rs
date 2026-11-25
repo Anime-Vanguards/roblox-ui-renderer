@@ -781,7 +781,16 @@ impl NativeApp {
                 if *failed {
                     crate::hints::missing_child_hint(message, &sources, Some(story))
                 } else {
-                    crate::hints::waiting_hint(&sources, Some(story))
+                    let warnings: Vec<&str> = self
+                        .mount_output
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|e| e["kind"] == "warn")
+                        .filter_map(|e| e["message"].as_str())
+                        .collect();
+                    let cause = crate::hints::parse_wait_cause(&warnings, None);
+                    crate::hints::waiting_hint(&sources, Some(story), cause.as_ref())
                 }
             }
             _ => None,

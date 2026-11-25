@@ -7221,4 +7221,129 @@ end
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn rojo_hint_suppressed_for_remote_invoke_and_partial_rojo_project() {
+        let dir = std::env::temp_dir().join(format!("rur-cost-rojo-hint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = crate::engine::default_repo();
+
+        // 1. Reviewer's fixture: mounts a Frame and then calls InvokeServer() on a RemoteFunction it made itself,
+        //    beside a valid default.project.json with an unmounted Packages folder -> must print NO --rojo hint.
+        let inv_dir = dir.join("invoke_proj");
+        std::fs::create_dir_all(inv_dir.join("ReplicatedStorage")).unwrap();
+        std::fs::create_dir_all(inv_dir.join("Packages")).unwrap();
+        std::fs::write(inv_dir.join("Packages/Kit.luau"), "return {}").unwrap();
+        std::fs::write(
+            inv_dir.join("default.project.json"),
+            r#"{"name":"Inv","tree":{"$className":"DataModel","ReplicatedStorage":{"$path":"ReplicatedStorage","Packages":{"$path":"Packages"}}}}"#,
+        )
+        .unwrap();
+        let inv_fixture = inv_dir.join("ReplicatedStorage/wait_remote.luau");
+        std::fs::write(
+            &inv_fixture,
+            r#"return function(Target)
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromOffset(100, 40)
+	f.Parent = Target
+	local rf = Instance.new("RemoteFunction")
+	rf.Name = "OwnRemote"
+	rf.Parent = game:GetService("ReplicatedStorage")
+	rf:InvokeServer()
+end
+"#,
+        )
+        .unwrap();
+        let make_args = |fixture: &Path, roots: &str| -> engine::cli::Args {
+            let argv: Vec<String> = vec![
+                "--repo".into(),
+                repo.to_string_lossy().into_owned(),
+                "--roots".into(),
+                roots.to_string(),
+                "--fixture".into(),
+                fixture.to_string_lossy().into_owned(),
+                "--viewport".into(),
+                "800x600".into(),
+                "--scale".into(),
+                "1".into(),
+                "--no-snapshots".into(),
+            ];
+            engine::cli::parse(&argv).unwrap()
+        };
+        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 3, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let rep_inv = run_sequence_cost(&make_args(&inv_fixture, &inv_dir.to_string_lossy()), &spec, &repo).unwrap();
+        assert_eq!(rep_inv["status"], "yielded");
+        assert!(rep_inv["totals"]["drawnNodes"].as_u64().unwrap_or(0) >= 1);
+        assert!(
+            rep_inv["waitingAt"].as_str().unwrap_or("").contains("wait_remote:8"),
+            "expected wait_remote:8, got {:?}",
+            rep_inv["waitingAt"]
+        );
+        assert!(
+            rep_inv.get("hint").is_none(),
+            "InvokeServer() on own RemoteFunction must not print a --rojo hint: {:?}",
+            rep_inv.get("hint")
+        );
+
+        // 2. Partial Rojo project covering fewer roots than the run mounted -> must print NO --rojo hint.
+        let part_dir = dir.join("partial_proj");
+        let shared_root = part_dir.join("common_root");
+        let place_root = part_dir.join("place_root");
+        std::fs::create_dir_all(shared_root.join("ReplicatedStorage/Core")).unwrap();
+        std::fs::create_dir_all(place_root.join("ReplicatedStorage")).unwrap();
+        std::fs::create_dir_all(place_root.join("Extra")).unwrap();
+        std::fs::write(shared_root.join("ReplicatedStorage/Core/Lib.luau"), "return {}").unwrap();
+        std::fs::write(place_root.join("Extra/Net.luau"), "return {}").unwrap();
+        std::fs::write(
+            place_root.join("default.project.json"),
+            r#"{"name":"PlaceOnly","tree":{"$className":"DataModel","ReplicatedStorage":{"$path":"ReplicatedStorage","Extra":{"$path":"Extra"}}}}"#,
+        )
+        .unwrap();
+        let wait_story = place_root.join("ReplicatedStorage/WaitExtra.story.luau");
+        std::fs::write(
+            &wait_story,
+            r#"local ReplicatedStorage = game:GetService("ReplicatedStorage")
+return function(Target)
+	local _ = ReplicatedStorage:WaitForChild("Extra")
+end
+"#,
+        )
+        .unwrap();
+        let make_story_args = |story: &Path, roots: &str| -> engine::cli::Args {
+            let argv: Vec<String> = vec![
+                "--repo".into(),
+                repo.to_string_lossy().into_owned(),
+                "--roots".into(),
+                roots.to_string(),
+                "--story".into(),
+                story.to_string_lossy().into_owned(),
+                "--viewport".into(),
+                "800x600".into(),
+                "--scale".into(),
+                "1".into(),
+                "--no-snapshots".into(),
+            ];
+            engine::cli::parse(&argv).unwrap()
+        };
+        let multi = format!("{};{}", shared_root.display(), place_root.display());
+        let rep_partial = run_sequence_cost(&make_story_args(&wait_story, &multi), &spec, &repo).unwrap();
+        assert_eq!(rep_partial["status"], "yielded");
+        assert!(
+            rep_partial.get("hint").is_none(),
+            "partial Rojo project that drops the other mounted root must not print a --rojo hint: {:?}",
+            rep_partial.get("hint")
+        );
+
+        // 3. Same story run with ONLY place_root (which default.project.json DOES cover) -> DOES print --rojo hint.
+        let rep_covered = run_sequence_cost(&make_story_args(&wait_story, &place_root.to_string_lossy()), &spec, &repo).unwrap();
+        assert_eq!(rep_covered["status"], "yielded");
+        let covered_hint = rep_covered["hint"].as_str().unwrap_or("");
+        assert!(
+            covered_hint.contains("pass --rojo") && covered_hint.contains("ReplicatedStorage.Extra"),
+            "covering Rojo project matching WaitForChild should print --rojo hint, got: {covered_hint:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

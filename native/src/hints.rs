@@ -61,10 +61,7 @@ impl Sources {
         if self.mounts.iter().any(|(path, mounted)| path == at && same_path(mounted, source)) {
             return true;
         }
-        self.roots.iter().any(|root| {
-            let via_root = at.split('/').fold(root.clone(), |dir, segment| dir.join(segment));
-            same_path(&via_root, source)
-        })
+        self.roots.iter().any(|root| root_mounts_path(root, at, source))
     }
 
     /// Whether the run mounted `file`'s project: every `$path` of it that exists, and at least one
@@ -104,9 +101,135 @@ impl Sources {
     }
 }
 
+fn norm_path(path: &Path) -> PathBuf {
+    crate::paths::canonical_path(path)
+        .or_else(|_| std::path::absolute(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn same_path(a: &Path, b: &Path) -> bool {
-    let absolute = |path: &Path| std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    a == b || absolute(a) == absolute(b)
+    a == b || norm_path(a) == norm_path(b)
+}
+
+fn path_contains(ancestor: &Path, child: &Path) -> bool {
+    let a = norm_path(ancestor);
+    let c = norm_path(child);
+    c == a || c.starts_with(&a)
+}
+
+/// Whether `root` (a `--roots` folder laid out by service) already mounts `(at, source)`,
+/// including Rojo script/model files such as `Foo.server.luau` mapped to `ServerScriptService/Foo`.
+fn root_mounts_path(root: &Path, at: &str, source: &Path) -> bool {
+    let via_root = at.split('/').fold(root.to_path_buf(), |dir, segment| dir.join(segment));
+    if same_path(&via_root, source) {
+        return true;
+    }
+    let Some(parent) = via_root.parent() else { return false };
+    let Some(expected_name) = via_root.file_name().and_then(|s| s.to_str()) else { return false };
+    if !source.parent().is_some_and(|p| same_path(p, parent)) {
+        return false;
+    }
+    let Some(file_name) = source.file_name().and_then(|s| s.to_str()) else { return false };
+    let stem = file_name
+        .strip_suffix(".server.luau")
+        .or_else(|| file_name.strip_suffix(".client.luau"))
+        .or_else(|| file_name.strip_suffix(".server.lua"))
+        .or_else(|| file_name.strip_suffix(".client.lua"))
+        .or_else(|| file_name.strip_suffix(".model.json"))
+        .or_else(|| file_name.strip_suffix(".meta.json"))
+        .or_else(|| file_name.strip_suffix(".luau"))
+        .or_else(|| file_name.strip_suffix(".lua"))
+        .or_else(|| file_name.strip_suffix(".json"))
+        .or_else(|| file_name.strip_suffix(".rbxm"))
+        .or_else(|| file_name.strip_suffix(".rbxmx"))
+        .or_else(|| file_name.strip_suffix(".rbx"));
+    stem == Some(expected_name)
+}
+
+/// What a yielding story mount is waiting on, parsed from engine warnings or the suspended Luau line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WaitCause {
+    /// Waiting inside `WaitForChild` (optional receiver/parent path, optional literal child name).
+    WaitForChild { parent: Option<String>, child: Option<String> },
+    /// Yielded in something other than `WaitForChild` (e.g. `InvokeServer`, `task.wait`, `Event:Wait`).
+    Other,
+}
+
+/// Extracts the first quoted string literal (`"..."` or `'...'`) from `text`.
+fn first_quoted_literal(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let q = bytes[i];
+        if q == b'"' || q == b'\'' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' {
+                    j += 2;
+                    continue;
+                }
+                if bytes[j] == q {
+                    return Some(text[start..j].to_string());
+                }
+                j += 1;
+            }
+            return None;
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Extracts a Roblox service or identifier path immediately preceding `:WaitForChild` / `.WaitForChild`.
+fn wait_receiver_parent(prefix: &str) -> Option<String> {
+    let trimmed = prefix.trim_end();
+    // Handle `game:GetService("ReplicatedStorage")`
+    if let Some(after_gs) = trimmed.rsplit("GetService").next() {
+        if trimmed.contains("GetService") {
+            if let Some(svc) = first_quoted_literal(after_gs) {
+                return Some(svc);
+            }
+        }
+    }
+    let ident: String = trimmed
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '.')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let ident = ident.trim_matches('.');
+    (!ident.is_empty()).then(|| ident.to_string())
+}
+
+/// Parses what a yielding thread is waiting on from `"Infinite yield possible"` warnings or its suspended source line.
+pub fn parse_wait_cause(warnings: &[&str], source_line: Option<&str>) -> Option<WaitCause> {
+    for w in warnings {
+        const PREFIX: &str = "Infinite yield possible on '";
+        if let Some(rest) = w.strip_prefix(PREFIX) {
+            if let Some((parent, after)) = rest.split_once(":WaitForChild(") {
+                let child = first_quoted_literal(after);
+                return Some(WaitCause::WaitForChild {
+                    parent: Some(parent.to_string()),
+                    child,
+                });
+            }
+        }
+    }
+    let line = source_line?.trim();
+    if line.is_empty() {
+        return None;
+    }
+    if let Some(pos) = line.find(":WaitForChild(").or_else(|| line.find(".WaitForChild(")) {
+        let prefix = &line[..pos];
+        let after = &line[pos + ":WaitForChild(".len()..];
+        let parent = wait_receiver_parent(prefix);
+        let child = first_quoted_literal(after);
+        return Some(WaitCause::WaitForChild { parent, child });
+    }
+    Some(WaitCause::Other)
 }
 
 /// The services a Rojo project or a root mounts into (a full name starting with one is a path in the DataModel)
@@ -176,6 +299,104 @@ fn rojo_mountable(file: &Path) -> bool {
         .all(|m| m.path.split('/').next().is_some_and(|svc| SERVICES.contains(&svc)))
 }
 
+/// Whether `path` (a file or service folder mounted by `--roots`) is covered by `present` Rojo mappings
+/// under `service`. A directory is covered either directly or when every non-hidden child entry in it
+/// is covered by `present`.
+fn dir_covered_by_mappings(path: &Path, service: &str, present: &[(&str, &Path)], depth: u8) -> bool {
+    if present.iter().any(|(at, src)| at.split('/').next() == Some(service) && path_contains(src, path)) {
+        return true;
+    }
+    if depth == 0 || !path.is_dir() {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    let mut saw_entry = false;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_s = name.to_string_lossy();
+        if name_s.starts_with('.') {
+            continue;
+        }
+        saw_entry = true;
+        if !dir_covered_by_mappings(&entry.path(), service, present, depth - 1) {
+            return false;
+        }
+    }
+    saw_entry
+}
+
+/// Whether replacing the run's current roots/mounts with `--rojo <file>` keeps everything the run
+/// mounted (every service directory under every `--roots` folder, every `--mount`, and the story
+/// itself when the story came from the run's project).
+fn rojo_covers_run(file: &Path, sources: &Sources, story: Option<&Path>) -> bool {
+    if !rojo_mountable(file) {
+        return false;
+    }
+    let Ok(mappings) = rojo::mappings(file) else {
+        return false;
+    };
+    let present: Vec<(&str, &Path)> = mappings
+        .iter()
+        .filter(|(_, _, exists)| *exists)
+        .map(|(at, src, _)| (at.as_str(), src.as_path()))
+        .collect();
+    if present.is_empty() {
+        return false;
+    }
+    for root in &sources.roots {
+        for svc in SERVICES {
+            let svc_dir = root.join(svc);
+            if svc_dir.is_dir() && !dir_covered_by_mappings(&svc_dir, svc, &present, 2) {
+                return false;
+            }
+        }
+    }
+    for (at, mounted_path) in &sources.mounts {
+        let svc = at.split('/').next().unwrap_or("");
+        if !present
+            .iter()
+            .any(|(m_at, m_src)| m_at.split('/').next() == Some(svc) && path_contains(m_src, mounted_path))
+        {
+            return false;
+        }
+    }
+    if let Some(story_path) = story {
+        let story_in_sources = sources.roots.iter().any(|r| path_contains(r, story_path))
+            || sources.mounts.iter().any(|(_, m)| path_contains(m, story_path));
+        if story_in_sources && !present.iter().any(|(_, m_src)| path_contains(m_src, story_path)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether a wait cause has to do with an unmounted Rojo mapping `at` (e.g. `"ReplicatedStorage/Packages"`).
+fn wait_matches_mapping(cause: Option<&WaitCause>, at: &str) -> bool {
+    let Some(WaitCause::WaitForChild { parent, child }) = cause else {
+        return false;
+    };
+    let segments: Vec<&str> = at.split('/').collect();
+    if let Some(child_name) = child.as_deref() {
+        if !segments.iter().any(|seg| *seg == child_name) {
+            return false;
+        }
+        if let Some(parent_path) = parent.as_deref() {
+            let root = parent_path.split('.').next().unwrap_or(parent_path);
+            if (SERVICES.contains(&root) || root == "PlayerGui") && segments.first().copied() != Some(root) {
+                return false;
+            }
+        }
+        true
+    } else if let Some(parent_path) = parent.as_deref() {
+        let norm = parent_path.replace('.', "/");
+        at == norm || at.starts_with(&format!("{norm}/"))
+    } else {
+        false
+    }
+}
+
 /// The hint for a failure that reads an instance nothing mounted, from the story at `story`
 pub fn missing_child_hint(message: &str, sources: &Sources, story: Option<&Path>) -> Option<String> {
     let (parent, child) = missing_member(message)?;
@@ -191,14 +412,14 @@ pub fn missing_child_hint(message: &str, sources: &Sources, story: Option<&Path>
         if sources.mounted(&wanted, &source) {
             continue;
         }
-        if !rojo_mountable(file) {
+        if !rojo_covers_run(file, sources, story) {
             continue;
         }
         // Several project files beside each other that map it, and the run used none of them
         let dir = file.parent().unwrap_or(Path::new(""));
         let beside = projects
             .iter()
-            .filter(|other| other.parent() == Some(dir) && maps(other).is_some() && rojo_mountable(other))
+            .filter(|other| other.parent() == Some(dir) && maps(other).is_some() && rojo_covers_run(other, sources, story))
             .count();
         if let (true, Err(several)) = (beside > 1, rojo::project_file_in(dir)) {
             return Some(rojo::several_projects(&several));
@@ -269,25 +490,48 @@ fn data_model_hint(package: &Path, wanted: &str, story: Option<&Path>) -> Option
 }
 
 /// The hint for a story whose mount still waits when the run ends (a WaitForChild on something nothing mounted, say):
-/// the nearest project file's `$path`s that don't exist, or that the run didn't mount
-pub fn waiting_hint(sources: &Sources, story: Option<&Path>) -> Option<String> {
+/// the nearest project file's `$path`s that don't exist, or a `--rojo` hint only when the named project covers
+/// everything the run mounted and the wait matches an unmounted path that project maps.
+pub fn waiting_hint(sources: &Sources, story: Option<&Path>, cause: Option<&WaitCause>) -> Option<String> {
+    if matches!(cause, Some(WaitCause::Other)) {
+        return None;
+    }
     let projects = nearby_project_files(sources, story);
     let dir = projects.first()?.parent()?;
     let here: Vec<&PathBuf> = projects.iter().filter(|file| file.parent() == Some(dir)).collect();
     let nearest = match here.iter().find(|file| sources.used(file)) {
         Some(used) => *used,
         None if here.len() > 1 => {
-            let mountable: Vec<PathBuf> = here.into_iter().filter(|f| rojo_mountable(f)).cloned().collect();
-            return (!mountable.is_empty()).then(|| rojo::several_projects(&mountable));
+            let matching: Vec<PathBuf> = here
+                .into_iter()
+                .filter(|f| {
+                    rojo_covers_run(f, sources, story)
+                        && rojo::mappings(f).is_ok_and(|ms| {
+                            ms.iter()
+                                .any(|(at, src, exists)| *exists && !sources.mounted(at, src) && wait_matches_mapping(cause, at))
+                        })
+                })
+                .cloned()
+                .collect();
+            return (!matching.is_empty()).then(|| rojo::several_projects(&matching));
         }
         None => here[0],
     };
     let mappings = rojo::mappings(nearest).ok()?;
-    if let Some((at, source, _)) = mappings.iter().find(|(_, _, exists)| !exists) {
+    if let Some((at, source, _)) = mappings.iter().find(|(at, _, exists)| {
+        !exists && (cause.is_none() || wait_matches_mapping(cause, at))
+    }) {
         return Some(rojo::missing_path(nearest, at, source));
     }
-    let unmounted: Vec<String> = mappings.iter().filter(|(at, source, _)| !sources.mounted(at, source)).map(|(at, _, _)| rojo::dotted(at)).collect();
-    if unmounted.is_empty() || !rojo_mountable(nearest) {
+    if !rojo_covers_run(nearest, sources, story) {
+        return None;
+    }
+    let unmounted: Vec<String> = mappings
+        .iter()
+        .filter(|(at, source, _)| !sources.mounted(at, source) && wait_matches_mapping(cause, at))
+        .map(|(at, _, _)| rojo::dotted(at))
+        .collect();
+    if unmounted.is_empty() {
         return None;
     }
     const SHOWN: usize = 4;
@@ -368,7 +612,7 @@ mod tests {
         let sources = mounted(&dir, "default.project.json");
         let hint = missing_child_hint(MISSING, &sources, Some(&story)).unwrap();
         assert_eq!(hint, format!("default.project.json maps ReplicatedStorage.Packages to Packages, which doesn't exist: run `wally install` in {}", dir.display()));
-        assert_eq!(waiting_hint(&sources, Some(&story)).unwrap(), hint);
+        assert_eq!(waiting_hint(&sources, Some(&story), None).unwrap(), hint);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -380,8 +624,12 @@ mod tests {
         assert_eq!(hint, format!("default.project.json maps ReplicatedStorage.Packages, but this run didn't mount it: pass --rojo {}", dir.join("default.project.json").display()));
         write(&dir.join("rur.json"), r#"{"places":[{"name":"client","roots":["src"]}]}"#);
         assert!(missing_child_hint(MISSING, &roots, Some(&story)).unwrap().contains("but this run used the places in rur.json beside it: pass --rojo"));
-        let waiting = waiting_hint(&roots, Some(&story)).unwrap();
-        assert!(waiting.starts_with("default.project.json maps ReplicatedStorage.Packages, ReplicatedStorage.Shared, but this run used the places"), "{waiting}");
+        let wait_packages = WaitCause::WaitForChild {
+            parent: Some("ReplicatedStorage".into()),
+            child: Some("Packages".into()),
+        };
+        let waiting = waiting_hint(&roots, Some(&story), Some(&wait_packages)).unwrap();
+        assert!(waiting.starts_with("default.project.json maps ReplicatedStorage.Packages, but this run used the places"), "{waiting}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -392,14 +640,18 @@ mod tests {
         let none = Sources::default();
         let hint = missing_child_hint(MISSING, &none, Some(&story)).unwrap();
         assert_eq!(hint, format!("{} has several Rojo projects (dev.project.json, place.project.json), so none was mounted: pass --rojo <file> to mount one", dir.display()));
-        assert_eq!(waiting_hint(&none, Some(&story)).unwrap(), hint);
+        let wait_packages = WaitCause::WaitForChild {
+            parent: Some("ReplicatedStorage".into()),
+            child: Some("Packages".into()),
+        };
+        assert_eq!(waiting_hint(&none, Some(&story), Some(&wait_packages)).unwrap(), hint);
         // Only one of them maps it: that one, and why the run didn't use it
         write(&dir.join("dev.project.json"), r#"{"name":"g","tree":{"$className":"DataModel","ReplicatedStorage":{"Shared":{"$path":"src/shared"}}}}"#);
         let hint = missing_child_hint(MISSING, &none, Some(&story)).unwrap();
         assert!(hint.starts_with("place.project.json maps ReplicatedStorage.Packages, but rur picks none of the 2 project files there by itself: pass --rojo"), "{hint}");
         // The one the run used is named instead
         let used = mounted(&dir, "place.project.json");
-        assert!(waiting_hint(&used, Some(&story)).is_none());
+        assert!(waiting_hint(&used, Some(&story), Some(&wait_packages)).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -514,7 +766,8 @@ mod tests {
         let story = dir.join("ReplicatedStorage/Ui.story.luau");
         write(&story, "return {}");
         let via_roots = Sources { roots: vec![dir.clone()], mounts: Vec::new() };
-        assert!(waiting_hint(&via_roots, Some(&story)).is_none(), "folders mounted through --roots must not trigger a --rojo hint");
+        let wait_init = WaitCause::WaitForChild { parent: Some("ReplicatedFirst".into()), child: Some("Init".into()) };
+        assert!(waiting_hint(&via_roots, Some(&story), Some(&wait_init)).is_none(), "folders mounted through --roots must not trigger a --rojo hint");
         let _ = std::fs::remove_dir_all(&dir);
 
         // 2. A DataModel project with a non-service top-level key (which `rur --rojo` rejects) must never be recommended
@@ -529,10 +782,75 @@ mod tests {
         write(&story, "return {}");
         let empty = Sources::default();
         assert!(!rojo_mountable(&bad.join("default.project.json")));
-        assert!(waiting_hint(&empty, Some(&story)).is_none(), "must not recommend --rojo on a project that --rojo rejects");
+        assert!(waiting_hint(&empty, Some(&story), Some(&wait_init)).is_none(), "must not recommend --rojo on a project that --rojo rejects");
         let missing = r#"Init is not a valid member of ReplicatedFirst "ReplicatedFirst""#;
         let hint = missing_child_hint(missing, &empty, Some(&story));
         assert!(hint.as_deref().is_none_or(|h| !h.contains("pass --rojo")), "must not suggest broken --rojo: {hint:?}");
         let _ = std::fs::remove_dir_all(&bad);
+    }
+
+    #[test]
+    fn rojo_hint_requires_covering_mounted_roots_and_matching_wait() {
+        // 1. Multi-root run where default.project.json only covers the second root (dropping shared_root)
+        let dir = temp_dir("partial-roots");
+        let shared = dir.join("shared");
+        let place = dir.join("place");
+        write(&shared.join("ReplicatedStorage/Core/Lib.luau"), "return {}");
+        write(&place.join("ReplicatedStorage/App.luau"), "return {}");
+        write(&place.join("Extra/Net.luau"), "return {}");
+        let story = place.join("StarterPlayer/Stories/Card.story.luau");
+        write(&story, "return {}");
+        write(
+            &place.join("default.project.json"),
+            r#"{"name":"Place","tree":{"$className":"DataModel","ReplicatedStorage":{"App":{"$path":"ReplicatedStorage/App.luau"},"Extra":{"$path":"Extra"}}}}"#,
+        );
+        let multi_roots = Sources { roots: vec![shared.clone(), place.clone()], mounts: Vec::new() };
+        let wait_extra = WaitCause::WaitForChild {
+            parent: Some("ReplicatedStorage".into()),
+            child: Some("Extra".into()),
+        };
+        assert!(
+            waiting_hint(&multi_roots, Some(&story), Some(&wait_extra)).is_none(),
+            "must not suggest --rojo when project drops another mounted root"
+        );
+        let missing_extra = r#"Extra is not a valid member of ReplicatedStorage "ReplicatedStorage""#;
+        let mhint = missing_child_hint(missing_extra, &multi_roots, Some(&story));
+        assert!(
+            mhint.as_deref().is_none_or(|h| !h.contains("pass --rojo")),
+            "missing_child_hint must not suggest partial --rojo: {mhint:?}"
+        );
+
+        // 2. Project DOES cover roots, but wait is unrelated (InvokeServer or WaitForChild on another path)
+        let full = temp_dir("unrelated-wait");
+        write(&full.join("ReplicatedStorage/App.luau"), "return {}");
+        write(&full.join("Packages/Kit.luau"), "return {}");
+        let full_story = full.join("ReplicatedStorage/Card.story.luau");
+        write(&full_story, "return {}");
+        write(
+            &full.join("default.project.json"),
+            r#"{"name":"Full","tree":{"$className":"DataModel","ReplicatedStorage":{"$path":"ReplicatedStorage","Packages":{"$path":"Packages"}}}}"#,
+        );
+        let single_root = Sources { roots: vec![full.clone()], mounts: Vec::new() };
+        assert_eq!(parse_wait_cause(&[], Some("rf:InvokeServer()")), Some(WaitCause::Other));
+        assert!(
+            waiting_hint(&single_root, Some(&full_story), Some(&WaitCause::Other)).is_none(),
+            "InvokeServer() wait must not print a --rojo hint"
+        );
+        let wait_unrelated = parse_wait_cause(&[], Some("local x = PlayerGui:WaitForChild(\"Hotbar\")"));
+        assert!(
+            waiting_hint(&single_root, Some(&full_story), wait_unrelated.as_ref()).is_none(),
+            "unrelated WaitForChild must not print a --rojo hint"
+        );
+        assert!(
+            waiting_hint(&single_root, Some(&full_story), None).is_none(),
+            "unknown wait must not guess a --rojo hint"
+        );
+        // Matching WaitForChild on a covering project DOES emit the --rojo hint
+        let wait_pkg = parse_wait_cause(&[], Some("local p = ReplicatedStorage:WaitForChild(\"Packages\")"));
+        let ok_hint = waiting_hint(&single_root, Some(&full_story), wait_pkg.as_ref()).unwrap();
+        assert!(ok_hint.contains("pass --rojo"), "{ok_hint}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&full);
     }
 }

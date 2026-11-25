@@ -205,6 +205,8 @@ pub struct Story {
     pub source: Option<std::path::PathBuf>,
     /// Where a mount that still yields waits: the first frame of its traceback outside rur's own chunks
     pub waiting_at: Option<String>,
+    /// What a yielding mount is waiting on (parsed from warnings or the suspended script line), for `hints::waiting_hint`
+    pub wait_cause: Option<crate::hints::WaitCause>,
 }
 
 impl Story {
@@ -220,6 +222,7 @@ impl Story {
             order: None,
             source: None,
             waiting_at: None,
+            wait_cause: None,
         })
     }
 
@@ -261,11 +264,19 @@ impl Story {
                         entry.reported = true;
                         let trace = engine_lua::traceback(lua, &entry.call.thread);
                         let source = self.source.clone();
+                        let first_frame = trace
+                            .as_deref()
+                            .unwrap_or_default()
+                            .lines()
+                            .map(str::trim)
+                            .find(|frame| !frame.is_empty() && !frame.starts_with("rur."));
                         self.waiting_at.get_or_insert_with(|| {
-                            let frames = trace.as_deref().unwrap_or_default().lines();
-                            let frame = frames.map(str::trim).find(|frame| !frame.is_empty() && !frame.starts_with("rur."));
-                            frame.map_or_else(|| "the story's require".to_string(), |frame| crate::hints::story_frame(frame, source.as_deref()))
+                            first_frame.map_or_else(|| "the story's require".to_string(), |frame| crate::hints::story_frame(frame, source.as_deref()))
                         });
+                        if self.wait_cause.is_none() {
+                            let line = first_frame.and_then(|frame| lookup_script_line(engine, frame, source.as_deref()));
+                            self.wait_cause = crate::hints::parse_wait_cause(&[], line.as_deref());
+                        }
                         engine.output("warn", "story mount is still yielding (waiting on something that never arrives offline)", trace);
                     }
                     still.push(entry);
@@ -296,6 +307,54 @@ impl Story {
             }
         }
     }
+}
+
+/// Reads the 1-based source line referenced by a Luau traceback frame (`<DataModelPath>:<line> ...`).
+fn lookup_script_line(engine: &Engine, frame: &str, story_source: Option<&Path>) -> Option<String> {
+    let location = frame.split(' ').next().unwrap_or(frame).trim();
+    let (chunk, line_str) = location.rsplit_once(':')?;
+    let line_no: usize = line_str.parse().ok()?;
+    if line_no == 0 {
+        return None;
+    }
+    let script_id = {
+        let state = engine.state.borrow();
+        let mut cur = engine.world().game;
+        let mut rest = chunk;
+        let mut found = true;
+        while !rest.is_empty() {
+            let mut best: Option<(InstanceId, &str)> = None;
+            for &child in &state.dom.at(cur).children {
+                let name = state.dom.at(child).name.to_string();
+                if rest == name {
+                    best = Some((child, ""));
+                    break;
+                } else if let Some(after) = rest.strip_prefix(name.as_str()).and_then(|s| s.strip_prefix('.')) {
+                    if best.is_none_or(|(_, prev)| after.len() < prev.len()) {
+                        best = Some((child, after));
+                    }
+                }
+            }
+            match best {
+                Some((child, next)) => {
+                    cur = child;
+                    rest = next;
+                }
+                None => {
+                    found = false;
+                    break;
+                }
+            }
+        }
+        (found && cur != engine.world().game && state.dom.get(cur).is_some()).then_some(cur)
+    };
+    let bytes = if let Some(id) = script_id {
+        engine_lua::modules::source_rc_opts(engine, id, false).map(|s| s.to_vec())
+    } else {
+        story_source.and_then(|p| std::fs::read(p).ok())
+    }?;
+    let text = std::str::from_utf8(&bytes).ok()?;
+    text.lines().nth(line_no - 1).map(|l| l.trim().to_string())
 }
 
 /// MakeStoryGui: the ScreenGui (RURStory in CoreGui) and target frame a story mounts into.
@@ -413,6 +472,7 @@ pub fn mount(
         order: None,
         source: source.filter(|source| matches!(source.kind, SourceKind::Story | SourceKind::Module)).map(|source| std::path::PathBuf::from(&source.path)),
         waiting_at: None,
+        wait_cause: None,
     };
     if let Some(controls) = controls {
         let options = LuaSerializeOptions::new().serialize_none_to_null(false).serialize_unit_to_null(false).set_array_metatable(false);
@@ -817,6 +877,14 @@ pub fn diagnostics(engine: &Rc<Engine>, project: &Project, story: &Story, run_ti
     // A failure that reads an instance nothing mounted (a Packages folder), or a mount that still waits: the cause rur
     // finds in the project files on disk (crate::hints)
     let errors = state.output.entries.iter().filter(|entry| entry.kind == "error").map(|entry| entry.message.as_str());
+    let warnings: Vec<&str> = state
+        .output
+        .entries
+        .iter()
+        .filter(|entry| entry.kind == "warn")
+        .map(|entry| entry.message.as_str())
+        .collect();
+    let wait_cause = crate::hints::parse_wait_cause(&warnings, None).or_else(|| story.wait_cause.clone());
     let source = story.source.as_deref();
     let hint = story
         .failure
@@ -824,7 +892,7 @@ pub fn diagnostics(engine: &Rc<Engine>, project: &Project, story: &Story, run_ti
         .into_iter()
         .chain(errors)
         .find_map(|message| crate::hints::missing_child_hint(message, &project.sources, source))
-        .or_else(|| (story.status == "yielded").then(|| crate::hints::waiting_hint(&project.sources, source)).flatten());
+        .or_else(|| (story.status == "yielded").then(|| crate::hints::waiting_hint(&project.sources, source, wait_cause.as_ref())).flatten());
     if let Some(hint) = hint {
         result["hint"] = json!(hint);
     }
