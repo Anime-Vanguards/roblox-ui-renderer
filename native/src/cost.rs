@@ -3442,6 +3442,7 @@ pub fn run_sequence_cost(
 
     let mut scene = SceneStore::default();
     let mut acc = SequenceAccumulator::with_cadence(spec.fps, first.client_hz, first.cadence_kind, &run_mode);
+    let actual_device = first.device.clone();
     let mut next = Some(first);
     let mut ready_status: Option<String> = None;
     let mut ready_waiting: Option<String> = None;
@@ -3508,7 +3509,7 @@ pub fn run_sequence_cost(
         run_outcome.play_mode_probe = Some(probe_mounts_in_play_mode(&engine_args, probe_time));
     }
     let mut report = acc.finish_with_outcome(&run_outcome);
-    attach_engine_run_metadata(&mut report, &engine_args, repo);
+    attach_engine_run_metadata(&mut report, &engine_args, repo, Some(&actual_device));
     Ok(sort_json(report))
 }
 
@@ -4495,12 +4496,27 @@ fn source_from_cli_args(context: &Context, args: &Args) -> Option<Value> {
     None
 }
 
-fn attach_engine_run_metadata(report: &mut Value, engine_args: &engine::cli::Args, repo: &Path) {
+pub(crate) fn set_report_device(report: &mut Value, device: &str) {
+    if let Some(obj) = report.as_object_mut() {
+        obj.insert("device".into(), json!(device));
+    }
+    *report = sort_json(report.clone());
+}
+
+fn attach_engine_run_metadata(
+    report: &mut Value,
+    engine_args: &engine::cli::Args,
+    repo: &Path,
+    actual_device: Option<&str>,
+) {
     let Some(obj) = report.as_object_mut() else { return };
     if let Some(src) = source_from_engine_args(engine_args, repo) {
         obj.insert("source".into(), src);
     }
-    obj.insert("device".into(), json!(engine_args.device.as_deref().unwrap_or("desktop")));
+    let device = actual_device
+        .or(engine_args.device.as_deref())
+        .unwrap_or("desktop");
+    obj.insert("device".into(), json!(device));
     obj.insert("controls".into(), parse_controls_json(engine_args.controls.as_deref(), None));
 }
 
@@ -4509,13 +4525,17 @@ fn attach_cli_run_metadata(
     context: &Context,
     args: &Args,
     engine_args: &engine::cli::Args,
+    actual_device: Option<&str>,
     single_time: Option<f64>,
 ) {
     let Some(obj) = report.as_object_mut() else { return };
     if let Some(src) = source_from_cli_args(context, args) {
         obj.insert("source".into(), src);
     }
-    obj.insert("device".into(), json!(engine_args.device.as_deref().unwrap_or("desktop")));
+    let device = actual_device
+        .or(engine_args.device.as_deref())
+        .unwrap_or("desktop");
+    obj.insert("device".into(), json!(device));
     obj.insert("controls".into(), parse_controls_json(args.given("--controls").as_deref(), Some(context)));
     if let Some(t) = single_time {
         obj.insert("time".into(), json!(round9(t)));
@@ -4613,7 +4633,8 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
         spec.client_hz = Some(client_hz);
         let engine_args = build_engine_args(&context, &args)?;
         let mut report = run_sequence_cost(&engine_args, &spec, &context.repo).map_err(Failure::Error)?;
-        attach_cli_run_metadata(&mut report, &context, &args, &engine_args, None);
+        let actual_device = report.get("device").and_then(Value::as_str).map(str::to_string);
+        attach_cli_run_metadata(&mut report, &context, &args, &engine_args, actual_device.as_deref(), None);
         let report = sort_json(report);
         let name = format!("{}-cost", crate::story_args::source_name(&source, false));
         (report, name)
@@ -4656,7 +4677,14 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
             outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args, probe_time));
         }
         apply_run_outcome(&mut report, &outcome, true);
-        attach_cli_run_metadata(&mut report, &context, &args, &engine_args, Some(engine_args.time.unwrap_or(0.0)));
+        attach_cli_run_metadata(
+            &mut report,
+            &context,
+            &args,
+            &engine_args,
+            Some(&run.device),
+            Some(engine_args.time.unwrap_or(0.0)),
+        );
         let report = sort_json(report);
         let name = format!("{}-cost", crate::story_args::source_name(&source, false));
         (report, name)
@@ -6809,5 +6837,109 @@ end
         let scene_only = analyze_scene(&scene, LayoutStats::default(), None);
         let scene_screen = format_one_screen_report(&scene_only, dest);
         assert!(!scene_screen.contains("caveat:"), "--scene report must not print layout ms caveat:\n{scene_screen}");
+    }
+
+    #[test]
+    fn live_device_recorded_in_cost_report_and_refused_by_compare() {
+        let dir = std::env::temp_dir().join(format!("rur-cost-live-device-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("touch_probe.luau");
+        std::fs::write(
+            &fixture,
+            r#"local UserInputService = game:GetService("UserInputService")
+return function(Target)
+	local lbl = Instance.new("TextLabel")
+	lbl.Name = if UserInputService.TouchEnabled then "TouchYes" else "TouchNo"
+	lbl.Size = UDim2.fromOffset(120, 40)
+	lbl.Text = lbl.Name
+	lbl.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+        let repo = crate::engine::default_repo().to_string_lossy().into_owned();
+        let roots = crate::engine::default_repo()
+            .join("tools/tests/oracle-root")
+            .to_string_lossy()
+            .into_owned();
+        let fixture_s = fixture.to_string_lossy().into_owned();
+
+        let run_arm = |out_name: &str, extra: &[&str]| -> (CliOutput, PathBuf) {
+            let out_dir = dir.join(out_name);
+            let mut argv = vec![
+                "--repo".into(),
+                repo.clone(),
+                "--roots".into(),
+                roots.clone(),
+                "--no-snapshots".into(),
+                "--viewport".into(),
+                "800x600".into(),
+                "--scale".into(),
+                "1".into(),
+                "--fixture".into(),
+                fixture_s.clone(),
+                "--out".into(),
+                out_dir.to_string_lossy().into_owned(),
+            ];
+            argv.extend(extra.iter().map(|s| (*s).to_string()));
+            let out = run_cli(&argv).unwrap();
+            assert!(!out.failed, "arm {out_name} failed:\n{}", out.summary);
+            (out, out_dir.join("cost.json"))
+        };
+
+        let has_obj = |rep: &Value, name: &str| {
+            rep["objects"]
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|o| o["name"] == name))
+        };
+
+        // Single-moment live arms: desktop, touch, gamepad
+        let (desk_single, desk_single_path) = run_arm("single_desk", &["--time", "0.1"]);
+        let (touch_single, touch_single_path) = run_arm("single_touch", &["--time", "0.1", "--device", "touch"]);
+        let (pad_single, _) = run_arm("single_pad", &["--time", "0.1", "--device", "gamepad"]);
+        assert!(has_obj(&desk_single.value, "TouchNo"), "desktop arm must see TouchEnabled=false");
+        assert!(has_obj(&touch_single.value, "TouchYes"), "touch arm must see TouchEnabled=true");
+        assert_eq!(desk_single.value["device"], "desktop");
+        assert_eq!(touch_single.value["device"], "touch");
+        assert_eq!(pad_single.value["device"], "gamepad");
+
+        let cmp_single = run_cli(&[
+            "compare".into(),
+            desk_single_path.to_string_lossy().into_owned(),
+            touch_single_path.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(cmp_single.failed, "compare must refuse desktop vs touch single arms");
+        assert_eq!(cmp_single.value["verdict"], "refused");
+        assert!(
+            cmp_single.value["reason"].as_str().unwrap_or("").contains("device"),
+            "refusal must name device: {}",
+            cmp_single.value
+        );
+
+        // Sequence live arms: desktop vs touch
+        let (desk_seq, desk_seq_path) = run_arm("seq_desk", &["--from", "0", "--frames", "3", "--fps", "60"]);
+        let (touch_seq, touch_seq_path) = run_arm("seq_touch", &["--from", "0", "--frames", "3", "--fps", "60", "--device", "touch"]);
+        assert!(has_obj(&desk_seq.value, "TouchNo"));
+        assert!(has_obj(&touch_seq.value, "TouchYes"));
+        assert_eq!(desk_seq.value["device"], "desktop");
+        assert_eq!(touch_seq.value["device"], "touch");
+
+        let cmp_seq = run_cli(&[
+            "compare".into(),
+            desk_seq_path.to_string_lossy().into_owned(),
+            touch_seq_path.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(cmp_seq.failed, "compare must refuse desktop vs touch sequence arms");
+        assert_eq!(cmp_seq.value["verdict"], "refused");
+        assert!(
+            cmp_seq.value["reason"].as_str().unwrap_or("").contains("device"),
+            "refusal must name device: {}",
+            cmp_seq.value
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

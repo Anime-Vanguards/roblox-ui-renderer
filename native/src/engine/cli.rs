@@ -90,8 +90,6 @@ pub struct Args {
     pub loads: Vec<String>,
     /// `--topbar-inset px`: the engine's topbar inset (Options::topbar_inset)
     pub topbar_inset: f64,
-    /// `--device desktop|touch|gamepad`: the input hardware UserInputService reports (Options::device)
-    pub device: Option<String>,
     /// `--server-harness <file>` with `--run-context loopback`: the loopback harness whose `Server` runs on the pair's
     /// server (the emulator's "Loopback run context"); the story is the client's. None: the place's own server scripts
     pub server_harness: Option<String>,
@@ -203,13 +201,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             "--all-layers" => result.all_layers = need()? != "0",
             "--load" => result.loads.push(need()?),
             "--topbar-inset" => result.topbar_inset = number(need()?)?.max(0.0),
-            "--device" => {
-                let device = need()?;
-                if !matches!(device.as_str(), "desktop" | "touch" | "gamepad") {
-                    return Err(format!("--device: expected desktop, touch or gamepad, got {device}"));
-                }
-                result.device = Some(device);
-            }
             // (the Node CLI's engine arguments start with the command's name: cli/engine.mjs engineBaseArgs)
             "engine" if index == 0 => {}
             _ => {
@@ -608,8 +599,7 @@ pub fn prepare(args: &Args) -> Result<Prepared, String> {
     #[cfg(feature = "desktop")]
     select_standalone_project(args, &mut engine)?;
     let prepared = launch::prepare(&engine, &super::default_repo())?;
-    let device = args.device.clone().unwrap_or(prepared.options.device.clone());
-    let options = Options { topbar_inset: args.topbar_inset, device, ..prepared.options };
+    let options = Options { topbar_inset: args.topbar_inset, ..prepared.options };
     Ok(Prepared { options, roots: prepared.roots, snapshot_dir: prepared.snapshot_dir, target: (width, height), mounts: prepared.mounts })
 }
 
@@ -855,6 +845,7 @@ pub struct CostRunOutput {
     pub scene: SceneOutput,
     pub layout: super::layout::Stats,
     pub dom_hidden: crate::cost::DomHiddenSummary,
+    pub device: String,
 }
 
 /// [`run_once`] for `rur cost`: also captures the deterministic full layout-pass counters and walks
@@ -880,7 +871,7 @@ pub fn run_once_with_cost(args: &Args) -> Result<CostRunOutput, String> {
         let scene = scene_output(&engine, args, &project, &mounted, source.as_ref(), exec_start)?;
         let layout = super::layout::stats_snapshot(&engine).delta_since(&layout_before);
         let dom_hidden = crate::cost::collect_dom_hidden(&engine, &mounted.roots);
-        Ok(CostRunOutput { scene, layout, dom_hidden })
+        Ok(CostRunOutput { scene, layout, dom_hidden, device: engine.options.device.clone() })
     })();
     drop(lua);
     engine.teardown();
@@ -1453,6 +1444,8 @@ pub struct SequenceFrame {
     pub client_hz: f64,
     /// `"client"` for fixed client frames (`1 / client_hz`) or `"display"` for display-cadence steps (`1 / fps`).
     pub cadence_kind: &'static str,
+    /// Actual device the engine ran with (`Options::device`, e.g. `"desktop"`, `"touch"`, `"gamepad"`, `"phone"`).
+    pub device: String,
     pub layout_churn: Vec<super::layout::LayoutChurnEntry>,
     #[cfg(feature = "desktop")]
     pub dom_hidden: Option<crate::cost::DomHiddenSummary>,
@@ -1572,6 +1565,7 @@ fn run_sequence(
         client_frames: steps_0,
         client_hz: effective_hz,
         cadence_kind,
+        device: engine.options.device.clone(),
         layout_churn: layout_churn_0,
         #[cfg(feature = "desktop")]
         dom_hidden: dom_hidden_0,
@@ -1623,6 +1617,7 @@ fn run_sequence(
             client_frames: steps,
             client_hz: effective_hz,
             cadence_kind,
+            device: engine.options.device.clone(),
             layout_churn,
             #[cfg(feature = "desktop")]
             dom_hidden,

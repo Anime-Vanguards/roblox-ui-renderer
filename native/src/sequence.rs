@@ -636,6 +636,7 @@ pub fn draw_frames(
     let mut in_flight: Option<(u32, PendingReadback)> = None;
     let (mut unchanged, mut waits, mut draws, mut prepares, mut gpus, mut readbacks) = (0u32, Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut ready = Value::Null;
+    let actual_device = first.device.clone();
     let mut next = Some(first);
     let mut waited_at = Instant::now();
     // A frame's pixels, in frame order, to the writers
@@ -786,7 +787,8 @@ pub fn draw_frames(
         }
         let mut outcome = crate::cost::extract_run_outcome(&merged_end);
         outcome.status = Some(status_str.clone());
-        let report = acc.finish_with_outcome(&outcome);
+        let mut report = acc.finish_with_outcome(&outcome);
+        crate::cost::set_report_device(&mut report, &actual_device);
         let path = out.join("cost.json");
         crate::cost::write_report(&path, &report).map_err(|e| anyhow!("writing {}: {e}", path.display()))?;
         let note = if run_mode != "play" {

@@ -1042,6 +1042,51 @@ end
 		assert.equal(c120Client.sequence.summary.clientHz, 120);
 		assert.equal(c120Client.sequence.summary.steadyStateClientFrames, 5);
 		assert.ok(Math.abs(c120Client.predicted["desktop-ref"].layoutCpuMs.ms - 0.09944) < 1e-9);
+
+		// Native binary called directly without Node: --device touch is really run and recorded,
+		// and `rur-native cost compare` refuses desktop vs touch live arms.
+		const { findEngine } = await import("../../cli/engine.mjs");
+		const nativeExe = findEngine();
+		assert.ok(nativeExe, "expected native rur-native binary");
+		const touchFixture = path.join(dir, "touch-device-probe.luau");
+		fs.writeFileSync(touchFixture, [
+			'local UserInputService = game:GetService("UserInputService")',
+			"return function(Target)",
+			'	local lbl = Instance.new("TextLabel")',
+			'	lbl.Name = if UserInputService.TouchEnabled then "TouchYes" else "TouchNo"',
+			"	lbl.Size = UDim2.fromOffset(120, 40)",
+			"	lbl.Text = lbl.Name",
+			"	lbl.Parent = Target",
+			"end",
+			"",
+		].join("\n"));
+		const outNativeDesk = path.join(dir, "native-desk");
+		const outNativeTouch = path.join(dir, "native-touch");
+		const rNativeDesk = spawnSync(nativeExe, [
+			"cost", "--repo", root, "--roots", path.join(root, "tools", "tests", "oracle-root"),
+			"--fixture", touchFixture, "--no-snapshots", "--viewport", "800x600", "--scale", "1",
+			"--time", "0.1", "--out", outNativeDesk,
+		], { cwd: root, encoding: "utf8", windowsHide: true, env });
+		assert.equal(rNativeDesk.status, 0, rNativeDesk.stderr);
+		const rNativeTouch = spawnSync(nativeExe, [
+			"cost", "--repo", root, "--roots", path.join(root, "tools", "tests", "oracle-root"),
+			"--fixture", touchFixture, "--no-snapshots", "--viewport", "800x600", "--scale", "1",
+			"--time", "0.1", "--device", "touch", "--out", outNativeTouch,
+		], { cwd: root, encoding: "utf8", windowsHide: true, env });
+		assert.equal(rNativeTouch.status, 0, rNativeTouch.stderr);
+		const cNativeDesk = JSON.parse(fs.readFileSync(path.join(outNativeDesk, "cost.json"), "utf8"));
+		const cNativeTouch = JSON.parse(fs.readFileSync(path.join(outNativeTouch, "cost.json"), "utf8"));
+		assert.equal(cNativeDesk.device, "desktop");
+		assert.equal(cNativeTouch.device, "touch");
+		assert.ok(cNativeDesk.objects.some(o => o.name === "TouchNo"), "desktop arm must draw TouchNo");
+		assert.ok(cNativeTouch.objects.some(o => o.name === "TouchYes"), "touch arm must draw TouchYes");
+		const rNativeCmp = spawnSync(nativeExe, [
+			"cost", "compare", path.join(outNativeDesk, "cost.json"), path.join(outNativeTouch, "cost.json"), "--json",
+		], { cwd: root, encoding: "utf8", windowsHide: true, env });
+		assert.equal(rNativeCmp.status, 2, `expected refusal exit 2, got ${rNativeCmp.status}: ${rNativeCmp.stdout}`);
+		const nativeCmp = JSON.parse(rNativeCmp.stdout);
+		assert.equal(nativeCmp.verdict, "refused");
+		assert.match(nativeCmp.reason, /device/i);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
