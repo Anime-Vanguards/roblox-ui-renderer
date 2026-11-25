@@ -851,17 +851,32 @@ assert.throws(() => findEngine(), err => err.message.includes(${JSON.stringify(d
 		assert.equal(JSON.parse(singleVsSeq.stdout).verdict, "refused");
 		assert.match(singleVsSeq.stderr, /mode/i);
 
-		// `rur sequence --cost --no-png --no-video`: writes cost.json alongside trace.json (edit mode -> refuses per-frame layoutCpuMs)
+		// `rur sequence --cost --no-png --no-video`: writes cost.json alongside trace.json (edit mode -> refuses per-frame layoutCpuMs and says so on screen)
 		const outSeqFlag = path.join(dir, "seq-with-cost");
 		const rSeqFlag = runRur("sequence", "--fixture", path.join(root, "fixtures", "corners.luau"), "--no-snapshots", "--from", "0", "--frames", "3", "--fps", "60", "--no-png", "--no-video", "--cost", "--json", "--out", outSeqFlag);
 		assert.equal(rSeqFlag.status, 0, rSeqFlag.stderr);
+		assert.match(rSeqFlag.stderr, /per-frame layoutCpuMs is refused in edit mode/);
+		assert.match(rSeqFlag.stderr, /--mode play/);
 		const seqSummary = JSON.parse(rSeqFlag.stdout);
 		assert.ok(seqSummary.cost && fs.existsSync(seqSummary.cost), "sequence --cost writes cost.json");
+		assert.match(String(seqSummary.costNote || ""), /per-frame layoutCpuMs is refused in edit mode/);
+		assert.match(String(seqSummary.costNote || ""), /--mode play/);
 		const seqFlagCost = JSON.parse(fs.readFileSync(seqSummary.cost, "utf8"));
 		assert.equal(seqFlagCost.sequence.frames.length, 3);
 		assert.equal(seqFlagCost.runMode, "edit");
 		assert.equal(seqFlagCost.predicted["desktop-ref"].layoutCpuMs.status, "refused");
 		assert.equal(seqFlagCost.predicted["desktop-ref"].layoutCpuMs.ms, null);
+
+		// `rur sequence --cost --mode play`: no edit-mode refusal on stderr or summary.costNote
+		const outSeqPlay = path.join(dir, "seq-with-cost-play");
+		const rSeqPlay = runRur("sequence", "--fixture", path.join(root, "fixtures", "corners.luau"), "--no-snapshots", "--mode", "play", "--from", "0", "--frames", "3", "--fps", "60", "--no-png", "--no-video", "--cost", "--json", "--out", outSeqPlay);
+		assert.equal(rSeqPlay.status, 0, rSeqPlay.stderr);
+		assert.doesNotMatch(rSeqPlay.stderr, /per-frame layoutCpuMs is refused in edit mode/);
+		const seqPlaySummary = JSON.parse(rSeqPlay.stdout);
+		assert.equal(seqPlaySummary.costNote, undefined);
+		const seqPlayCost = JSON.parse(fs.readFileSync(seqPlaySummary.cost, "utf8"));
+		assert.equal(seqPlayCost.runMode, "play");
+		assert.equal(seqPlayCost.predicted["desktop-ref"].layoutCpuMs.status, "extrapolated");
 
 		// Counter-driven Heartbeat scroll + AbsolutePosition read: default sequence runs in play mode (1 beat/frame),
 		// explicit --mode edit refuses per-frame layoutCpuMs, and compare refuses play vs edit.

@@ -526,11 +526,13 @@ export async function sequence(args, { service = false, env = process.env } = {}
 	const argv = runtimeArgs({ ...args, "snapshot-dir": snapshotDir(args) });
 	const offline = Boolean(args.offline);
 	let result = null;
+	let viaService = false;
 	// (a profile is a run's own: a process of its own)
 	const profile = profileArgs(args);
 	if (service && !args.verbose && !profile.length) {
 		const { sequenceInService } = await import("./client.mjs");
 		result = await sequenceInService(argv, outDir, options, { offline }, { env });
+		viaService = Boolean(result);
 	}
 	result ||= await sequenceNative([...profile, ...argv], outDir, options, { offline });
 	const diagnostics = result.diagnostics || {};
@@ -562,6 +564,10 @@ export async function sequence(args, { service = false, env = process.env } = {}
 		perFrame: result.perFrame || {},
 	};
 	if (result.cost) summary.cost = result.cost;
+	if (result.costNote) {
+		summary.costNote = result.costNote;
+		if (viaService) process.stderr.write(`rur: sequence --cost: ${result.costNote}\n`);
+	}
 	if (result.profile) summary.profile = result.profile;
 	fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
 	return summary;

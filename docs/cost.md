@@ -16,8 +16,8 @@ node cli/rur.mjs cost --fixture path/to/hud.luau --all-layers --out out/hud-all
 # Multi-frame sequence layout churn (CPU-only, no GPU/PNG/video)
 node cli/rur.mjs cost --story path/to/Anim.story.luau --from 0.5 --frames 60 --fps 60 --out out/anim-cost
 
-# Capture frames/video AND deterministic cost.json in one pass
-node cli/rur.mjs sequence --story path/to/Anim.story.luau --from 0 --frames 60 --fps 60 --cost --out out/anim-seq
+# Capture frames/video AND deterministic cost.json in one pass (pass --mode play for per-frame layoutCpuMs; default edit mode refuses it on screen)
+node cli/rur.mjs sequence --story path/to/Anim.story.luau --mode play --from 0 --frames 60 --fps 60 --cost --out out/anim-seq
 
 # Analyze a saved scene.json (note: hiddenInShown.complete is false without a live DOM)
 node cli/rur.mjs cost --scene out/hud/scene.json --out out/hud-cost

@@ -206,7 +206,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/story_render.rs",
         "pub fn sequence_cli(",
-        0x7cfcb81d696d032f,
+        0xecd8d4b913570911,
     ),
     (
         Crate::Native,

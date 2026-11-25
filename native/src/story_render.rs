@@ -630,6 +630,9 @@ pub fn sequence_cli(argv: &[String]) -> i32 {
     let code = match result {
         Ok(result) => {
             crate::term::note(&format!("sequence {}; {} frames; {:.3}s -> {}", crate::term::status(result["status"].as_str().unwrap_or("?")), result["frames"], started.elapsed().as_secs_f64(), out.display()));
+            if let Some(note) = result.get("costNote").and_then(Value::as_str) {
+                crate::term::note(&format!("sequence --cost: {note}"));
+            }
             print_result(&result);
             0
         }

@@ -773,7 +773,7 @@ pub fn draw_frames(
         .map(str::to_string)
         .or_else(|| ready.pointer("/delta/header/status").and_then(Value::as_str).map(str::to_string))
         .unwrap_or_else(|| "ok".into());
-    let cost_file = if let Some(acc) = cost_acc {
+    let (cost_file, cost_note) = if let Some(acc) = cost_acc {
         let mut merged_end = end.clone();
         if merged_end["diagnostics"].is_null() {
             merged_end["diagnostics"] = ready["diagnostics"].clone();
@@ -783,9 +783,14 @@ pub fn draw_frames(
         let report = acc.finish_with_outcome(&outcome);
         let path = out.join("cost.json");
         crate::cost::write_report(&path, &report).map_err(|e| anyhow!("writing {}: {e}", path.display()))?;
-        Some(path)
+        let note = if run_mode != "play" {
+            Some("per-frame layoutCpuMs is refused in edit mode (Studio 240 Hz Heartbeat, 4 beats/frame); pass --mode play for 60 Hz client per-frame ms")
+        } else {
+            None
+        };
+        (Some(path), note)
     } else {
-        None
+        (None, None)
     };
     Ok(json!({
         "status": status_str,
@@ -796,6 +801,7 @@ pub fn draw_frames(
         "framesDir": if options.png { Some(out.join("frames")) } else { None },
         "trace": out.join("trace.json"),
         "cost": cost_file,
+        "costNote": cost_note,
         "scenesDir": if options.scenes { Some(out.join("scenes")) } else { None },
         "video": video,
         "crop": {"node": node, "pixels": region, "rect": region.iter().map(|value| f64::from(*value) / scale).collect::<Vec<_>>()},
