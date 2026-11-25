@@ -527,6 +527,9 @@ impl Session {
             if let Some(at) = &self.story.waiting_at {
                 report["waiting"] = Json::String(at.clone());
             }
+            if self.story.wait_in_loop {
+                report["waitingInLoop"] = Json::Bool(true);
+            }
         }
         report
     }

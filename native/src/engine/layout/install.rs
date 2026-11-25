@@ -283,6 +283,7 @@ pub fn take_churn(engine: &Engine) -> Vec<super::LayoutChurnEntry> {
             path_count,
             pos,
             stored: churn.stored,
+            ancestor_stored: churn.ancestor_stored,
             moved: churn.moved,
             scroll_passes: churn.scroll_passes,
             scroll_moved: churn.scroll_moved,

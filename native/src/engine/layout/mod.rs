@@ -287,6 +287,7 @@ impl Stats {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ObjectChurn {
     pub stored: f64,
+    pub ancestor_stored: f64,
     pub moved: f64,
     pub scroll_passes: u64,
     pub scroll_moved: u64,
@@ -303,6 +304,7 @@ pub struct LayoutChurnEntry {
     pub path_count: u32,
     pub pos: [f64; 2],
     pub stored: f64,
+    pub ancestor_stored: f64,
     pub moved: f64,
     pub scroll_passes: u64,
     pub scroll_moved: u64,

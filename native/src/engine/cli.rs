@@ -846,6 +846,7 @@ pub struct CostRunOutput {
     pub layout: super::layout::Stats,
     pub dom_hidden: crate::cost::DomHiddenSummary,
     pub device: String,
+    pub waiting_in_loop: bool,
 }
 
 /// [`run_once`] for `rur cost`: also captures the deterministic full layout-pass counters and walks
@@ -871,7 +872,13 @@ pub fn run_once_with_cost(args: &Args) -> Result<CostRunOutput, String> {
         let scene = scene_output(&engine, args, &project, &mounted, source.as_ref(), exec_start)?;
         let layout = super::layout::stats_snapshot(&engine).delta_since(&layout_before);
         let dom_hidden = crate::cost::collect_dom_hidden(&engine, &mounted.roots);
-        Ok(CostRunOutput { scene, layout, dom_hidden, device: engine.options.device.clone() })
+        Ok(CostRunOutput {
+            scene,
+            layout,
+            dom_hidden,
+            device: engine.options.device.clone(),
+            waiting_in_loop: mounted.wait_in_loop,
+        })
     })();
     drop(lua);
     engine.teardown();

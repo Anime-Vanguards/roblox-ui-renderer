@@ -2882,6 +2882,7 @@ impl<'a> Pass<'a> {
                 for &src in ds {
                     let entry = self.l.churn.entry(src).or_default();
                     entry.stored += s_f * share;
+                    entry.ancestor_stored += s_f * share;
                     entry.moved += m_f * share;
                 }
                 continue;

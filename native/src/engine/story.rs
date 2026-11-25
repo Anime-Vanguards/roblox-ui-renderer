@@ -207,6 +207,8 @@ pub struct Story {
     pub waiting_at: Option<String>,
     /// What a yielding mount is waiting on (parsed from warnings or the suspended script line), for `hints::waiting_hint`
     pub wait_cause: Option<crate::hints::WaitCause>,
+    /// Whether a yielding mount suspended at a wait call inside an inline loop (`while`/`for`/`repeat`)
+    pub wait_in_loop: bool,
 }
 
 impl Story {
@@ -223,6 +225,7 @@ impl Story {
             source: None,
             waiting_at: None,
             wait_cause: None,
+            wait_in_loop: false,
         })
     }
 
@@ -274,8 +277,10 @@ impl Story {
                             first_frame.map_or_else(|| "the story's require".to_string(), |frame| crate::hints::story_frame(frame, source.as_deref()))
                         });
                         if self.wait_cause.is_none() {
-                            let line = first_frame.and_then(|frame| lookup_script_line(engine, frame, source.as_deref()));
-                            self.wait_cause = crate::hints::parse_wait_cause(&[], line.as_deref());
+                            if let Some((line, in_loop)) = first_frame.and_then(|frame| lookup_script_yield_context(engine, frame, source.as_deref())) {
+                                self.wait_cause = crate::hints::parse_wait_cause(&[], Some(&line));
+                                self.wait_in_loop = in_loop;
+                            }
                         }
                         engine.output("warn", "story mount is still yielding (waiting on something that never arrives offline)", trace);
                     }
@@ -309,8 +314,9 @@ impl Story {
     }
 }
 
-/// Reads the 1-based source line referenced by a Luau traceback frame (`<DataModelPath>:<line> ...`).
-fn lookup_script_line(engine: &Engine, frame: &str, story_source: Option<&Path>) -> Option<String> {
+/// Reads the 1-based source line referenced by a Luau traceback frame (`<DataModelPath>:<line> ...`)
+/// and checks whether that line is a wait call inside an enclosing loop block.
+fn lookup_script_yield_context(engine: &Engine, frame: &str, story_source: Option<&Path>) -> Option<(String, bool)> {
     let location = frame.split(' ').next().unwrap_or(frame).trim();
     let (chunk, line_str) = location.rsplit_once(':')?;
     let line_no: usize = line_str.parse().ok()?;
@@ -354,7 +360,90 @@ fn lookup_script_line(engine: &Engine, frame: &str, story_source: Option<&Path>)
         story_source.and_then(|p| std::fs::read(p).ok())
     }?;
     let text = std::str::from_utf8(&bytes).ok()?;
-    text.lines().nth(line_no - 1).map(|l| l.trim().to_string())
+    let line = text.lines().nth(line_no - 1)?.trim().to_string();
+    let in_loop = line_is_loop_yield(text, line_no);
+    Some((line, in_loop))
+}
+
+fn strip_luau_comment_and_strings(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    let mut in_quote: Option<char> = None;
+    while let Some(c) = chars.next() {
+        if let Some(q) = in_quote {
+            if c == '\\' {
+                let _ = chars.next();
+            } else if c == q {
+                in_quote = None;
+            }
+            out.push(' ');
+            continue;
+        }
+        if c == '-' && chars.peek() == Some(&'-') {
+            break;
+        }
+        if c == '"' || c == '\'' {
+            in_quote = Some(c);
+            out.push(' ');
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn line_is_loop_yield(text: &str, line_no: usize) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(cur_raw) = lines.get(line_no.saturating_sub(1)) else {
+        return false;
+    };
+    let cur = strip_luau_comment_and_strings(cur_raw);
+    if cur.contains("InvokeServer") || cur.contains("WaitForChild") {
+        return false;
+    }
+    let looks_like_loop_wait =
+        cur.contains("task.wait") || cur.contains("wait(") || cur.contains(":Wait(");
+    if !looks_like_loop_wait {
+        return false;
+    }
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Block {
+        Loop,
+        Fn,
+        Other,
+    }
+    let mut stack: Vec<Block> = Vec::new();
+    for raw in lines.iter().take(line_no) {
+        let code = strip_luau_comment_and_strings(raw);
+        let tokens: Vec<&str> = code
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .filter(|t| !t.is_empty())
+            .collect();
+        for (i, &tok) in tokens.iter().enumerate() {
+            match tok {
+                "while" | "for" | "repeat" => stack.push(Block::Loop),
+                "function" => stack.push(Block::Fn),
+                "if" => {
+                    let is_expr = tokens[i + 1..].contains(&"else") && !tokens[i + 1..].contains(&"end");
+                    if !is_expr {
+                        stack.push(Block::Other);
+                    }
+                }
+                "do" => {
+                    let after_loop_head = tokens[..i].iter().rev().any(|&t| t == "while" || t == "for");
+                    if !after_loop_head {
+                        stack.push(Block::Other);
+                    }
+                }
+                "end" | "until" => {
+                    stack.pop();
+                }
+                _ => {}
+            }
+        }
+    }
+    let fn_start = stack.iter().rposition(|&b| b == Block::Fn).map_or(0, |p| p + 1);
+    stack[fn_start..].contains(&Block::Loop)
 }
 
 /// MakeStoryGui: the ScreenGui (RURStory in CoreGui) and target frame a story mounts into.
@@ -473,6 +562,7 @@ pub fn mount(
         source: source.filter(|source| matches!(source.kind, SourceKind::Story | SourceKind::Module)).map(|source| std::path::PathBuf::from(&source.path)),
         waiting_at: None,
         wait_cause: None,
+        wait_in_loop: false,
     };
     if let Some(controls) = controls {
         let options = LuaSerializeOptions::new().serialize_none_to_null(false).serialize_unit_to_null(false).set_array_metatable(false);

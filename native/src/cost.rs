@@ -1681,6 +1681,7 @@ pub struct RunOutcome {
     pub status: Option<String>,
     pub failure: Option<String>,
     pub waiting_at: Option<String>,
+    pub waiting_in_loop: bool,
     pub hint: Option<String>,
     pub edit_mode_mounts: Option<bool>,
     pub play_mode_probe: Option<PlayModeProbe>,
@@ -1817,10 +1818,12 @@ pub fn extract_run_outcome(value: &Value) -> RunOutcome {
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string);
+    let waiting_in_loop = value.get("waitingInLoop").and_then(Value::as_bool).unwrap_or(false);
     RunOutcome {
         status,
         failure,
         waiting_at,
+        waiting_in_loop,
         hint,
         edit_mode_mounts: None,
         play_mode_probe: None,
@@ -1893,12 +1896,26 @@ fn probe_mounts_in_play_mode(engine_args: &engine::cli::Args, probe_time: f64) -
     }
 }
 
-fn non_ok_reason(status: &str, failure: Option<&str>, drawn_nodes: u64) -> String {
+fn non_ok_reason(
+    status: &str,
+    failure: Option<&str>,
+    drawn_nodes: u64,
+    waiting_at: Option<&str>,
+    waiting_in_loop: bool,
+) -> String {
     match status {
         "empty" => EMPTY_MOUNT_MESSAGE.to_string(),
-        "yielded" if drawn_nodes > 0 => format!(
-            "Story mount drew UI ({drawn_nodes} nodes) and then yielded without returning (for example, an inline loop in mount); per-frame layoutCpuMs is refused until mount returns."
+        "yielded" if drawn_nodes > 0 && waiting_in_loop => format!(
+            "Story mount drew UI ({drawn_nodes} nodes) and then yielded inside a loop without returning; per-frame layoutCpuMs is refused until mount returns."
         ),
+        "yielded" if drawn_nodes > 0 => match waiting_at {
+            Some(at) => format!(
+                "Story mount drew UI ({drawn_nodes} nodes) and then yielded at {at} without returning; mount must return before per-frame layoutCpuMs can be priced."
+            ),
+            None => format!(
+                "Story mount drew UI ({drawn_nodes} nodes) and then yielded without returning; mount must return before per-frame layoutCpuMs can be priced."
+            ),
+        },
         "yielded" => match failure {
             Some(msg) => format!("{} (0 drawn nodes; zero counts are not a valid UI cost measurement).", first_line(msg, 160)),
             None => "Story mount yielded before mounting UI; zero counts are not a valid UI cost measurement.".into(),
@@ -1915,11 +1932,14 @@ fn non_ok_reason(status: &str, failure: Option<&str>, drawn_nodes: u64) -> Strin
 fn non_ok_settled_by(
     status: &str,
     drawn_nodes: u64,
+    waiting_in_loop: bool,
     edit_mode_mounts: Option<bool>,
     play_mode_mounts: Option<bool>,
 ) -> &'static str {
-    if status == "yielded" && drawn_nodes > 0 {
+    if status == "yielded" && drawn_nodes > 0 && waiting_in_loop {
         "Wrap any frame or animation loop inside task.spawn(...) or RunService.Heartbeat:Connect(...) so the mount function returns its cleanup handle."
+    } else if status == "yielded" && drawn_nodes > 0 {
+        "Move the yielding call off the mount return path so mount finishes and returns before per-frame layout is priced."
     } else if edit_mode_mounts == Some(true) {
         "Story mounts in edit mode, not play, so it cannot get per-frame layoutCpuMs as-is; re-run with --mode edit for static counts, CanvasGroup RT, overdraw, and hidden DOM, or fix the play-mode wait/failure above."
     } else if play_mode_mounts == Some(true) {
@@ -1929,10 +1949,13 @@ fn non_ok_settled_by(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn predicted_non_ok_json(
     status: &str,
     failure: Option<&str>,
     drawn_nodes: u64,
+    waiting_at: Option<&str>,
+    waiting_in_loop: bool,
     single_live: bool,
     edit_mode_mounts: Option<bool>,
     play_mode_mounts: Option<bool>,
@@ -1957,8 +1980,8 @@ fn predicted_non_ok_json(
         "basis": basis,
         "scope": scope,
         "ms": Value::Null,
-        "reason": non_ok_reason(status, failure, drawn_nodes),
-        "settledBy": non_ok_settled_by(status, drawn_nodes, edit_mode_mounts, play_mode_mounts),
+        "reason": non_ok_reason(status, failure, drawn_nodes, waiting_at, waiting_in_loop),
+        "settledBy": non_ok_settled_by(status, drawn_nodes, waiting_in_loop, edit_mode_mounts, play_mode_mounts),
     });
     if single_live {
         json!({
@@ -2054,6 +2077,9 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
         if let Some(at) = &outcome.waiting_at {
             obj.insert("waitingAt".into(), json!(at));
         }
+        if outcome.waiting_in_loop {
+            obj.insert("waitingInLoop".into(), json!(true));
+        }
     }
     let failure_text = if status == "empty" {
         EMPTY_MOUNT_MESSAGE.to_string()
@@ -2077,6 +2103,8 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
             &status,
             Some(&failure_text),
             drawn_nodes,
+            outcome.waiting_at.as_deref(),
+            outcome.waiting_in_loop,
             single_live,
             outcome.edit_mode_mounts,
             play_mode_mounts,
@@ -2085,7 +2113,10 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
     if let Some(fid) = obj.get_mut("fidelity").and_then(Value::as_object_mut) {
         fid.insert(
             "layoutCpuMs".into(),
-            json!(format!("refused ({status}: {})", non_ok_reason(&status, Some(&failure_text), drawn_nodes))),
+            json!(format!(
+                "refused ({status}: {})",
+                non_ok_reason(&status, Some(&failure_text), drawn_nodes, outcome.waiting_at.as_deref(), outcome.waiting_in_loop)
+            )),
         );
     }
     if let Some(summary) = obj
@@ -2108,8 +2139,8 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
                 "desktop-ref": Value::Null,
                 "phone-mid-range": Value::Null,
                 "phone-mid-band": Value::Null,
-                "reason": non_ok_reason(&status, Some(&failure_text), drawn_nodes),
-                "settledBy": non_ok_settled_by(&status, drawn_nodes, outcome.edit_mode_mounts, play_mode_mounts),
+                "reason": non_ok_reason(&status, Some(&failure_text), drawn_nodes, outcome.waiting_at.as_deref(), outcome.waiting_in_loop),
+                "settledBy": non_ok_settled_by(&status, drawn_nodes, outcome.waiting_in_loop, outcome.edit_mode_mounts, play_mode_mounts),
             }),
         );
     }
@@ -2439,7 +2470,7 @@ pub fn analyze_scene_with_mode(
         if status == "ok" {
             report.insert("predicted".into(), predicted_single_live_json(layout));
         } else {
-            report.insert("predicted".into(), predicted_non_ok_json(status, None, analyzer.totals.drawn_nodes, true, None, None));
+            report.insert("predicted".into(), predicted_non_ok_json(status, None, analyzer.totals.drawn_nodes, None, false, true, None, None));
         }
     } else {
         report.insert("predicted".into(), predicted_scene_only_json());
@@ -2807,8 +2838,8 @@ fn check_compare_equivalence(before: &Value, after: &Value) -> EquivalenceResult
     let a_ctrl = after.get("controls").filter(|v| !v.is_null());
     match (b_ctrl, a_ctrl) {
         (Some(b_ctrl), Some(a_ctrl)) => {
-            let b_ctrl = sort_json(b_ctrl.clone());
-            let a_ctrl = sort_json(a_ctrl.clone());
+            let b_ctrl = canonicalize_json_numbers(sort_json(b_ctrl.clone()));
+            let a_ctrl = canonicalize_json_numbers(sort_json(a_ctrl.clone()));
             if b_ctrl != a_ctrl {
                 mismatches.push(EquivalenceMismatch {
                     field: "controls",
@@ -3207,6 +3238,7 @@ impl SequenceAccumulator {
                     .entry(entry.id)
                     .and_modify(|acc| {
                         acc.stored += entry.stored;
+                        acc.ancestor_stored += entry.ancestor_stored;
                         acc.moved += entry.moved;
                         acc.scroll_passes += entry.scroll_passes;
                         acc.scroll_moved += entry.scroll_moved;
@@ -3460,18 +3492,19 @@ impl SequenceAccumulator {
             obj.insert("status".into(), json!(final_status));
             obj.remove("fullTreeLayout");
             obj.insert("layout".into(), steady_layout_json.clone());
-            let mut raw_drivers: Vec<(f64, f64, engine::layout::LayoutChurnEntry, f64, f64, f64, f64)> = if has_steady_client_frames {
+            let mut raw_drivers: Vec<(f64, f64, engine::layout::LayoutChurnEntry, f64, f64, f64, f64, f64)> = if has_steady_client_frames {
                 self.steady_churn
                     .values()
                     .filter(|c| c.stored > 1e-9 || c.moved > 1e-9 || c.scroll_passes > 0 || c.scroll_moved > 0)
                     .map(|c| {
                         let s = c.stored / denom;
+                        let anc = c.ancestor_stored / denom;
                         let m = c.moved / denom;
                         let sp = c.scroll_passes as f64 / denom;
                         let sm = c.scroll_moved as f64 / denom;
                         let records = s + m + sm;
                         let est_ms = sp * STUDIO_SCROLL_PASS_MS + records * STUDIO_LAYOUT_OBJECT_MS;
-                        (est_ms, records, c.clone(), s, m, sp, sm)
+                        (est_ms, records, c.clone(), s, anc, m, sp, sm)
                     })
                     .collect()
             } else {
@@ -3479,6 +3512,12 @@ impl SequenceAccumulator {
             };
             let total_drivers = raw_drivers.len();
             let total_driver_records: f64 = raw_drivers.iter().map(|(_, rec, ..)| *rec).sum();
+            let total_ancestor_stored: f64 = raw_drivers.iter().map(|(_, _, _, _, anc, ..)| *anc).sum();
+            let ancestor_share = if total_driver_records > 1e-12 {
+                (total_ancestor_stored / total_driver_records).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             let total_driver_ms: f64 = raw_drivers.iter().map(|(ms, ..)| *ms).sum();
             raw_drivers.sort_by(|a, b| {
                 b.0.total_cmp(&a.0)
@@ -3492,7 +3531,7 @@ impl SequenceAccumulator {
             let reported_driver_ms: f64 = raw_drivers.iter().map(|(ms, ..)| *ms).sum();
             let drivers_json: Vec<Value> = raw_drivers
                 .into_iter()
-                .map(|(est_ms, _, c, s, m, sp, sm)| {
+                .map(|(est_ms, _, c, s, anc, m, sp, sm)| {
                     let share = if total_driver_ms > 1e-12 { est_ms / total_driver_ms } else { 0.0 };
                     json!({
                         "id": c.id,
@@ -3503,6 +3542,7 @@ impl SequenceAccumulator {
                         "pathCount": c.path_count,
                         "position": [round4(c.pos[0]), round4(c.pos[1])],
                         "stored": round6(s),
+                        "ancestorStored": round6(anc),
                         "moved": round6(m),
                         "scrollPasses": round6(sp),
                         "scrollMoved": round6(sm),
@@ -3520,6 +3560,8 @@ impl SequenceAccumulator {
                     "reportedDrivers": reported_drivers,
                     "totalRecords": round6(total_driver_records),
                     "reportedRecords": round6(reported_driver_records),
+                    "ancestorStored": round6(total_ancestor_stored),
+                    "ancestorShare": round6(ancestor_share),
                     "totalDesktopMs": round9(total_driver_ms),
                     "reportedDesktopMs": round9(reported_driver_ms),
                 }),
@@ -4090,7 +4132,13 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
         let drawn_nodes = t["drawnNodes"].as_u64().unwrap_or(0);
         if status != "ok" {
             let detail = if status == "yielded" && drawn_nodes > 0 {
-                format!("yielded after drawing {drawn_nodes} nodes; wrap the loop in task.spawn or Heartbeat:Connect so mount returns")
+                if report["waitingInLoop"].as_bool() == Some(true) {
+                    format!("yielded after drawing {drawn_nodes} nodes; wrap the loop in task.spawn or Heartbeat:Connect so mount returns")
+                } else if let Some(at) = report["waitingAt"].as_str().filter(|s| !s.trim().is_empty()) {
+                    format!("yielded at {at} after drawing {drawn_nodes} nodes; mount must return first")
+                } else {
+                    format!("yielded after drawing {drawn_nodes} nodes; mount must return first")
+                }
             } else if drawn_nodes > 0 {
                 format!("{status} after drawing {drawn_nodes} nodes; counts from a failed run are not valid")
             } else {
@@ -4132,10 +4180,28 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
                 "  layoutMs:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
                 format_phone_range(&phone_range, &phone_band),
             );
-            let _ = writeln!(
-                out,
-                "  caveat:    absolute ms on deep trees is unchecked against a client (ancestor bookkeeping); before-vs-after on one story is valid",
-            );
+            let total_driver_records = report
+                .pointer("/layoutDriverSummary/totalRecords")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            if total_driver_records > 1e-12 {
+                let anc_pct = (report
+                    .pointer("/layoutDriverSummary/ancestorShare")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0)
+                    .clamp(0.0, 1.0)
+                    * 100.0)
+                    .round() as u64;
+                let _ = writeln!(
+                    out,
+                    "  caveat:    {anc_pct}% of steady layout records are ancestor bookkeeping (unchecked against a client); before-vs-after on one story is valid",
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "  caveat:    absolute ms on deep trees is unchecked against a client (ancestor bookkeeping); before-vs-after on one story is valid",
+                );
+            }
             if desk_ms <= 1e-12 && steady["passes"].as_f64().unwrap_or(0.0) <= 1e-12 {
                 let _ = writeln!(
                     out,
@@ -4154,7 +4220,13 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
         );
         if status != "ok" {
             let detail = if status == "yielded" && drawn_nodes > 0 {
-                format!("yielded after drawing {drawn_nodes} nodes; wrap the loop in task.spawn or Heartbeat:Connect so mount returns")
+                if report["waitingInLoop"].as_bool() == Some(true) {
+                    format!("yielded after drawing {drawn_nodes} nodes; wrap the loop in task.spawn or Heartbeat:Connect so mount returns")
+                } else if let Some(at) = report["waitingAt"].as_str().filter(|s| !s.trim().is_empty()) {
+                    format!("yielded at {at} after drawing {drawn_nodes} nodes; mount must return first")
+                } else {
+                    format!("yielded after drawing {drawn_nodes} nodes; mount must return first")
+                }
             } else if drawn_nodes > 0 {
                 format!("{status} after drawing {drawn_nodes} nodes; counts from a failed run are not valid")
             } else {
@@ -4743,6 +4815,30 @@ fn normalize_source_path(path: &Path, bases: &[&Path]) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// Canonicalizes JSON numbers so mathematically equal values (such as `1.0` and `1`) compare
+/// equal in `--controls` equivalence checks (Luau has one `number` type).
+fn canonicalize_json_numbers(value: Value) -> Value {
+    match value {
+        Value::Number(n) => {
+            if let Some(f) = n.as_f64() {
+                if f.is_finite() && (f - f.round()).abs() < 1e-12 && f.abs() <= 9_007_199_254_740_992.0 {
+                    return json!(f.round() as i64);
+                }
+            }
+            Value::Number(n)
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(canonicalize_json_numbers).collect()),
+        Value::Object(map) => {
+            let mut out = Map::new();
+            for (k, v) in map {
+                out.insert(k, canonicalize_json_numbers(v));
+            }
+            Value::Object(out)
+        }
+        other => other,
+    }
+}
+
 fn parse_controls_json(raw: Option<&str>, resolve_base: Option<&Context>) -> Value {
     let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
         return json!({});
@@ -4979,6 +5075,7 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
         let run_mode = engine_args.mode.as_deref().unwrap_or("edit");
         let mut report = analyze_scene_with_mode(&store, run.layout, Some(&run.dom_hidden), run_mode);
         let mut outcome = extract_run_outcome(&run.scene.scene);
+        outcome.waiting_in_loop |= run.waiting_in_loop;
         let run_failed = report["status"] != "ok" || outcome.status.as_deref().is_some_and(|s| s != "ok");
         if run_mode == "play" && run_failed {
             let probe_time = engine_args.time.unwrap_or(0.05).max(0.05);
@@ -8032,6 +8129,156 @@ end
             !out.summary.contains("Requested module experienced an error while loading"),
             "screen must not show generic require() wrapper:\n{}",
             out.summary
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn controls_numeric_equality_yield_message_and_ancestor_share_caveat() {
+        let dir = std::env::temp_dir().join(format!("rur-cost-small9-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+
+        // 1. Controls numeric equality: 1.0 == 1 compares equal; 1.5 != 1 is refused.
+        let card = dir.join("card.luau");
+        std::fs::write(
+            &card,
+            "return function(Target)\n\tlocal f = Instance.new(\"Frame\")\n\tf.Size = UDim2.fromOffset(80, 40)\n\tf.Parent = Target\nend\n",
+        )
+        .unwrap();
+        let run_ctrl = |name: &str, ctrl: &str| {
+            let out_dir = dir.join(name);
+            let out = run_cli(&[
+                "--repo".into(),
+                repo.to_string_lossy().into_owned(),
+                "--roots".into(),
+                root.to_string_lossy().into_owned(),
+                "--no-snapshots".into(),
+                "--viewport".into(),
+                "800x600".into(),
+                "--scale".into(),
+                "1".into(),
+                "--fixture".into(),
+                card.to_string_lossy().into_owned(),
+                "--time".into(),
+                "0.1".into(),
+                "--controls".into(),
+                ctrl.into(),
+                "--out".into(),
+                out_dir.to_string_lossy().into_owned(),
+            ])
+            .unwrap();
+            assert!(!out.failed, "arm {name} failed:\n{}", out.summary);
+            out_dir.join("cost.json")
+        };
+        let c_float = run_ctrl("ctrl_float", r#"{"ResolutionScale":1.0,"Nested":[2.0,0.5]}"#);
+        let c_int = run_ctrl("ctrl_int", r#"{"ResolutionScale":1,"Nested":[2,0.5]}"#);
+        let c_diff = run_ctrl("ctrl_diff", r#"{"ResolutionScale":1.5,"Nested":[2,0.5]}"#);
+
+        let cmp_eq = run_cli(&[
+            "compare".into(),
+            c_float.to_string_lossy().into_owned(),
+            c_int.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(!cmp_eq.failed, "1.0 and 1 in controls must compare equal:\n{}", cmp_eq.summary);
+        assert_eq!(cmp_eq.value["verdict"], "unchanged");
+
+        let cmp_neq = run_cli(&[
+            "compare".into(),
+            c_int.to_string_lossy().into_owned(),
+            c_diff.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert!(cmp_neq.failed, "1 vs 1.5 in controls must be refused:\n{}", cmp_neq.summary);
+        assert_eq!(cmp_neq.value["verdict"], "refused");
+
+        // 2. Non-loop yield after draw (InvokeServer) must NOT say "wrap the loop", while a real
+        //    inline loop still says "wrap the loop in task.spawn or Heartbeat:Connect".
+        let wait_remote = dir.join("wait_remote_yield.luau");
+        std::fs::write(
+            &wait_remote,
+            r#"return function(Target)
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromOffset(100, 40)
+	f.Parent = Target
+	local rf = Instance.new("RemoteFunction")
+	rf.Parent = game:GetService("ReplicatedStorage")
+	rf:InvokeServer()
+end
+"#,
+        )
+        .unwrap();
+        let make_args = |fixture: &Path| {
+            let argv: Vec<String> = vec![
+                "--repo".into(),
+                repo.to_string_lossy().into_owned(),
+                "--roots".into(),
+                root.to_string_lossy().into_owned(),
+                "--fixture".into(),
+                fixture.to_string_lossy().into_owned(),
+                "--viewport".into(),
+                "800x600".into(),
+                "--scale".into(),
+                "1".into(),
+                "--no-snapshots".into(),
+            ];
+            engine::cli::parse(&argv).unwrap()
+        };
+        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let rep_remote = run_sequence_cost(&make_args(&wait_remote), &spec, &repo).unwrap();
+        assert_eq!(rep_remote["status"], "yielded");
+        assert_ne!(rep_remote.get("waitingInLoop").and_then(Value::as_bool), Some(true));
+        let screen_remote = format_one_screen_report(&rep_remote, Path::new("out/cost.json"));
+        assert!(
+            screen_remote.contains("mount must return first") && screen_remote.contains("wait_remote_yield:7"),
+            "non-loop yield after draw must name yield location and say mount must return first:\n{screen_remote}"
+        );
+        assert!(
+            !screen_remote.contains("wrap the loop"),
+            "non-loop InvokeServer yield must not say wrap the loop:\n{screen_remote}"
+        );
+
+        // 3. Deep-tree caveat states the exact ancestor-bookkeeping percentage on steady sequences.
+        let deep_chain = dir.join("deep_chain.luau");
+        std::fs::write(
+            &deep_chain,
+            r#"local RunService = game:GetService("RunService")
+return function(Target)
+	local cur = Target
+	for i = 1, 8 do
+		local f = Instance.new("Frame")
+		f.Name = "Layer" .. i
+		f.Size = UDim2.fromOffset(200, 100)
+		f.Parent = cur
+		cur = f
+	end
+	local leaf = Instance.new("Frame")
+	leaf.Name = "Leaf"
+	leaf.Size = UDim2.fromOffset(50, 20)
+	leaf.Parent = cur
+	local step = 0
+	local conn = RunService.Heartbeat:Connect(function()
+		step += 1
+		leaf.Size = UDim2.fromOffset(50 + (step % 10), 20)
+	end)
+	return function() conn:Disconnect() end
+end
+"#,
+        )
+        .unwrap();
+        let rep_deep = run_sequence_cost(&make_args(&deep_chain), &spec, &repo).unwrap();
+        assert_eq!(rep_deep["status"], "ok");
+        let deep_share = rep_deep.pointer("/layoutDriverSummary/ancestorShare").and_then(Value::as_f64).unwrap();
+        assert!(deep_share > 0.8, "8-layer deep chain must have >80% ancestor share, got {deep_share}");
+        let deep_pct = (deep_share * 100.0).round() as u64;
+        let screen_deep = format_one_screen_report(&rep_deep, Path::new("out/cost.json"));
+        assert!(
+            screen_deep.contains(&format!("{deep_pct}% of steady layout records are ancestor bookkeeping")),
+            "deep sequence caveat must state ancestor share ({deep_pct}%):\n{screen_deep}"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
