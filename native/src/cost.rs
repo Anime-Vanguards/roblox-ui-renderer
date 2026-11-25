@@ -1312,18 +1312,58 @@ fn predicted_scene_only_json() -> Value {
     })
 }
 
+fn format_hz(hz: f64) -> String {
+    if !hz.is_finite() {
+        return "?".into();
+    }
+    if (hz - hz.round()).abs() < 1e-6 {
+        format!("{}", hz.round() as u64)
+    } else {
+        format!("{hz:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
 pub fn run_mode_info(run_mode: &str) -> Value {
+    run_mode_info_with_cadence(run_mode, 60.0, "client", None)
+}
+
+pub fn run_mode_info_with_cadence(run_mode: &str, client_hz: f64, cadence_kind: &str, sample_fps: Option<f64>) -> Value {
+    let hz_str = format_hz(client_hz);
     match run_mode {
-        "play" => json!({
-            "mode": "play",
-            "heartbeatsPerFrame": 1,
-            "meaning": "Playing client cadence (60 Hz, 1 Heartbeat per frame); per-frame layout counters and extrapolated layoutCpuMs reflect one client 60 Hz frame."
-        }),
-        "edit" => json!({
-            "mode": "edit",
-            "heartbeatsPerFrame": 4,
-            "meaning": "Studio edit mode (240 Hz Heartbeat, 4 beats per 60 Hz render frame); per-frame layoutCpuMs is refused because Heartbeat-driven UI can run up to 4x a playing client's rate. Pass --mode play for client per-frame layout figures."
-        }),
+        "play" => {
+            let meaning = match sample_fps {
+                Some(fps) => format!(
+                    "Playing client cadence ({hz_str} Hz {cadence_kind}, 1 Heartbeat per client frame; sampled @ {} fps); steady-state layout counters and extrapolated layoutCpuMs are normalized per 1 client frame at {hz_str} Hz.",
+                    format_hz(fps),
+                ),
+                None => format!(
+                    "Playing client cadence ({hz_str} Hz {cadence_kind}, 1 Heartbeat per client frame); per-frame layout counters and extrapolated layoutCpuMs reflect one client {hz_str} Hz frame."
+                ),
+            };
+            let mut obj = Map::new();
+            obj.insert("mode".into(), json!("play"));
+            obj.insert("clientHz".into(), json!(round4(client_hz)));
+            obj.insert("cadenceKind".into(), json!(cadence_kind));
+            if let Some(fps) = sample_fps {
+                obj.insert("sampleFps".into(), json!(round4(fps)));
+            }
+            obj.insert("heartbeatsPerFrame".into(), json!(1));
+            obj.insert("heartbeatsPerClientFrame".into(), json!(1));
+            obj.insert("meaning".into(), json!(meaning));
+            Value::Object(obj)
+        }
+        "edit" => {
+            let mut obj = Map::new();
+            obj.insert("mode".into(), json!("edit"));
+            obj.insert("clientHz".into(), json!(round4(client_hz)));
+            obj.insert("cadenceKind".into(), json!(cadence_kind));
+            if let Some(fps) = sample_fps {
+                obj.insert("sampleFps".into(), json!(round4(fps)));
+            }
+            obj.insert("heartbeatsPerFrame".into(), json!(4));
+            obj.insert("meaning".into(), json!("Studio edit mode (240 Hz Heartbeat, 4 beats per 60 Hz render frame); per-frame layoutCpuMs is refused because Heartbeat-driven UI can run up to 4x a playing client's rate. Pass --mode play for client per-frame layout figures."));
+            Value::Object(obj)
+        }
         "scene" => json!({
             "mode": "scene",
             "heartbeatsPerFrame": Value::Null,
@@ -1335,6 +1375,72 @@ pub fn run_mode_info(run_mode: &str) -> Value {
             "meaning": "Non-standard engine run mode; per-frame layoutCpuMs is refused unless run with --mode play."
         }),
     }
+}
+
+fn predicted_non_single_client_frame_json(client_frames: u32, client_hz: f64, sample_fps: f64, is_mount: bool) -> Value {
+    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
+    let hz_str = format_hz(client_hz);
+    let fps_str = format_hz(sample_fps);
+    let (basis, scope, reason) = if is_mount {
+        (
+            "mount_and_runup",
+            "mount_and_runup_not_one_client_frame",
+            format!("Frame 0 includes initial mount and run-up ({client_frames} client frames at {hz_str} Hz), not one steady client frame."),
+        )
+    } else {
+        (
+            "not_one_client_frame",
+            "sample_not_one_client_frame",
+            format!("Sample spans {client_frames} client frames (sampled @ {fps_str} fps on a {hz_str} Hz client); not printed as one client frame."),
+        )
+    };
+    let layout_refusal = json!({
+        "status": "refused",
+        "basis": basis,
+        "scope": scope,
+        "ms": Value::Null,
+        "clientFrames": client_frames,
+        "reason": reason,
+        "settledBy": "Read top-level predicted / sequence.summary.steadyStateLayoutCpuMs (normalized per 1 client frame) or sample at --fps matching --client-hz."
+    });
+    json!({
+        "desktop-ref": {
+            "layoutCpuMs": layout_refusal,
+            "drawPassCpuMs": draw_refusal,
+            "gpuUiMs": gpu_refusal
+        },
+        "phone-mid": {
+            "layoutCpuMs": layout_refusal,
+            "drawPassCpuMs": draw_refusal,
+            "gpuUiMs": gpu_refusal
+        }
+    })
+}
+
+fn predicted_no_client_frames_json(sample_count: usize, client_hz: f64, sample_fps: f64) -> Value {
+    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
+    let hz_str = format_hz(client_hz);
+    let fps_str = format_hz(sample_fps);
+    let layout_refusal = json!({
+        "status": "refused",
+        "basis": "no_client_frame_stepped",
+        "scope": "steady_state_no_client_frames",
+        "ms": Value::Null,
+        "reason": format!("0 client frames completed after frame 0 ({sample_count} samples @ {fps_str} fps on a {hz_str} Hz client); cannot price one client frame."),
+        "settledBy": format!("Increase --frames or --duration so at least 1 {hz_str} Hz client frame completes after frame 0, or lower --fps.")
+    });
+    json!({
+        "desktop-ref": {
+            "layoutCpuMs": layout_refusal,
+            "drawPassCpuMs": draw_refusal,
+            "gpuUiMs": gpu_refusal
+        },
+        "phone-mid": {
+            "layoutCpuMs": layout_refusal,
+            "drawPassCpuMs": draw_refusal,
+            "gpuUiMs": gpu_refusal
+        }
+    })
 }
 
 /// Failure, hint, and edit-mode fallback metadata carried from an engine run into `rur-cost/1`.
@@ -2003,6 +2109,20 @@ fn check_compare_equivalence(before: &Value, after: &Value) -> Vec<EquivalenceMi
                 });
             }
         }
+        if let (Some(bhz), Some(ahz)) = (
+            before.pointer("/sequence/summary/clientHz").and_then(Value::as_f64),
+            after.pointer("/sequence/summary/clientHz").and_then(Value::as_f64),
+        ) {
+            if (bhz - ahz).abs() > 1e-6 {
+                mismatches.push(EquivalenceMismatch {
+                    field: "sequence.clientHz",
+                    before: json!(bhz),
+                    after: json!(ahz),
+                    reason: format!("sequence clientHz differs (before={bhz}, after={ahz})"),
+                    remedy: "Re-run both sequence arms with the same --client-hz.".into(),
+                });
+            }
+        }
     }
 
     let b_run_mode = before.get("runMode").and_then(Value::as_str);
@@ -2301,12 +2421,15 @@ struct FrameMetrics {
     screen_overdraw: f64,
     offscreen_overdraw: f64,
     layout: LayoutStats,
+    client_frames: u32,
 }
 
 /// Accumulates per-frame deterministic UI cost and incremental `Layout.Stats` churn across a
 /// multi-frame sequence (`rur cost --from/--to/--frames/--duration/--fps` and `rur sequence --cost`).
 pub struct SequenceAccumulator {
     fps: f64,
+    client_hz: f64,
+    cadence_kind: &'static str,
     run_mode: String,
     frames: Vec<Value>,
     metrics: Vec<FrameMetrics>,
@@ -2321,8 +2444,14 @@ pub struct SequenceAccumulator {
 
 impl SequenceAccumulator {
     pub fn new(fps: f64, run_mode: &str) -> Self {
+        Self::with_cadence(fps, 60.0, "client", run_mode)
+    }
+
+    pub fn with_cadence(fps: f64, client_hz: f64, cadence_kind: &'static str, run_mode: &str) -> Self {
         Self {
             fps,
+            client_hz,
+            cadence_kind,
             run_mode: run_mode.to_string(),
             frames: Vec::new(),
             metrics: Vec::new(),
@@ -2344,6 +2473,7 @@ impl SequenceAccumulator {
         unchanged: bool,
         changed_nodes: usize,
         removed_nodes: usize,
+        client_frames: u32,
         scene: &SceneStore,
         layout: LayoutStats,
         dom_hidden: Option<DomHiddenSummary>,
@@ -2380,24 +2510,30 @@ impl SequenceAccumulator {
             screen_overdraw: totals["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
             offscreen_overdraw: totals["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
             layout,
+            client_frames,
         });
         self.times.push(time);
         let is_play = self.run_mode == "play";
         let frame_scope = if index == 0 {
             if is_play { "mount_and_runup" } else { "mount_and_runup_edit_mode" }
         } else if is_play {
-            "per_frame"
+            if client_frames == 1 { "per_client_frame" } else { "sample_multi_or_zero_client_frames" }
         } else {
             "per_frame_edit_mode_240hz"
         };
-        let frame_predicted = if is_play {
-            predicted_sequence_json(desktop_layout_cpu_ms(layout), frame_scope)
-        } else {
+        let frame_predicted = if !is_play {
             predicted_edit_mode_sequence_json(&self.run_mode, "per_frame_refused_in_edit_mode")
+        } else if index == 0 {
+            predicted_non_single_client_frame_json(client_frames, self.client_hz, self.fps, true)
+        } else if client_frames == 1 {
+            predicted_sequence_json(desktop_layout_cpu_ms(layout), "per_client_frame")
+        } else {
+            predicted_non_single_client_frame_json(client_frames, self.client_hz, self.fps, false)
         };
         self.frames.push(json!({
             "index": index,
             "time": round9(time),
+            "clientFrames": client_frames,
             "unchanged": unchanged,
             "changedNodes": changed_nodes,
             "removedNodes": removed_nodes,
@@ -2457,22 +2593,62 @@ impl SequenceAccumulator {
             p95_map.insert(key.into(), json!(p95));
         }
 
-        let steady_slice = if count > 1 { &self.metrics[1..] } else { &self.metrics[..] };
-        let steady_len = steady_slice.len().max(1) as f64;
-        let steady_passes = steady_slice.iter().map(|m| m.layout.passes as f64).sum::<f64>() / steady_len;
-        let steady_computed = steady_slice.iter().map(|m| m.layout.computed as f64).sum::<f64>() / steady_len;
-        let steady_stored = steady_slice.iter().map(|m| m.layout.stored as f64).sum::<f64>() / steady_len;
-        let steady_moved = steady_slice.iter().map(|m| m.layout.moved as f64).sum::<f64>() / steady_len;
-        let steady_scroll_passes = steady_slice.iter().map(|m| m.layout.scroll_passes as f64).sum::<f64>() / steady_len;
-        let steady_scroll = steady_slice.iter().map(|m| m.layout.scroll_moved as f64).sum::<f64>() / steady_len;
-        let steady_desk_ms = steady_slice.iter().map(|m| desktop_layout_cpu_ms(m.layout)).sum::<f64>() / steady_len;
+        let steady_slice = if count > 1 { &self.metrics[1..] } else { &[][..] };
+        let steady_client_frames: u64 = steady_slice.iter().map(|m| u64::from(m.client_frames)).sum();
+        let has_steady_client_frames = steady_client_frames > 0;
+        let denom = if has_steady_client_frames { steady_client_frames as f64 } else { 1.0 };
+        let steady_passes = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.passes as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_computed = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.computed as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_stored = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.stored as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_moved = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.moved as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_scroll_passes = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.scroll_passes as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_scroll = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.scroll_moved as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_desk_ms = if has_steady_client_frames {
+            steady_slice.iter().map(|m| desktop_layout_cpu_ms(m.layout)).sum::<f64>() / denom
+        } else {
+            0.0
+        };
 
         let is_play = self.run_mode == "play";
+        let hz_str = format_hz(self.client_hz);
+        let fps_str = format_hz(self.fps);
         let mut base = self.last_report.unwrap_or_else(|| {
             analyze_scene_with_mode(&SceneStore::default(), LayoutStats::default(), None, &self.run_mode)
         });
         let steady_layout_json = json!({
-            "scope": if is_play { "steady_state_per_frame_mean" } else { "steady_state_per_frame_mean_edit_mode_240hz" },
+            "scope": if !is_play {
+                "steady_state_per_frame_mean_edit_mode_240hz"
+            } else if has_steady_client_frames {
+                "steady_state_per_client_frame_mean"
+            } else {
+                "steady_state_no_client_frames"
+            },
+            "clientHz": round4(self.client_hz),
+            "cadenceKind": self.cadence_kind,
             "passes": round6(steady_passes),
             "computed": round6(steady_computed),
             "stored": round6(steady_stored),
@@ -2480,10 +2656,32 @@ impl SequenceAccumulator {
             "scrollPasses": round6(steady_scroll_passes),
             "scrollMoved": round6(steady_scroll),
         });
-        let steady_cpu_json = if is_play {
+        let steady_cpu_json = if !is_play {
+            json!({
+                "status": "refused",
+                "basis": "edit_mode_cadence",
+                "desktop-ref": Value::Null,
+                "phone-mid-range": Value::Null,
+                "phone-mid-band": Value::Null,
+                "reason": "Run used --mode edit (Studio 240 Hz Heartbeat, 4 beats per 60 Hz frame), which can price Heartbeat-driven UI at up to 4x a playing client's per-frame layout cost.",
+                "settledBy": "Re-run with --mode play for a playing client's 60 Hz Heartbeat cadence (1 beat per frame).",
+            })
+        } else if !has_steady_client_frames {
+            json!({
+                "status": "refused",
+                "basis": "no_client_frame_stepped",
+                "desktop-ref": Value::Null,
+                "phone-mid-range": Value::Null,
+                "phone-mid-band": Value::Null,
+                "reason": format!("0 client frames completed after frame 0 ({count} samples @ {fps_str} fps on a {hz_str} Hz client); cannot price one client frame."),
+                "settledBy": format!("Increase --frames or --duration so at least 1 {hz_str} Hz client frame completes after frame 0, or lower --fps."),
+            })
+        } else {
             json!({
                 "status": "extrapolated",
                 "basis": "extrapolated",
+                "clientHz": round4(self.client_hz),
+                "cadenceKind": self.cadence_kind,
                 "desktop-ref": round9(steady_desk_ms),
                 "phone-mid-basis": "derived",
                 "phone-mid-range": [
@@ -2503,16 +2701,6 @@ impl SequenceAccumulator {
                     round4(PHONE_UI_MAIN_HIGH),
                 ],
             })
-        } else {
-            json!({
-                "status": "refused",
-                "basis": "edit_mode_cadence",
-                "desktop-ref": Value::Null,
-                "phone-mid-range": Value::Null,
-                "phone-mid-band": Value::Null,
-                "reason": "Run used --mode edit (Studio 240 Hz Heartbeat, 4 beats per 60 Hz frame), which can price Heartbeat-driven UI at up to 4x a playing client's per-frame layout cost.",
-                "settledBy": "Re-run with --mode play for a playing client's 60 Hz Heartbeat cadence (1 beat per frame).",
-            })
         };
         let raw_status = outcome
             .status
@@ -2528,25 +2716,29 @@ impl SequenceAccumulator {
         if let Some(obj) = base.as_object_mut() {
             obj.insert("mode".into(), json!("sequence"));
             obj.insert("runMode".into(), json!(self.run_mode));
-            obj.insert("runModeInfo".into(), run_mode_info(&self.run_mode));
+            obj.insert("runModeInfo".into(), run_mode_info_with_cadence(&self.run_mode, self.client_hz, self.cadence_kind, Some(self.fps)));
             obj.insert("status".into(), json!(final_status));
             obj.remove("fullTreeLayout");
             obj.insert("layout".into(), steady_layout_json.clone());
             obj.insert(
                 "predicted".into(),
-                if is_play {
-                    predicted_sequence_json(steady_desk_ms, "steady_state_per_frame_mean")
-                } else {
+                if !is_play {
                     predicted_edit_mode_sequence_json(&self.run_mode, "per_frame_refused_in_edit_mode")
+                } else if !has_steady_client_frames {
+                    predicted_no_client_frames_json(count, self.client_hz, self.fps)
+                } else {
+                    predicted_sequence_json(steady_desk_ms, "steady_state_per_client_frame_mean")
                 },
             );
             if let Some(fid) = obj.get_mut("fidelity").and_then(Value::as_object_mut) {
                 fid.insert(
                     "layoutCpuMs".into(),
-                    if is_play {
-                        json!("extrapolated_from_lazy_layout_probe (mode=play, 60 Hz client cadence, 1 Heartbeat/frame; desktop lazy-layout slope extrapolated to per-frame layout passes; phone-mid uses derived 3.9x..6.3x ratio, band 2.55x..12.32x, capture factor 1.25..2.0 unmeasured for layout)")
-                    } else {
+                    if !is_play {
                         json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz, 4 beats per 60 Hz frame; pass --mode play for client per-frame layoutCpuMs)")
+                    } else if !has_steady_client_frames {
+                        json!(format!("refused_no_client_frames (0 client frames completed after frame 0 @ {fps_str} fps on {hz_str} Hz client)"))
+                    } else {
+                        json!(format!("extrapolated_from_lazy_layout_probe (mode=play, {hz_str} Hz {} cadence, 1 Heartbeat/client frame, sampled @ {fps_str} fps; desktop lazy-layout slope extrapolated to per-client-frame layout passes; phone-mid uses derived 3.9x..6.3x ratio, band 2.55x..12.32x, capture factor 1.25..2.0 unmeasured for layout)", self.cadence_kind))
                     },
                 );
             }
@@ -2556,12 +2748,15 @@ impl SequenceAccumulator {
                     "summary": {
                         "frameCount": count,
                         "fps": self.fps,
+                        "clientHz": round4(self.client_hz),
+                        "cadenceKind": self.cadence_kind,
                         "runMode": self.run_mode,
                         "from": round9(self.times.first().copied().unwrap_or(0.0)),
                         "to": round9(self.times.last().copied().unwrap_or(0.0)),
                         "activeFrames": self.active_frames,
                         "unchangedFrames": self.unchanged_frames,
                         "steadyStateFrames": steady_slice.len(),
+                        "steadyStateClientFrames": steady_client_frames,
                         "mean": mean_map,
                         "peak": peak_map,
                         "p95": p95_map,
@@ -2587,8 +2782,8 @@ impl SequenceAccumulator {
 }
 
 /// Runs a CPU-only multi-frame cost sequence (no GPU device, PNG encoding, or video encoding).
-/// Defaults `--mode` to `play` (1 Heartbeat per 60 Hz frame, matching a playing client) unless
-/// the caller explicitly passed `--mode`.
+/// Defaults `--mode` to `play` (1 Heartbeat per client frame, matching a playing client) and
+/// `spec.client_hz` to `Some(60.0)` unless the caller explicitly passed `--mode` / `--client-hz`.
 pub fn run_sequence_cost(
     engine_args: &engine::cli::Args,
     spec: &engine::cli::SequenceSpec,
@@ -2600,6 +2795,9 @@ pub fn run_sequence_cost(
     }
     let run_mode = engine_args.mode.as_deref().unwrap_or("play").to_string();
     let mut spec = spec.clone();
+    if spec.client_hz.is_none() {
+        spec.client_hz = Some(60.0);
+    }
     spec.collect_cost = true;
     let mut resolver = crate::resolve::Resolver::new(repo.to_path_buf(), engine_args.offline);
     let mut frames_rx = crate::sequence::start_fresh(&engine_args, &spec)?;
@@ -2623,7 +2821,7 @@ pub fn run_sequence_cost(
     }
 
     let mut scene = SceneStore::default();
-    let mut acc = SequenceAccumulator::new(spec.fps, &run_mode);
+    let mut acc = SequenceAccumulator::with_cadence(spec.fps, first.client_hz, first.cadence_kind, &run_mode);
     let mut next = Some(first);
     let mut ready_status: Option<String> = None;
     let mut ready_diagnostics: Option<Value> = None;
@@ -2637,7 +2835,7 @@ pub fn run_sequence_cost(
                 Err(_) => return Err("the sequence engine stopped without finishing".into()),
             },
         };
-        let engine::cli::SequenceFrame { index, time, mut reply, layout, dom_hidden } = frame;
+        let engine::cli::SequenceFrame { index, time, mut reply, layout, client_frames, dom_hidden, .. } = frame;
         if reply["type"] == "error" {
             return Err(format!("frame {index}: {}", reply["message"].as_str().unwrap_or("the engine failed")));
         }
@@ -2655,6 +2853,7 @@ pub fn run_sequence_cost(
             unchanged,
             outcome.changed_nodes.len(),
             outcome.removed_nodes.len(),
+            client_frames,
             &scene,
             layout,
             dom_hidden,
@@ -2749,22 +2948,32 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
     let status = report["status"].as_str().unwrap_or("?");
     let mode = report["mode"].as_str().unwrap_or("single");
     let run_mode = report["runMode"].as_str().unwrap_or("unknown");
+    let seq_summary = report.pointer("/sequence/summary");
+    let client_hz = seq_summary
+        .and_then(|s| s["clientHz"].as_f64())
+        .or_else(|| report.pointer("/runModeInfo/clientHz").and_then(Value::as_f64))
+        .unwrap_or(60.0);
+    let cadence_kind = seq_summary
+        .and_then(|s| s["cadenceKind"].as_str())
+        .or_else(|| report.pointer("/runModeInfo/cadenceKind").and_then(Value::as_str))
+        .unwrap_or("client");
+    let hz_str = format_hz(client_hz);
     let mode_cadence = match run_mode {
-        "play" => "play 60 Hz",
-        "edit" => "edit 240 Hz",
-        "scene" => "scene",
-        other => other,
+        "play" => format!("play {hz_str} Hz {cadence_kind}"),
+        "edit" => "edit 240 Hz".to_string(),
+        "scene" => "scene".to_string(),
+        other => other.to_string(),
     };
     let vp = &report["viewport"];
     let t = &report["totals"];
     let rt_bytes = t["canvasRtBytes"].as_u64().unwrap_or(0);
 
-    if let Some(seq) = report.pointer("/sequence/summary") {
+    if let Some(seq) = seq_summary {
         let _ = writeln!(
             out,
-            "rur cost: {status} (sequence, {} frames @ {} fps, mode={mode_cadence}) | {}x{} @ {}x ({}x{} px)",
+            "rur cost: {status} (sequence, {} samples @ {} fps, mode={mode_cadence}) | {}x{} @ {}x ({}x{} px)",
             seq["frameCount"].as_u64().unwrap_or(0),
-            seq["fps"].as_f64().unwrap_or(60.0),
+            format_hz(seq["fps"].as_f64().unwrap_or(60.0)),
             vp["width"].as_f64().unwrap_or(0.0),
             vp["height"].as_f64().unwrap_or(0.0),
             vp["scale"].as_f64().unwrap_or(1.0),
@@ -2866,9 +3075,20 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
 
     if let Some(seq) = report.pointer("/sequence/summary") {
         let steady = &seq["steadyStateLayoutMean"];
+        let steady_samples = seq["steadyStateFrames"].as_u64().unwrap_or(0);
+        let steady_client = seq["steadyStateClientFrames"].as_u64().unwrap_or(steady_samples);
+        let cadence_note = if run_mode == "play" {
+            if steady_client != steady_samples {
+                format!(" per {hz_str} Hz {cadence_kind} frame ({steady_client} client frames in {steady_samples} steady samples)")
+            } else {
+                format!(" per {hz_str} Hz {cadence_kind} frame")
+            }
+        } else {
+            String::new()
+        };
         let _ = writeln!(
             out,
-            "  layout:    steady {:.2}p / {:.1}s / {:.1}m / {:.1}sp / {:.1}sm ({} active, {} unchanged)",
+            "  layout:    steady {:.2}p / {:.1}s / {:.1}m / {:.1}sp / {:.1}sm{cadence_note} ({} active, {} unchanged)",
             steady["passes"].as_f64().unwrap_or(0.0),
             steady["stored"].as_f64().unwrap_or(0.0),
             steady["moved"].as_f64().unwrap_or(0.0),
@@ -2877,12 +3097,24 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             seq["activeFrames"].as_u64().unwrap_or(0),
             seq["unchangedFrames"].as_u64().unwrap_or(0),
         );
+        let cpu_status = seq.pointer("/steadyStateLayoutCpuMs/status").and_then(Value::as_str);
         if status != "ok" {
             let _ = writeln!(
                 out,
                 "  layoutMs:  refused ({status}; zero counts are not a valid UI cost measurement)",
             );
-        } else if run_mode == "play" {
+        } else if run_mode != "play" {
+            let _ = writeln!(
+                out,
+                "  layoutMs:  refused in edit mode (240 Hz, 4 beats/frame; pass --mode play for 60 Hz client per-frame ms)",
+            );
+        } else if cpu_status == Some("refused") {
+            let reason = seq
+                .pointer("/steadyStateLayoutCpuMs/reason")
+                .and_then(Value::as_str)
+                .unwrap_or("0 client frames completed after frame 0");
+            let _ = writeln!(out, "  layoutMs:  refused ({})", first_line(reason, 160));
+        } else {
             let desk_ms = seq.pointer("/steadyStateLayoutCpuMs/desktop-ref").and_then(Value::as_f64).unwrap_or(0.0);
             let phone_range = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-range");
             let phone_band = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-band");
@@ -2890,11 +3122,6 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
                 out,
                 "  layoutMs:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
                 format_phone_range(&phone_range, &phone_band),
-            );
-        } else {
-            let _ = writeln!(
-                out,
-                "  layoutMs:  refused in edit mode (240 Hz, 4 beats/frame; pass --mode play for 60 Hz client per-frame ms)",
             );
         }
     } else if let Some(ft) = report.get("fullTreeLayout") {
@@ -3138,15 +3365,27 @@ fn print_summary(report: &Value, dest: &Path) {
     if let Some(seq) = report.pointer("/sequence/summary") {
         let frames = seq["frameCount"].as_u64().unwrap_or(0);
         let fps = seq["fps"].as_f64().unwrap_or(60.0);
+        let client_hz = seq["clientHz"].as_f64().unwrap_or(60.0);
+        let cadence_kind = seq["cadenceKind"].as_str().unwrap_or("client");
+        let hz_str = format_hz(client_hz);
         let steady = &seq["steadyStateLayoutMean"];
         let mode_label = match run_mode {
-            "play" => "mode=play 60 Hz",
-            "edit" => "mode=edit 240 Hz",
-            other => other,
+            "play" => format!("mode=play {hz_str} Hz {cadence_kind}"),
+            "edit" => "mode=edit 240 Hz".to_string(),
+            other => other.to_string(),
         };
+        let cpu_status = seq.pointer("/steadyStateLayoutCpuMs/status").and_then(Value::as_str);
         let layout_timing = if status != "ok" {
             format!("layout ms refused ({status}); draw/gpu refused")
-        } else if run_mode == "play" {
+        } else if run_mode != "play" {
+            "per-frame layout ms refused in edit mode (pass --mode play for 60 Hz client cadence); draw/gpu refused".to_string()
+        } else if cpu_status == Some("refused") {
+            let reason = seq
+                .pointer("/steadyStateLayoutCpuMs/reason")
+                .and_then(Value::as_str)
+                .unwrap_or("0 client frames completed");
+            format!("layout ms refused ({}); draw/gpu refused", first_line(reason, 120))
+        } else {
             let desk_ms = seq.pointer("/steadyStateLayoutCpuMs/desktop-ref").and_then(Value::as_f64).unwrap_or(0.0);
             let phone_range = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-range");
             let phone_band = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-band");
@@ -3154,14 +3393,12 @@ fn print_summary(report: &Value, dest: &Path) {
                 "extrapolated desk {desk_ms:.4} ms, {}; draw/gpu refused",
                 format_phone_range(&phone_range, &phone_band)
             )
-        } else {
-            "per-frame layout ms refused in edit mode (pass --mode play for 60 Hz client cadence); draw/gpu refused".to_string()
         };
         eprintln!(
-            "rur cost: {} ({} frames @ {} fps, {}) | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m/{:.1}sp/{:.1}sm ({}) | model draws={} breaks={} (unmeasured) -> {}",
+            "rur cost: {} ({} samples @ {} fps, {}) | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m/{:.1}sp/{:.1}sm ({}) | model draws={} breaks={} (unmeasured) -> {}",
             status,
             frames,
-            fps,
+            format_hz(fps),
             mode_label,
             t["quads"].as_u64().unwrap_or(0),
             t["glyphQuads"].as_u64().unwrap_or(0),
@@ -3305,14 +3542,20 @@ rur cost — deterministic Roblox UI render-cost accounting
 Usage:
   rur cost --story <file.story.luau> | --module <file> | --model <file.rbxm> | --fixture <file>
            [--out <dir|file.json>] [--viewport WxH] [--scale S] [--time T] [--all-layers]
-           [--from S] [--to S | --frames N | --duration S] [--fps N]
+           [--from S] [--to S | --frames N | --duration S] [--fps N] [--client-hz N]
            [--mode edit|play] [--device desktop|touch|gamepad] [--topbar-inset px]
            [--controls <json|file>] [--actions <json|file>] [--compare <before>] [--json]
   rur cost --scene <scene.json> [--out <dir|file.json>] [--json]
   rur cost compare <before> <after> [--out <dir|file.json>] [--json]
 
+Cadence:
+  Sequence mode (--from/--frames/--to/--duration/--fps) defaults to --mode play at 60 Hz client
+  cadence (--client-hz defaults to 60); --fps controls only how often samples are captured, and
+  per-frame figures are normalized to one client frame (or refused when 0 client frames step).
+  Explicit --mode edit (or `rur sequence --cost` without --mode play) refuses per-frame layoutCpuMs.
+
 Outputs:
-  stdout             compact one-screen summary (or full single-line JSON with --json).
+  stdout             compact one-screen summary (or full JSON with --json).
   <out>/cost.json    deterministic JSON (zero wall-clock fields): quads & glyph quads, clipped
                      overdraw, Studio CanvasGroup RT dimensions & switches, live-DOM hidden-in-shown
                      subtrees, layout pass counters (and per-frame churn in sequence mode),
@@ -3378,7 +3621,9 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
         });
     }
 
-    let is_sequence = ["--from", "--to", "--frames", "--duration", "--fps"].iter().any(|k| args.present(k));
+    let is_sequence = ["--from", "--to", "--frames", "--duration", "--fps", "--client-hz"]
+        .iter()
+        .any(|k| args.present(k));
     if is_sequence && args.present("--time") {
         return Err(Failure::Usage("cost sequence mode takes --from and --to (or --frames / --duration) with --fps, not --time".into()));
     }
@@ -3398,8 +3643,21 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
             }
         }
         seq_opts.insert("cost".into(), Value::Bool(true));
-        let (spec, _) = crate::sequence::parse_options(&Value::Object(seq_opts), args.truthy("--offline"))
+        let (mut spec, _) = crate::sequence::parse_options(&Value::Object(seq_opts), args.truthy("--offline"))
             .map_err(Failure::Usage)?;
+        let client_hz = match args.value("--client-hz") {
+            Some(raw) => {
+                let parsed: f64 = raw
+                    .trim()
+                    .parse()
+                    .ok()
+                    .filter(|v: &f64| v.is_finite() && *v > 0.0 && *v <= 1000.0)
+                    .ok_or_else(|| Failure::Usage(format!("--client-hz must be above 0 and at most 1000 (got {raw})")))?;
+                parsed
+            }
+            None => 60.0,
+        };
+        spec.client_hz = Some(client_hz);
         let engine_args = build_engine_args(&context, &args)?;
         let report = run_sequence_cost(&engine_args, &spec, &context.repo).map_err(Failure::Error)?;
         let name = format!("{}-cost", crate::story_args::source_name(&source, false));
@@ -3600,8 +3858,8 @@ mod tests {
         let mut acc_edit = SequenceAccumulator::new(60.0, "edit");
         for i in 0..10u32 {
             let st = LayoutStats { scroll_passes: 1, scroll_moved: 120, ..Default::default() };
-            acc_play.record_frame(i, f64::from(i) / 60.0, false, 1, 0, &scene, st, if i == 0 { Some(hidden.clone()) } else { None });
-            acc_edit.record_frame(i, f64::from(i) / 60.0, false, 1, 0, &scene, st, if i == 0 { Some(hidden.clone()) } else { None });
+            acc_play.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, st, if i == 0 { Some(hidden.clone()) } else { None });
+            acc_edit.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, st, if i == 0 { Some(hidden.clone()) } else { None });
         }
         let play_text = format_one_screen_report(&acc_play.finish(Some("ok")), dest);
         let play_lines = play_text.lines().filter(|l| !l.trim().is_empty()).count();
@@ -3972,7 +4230,7 @@ end
 
         // Sequence mode: each steady-state 60 Hz frame applies 1 scroll moving 301 records (not 1204)
         // and prices it at 62 us + 301 * 0.312 us = 0.155912 ms
-        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
         let seq_rep = run_sequence_cost(&args, &spec, &repo).unwrap();
         let frames = seq_rep["sequence"]["frames"].as_array().unwrap();
         for f in &frames[1..] {
@@ -4095,7 +4353,7 @@ end
             argv.extend(extra.iter().map(|s| s.to_string()));
             engine::cli::parse(&argv).unwrap()
         };
-        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, collect_cost: true };
+        let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
 
         // 1. Default run (no --mode): runs play mode (1 Heartbeat/frame) and matches client 0.09944 ms
         let default_rep = run_sequence_cost(&make_args(&counter_fixture, &[]), &spec, &repo).unwrap();
@@ -4292,7 +4550,7 @@ end
 
         // 1. Static fixture (corners.luau): frame 0 lays out; frames 1..4 have 0 layout churn
         let static_args = make_args(&repo.join("fixtures/corners.luau"), &[]);
-        let static_spec = engine::cli::SequenceSpec { from: 0.0, frames: 5, fps: 60.0, collect_cost: true };
+        let static_spec = engine::cli::SequenceSpec { from: 0.0, frames: 5, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
         let static_rep = run_sequence_cost(&static_args, &static_spec, &repo).unwrap();
         let s_frames = static_rep["sequence"]["frames"].as_array().unwrap();
         assert_eq!(s_frames.len(), 5);
@@ -4307,7 +4565,7 @@ end
         // 2. Animated fixture (anim-tweens.luau): positive churn on frames 1..3 AND exact single-moment parity
         let anim_path = repo.join("fixtures/anim-tweens.luau");
         let anim_args = make_args(&anim_path, &[]);
-        let anim_spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 30.0, collect_cost: true };
+        let anim_spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 30.0, client_hz: Some(60.0), collect_cost: true };
         let anim_rep = run_sequence_cost(&anim_args, &anim_spec, &repo).unwrap();
         let a_frames = anim_rep["sequence"]["frames"].as_array().unwrap();
         assert_eq!(a_frames.len(), 4);
@@ -4402,7 +4660,7 @@ end
             argv.extend(extra.iter().map(|s| s.to_string()));
             engine::cli::parse(&argv).unwrap()
         };
-        let seq_spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, collect_cost: true };
+        let seq_spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
         let dest = Path::new("out/cost.json");
 
         // 1. assert(not RunService:IsRunning()) -> error with cause, refused ms, and edit-mode fallback note
@@ -4466,6 +4724,159 @@ end
         let screen_single = format_one_screen_report(&single_rep, dest);
         assert!(screen_single.contains("always broken story"), "{screen_single}");
         assert!(!screen_single.contains("0.0000 ms"), "{screen_single}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn client_cadence_is_one_client_frame_at_30_60_120_fps_and_refuses_zero_client_frames() {
+        // Review fixture: 37 cards x 3 records (Card + Inner + Title) = 111 moved records per scroll.
+        // Hand figure for one client frame: 62 us + 0.312 us * 111 = 96.632 us = 0.096632 ms.
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+        let dir = std::env::temp_dir().join(format!("rur-cost-cadence-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fx = dir.join("scroll37_x3.luau");
+        std::fs::write(
+            &fx,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	local Scroller = Instance.new("ScrollingFrame")
+	Scroller.Size = UDim2.fromOffset(600, 400)
+	Scroller.CanvasSize = UDim2.fromOffset(0, 4000)
+	Scroller.Parent = Target
+	local Cards = {}
+	for i = 1, 37 do
+		local Card = Instance.new("Frame")
+		Card.Position = UDim2.fromOffset(0, (i - 1) * 50)
+		Card.Size = UDim2.fromOffset(200, 40)
+		Card.Parent = Scroller
+		local Inner = Instance.new("Frame")
+		Inner.Size = UDim2.fromScale(1, 1)
+		Inner.Parent = Card
+		local Title = Instance.new("TextLabel")
+		Title.Size = UDim2.fromOffset(80, 20)
+		Title.Text = ""
+		Title.Parent = Card
+		Cards[i] = Card
+	end
+	local step = 0
+	RunService.Heartbeat:Connect(function()
+		step += 1
+		Scroller.CanvasPosition = Vector2.new(0, (step * 10) % 2000)
+		local _ = Cards[1].AbsolutePosition
+	end)
+end
+"#,
+        )
+        .unwrap();
+        let argv: Vec<String> = vec![
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--roots".into(), root.to_string_lossy().into_owned(),
+            "--fixture".into(), fx.to_string_lossy().into_owned(),
+            "--viewport".into(), "800x600".into(),
+            "--scale".into(), "1".into(),
+            "--no-snapshots".into(),
+        ];
+        let args = engine::cli::parse(&argv).unwrap();
+        let expected_ms = 0.096632;
+        let dest = Path::new("out/cost.json");
+
+        // 1. --fps 60 (60 Hz client): 1 client frame per sample -> 1.0 sp / 111.0 sm / 0.096632 ms
+        let rep60 = run_sequence_cost(
+            &args,
+            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 60.0, client_hz: Some(60.0), collect_cost: true },
+            &repo,
+        )
+        .unwrap();
+        assert_eq!(rep60["sequence"]["summary"]["clientHz"], 60.0);
+        assert_eq!(rep60["sequence"]["summary"]["steadyStateClientFrames"], 5);
+        assert_eq!(rep60["layout"]["scrollPasses"], 1.0);
+        assert_eq!(rep60["layout"]["scrollMoved"], 111.0);
+        let ms60 = rep60["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
+        assert!((ms60 - expected_ms).abs() < 1e-9, "fps=60 expected {expected_ms}, got {ms60}");
+        let f60 = rep60["sequence"]["frames"].as_array().unwrap();
+        assert_eq!(f60[0]["predicted"]["desktop-ref"]["layoutCpuMs"]["status"], "refused");
+        assert_eq!(f60[1]["clientFrames"], 1);
+        assert!((f60[1]["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - expected_ms).abs() < 1e-9);
+
+        // 2. --fps 30 (60 Hz client): 2 client frames per sample, normalized per 1 client frame -> 0.096632 ms
+        //    Individual 2-client-frame samples refuse per-frame layoutCpuMs so they are never printed as 1 client frame.
+        let rep30 = run_sequence_cost(
+            &args,
+            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 30.0, client_hz: Some(60.0), collect_cost: true },
+            &repo,
+        )
+        .unwrap();
+        assert_eq!(rep30["sequence"]["summary"]["fps"], 30.0);
+        assert_eq!(rep30["sequence"]["summary"]["clientHz"], 60.0);
+        assert_eq!(rep30["sequence"]["summary"]["steadyStateClientFrames"], 10);
+        assert_eq!(rep30["layout"]["scrollPasses"], 1.0);
+        assert_eq!(rep30["layout"]["scrollMoved"], 111.0);
+        let ms30 = rep30["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
+        assert!((ms30 - expected_ms).abs() < 1e-9, "fps=30 expected {expected_ms}, got {ms30}");
+        let f30 = rep30["sequence"]["frames"].as_array().unwrap();
+        assert_eq!(f30[1]["clientFrames"], 2);
+        assert_eq!(f30[1]["predicted"]["desktop-ref"]["layoutCpuMs"]["status"], "refused");
+        assert!(f30[1]["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].is_null());
+        let screen30 = format_one_screen_report(&rep30, dest);
+        assert!(screen30.contains("30 fps") && screen30.contains("mode=play 60 Hz client"), "{screen30}");
+        assert!(screen30.contains("0.0966 ms") && !screen30.contains("0.1933 ms"), "{screen30}");
+
+        // 3. --fps 120 (60 Hz client): 0 or 1 client frames per sample, normalized per 1 client frame -> 0.096632 ms
+        let rep120 = run_sequence_cost(
+            &args,
+            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 120.0, client_hz: Some(60.0), collect_cost: true },
+            &repo,
+        )
+        .unwrap();
+        assert_eq!(rep120["sequence"]["summary"]["fps"], 120.0);
+        assert_eq!(rep120["sequence"]["summary"]["clientHz"], 60.0);
+        assert_eq!(rep120["sequence"]["summary"]["steadyStateClientFrames"], 2);
+        assert_eq!(rep120["layout"]["scrollPasses"], 1.0);
+        assert_eq!(rep120["layout"]["scrollMoved"], 111.0);
+        let ms120 = rep120["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
+        assert!((ms120 - expected_ms).abs() < 1e-9, "fps=120 expected {expected_ms}, got {ms120}");
+        let f120 = rep120["sequence"]["frames"].as_array().unwrap();
+        assert_eq!(f120[1]["clientFrames"], 0);
+        assert_eq!(f120[1]["predicted"]["desktop-ref"]["layoutCpuMs"]["status"], "refused");
+        assert_eq!(f120[2]["clientFrames"], 1);
+        assert!((f120[2]["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - expected_ms).abs() < 1e-9);
+
+        // 4. --fps 120 --client-hz 120: explicitly runs 120 Hz client cadence and labels it 120 Hz
+        let rep120_hz = run_sequence_cost(
+            &args,
+            &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 120.0, client_hz: Some(120.0), collect_cost: true },
+            &repo,
+        )
+        .unwrap();
+        assert_eq!(rep120_hz["sequence"]["summary"]["clientHz"], 120.0);
+        assert_eq!(rep120_hz["sequence"]["summary"]["steadyStateClientFrames"], 5);
+        assert_eq!(rep120_hz["layout"]["scrollPasses"], 1.0);
+        assert_eq!(rep120_hz["layout"]["scrollMoved"], 111.0);
+        let ms120_hz = rep120_hz["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
+        assert!((ms120_hz - expected_ms).abs() < 1e-9);
+        let screen120_hz = format_one_screen_report(&rep120_hz, dest);
+        assert!(screen120_hz.contains("mode=play 120 Hz client"), "{screen120_hz}");
+        assert!(!screen120_hz.contains("mode=play 60 Hz"), "{screen120_hz}");
+        let cmp_hz = compare_reports(&rep120, &rep120_hz).unwrap();
+        assert_eq!(cmp_hz["verdict"], "refused");
+        assert!(cmp_hz["reason"].as_str().unwrap().contains("clientHz"));
+
+        // 5. --fps 120 --frames 2 (60 Hz client -> 0 steady client frames): must refuse layoutCpuMs, never 0.0000 ms
+        let rep_zero = run_sequence_cost(
+            &args,
+            &engine::cli::SequenceSpec { from: 0.5, frames: 2, fps: 120.0, client_hz: Some(60.0), collect_cost: true },
+            &repo,
+        )
+        .unwrap();
+        assert_eq!(rep_zero["sequence"]["summary"]["steadyStateClientFrames"], 0);
+        assert_eq!(rep_zero["predicted"]["desktop-ref"]["layoutCpuMs"]["status"], "refused");
+        assert!(rep_zero["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].is_null());
+        assert_eq!(rep_zero["sequence"]["summary"]["steadyStateLayoutCpuMs"]["status"], "refused");
+        let screen_zero = format_one_screen_report(&rep_zero, dest);
+        assert!(screen_zero.contains("refused") && !screen_zero.contains("0.0000 ms"), "{screen_zero}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

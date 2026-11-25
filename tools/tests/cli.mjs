@@ -995,6 +995,30 @@ end
 		assert.equal(cEmptyPlay.status, "empty");
 		assert.equal(cEmptyPlay.predicted["desktop-ref"].layoutCpuMs.status, "refused");
 		assert.equal(cEmptyPlay.editModeFallback?.mountsInEditMode, true);
+
+		// Per-frame figure is always one client frame at --fps 30, 60, and 120 (60 Hz default, or --client-hz).
+		for (const fps of [30, 60, 120]) {
+			const outFps = path.join(dir, `counter-fps-${fps}`);
+			const rFps = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "6", "--fps", String(fps), "--out", outFps);
+			assert.equal(rFps.status, 0, rFps.stderr);
+			assert.match(rFps.stdout, /mode=play 60 Hz client/);
+			assert.match(rFps.stdout, /0\.0994 ms/);
+			const cFps = JSON.parse(fs.readFileSync(path.join(outFps, "cost.json"), "utf8"));
+			assert.equal(cFps.sequence.summary.fps, fps);
+			assert.equal(cFps.sequence.summary.clientHz, 60);
+			assert.equal(cFps.layout.scrollPasses, 1);
+			assert.equal(cFps.layout.scrollMoved, 120);
+			assert.ok(Math.abs(cFps.predicted["desktop-ref"].layoutCpuMs.ms - 0.09944) < 1e-9, `fps=${fps} expected 0.09944, got ${cFps.predicted["desktop-ref"].layoutCpuMs.ms}`);
+		}
+		const out120Client = path.join(dir, "counter-client-120");
+		const r120Client = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "6", "--fps", "120", "--client-hz", "120", "--out", out120Client);
+		assert.equal(r120Client.status, 0, r120Client.stderr);
+		assert.match(r120Client.stdout, /mode=play 120 Hz client/);
+		assert.doesNotMatch(r120Client.stdout, /mode=play 60 Hz/);
+		const c120Client = JSON.parse(fs.readFileSync(path.join(out120Client, "cost.json"), "utf8"));
+		assert.equal(c120Client.sequence.summary.clientHz, 120);
+		assert.equal(c120Client.sequence.summary.steadyStateClientFrames, 5);
+		assert.ok(Math.abs(c120Client.predicted["desktop-ref"].layoutCpuMs.ms - 0.09944) < 1e-9);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
@@ -1016,7 +1040,10 @@ end
 		assert.equal(first.status, 0, `golden in isolated RUR_STATE_DIR failed:\n${first.stdout}\n${first.stderr}`);
 		assert.match(first.stdout, /1\/1 identical to the golden output/, first.stdout);
 		assert.doesNotMatch(first.stdout, /could not get cloud font inputs/, first.stdout);
-		assert.ok(fs.existsSync(path.join(stateDir, "assets")), "cloud fonts must be cached inside RUR_STATE_DIR/assets");
+		const hasFrozenFonts = fs.existsSync(path.join(root, "out", "golden", "fonts"));
+		if (!hasFrozenFonts) {
+			assert.ok(fs.existsSync(path.join(stateDir, "assets")), "cloud fonts must be cached inside RUR_STATE_DIR/assets");
+		}
 
 		const second = spawnSync(process.execPath, ["tools/engine/golden.mjs", "--fast", "--filter", "fast/edit/text-probe-rich@quarter"], {
 			cwd: root, encoding: "utf8", windowsHide: true, env,

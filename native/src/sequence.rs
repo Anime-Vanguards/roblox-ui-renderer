@@ -123,7 +123,7 @@ pub fn parse_options(value: &Value, offline: bool) -> Result<(SequenceSpec, Sequ
     let flag = |key: &str, default: bool| value.get(key).and_then(Value::as_bool).unwrap_or(default);
     let cost = flag("cost", false);
     Ok((
-        SequenceSpec { from, frames: frames as u32, fps, collect_cost: cost },
+        SequenceSpec { from, frames: frames as u32, fps, client_hz: None, collect_cost: cost },
         SequenceOutput { fps, crop, pad, png: flag("png", true), scenes: flag("scenes", false), video: flag("video", true), cost, offline },
     ))
 }
@@ -621,7 +621,9 @@ pub fn draw_frames(
     let mut scene = SceneStore::default();
     let mut presentation = ScrollPresentation::default();
     let mut trace = Trace::default();
-    let mut cost_acc = options.cost.then(|| crate::cost::SequenceAccumulator::new(options.fps, run_mode));
+    let mut cost_acc = options.cost.then(|| {
+        crate::cost::SequenceAccumulator::with_cadence(options.fps, first.client_hz, first.cadence_kind, run_mode)
+    });
     let mut writers: Option<Writers> = None;
     let mut crop: Option<([u32; 4], Option<String>)> = None;
     let mut resolved: std::collections::HashSet<String> = Default::default();
@@ -655,7 +657,7 @@ pub fn draw_frames(
         };
         let drawn_at = Instant::now();
         waits.push(drawn_at.duration_since(waited_at).as_secs_f64());
-        let SequenceFrame { index, time, mut reply, layout, dom_hidden } = frame;
+        let SequenceFrame { index, time, mut reply, layout, client_frames, dom_hidden, .. } = frame;
         if reply["type"] == "error" {
             bail!("frame {index}: {}", reply["message"].as_str().unwrap_or("the engine failed"));
         }
@@ -668,6 +670,7 @@ pub fn draw_frames(
                 still,
                 outcome.changed_nodes.len(),
                 outcome.removed_nodes.len(),
+                client_frames,
                 &scene,
                 layout,
                 dom_hidden,
@@ -901,7 +904,7 @@ mod tests {
     fn a_profiled_sequence_writes_its_profile_before_it_ends() {
         let _profile = one_profile_at_a_time();
         let args = fixture_args(&[]);
-        let spec = SequenceSpec { from: 0.0, frames: 12, fps: 60.0, collect_cost: false };
+        let spec = SequenceSpec { from: 0.0, frames: 12, fps: 60.0, client_hz: None, collect_cost: false };
         let dir = temp_profile("sequence");
         let config = profiler::Config::new(profiler::Kinds::parse("work,heap,caches").unwrap(), dir.clone());
         let frames = start_fresh_profiled(&args, &spec, Some(config)).unwrap();
@@ -961,7 +964,7 @@ mod tests {
         let args = fixture_args(&[]);
         for (from, fps, frames, first_frame, step) in [(0.0167, 60.0, 8u32, 1u32, 1u32), (0.5, 30.0, 4, 30, 2)] {
             let mut scene = SceneStore::default();
-            let messages = capture(&args, &SequenceSpec { from, frames, fps, collect_cost: false });
+            let messages = capture(&args, &SequenceSpec { from, frames, fps, client_hz: None, collect_cost: false });
             assert_eq!(messages.len(), frames as usize + 1, "every frame, then the end");
             for message in messages {
                 match message {
@@ -978,7 +981,7 @@ mod tests {
                 }
             }
         }
-        let times: Vec<f64> = capture(&args, &SequenceSpec { from: 0.0, frames: 5, fps: 144.0, collect_cost: false })
+        let times: Vec<f64> = capture(&args, &SequenceSpec { from: 0.0, frames: 5, fps: 144.0, client_hz: None, collect_cost: false })
             .into_iter()
             .filter_map(|message| match message {
                 SequenceMessage::Frame(frame) => Some(frame.time),

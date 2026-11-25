@@ -1424,12 +1424,18 @@ fn run_on(
 }
 
 /// What a sequence captures (`rur sequence`, sequence.rs): `frames` frames `1 / fps` s apart, the first at
-/// `from` s (the engine frame nearest it, as `--time`)
+/// `from` s (the engine frame nearest it, as `--time`).
+///
+/// When `client_hz` is `Some(hz)` (`rur cost`, defaulting to `60.0`), the client clock always advances
+/// in whole `1 / hz` s frames and `fps` only controls how often samples are captured. When `None`
+/// (`rur sequence`), legacy cadence applies (whole 60 Hz engine frames when `fps` divides 60, else
+/// display-cadence steps of `1 / fps`).
 #[derive(Clone, Debug)]
 pub struct SequenceSpec {
     pub from: f64,
     pub frames: u32,
     pub fps: f64,
+    pub client_hz: Option<f64>,
     /// Collect per-frame `Layout.Stats` deltas and live-DOM hidden-in-shown counts (`rur cost`, `rur sequence --cost`)
     pub collect_cost: bool,
 }
@@ -1441,6 +1447,12 @@ pub struct SequenceFrame {
     pub time: f64,
     pub reply: Json,
     pub layout: super::layout::Stats,
+    /// Number of client simulation steps executed to reach this sample (`0`, `1`, `2`, ...).
+    pub client_frames: u32,
+    /// Effective simulation rate in Hz for this sequence (`60.0`, `--client-hz`, or `fps` in display cadence).
+    pub client_hz: f64,
+    /// `"client"` for fixed client frames (`1 / client_hz`) or `"display"` for display-cadence steps (`1 / fps`).
+    pub cadence_kind: &'static str,
     #[cfg(feature = "desktop")]
     pub dom_hidden: Option<crate::cost::DomHiddenSummary>,
 }
@@ -1476,6 +1488,11 @@ fn run_sequence(
     if !(spec.fps > 0.0 && spec.fps.is_finite()) || spec.frames == 0 {
         return Err(format!("a sequence needs frames (got {}) and a positive fps (got {})", spec.frames, spec.fps));
     }
+    if let Some(hz) = spec.client_hz {
+        if !(hz > 0.0 && hz <= 1000.0 && hz.is_finite()) {
+            return Err(format!("--client-hz must be above 0 and at most 1000 (got {hz})"));
+        }
+    }
     let run_started = Instant::now();
     let layout_start = super::layout::stats_snapshot(engine);
     let source = source_of(args);
@@ -1486,15 +1503,44 @@ fn run_sequence(
         Some(actions) => story::load_actions(lua, actions)?,
         None => Vec::new(),
     };
+    let fixed_client_hz = spec.client_hz;
+    if let Some(hz) = fixed_client_hz {
+        engine.state.borrow_mut().sched.frame_duration = 1.0 / hz;
+    }
     let frame = engine.state.borrow().sched.frame_duration;
     let first = (spec.from.max(0.0) / frame).round();
     // Engine frames per captured frame: whole ones when the rate divides the engine's
     let ratio = 1.0 / (spec.fps * frame);
-    let whole = ratio.round() >= 1.0 && (ratio - ratio.round()).abs() < 1e-6;
-    let moment = |index: u32| if whole { (first + f64::from(index) * ratio.round()) * frame } else { first * frame + f64::from(index) / spec.fps };
+    let whole = fixed_client_hz.is_some() || (ratio.round() >= 1.0 && (ratio - ratio.round()).abs() < 1e-6);
+    let effective_hz = fixed_client_hz.unwrap_or_else(|| if whole { 1.0 / frame } else { spec.fps });
+    let cadence_kind: &'static str = if fixed_client_hz.is_some() || whole { "client" } else { "display" };
+    let moment = |index: u32| {
+        if fixed_client_hz.is_some() {
+            first * frame + f64::from(index) / spec.fps
+        } else if whole {
+            (first + f64::from(index) * ratio.round()) * frame
+        } else {
+            first * frame + f64::from(index) / spec.fps
+        }
+    };
     let mut timeline = story::Timeline::new(actions);
     let mut whole_frames = |lua: &Lua, engine: &Rc<Engine>, at: f64| super::scheduler::run_until(lua, engine, at);
-    let start = timeline.advance(lua, engine, moment(0), spec.frames == 1, &mut story::input_dispatch, &mut whole_frames);
+    let mut fixed_client_frames = |lua: &Lua, engine: &Rc<Engine>, at: f64| -> LuaResult<()> {
+        loop {
+            let current = engine.state.borrow().sched.now;
+            if current + frame <= at + 1e-9 {
+                super::scheduler::step(lua, engine, Some(frame))?;
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    };
+    let start = if fixed_client_hz.is_some() {
+        timeline.advance(lua, engine, moment(0), spec.frames == 1, &mut story::input_dispatch, &mut fixed_client_frames)
+    } else {
+        timeline.advance(lua, engine, moment(0), spec.frames == 1, &mut story::input_dispatch, &mut whole_frames)
+    };
     mounted.protected(engine, "frame loop", start);
     mounted.settle(lua, engine).map_err(lua_error)?;
     story::add_plugin_widgets(&project, &mut mounted);
@@ -1509,6 +1555,7 @@ fn run_sequence(
     session.run_time = run_started.elapsed().as_secs_f64();
     let ready = session.ready(lua).map_err(lua_error)?;
     let layout_0 = super::layout::stats_snapshot(engine).delta_since(&layout_start);
+    let steps_0 = engine.state.borrow().sched.frame as u32;
     #[cfg(feature = "desktop")]
     let dom_hidden_0 = spec.collect_cost.then(|| crate::cost::collect_dom_hidden(engine, &session.story.roots));
     let now = |engine: &Rc<Engine>| engine.state.borrow().sched.now;
@@ -1517,6 +1564,9 @@ fn run_sequence(
         time: now(engine),
         reply: ready,
         layout: layout_0,
+        client_frames: steps_0,
+        client_hz: effective_hz,
+        cadence_kind,
         #[cfg(feature = "desktop")]
         dom_hidden: dom_hidden_0,
     })) {
@@ -1530,7 +1580,9 @@ fn run_sequence(
         let last = index + 1 == spec.frames;
         let layout_before = super::layout::stats_snapshot(engine);
         let steps_before = engine.state.borrow().sched.frame;
-        let result = if whole {
+        let result = if fixed_client_hz.is_some() {
+            timeline.advance(lua, engine, until, last, &mut story::input_dispatch, &mut fixed_client_frames)
+        } else if whole {
             timeline.advance(lua, engine, until, last, &mut story::input_dispatch, &mut whole_frames)
         } else {
             // One render step from the previous frame's moment to this one's, however many actions fall
@@ -1561,6 +1613,9 @@ fn run_sequence(
             time: now(engine),
             reply,
             layout: layout_delta,
+            client_frames: steps,
+            client_hz: effective_hz,
+            cadence_kind,
             #[cfg(feature = "desktop")]
             dom_hidden,
         })) {
