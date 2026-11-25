@@ -775,8 +775,8 @@ assert.throws(() => findEngine(), err => err.message.includes(${JSON.stringify(d
 		assert.equal(costA.schema, "rur-cost/1");
 		assert.equal(costA.totals.canvasGroupTargets, 7);
 		assert.equal(costA.totals.canvasRtBytes, 723600);
-		assert.equal(costA.totals.glyphQuads, 30);
-		assert.equal(costA.totals.batchBreaksByCause.clip, 1, "CanvasGroup first children must not add spurious clip breaks");
+		assert.equal(costA.totals.glyphQuads, 35, "all 7 CanvasGroups render their 5-glyph Group label into their own textures");
+		assert.equal(costA.totals.batchBreaksByCause.clip, 0, "CanvasGroup descendants (including overhanging nested groups) must not add spurious ancestor-clip breaks");
 		assert.match(costA.fidelity.drawCalls, /unmeasured/i);
 		assert.match(costA.fidelity.batchBreaks, /unmeasured/i);
 		assert.doesNotMatch(costA.fidelity.batchBreaks, /roblox/i);

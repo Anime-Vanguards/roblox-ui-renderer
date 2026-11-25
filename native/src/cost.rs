@@ -426,6 +426,69 @@ fn effective_scissor_key(clip: Option<[f64; 4]>, target_bounds: [f64; 4]) -> Opt
     }
 }
 
+/// Strips a `CanvasGroup`'s inherited ancestor clip from a descendant's exported clip rect when
+/// drawing into the group's offscreen texture (`render::groups::texture_clip_node`, Studio rule:
+/// a group's background and descendants draw into the group's texture clipped only by the group's
+/// bounds and interior clipping frames; the group's ancestor clip applies only on composite).
+fn strip_group_ancestor_clip(
+    clip: Option<[f64; 4]>,
+    group_ancestor_clip: Option<[f64; 4]>,
+    target_bounds: [f64; 4],
+) -> Option<[f64; 4]> {
+    let mut c = clip?;
+    let Some(g) = group_ancestor_clip else {
+        return Some(c);
+    };
+    if (c[0] - g[0]).abs() <= 1e-6 && g[0] > target_bounds[0] {
+        c[0] = target_bounds[0];
+    }
+    if (c[2] - g[2]).abs() <= 1e-6 && g[2] < target_bounds[2] {
+        c[2] = target_bounds[2];
+    }
+    if (c[1] - g[1]).abs() <= 1e-6 && g[1] > target_bounds[1] {
+        c[1] = target_bounds[1];
+    }
+    if (c[3] - g[3]).abs() <= 1e-6 && g[3] < target_bounds[3] {
+        c[3] = target_bounds[3];
+    }
+    Some(c)
+}
+
+fn effective_text_clip(
+    node: &Value,
+    scale: f64,
+    in_group: bool,
+    group_ancestor_clip: Option<[f64; 4]>,
+    target_bounds: [f64; 4],
+) -> Option<[f64; 4]> {
+    if in_group {
+        return None;
+    }
+    if group_ancestor_clip.is_none() {
+        return text_clip_rect(node, [0.0, 0.0], scale);
+    }
+    let clip = strip_group_ancestor_clip(clip_rect(node, [0.0, 0.0], scale), group_ancestor_clip, target_bounds);
+    if node["text"]["clip"] != Value::Bool(true) {
+        return clip;
+    }
+    let rect = &node["rect"];
+    let num = |v: &Value| v.as_f64().filter(|n| n.is_finite()).unwrap_or(0.0);
+    let (x, y) = match node["absolute"].as_array() {
+        Some(a) if a.len() >= 2 => (num(&a[0]), num(&a[1])),
+        _ => (num(&rect[0]), num(&rect[1])),
+    };
+    let [l, r] = device_span(x, num(&rect[2]), scale);
+    let [t, b] = device_span(y, num(&rect[3]), scale);
+    let own = [l, t, l.max(r), t.max(b)];
+    Some(match clip {
+        None => own,
+        Some(c) => {
+            let (x0, y0) = (own[0].max(c[0]), own[1].max(c[1]));
+            [x0, y0, own[2].min(c[2]).max(x0), own[3].min(c[3]).max(y0)]
+        }
+    })
+}
+
 fn round6(value: f64) -> f64 {
     if !value.is_finite() {
         return 0.0;
@@ -659,6 +722,7 @@ impl<'a> Analyzer<'a> {
         self.object_entry(node, nid, &sg.name).quads += quad_count;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_node(
         &mut self,
         sg: &mut ScreenGuiAccum,
@@ -668,6 +732,7 @@ impl<'a> Analyzer<'a> {
         target_bounds: [f64; 4],
         pass_id: u8,
         in_group: bool,
+        group_ancestor_clip: Option<[f64; 4]>,
     ) {
         if node["culled"].as_bool() == Some(true) || node["visible"].as_bool() == Some(false) {
             return;
@@ -680,7 +745,11 @@ impl<'a> Analyzer<'a> {
             let segs = p2d.get("segments").and_then(Value::as_array).map_or(0, Vec::len) as u64;
             if segs > 0 {
                 let phys = physical_rect(node, self.scale).rect;
-                let clip = if in_group { None } else { clip_rect(node, [0.0, 0.0], self.scale) };
+                let clip = if in_group {
+                    None
+                } else {
+                    strip_group_ancestor_clip(clip_rect(node, [0.0, 0.0], self.scale), group_ancestor_clip, target_bounds)
+                };
                 let area = intersect_area(phys.bounds(), clip, target_bounds);
                 if area > 0.0 {
                     self.emit_quads(sg, node, nid, target_id, target_bounds, pass_id, "path2d", "path2d", None, clip, false, segs, area);
@@ -696,7 +765,11 @@ impl<'a> Analyzer<'a> {
 
         let phys = physical_rect(node, self.scale).rect;
         let bounds = quad_bounds_device(node, phys, self.scale);
-        let clip = if in_group { None } else { clip_rect(node, [0.0, 0.0], self.scale) };
+        let clip = if in_group {
+            None
+        } else {
+            strip_group_ancestor_clip(clip_rect(node, [0.0, 0.0], self.scale), group_ancestor_clip, target_bounds)
+        };
         let clipped_area = intersect_area(bounds, clip, target_bounds);
         let corner = if in_group { false } else { has_corner(node) };
         let gradient = if in_group { false } else { node.get("gradient").is_some_and(Value::is_object) };
@@ -766,7 +839,7 @@ impl<'a> Analyzer<'a> {
         if let Some(text) = node.get("text").and_then(Value::as_object) {
             if let Some(lines) = text.get("lines").and_then(Value::as_array).filter(|l| !l.is_empty()) {
                 let a = alpha8(1.0 - text.get("transparency").and_then(Value::as_f64).unwrap_or(0.0));
-                let tclip = if in_group { None } else { text_clip_rect(node, [0.0, 0.0], self.scale) };
+                let tclip = effective_text_clip(node, self.scale, in_group, group_ancestor_clip, target_bounds);
                 let mut glyphs = 0u64;
                 let mut line_area = 0.0f64;
                 for line in lines {
@@ -868,13 +941,23 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn draw_post(&mut self, sg: &mut ScreenGuiAccum, node: &Value, nid: u64, target_id: u64, target_bounds: [f64; 4], pass_id: u8) {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_post(
+        &mut self,
+        sg: &mut ScreenGuiAccum,
+        node: &Value,
+        nid: u64,
+        target_id: u64,
+        target_bounds: [f64; 4],
+        pass_id: u8,
+        group_ancestor_clip: Option<[f64; 4]>,
+    ) {
         let Some(scroll) = node.get("scroll").and_then(Value::as_object) else { return };
         let thickness = (scroll.get("thickness").and_then(Value::as_f64).unwrap_or(0.0) - 1e-6).ceil() as i64;
         if thickness <= 0 || alpha8(1.0 - scroll.get("transparency").and_then(Value::as_f64).unwrap_or(0.0)) == 0 {
             return;
         }
-        let clip = clip_rect(node, [0.0, 0.0], self.scale);
+        let clip = strip_group_ancestor_clip(clip_rect(node, [0.0, 0.0], self.scale), group_ancestor_clip, target_bounds);
         let rot = is_rotated(node);
         for horiz in [false, true] {
             let axis_key = if horiz { "horizontal" } else { "vertical" };
@@ -913,6 +996,7 @@ impl<'a> Analyzer<'a> {
         pass_id: u8,
         depth: u64,
         skip_group: Option<u64>,
+        group_ancestor_clip: Option<[f64; 4]>,
     ) {
         for entry in entries {
             if let Some(obj) = entry.as_object() {
@@ -946,17 +1030,19 @@ impl<'a> Analyzer<'a> {
                     sg.canvas_rt_switches += 2;
                     self.object_entry(gnode, gid, &sg.name).canvas_rt_bytes += rt_bytes;
 
-                    // Recurse into offscreen CanvasGroup render target
+                    // Recurse into offscreen CanvasGroup render target: background and descendants
+                    // draw into the group's texture unclipped by the group's ancestors.
                     let rt_bounds = flat.bounds();
+                    let raw_group_clip = clip_rect(gnode, [0.0, 0.0], self.scale);
                     self.last_state_by_target.remove(&gid);
                     if let Some(sub_draw) = obj.get("draw").and_then(Value::as_array) {
-                        self.walk_entries(sg, sub_draw, gid, rt_bounds, pass_id, new_depth, Some(gid));
+                        self.walk_entries(sg, sub_draw, gid, rt_bounds, pass_id, new_depth, Some(gid), raw_group_clip);
                     }
 
-                    // Composite offscreen RT onto parent target
+                    // Composite offscreen RT onto parent target (ancestor clip applies here)
                     let phys = physical_rect(gnode, self.scale).rect;
                     let bounds = quad_bounds_device(gnode, phys, self.scale);
-                    let clip = clip_rect(gnode, [0.0, 0.0], self.scale);
+                    let clip = strip_group_ancestor_clip(raw_group_clip, group_ancestor_clip, target_bounds);
                     let area = intersect_area(bounds, clip, target_bounds);
                     if area > 0.0 {
                         self.emit_quads(
@@ -991,9 +1077,9 @@ impl<'a> Analyzer<'a> {
                 continue;
             }
             if raw < 0 {
-                self.draw_post(sg, node, nid, target_id, target_bounds, pass_id);
+                self.draw_post(sg, node, nid, target_id, target_bounds, pass_id, group_ancestor_clip);
             } else {
-                self.draw_node(sg, node, nid, target_id, target_bounds, pass_id, skip_group == Some(nid));
+                self.draw_node(sg, node, nid, target_id, target_bounds, pass_id, skip_group == Some(nid), group_ancestor_clip);
             }
         }
     }
@@ -1309,7 +1395,7 @@ pub fn analyze_scene_with_mode(
             ..Default::default()
         };
         if let Some(draw_list) = layer.get("draw").and_then(Value::as_array) {
-            analyzer.walk_entries(&mut sg, draw_list, 0, screen_bounds, pass_id, 0, None);
+            analyzer.walk_entries(&mut sg, draw_list, 0, screen_bounds, pass_id, 0, None, None);
         }
         screen_guis.push(sg);
     }
@@ -2674,6 +2760,71 @@ mod tests {
         assert_eq!(t["canvasRtBytes"], 2049 * 38 * 4);
         assert_eq!(t["canvasRtSwitches"], 2);
         assert_eq!(t["maxCanvasGroupDepth"], 1);
+    }
+
+    #[test]
+    fn clipped_canvas_group_draws_whole_texture_without_ancestor_clip_or_spurious_break() {
+        // 800x600 at scale 1: 100x100 ClipsDescendants frame -> 200x100 CanvasGroup ->
+        // 50x50 InView (inside ancestor clip) + 50x50 OutOfClip (in the half the ancestor clip hides).
+        // Studio renders both the CanvasGroup's background and its descendants into the 200x100
+        // offscreen texture unclipped by the group's ancestors (notes/images.md round 7,
+        // render::groups::texture_clip_node); the ancestor clip applies only on composite.
+        let scene = store_of(json!({
+            "viewport": {"width": 800, "height": 600, "scale": 1.0},
+            "status": "ok",
+            "nodes": [
+                {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true},
+                {"id": 2, "name": "Clip", "path": "G.Clip", "class": "Frame", "rect": [0, 0, 100, 100], "bg": {"color": [0, 0, 0], "transparency": 1}},
+                {"id": 3, "name": "Group", "path": "G.Clip.Group", "class": "CanvasGroup", "rect": [0, 0, 200, 100], "clip": [0, 0, 100, 100], "bg": {"color": [1, 1, 1], "transparency": 0}, "group": {"transparency": 0}},
+                {"id": 4, "name": "InView", "path": "G.Clip.Group.InView", "class": "Frame", "rect": [10, 10, 50, 50], "clip": [0, 0, 100, 100], "bg": {"color": [1, 0, 0], "transparency": 0}},
+                {"id": 5, "name": "OutOfClip", "path": "G.Clip.Group.OutOfClip", "class": "Frame", "rect": [120, 10, 50, 50], "clip": [0, 0, 100, 100], "bg": {"color": [0, 0, 1], "transparency": 0}}
+            ],
+            "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": [
+                2,
+                {"group": 3, "draw": [3, 4, 5]}
+            ]}],
+            "fonts": [],
+            "images": []
+        }));
+        let report = analyze_scene(&scene, LayoutStats::default(), None);
+        let t = &report["totals"];
+        // Quads: Group bg (1) + InView (1) + OutOfClip (1) + Group composite (1) = 4
+        assert_eq!(t["quads"], 4);
+        assert_eq!(t["canvasRtBytes"], 80_000);
+        // Offscreen overdraw: (20,000 + 2,500 + 2,500) / 480,000 = 0.052083
+        assert_eq!(t["offscreenOverdrawViewports"], 0.052083);
+        // Screen overdraw: composite clipped to 100x100 = 10,000 / 480,000 = 0.020833
+        assert_eq!(t["screenOverdrawViewports"], 0.020833);
+        assert_eq!(t["batchBreaksByCause"]["clip"], 0);
+        assert_eq!(t["batchBreaks"], 0);
+        let objects = report["objects"].as_array().unwrap();
+        let in_view = objects.iter().find(|o| o["name"] == "InView").unwrap();
+        assert_eq!(in_view["batchBreaks"], 0);
+        assert_eq!(in_view["quads"], 1);
+        let out_of_clip = objects.iter().find(|o| o["name"] == "OutOfClip").unwrap();
+        assert_eq!(out_of_clip["quads"], 1);
+        assert_eq!(out_of_clip["offscreenOverdrawViewports"], 0.005208);
+
+        // An interior ClipsDescendants frame inside an ancestor-clipped CanvasGroup MUST still clip
+        // its children and count its interior clip break.
+        let interior = store_of(json!({
+            "viewport": {"width": 800, "height": 600, "scale": 1.0},
+            "status": "ok",
+            "nodes": [
+                {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true},
+                {"id": 3, "name": "Group", "path": "G.Clip.Group", "class": "CanvasGroup", "rect": [0, 0, 200, 100], "clip": [0, 0, 100, 100], "bg": {"color": [1, 1, 1], "transparency": 0}, "group": {"transparency": 0}},
+                {"id": 4, "name": "InnerClipChild", "path": "G.Clip.Group.InnerClip.Child", "class": "Frame", "rect": [10, 10, 60, 60], "clip": [10, 10, 40, 40], "bg": {"color": [0, 1, 0], "transparency": 0}}
+            ],
+            "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": [
+                {"group": 3, "draw": [3, 4]}
+            ]}],
+            "fonts": [],
+            "images": []
+        }));
+        let interior_rep = analyze_scene(&interior, LayoutStats::default(), None);
+        // Group bg (20,000) + InnerClipChild clipped to 40x40 (1,600) = 21,600 / 480,000 = 0.045
+        assert_eq!(interior_rep["totals"]["offscreenOverdrawViewports"], 0.045);
+        assert_eq!(interior_rep["totals"]["batchBreaksByCause"]["clip"], 1);
     }
 
     #[test]

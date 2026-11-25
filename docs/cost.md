@@ -52,6 +52,8 @@ Offscreen target sizing uses the exact Studio rules established in [images.md](i
 - Large groups scale uniformly so neither side exceeds `2048` device px and area stays within `2048 x 1024` px.
 - Groups that are `culled`, `Visible = false`, zero-sized, or have quantized `alpha8(1 - GroupTransparency) == 0` allocate `0` bytes and perform `0` RT switches.
 - Each drawn target counts `2` render-target switches (`totals.canvasRtSwitches`) and tracks nesting depth (`totals.maxCanvasGroupDepth`).
+- **Offscreen texture clipping rule:** Matching `native/src/render/groups.rs::texture_clip_node` (Studio rule measured in [images.md](images.md), round 7), a `CanvasGroup`'s own background and its descendants are rendered into its offscreen texture clipped only by the group's bounds and any clipping frames *inside* the group — not by the group's ancestors. The ancestor clip applies when compositing the group's texture onto its parent target.
+  - **Non-comparability note:** Reports generated before this rule unified background and descendant clipping do not compare on `offscreenOverdrawViewports` (or `quads` / `clip` batch breaks) for `CanvasGroup`s clipped by an ancestor (including overhanging nested `CanvasGroup`s). Earlier builds either clipped both background and children to the ancestor or left the background unclipped while clipping children.
 
 ### 3. Hidden-in-shown DOM subtrees
 
