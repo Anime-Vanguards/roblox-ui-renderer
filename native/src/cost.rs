@@ -7804,4 +7804,138 @@ end
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn list_reflow_splits_shared_moved_siblings_across_resizing_drivers() {
+        let dir = std::env::temp_dir().join(format!("rur-cost-list-reflow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixture = dir.join("list_reflow.luau");
+        std::fs::write(
+            &fixture,
+            r#"local RunService = game:GetService("RunService")
+return function(Target)
+	local ListBox = Instance.new("Frame")
+	ListBox.Name = "ListBox"
+	ListBox.Size = UDim2.fromOffset(300, 400)
+	ListBox.Parent = Target
+	local Layout = Instance.new("UIListLayout")
+	Layout.SortOrder = Enum.SortOrder.LayoutOrder
+	Layout.Parent = ListBox
+	local rows = {}
+	for i = 1, 6 do
+		local Row = Instance.new("Frame")
+		Row.Name = "Row" .. i
+		Row.LayoutOrder = i
+		Row.Size = UDim2.fromOffset(200, 30)
+		Row.Parent = ListBox
+		rows[i] = Row
+	end
+	local step = 0
+	local conn = RunService.Heartbeat:Connect(function()
+		step += 1
+		local h = 30 + (step % 10)
+		rows[1].Size = UDim2.fromOffset(200, h)
+		rows[2].Size = UDim2.fromOffset(200, h)
+	end)
+	return function()
+		conn:Disconnect()
+	end
+end
+"#,
+        )
+        .unwrap();
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+        let argv: Vec<String> = vec![
+            "--repo".into(),
+            repo.to_string_lossy().into_owned(),
+            "--roots".into(),
+            root.to_string_lossy().into_owned(),
+            "--fixture".into(),
+            fixture.to_string_lossy().into_owned(),
+            "--viewport".into(),
+            "800x600".into(),
+            "--scale".into(),
+            "1".into(),
+            "--no-snapshots".into(),
+        ];
+        let args = engine::cli::parse(&argv).unwrap();
+        let spec = engine::cli::SequenceSpec { from: 0.0, frames: 8, fps: 60.0, client_hz: Some(60.0), collect_cost: true };
+        let report = run_sequence_cost(&args, &spec, &repo).unwrap();
+        assert_eq!(report["status"], "ok");
+
+        let header_stored = report["layout"]["stored"].as_f64().unwrap();
+        let header_moved = report["layout"]["moved"].as_f64().unwrap();
+        assert!(header_moved >= 4.0, "rows 3..6 must reflow each frame, got header moved={header_moved}");
+
+        let drivers = report["layoutDrivers"].as_array().unwrap();
+        let names: Vec<&str> = drivers.iter().filter_map(|d| d["name"].as_str()).collect();
+        assert_eq!(drivers.len(), 2, "only the two resizing rows should be drivers, got: {names:?}");
+        assert!(names.contains(&"Row1") && names.contains(&"Row2"), "got drivers: {names:?}");
+
+        let sum_stored: f64 = drivers.iter().map(|d| d["stored"].as_f64().unwrap_or(0.0)).sum();
+        let sum_moved: f64 = drivers.iter().map(|d| d["moved"].as_f64().unwrap_or(0.0)).sum();
+        assert!(
+            (sum_stored - header_stored).abs() < 1e-3,
+            "driver stored sum ({sum_stored}) must equal header stored ({header_stored}); drivers={drivers:?}"
+        );
+        assert!(
+            (sum_moved - header_moved).abs() < 1e-3,
+            "driver moved sum ({sum_moved}) must equal header moved ({header_moved}); drivers={drivers:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn phone_range_assumed_factor_count_matches_reported_factors() {
+        let scene = store_of(json!({
+            "viewport": {"width": 800, "height": 600, "scale": 1.0},
+            "status": "ok",
+            "nodes": [
+                {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true},
+                {"id": 2, "name": "Card", "path": "G.Card", "class": "Frame", "rect": [0, 0, 100, 50], "bg": {"color": [1, 1, 1], "transparency": 0}}
+            ],
+            "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": [2]}],
+            "fonts": [],
+            "images": []
+        }));
+        let hidden = DomHiddenSummary { complete: true, ..Default::default() };
+        let dest = Path::new("out/factors/cost.json");
+
+        let single = analyze_scene_with_mode(&scene, LayoutStats { passes: 1, stored: 10, ..Default::default() }, Some(&hidden), "edit");
+        let mut acc = SequenceAccumulator::new(60.0, "play");
+        for i in 0..3u32 {
+            acc.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, LayoutStats { passes: 1, stored: 10, ..Default::default() }, Vec::new(), if i == 0 { Some(hidden.clone()) } else { None });
+        }
+        let seq = acc.finish(Some("ok"));
+
+        for (label, rep, factors_ptr) in [
+            ("single", &single, "/predicted/phone-mid/fullTreeLayoutCpuMs/factors"),
+            ("sequence", &seq, "/predicted/phone-mid/layoutCpuMs/factors"),
+        ] {
+            let factors = rep
+                .pointer(factors_ptr)
+                .and_then(Value::as_object)
+                .unwrap_or_else(|| panic!("{label}: missing {factors_ptr}"));
+            let mut total = 0usize;
+            let mut assumed = 0usize;
+            for v in factors.values() {
+                if let Some(obj) = v.as_object() {
+                    total += 1;
+                    if obj.get("basis").and_then(Value::as_str).is_some_and(|b| b.starts_with("assumed")) {
+                        assumed += 1;
+                    }
+                }
+            }
+            assert!(total > 0, "{label}: expected non-empty factor entries");
+            let expected = format!("{assumed}/{total} factors assumed");
+            let screen = format_one_screen_report(rep, dest);
+            assert!(
+                screen.contains(&expected),
+                "{label} screen must report `{expected}` matching factors ({factors:?}):\n{screen}"
+            );
+        }
+    }
 }
