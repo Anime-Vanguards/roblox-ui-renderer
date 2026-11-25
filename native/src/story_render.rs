@@ -200,7 +200,7 @@ impl StoryRenderer {
         fonts_changed: impl FnMut(),
     ) -> Result<(Value, Option<Pixels>)> {
         self.placeholders = options.placeholders;
-        let (mut result, scene, images) = self.write_outputs(args, out, options.offline, true, first, fonts_changed)?;
+        let (mut result, scene, images, _) = self.write_outputs(args, out, options.offline, true, first, fonts_changed)?;
         let mut pixels = None;
         if options.pixels {
             result["summary"] = pixels_summary(&scene, &images);
@@ -222,7 +222,7 @@ impl StoryRenderer {
         runs: bool,
         first: impl FnOnce(&Args) -> Result<SceneOutput, String>,
         mut fonts_changed: impl FnMut(),
-    ) -> Result<(Value, Value, Map<String, Value>)> {
+    ) -> Result<(Value, Value, Map<String, Value>, (u64, f64, f64))> {
         std::fs::create_dir_all(out).with_context(|| format!("Creating {}", out.display()))?;
         self.resolver.set_offline(offline);
         let mut args = args.clone();
@@ -302,7 +302,7 @@ impl StoryRenderer {
             Some((_, Value::Object(images))) => images,
             _ => Map::new(),
         };
-        Ok((result, output.scene, images))
+        Ok((result, output.scene, images, (output.frames, output.seconds, output.fps)))
     }
 
     /// render.png of a written directory (`encode`), else its pixels; its time and any error in `result`
@@ -534,6 +534,15 @@ pub(crate) fn begin_profile(config: profiler::Config) -> profiler::Session {
     profiler::Session::begin(config)
 }
 
+/// Replaces a render's active profile session before a cloud-font retry: the prior session must drop
+/// before the new one begins so its Drop cannot clear the replacement's thread-local profiler state.
+fn restart_profile(session: &mut Option<profiler::Session>, config: Option<&profiler::Config>) {
+    if let Some(config) = config {
+        *session = None;
+        *session = Some(begin_profile(config.clone()));
+    }
+}
+
 /// The story, module, model or fixture a run of `args` shows (a profile's run names it)
 pub(crate) fn source_file(args: &Args) -> Option<String> {
     args.story.clone().or_else(|| args.module.clone()).or_else(|| args.model.clone()).or_else(|| args.fixture.clone())
@@ -762,19 +771,12 @@ pub fn cli(argv: &[String]) -> i32 {
             &out,
             options.offline,
             true,
-            |args| {
-                let output = crate::engine::cli::run_once(args)?;
-                clock = (output.frames, output.seconds, output.fps);
-                Ok(output)
-            },
-            || {
-                if let Some(config) = &profile {
-                    session = Some(begin_profile(config.clone()));
-                }
-            },
+            crate::engine::cli::run_once,
+            || restart_profile(&mut session, profile.as_ref()),
         ),
     };
-    let result = result.and_then(|(mut result, scene, _)| {
+    let result = result.and_then(|(mut result, scene, _, final_clock)| {
+        clock = final_clock;
         for (print, text) in problem_lines(&scene, &printed, source_file(&args).as_deref().map(Path::new)) {
             print(&text);
         }
@@ -880,5 +882,27 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].1, "Packages is not a valid member of ReplicatedStorage \"ReplicatedStorage\"");
         assert_eq!(lines[1].1, "default.project.json maps ReplicatedStorage.Packages");
+    }
+
+    /// A cold render that downloads missing cloud fonts restarts its profile before the retry run.
+    /// Dropping the first session before starting the replacement keeps the replacement active so
+    /// the retry is profiled and finishes cleanly instead of failing with "no profile ran".
+    #[test]
+    fn restarting_a_profile_for_a_font_retry_keeps_the_replacement_session_active() {
+        let dir = std::env::temp_dir().join(format!(
+            "rur-profile-retry-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let config = profiler::Config::new(profiler::Kinds::parse("work,caches").unwrap(), dir.clone());
+        let mut session = Some(begin_profile(config.clone()));
+        // Simulate the cloud-font retry closure restarting the profile on the same thread.
+        restart_profile(&mut session, Some(&config));
+        assert!(profiler::active(), "replacement profile must stay active after dropping the prior one");
+        let run = profiler::Run { command: "render".into(), status: "ok".into(), frames: 1, seconds: 1.0 / 60.0, fps: 60.0, ..Default::default() };
+        let summary = session.take().unwrap().finish(run).expect("replacement profile should finish cleanly");
+        assert!(!summary.is_empty());
+        assert!(dir.join("summary.txt").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
