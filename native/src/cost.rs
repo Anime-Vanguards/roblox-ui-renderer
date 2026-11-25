@@ -1887,11 +1887,18 @@ fn non_ok_reason(status: &str, failure: Option<&str>, drawn_nodes: u64) -> Strin
     }
 }
 
-fn non_ok_settled_by(status: &str, drawn_nodes: u64, edit_mode_mounts: Option<bool>) -> &'static str {
+fn non_ok_settled_by(
+    status: &str,
+    drawn_nodes: u64,
+    edit_mode_mounts: Option<bool>,
+    play_mode_mounts: Option<bool>,
+) -> &'static str {
     if status == "yielded" && drawn_nodes > 0 {
         "Wrap any frame or animation loop inside task.spawn(...) or RunService.Heartbeat:Connect(...) so the mount function returns its cleanup handle."
     } else if edit_mode_mounts == Some(true) {
         "Story mounts in edit mode, not play, so it cannot get per-frame layoutCpuMs as-is; re-run with --mode edit for static counts, CanvasGroup RT, overdraw, and hidden DOM, or fix the play-mode wait/failure above."
+    } else if play_mode_mounts == Some(true) {
+        "Story mounts in play mode, not edit; re-run with --mode play (or use --from and --frames for a play-mode sequence)."
     } else {
         "Fix the story failure or mount path so the UI mounts cleanly before reading cost figures."
     }
@@ -1903,6 +1910,7 @@ fn predicted_non_ok_json(
     drawn_nodes: u64,
     single_live: bool,
     edit_mode_mounts: Option<bool>,
+    play_mode_mounts: Option<bool>,
 ) -> Value {
     let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
     let basis = if status == "empty" {
@@ -1925,7 +1933,7 @@ fn predicted_non_ok_json(
         "scope": scope,
         "ms": Value::Null,
         "reason": non_ok_reason(status, failure, drawn_nodes),
-        "settledBy": non_ok_settled_by(status, drawn_nodes, edit_mode_mounts),
+        "settledBy": non_ok_settled_by(status, drawn_nodes, edit_mode_mounts, play_mode_mounts),
     });
     if single_live {
         json!({
@@ -1968,7 +1976,7 @@ fn edit_mode_fallback_json() -> Value {
     })
 }
 
-fn play_mode_probe_json(probe: &PlayModeProbe) -> Value {
+fn play_mode_probe_json(probe: &PlayModeProbe, edit_ok: bool) -> Value {
     let mut obj = Map::new();
     obj.insert("mountsInPlayMode".into(), json!(probe.mounts_in_play_mode));
     obj.insert("status".into(), json!(probe.status));
@@ -1978,7 +1986,13 @@ fn play_mode_probe_json(probe: &PlayModeProbe) -> Value {
     if let Some(f) = &probe.failure {
         obj.insert("failure".into(), json!(failure_headline(f, 200)));
     }
-    if !probe.mounts_in_play_mode {
+    if probe.mounts_in_play_mode && !edit_ok {
+        obj.insert("flag".into(), json!("--mode play"));
+        obj.insert(
+            "note".into(),
+            json!("Story mounts in play mode, not edit; pass --mode play (or --from and --frames for a play-mode sequence)."),
+        );
+    } else if !probe.mounts_in_play_mode && edit_ok {
         obj.insert(
             "note".into(),
             json!("This story does not mount in play mode, so per-frame layoutCpuMs is unavailable as-is. Fix the play-mode wait or failure to price per-frame layout, or use these edit-mode counts/RT/overdraw/hidden DOM only."),
@@ -2004,8 +2018,9 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
     if let Some(hint) = &outcome.hint {
         obj.insert("hint".into(), json!(hint));
     }
+    let play_mode_mounts = outcome.play_mode_probe.as_ref().map(|p| p.mounts_in_play_mode);
     if let Some(probe) = &outcome.play_mode_probe {
-        obj.insert("playModeProbe".into(), play_mode_probe_json(probe));
+        obj.insert("playModeProbe".into(), play_mode_probe_json(probe, status == "ok"));
     }
     if status == "ok" {
         return;
@@ -2033,7 +2048,14 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
     }
     obj.insert(
         "predicted".into(),
-        predicted_non_ok_json(&status, Some(&failure_text), drawn_nodes, single_live, outcome.edit_mode_mounts),
+        predicted_non_ok_json(
+            &status,
+            Some(&failure_text),
+            drawn_nodes,
+            single_live,
+            outcome.edit_mode_mounts,
+            play_mode_mounts,
+        ),
     );
     if let Some(fid) = obj.get_mut("fidelity").and_then(Value::as_object_mut) {
         fid.insert(
@@ -2062,7 +2084,7 @@ fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool
                 "phone-mid-range": Value::Null,
                 "phone-mid-band": Value::Null,
                 "reason": non_ok_reason(&status, Some(&failure_text), drawn_nodes),
-                "settledBy": non_ok_settled_by(&status, drawn_nodes, outcome.edit_mode_mounts),
+                "settledBy": non_ok_settled_by(&status, drawn_nodes, outcome.edit_mode_mounts, play_mode_mounts),
             }),
         );
     }
@@ -2392,7 +2414,7 @@ pub fn analyze_scene_with_mode(
         if status == "ok" {
             report.insert("predicted".into(), predicted_single_live_json(layout));
         } else {
-            report.insert("predicted".into(), predicted_non_ok_json(status, None, analyzer.totals.drawn_nodes, true, None));
+            report.insert("predicted".into(), predicted_non_ok_json(status, None, analyzer.totals.drawn_nodes, true, None, None));
         }
     } else {
         report.insert("predicted".into(), predicted_scene_only_json());
@@ -3626,7 +3648,7 @@ pub fn run_sequence_cost(
     let is_empty_mount = status == "ok" && acc.saw_live_dom && !acc.any_non_empty;
     if run_mode == "play" && (status != "ok" || is_empty_mount) {
         run_outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args, probe_time));
-    } else if run_mode == "edit" && status == "ok" && !is_empty_mount {
+    } else if run_mode == "edit" {
         run_outcome.play_mode_probe = Some(probe_mounts_in_play_mode(&engine_args, probe_time));
     }
     let mut report = acc.finish_with_outcome(&run_outcome);
@@ -3774,6 +3796,11 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             let _ = writeln!(
                 out,
                 "  mode note: mounts in edit mode, not play; per-frame layoutCpuMs is unavailable as-is (pass --mode edit for counts/RT/overdraw/hidden DOM, or fix the wait/error above)",
+            );
+        } else if report.pointer("/playModeProbe/mountsInPlayMode").and_then(Value::as_bool) == Some(true) {
+            let _ = writeln!(
+                out,
+                "  mode note: mounts in play mode, not edit (pass --mode play)",
             );
         }
     }
@@ -4796,9 +4823,13 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
         let run_mode = engine_args.mode.as_deref().unwrap_or("edit");
         let mut report = analyze_scene_with_mode(&store, run.layout, Some(&run.dom_hidden), run_mode);
         let mut outcome = extract_run_outcome(&run.scene.scene);
-        if run_mode == "play" && (report["status"] != "ok" || outcome.status.as_deref().is_some_and(|s| s != "ok")) {
+        let run_failed = report["status"] != "ok" || outcome.status.as_deref().is_some_and(|s| s != "ok");
+        if run_mode == "play" && run_failed {
             let probe_time = engine_args.time.unwrap_or(0.05).max(0.05);
             outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args, probe_time));
+        } else if run_mode == "edit" && run_failed {
+            let probe_time = engine_args.time.unwrap_or(0.05).max(0.05);
+            outcome.play_mode_probe = Some(probe_mounts_in_play_mode(&engine_args, probe_time));
         }
         apply_run_outcome(&mut report, &outcome, true);
         attach_cli_run_metadata(
@@ -7342,6 +7373,130 @@ end
         assert!(
             covered_hint.contains("pass --rojo") && covered_hint.contains("ReplicatedStorage.Extra"),
             "covering Rojo project matching WaitForChild should print --rojo hint, got: {covered_hint:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn single_moment_play_only_story_probes_play_mode_and_suggests_flag() {
+        let dir = std::env::temp_dir().join(format!("rur-cost-play-only-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = crate::engine::default_repo().to_string_lossy().into_owned();
+        let roots = crate::engine::default_repo()
+            .join("tools/tests/oracle-root")
+            .to_string_lossy()
+            .into_owned();
+
+        let err_in_edit = dir.join("play_only_err.luau");
+        std::fs::write(
+            &err_in_edit,
+            r#"local RunService = game:GetService("RunService")
+return function(Target)
+	if not RunService:IsRunning() then
+		error("requires play mode runtime")
+	end
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromOffset(120, 40)
+	f.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+
+        let empty_in_edit = dir.join("play_only_empty.luau");
+        std::fs::write(
+            &empty_in_edit,
+            r#"local RunService = game:GetService("RunService")
+return function(Target)
+	if not RunService:IsRunning() then
+		return function() end
+	end
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromOffset(120, 40)
+	f.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+
+        let broken_both = dir.join("broken_both.luau");
+        std::fs::write(
+            &broken_both,
+            r#"return function(_Target)
+	error("broken in edit and play")
+end
+"#,
+        )
+        .unwrap();
+
+        let run_single = |fixture: &Path, name: &str, extra: &[&str]| {
+            let out_dir = dir.join(name);
+            let mut argv: Vec<String> = vec![
+                "--repo".into(),
+                repo.clone(),
+                "--roots".into(),
+                roots.clone(),
+                "--no-snapshots".into(),
+                "--viewport".into(),
+                "800x600".into(),
+                "--scale".into(),
+                "1".into(),
+                "--fixture".into(),
+                fixture.to_string_lossy().into_owned(),
+                "--out".into(),
+                out_dir.to_string_lossy().into_owned(),
+            ];
+            argv.extend(extra.iter().map(|s| (*s).to_string()));
+            run_cli(&argv).unwrap()
+        };
+
+        // 1. Fails in default single-moment edit mode -> probes play mode and tells user `--mode play` mounts it
+        let out_err = run_single(&err_in_edit, "err_default", &[]);
+        assert!(out_err.failed);
+        assert_eq!(out_err.value["status"], "error");
+        assert_eq!(out_err.value.pointer("/playModeProbe/mountsInPlayMode"), Some(&json!(true)));
+        assert!(
+            out_err.summary.contains("mounts in play mode, not edit (pass --mode play)"),
+            "failing single-moment screen must say --mode play mounts it:\n{}",
+            out_err.summary
+        );
+        assert!(
+            out_err
+                .value
+                .pointer("/predicted/desktop-ref/layoutCpuMs/settledBy")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .contains("--mode play"),
+            "{}",
+            out_err.value["predicted"]
+        );
+
+        // Passing --mode play mounts cleanly
+        let out_play = run_single(&err_in_edit, "err_play", &["--mode", "play"]);
+        assert!(!out_play.failed, "play mode should mount:\n{}", out_play.summary);
+        assert_eq!(out_play.value["status"], "ok");
+
+        // 2. Mounts empty in default single-moment edit mode -> also probes play mode
+        let out_empty = run_single(&empty_in_edit, "empty_default", &[]);
+        assert!(out_empty.failed);
+        assert_eq!(out_empty.value["status"], "empty");
+        assert_eq!(out_empty.value.pointer("/playModeProbe/mountsInPlayMode"), Some(&json!(true)));
+        assert!(
+            out_empty.summary.contains("mounts in play mode, not edit (pass --mode play)"),
+            "empty single-moment screen must say --mode play mounts it:\n{}",
+            out_empty.summary
+        );
+
+        // 3. Broken in both edit and play -> playModeProbe is false and screen does NOT suggest --mode play
+        let out_both = run_single(&broken_both, "broken_both", &[]);
+        assert!(out_both.failed);
+        assert_eq!(out_both.value.pointer("/playModeProbe/mountsInPlayMode"), Some(&json!(false)));
+        assert!(
+            !out_both.summary.contains("pass --mode play"),
+            "story broken in play mode too must not claim --mode play mounts it:\n{}",
+            out_both.summary
         );
 
         let _ = std::fs::remove_dir_all(&dir);
