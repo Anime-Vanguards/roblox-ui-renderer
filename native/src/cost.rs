@@ -3816,6 +3816,10 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
                 "  layoutMs:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
                 format_phone_range(&phone_range, &phone_band),
             );
+            let _ = writeln!(
+                out,
+                "  caveat:    absolute ms on deep trees is unchecked against a client (ancestor bookkeeping); before-vs-after on one story is valid",
+            );
             if desk_ms <= 1e-12 && steady["passes"].as_f64().unwrap_or(0.0) <= 1e-12 {
                 let _ = writeln!(
                     out,
@@ -3849,6 +3853,10 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
                 out,
                 "  fullTree:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
                 format_phone_range(&phone_range, &phone_band),
+            );
+            let _ = writeln!(
+                out,
+                "  caveat:    absolute ms on deep trees is unchecked against a client (ancestor bookkeeping); before-vs-after on one story is valid",
             );
         }
     } else {
@@ -6759,5 +6767,47 @@ end
         empty_t05["time"] = json!(0.5);
         let screen_t05 = format_one_screen_report(&empty_t05, dest);
         assert!(!screen_t05.contains("captured at --time 0"), "--time 0.5 must not say captured at --time 0:\n{screen_t05}");
+    }
+
+    #[test]
+    fn deep_tree_ancestor_caveat_prints_when_layout_ms_extrapolated_and_not_when_refused() {
+        let dest = Path::new("out/caveat/cost.json");
+        let scene = store_of(json!({
+            "viewport": {"width": 800, "height": 600, "scale": 1.0},
+            "status": "ok",
+            "nodes": [
+                {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true},
+                {"id": 2, "name": "Card", "path": "G.Card", "class": "Frame", "rect": [0, 0, 100, 50], "bg": {"color": [1, 1, 1], "transparency": 0}}
+            ],
+            "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": [2]}],
+            "fonts": [],
+            "images": []
+        }));
+        let hidden = DomHiddenSummary { complete: true, ..Default::default() };
+
+        // 1. Play sequence with extrapolated layoutMs prints the deep-tree caveat
+        let mut acc_play = SequenceAccumulator::new(60.0, "play");
+        for i in 0..3u32 {
+            acc_play.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, LayoutStats { passes: 1, stored: 4, ..Default::default() }, Vec::new(), if i == 0 { Some(hidden.clone()) } else { None });
+        }
+        let play_screen = format_one_screen_report(&acc_play.finish(Some("ok")), dest);
+        assert!(play_screen.contains("caveat:") && play_screen.contains("unchecked against a client") && play_screen.contains("before-vs-after"), "{play_screen}");
+
+        // 2. Single-moment live report with extrapolated fullTree prints the caveat
+        let single_live = analyze_scene_with_mode(&scene, LayoutStats { passes: 1, stored: 4, ..Default::default() }, Some(&hidden), "edit");
+        let single_screen = format_one_screen_report(&single_live, dest);
+        assert!(single_screen.contains("caveat:") && single_screen.contains("unchecked against a client"), "{single_screen}");
+
+        // 3. Refused reports (edit-mode sequence, --scene) do not print the caveat
+        let mut acc_edit = SequenceAccumulator::new(60.0, "edit");
+        for i in 0..3u32 {
+            acc_edit.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, LayoutStats { passes: 1, stored: 4, ..Default::default() }, Vec::new(), if i == 0 { Some(hidden.clone()) } else { None });
+        }
+        let edit_screen = format_one_screen_report(&acc_edit.finish(Some("ok")), dest);
+        assert!(!edit_screen.contains("caveat:"), "refused edit sequence must not print layout ms caveat:\n{edit_screen}");
+
+        let scene_only = analyze_scene(&scene, LayoutStats::default(), None);
+        let scene_screen = format_one_screen_report(&scene_only, dest);
+        assert!(!scene_screen.contains("caveat:"), "--scene report must not print layout ms caveat:\n{scene_screen}");
     }
 }
