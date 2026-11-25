@@ -3460,7 +3460,7 @@ fn format_ms_approx(ms: f64) -> String {
 
 fn format_phone_range(range: &[f64; 2], band: &[f64; 2]) -> String {
     format!(
-        "phone ~{}..{} ms (derived 3.9x..6.3x, band {}..{} ms [2.55x..12.32x])",
+        "phone ~{}..{} ms (derived 3.9x..6.3x, 2/3 factors assumed; band {}..{} ms [2.55x..12.32x])",
         format_ms_approx(range[0]),
         format_ms_approx(range[1]),
         format_ms_approx(band[0]),
@@ -4488,6 +4488,7 @@ mod tests {
         assert!(text.contains("0 B"), "summary must include exact RT bytes: {text}");
         assert!(text.contains("cost.json"), "summary must name report path: {text}");
         assert!(text.contains("derived 3.9x..6.3x") && text.contains("2.55x..12.32x"), "{text}");
+        assert!(text.contains("assumed"), "phone range line must state assumed factors:\n{text}");
 
         // Sequence summary (both play and edit modes) must stay <= 32 lines even for many frames
         let mut acc_play = SequenceAccumulator::new(60.0, "play");
@@ -4501,6 +4502,7 @@ mod tests {
         let play_lines = play_text.lines().filter(|l| !l.trim().is_empty()).count();
         assert!(play_lines <= 32 && play_text.len() <= 4096, "play seq summary too large ({play_lines} lines, {} B):\n{play_text}", play_text.len());
         assert!(play_text.contains("mode=play 60 Hz") && play_text.contains("0.0994 ms"), "{play_text}");
+        assert!(play_text.contains("assumed"), "sequence phone range line must state assumed factors:\n{play_text}");
 
         let edit_text = format_one_screen_report(&acc_edit.finish(Some("ok")), dest);
         let edit_lines = edit_text.lines().filter(|l| !l.trim().is_empty()).count();
@@ -4767,6 +4769,7 @@ mod tests {
         // Formatted summary prints derived range + 2.55x..12.32x band without 4-decimal false precision
         let summary = format_phone_range(&[0.3915, 0.6263], &[0.2536, 1.2251]);
         assert!(summary.contains("derived 3.9x..6.3x") && summary.contains("2.55x..12.32x"), "{summary}");
+        assert!(summary.contains("assumed"), "formatted phone range must disclose assumed factors: {summary}");
         assert!(summary.contains("~0.39..0.63 ms") && summary.contains("0.25..1.23 ms"), "{summary}");
 
         // Scroll 100 cards with 2 children each (+ container = 301 records):
