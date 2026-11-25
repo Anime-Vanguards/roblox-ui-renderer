@@ -2133,7 +2133,8 @@ mod layer_tests {
     }
 
     /// `--load` and `--model` read a Roblox archive (.rbx) as the model it holds, with the values its writer kept outside
-    /// the scene put back (here a label's long Text, which the stored scene alone reads as empty)
+    /// the scene put back (here a label's long Text, which the stored scene alone reads as empty). The label draws with
+    /// the test's own font, so it draws on a machine with no Studio install too.
     #[test]
     fn load_and_model_read_an_archive_with_its_values() {
         use rbx_dom_weak::{InstanceBuilder, WeakDom, types::{UDim, UDim2}};
@@ -2161,7 +2162,7 @@ end
         assert_eq!(output.status, "ok", "{}", output.text);
         let mut model_args = args(&fixture, &[]);
         (model_args.fixture, model_args.model) = (None, Some(alone.to_string_lossy().into_owned()));
-        let output = run_once(&model_args).unwrap();
+        let output = run_once_with_fonts(&model_args, &own_fonts(&directory, &crate::engine::default_repo())).unwrap();
         assert_eq!(output.status, "ok", "{}", output.text);
         let glyphs: usize = output.scene["nodes"]
             .as_array()
@@ -2176,13 +2177,30 @@ end
     }
 }
 
+/// Fonts of a test's own under `directory`: a frozen font set (as RUR_FONT_ROOT names one) whose only face is the
+/// test font in the place of the face every family without files of its own falls back to (Source Sans Pro Regular),
+/// so a test's labels draw the same glyphs on a machine with no Studio install
+#[cfg(test)]
+fn own_fonts(directory: &std::path::Path, repo: &std::path::Path) -> crate::engine::text::FontPaths {
+    let font = crate::assets::tests::test_font().expect("the labels need a TrueType font: set RUR_TEST_FONT");
+    let fonts = directory.join("fonts");
+    let faces = fonts.join("studio").join("content").join("fonts");
+    std::fs::create_dir_all(&faces).unwrap();
+    std::fs::copy(font, faces.join("SourceSansPro-Regular.ttf")).unwrap();
+    let fonts = Some(fonts.to_string_lossy().replace('\\', "/"));
+    crate::engine::text::FontPaths { fonts, ..crate::engine::text::FontPaths::for_repo(&repo.to_string_lossy()) }
+}
+
+/// [`run_once`], its text engine reading `fonts` instead of the machine's
+#[cfg(test)]
+fn run_once_with_fonts(args: &Args, fonts: &crate::engine::text::FontPaths) -> Result<SceneOutput, String> {
+    use crate::engine::{GuiEngine, text::TextEngine};
+    run_once_with(args, |engine| *engine.text().borrow_mut() = Some(TextEngine::new(fonts.clone())))
+}
+
 #[cfg(test)]
 mod loopback_tests {
     use super::*;
-    use crate::engine::{
-        GuiEngine,
-        text::{FontPaths, TextEngine},
-    };
 
     const SERVER: &str = "return {\n\tServer = function(Context)\n\t\tlocal Storage = game:GetService(\"ReplicatedStorage\")\n\t\tlocal Greeting = Instance.new(\"StringValue\")\n\t\tGreeting.Name = \"Greeting\"\n\t\tGreeting.Value = \"hello from the server\"\n\t\tGreeting.Parent = Storage\n\t\tlocal Count = Instance.new(\"RemoteEvent\")\n\t\tCount.Name = \"Count\"\n\t\tCount.Parent = Storage\n\t\ttask.wait(0.2)\n\t\tGreeting.Value = \"changed by the server\"\n\t\tCount:FireAllClients(42)\n\tend,\n}\n";
     // (each label says what it shows as it is set: a scene holds glyphs, not text)
@@ -2208,19 +2226,6 @@ mod loopback_tests {
     /// The glyphs a label of `text` draws (one a character but spaces)
     fn glyphs_of(text: &str) -> usize {
         text.chars().filter(|c| !c.is_whitespace()).count()
-    }
-
-    /// Fonts of the test's own under `directory`: a frozen font set (as RUR_FONT_ROOT names one) whose only face is
-    /// the test font in the place of the face every family without files of its own falls back to (Source Sans Pro
-    /// Regular), so the labels draw the same glyphs on a machine with no Studio install
-    fn own_fonts(directory: &std::path::Path, repo: &std::path::Path) -> FontPaths {
-        let font = crate::assets::tests::test_font().expect("the labels need a TrueType font: set RUR_TEST_FONT");
-        let fonts = directory.join("fonts");
-        let faces = fonts.join("studio").join("content").join("fonts");
-        std::fs::create_dir_all(&faces).unwrap();
-        std::fs::copy(font, faces.join("SourceSansPro-Regular.ttf")).unwrap();
-        let fonts = Some(fonts.to_string_lossy().replace('\\', "/"));
-        FontPaths { fonts, ..FontPaths::for_repo(&repo.to_string_lossy()) }
     }
 
     /// `--run-context loopback --server-harness`: the story is the client's, its DataModel the server's replicated
@@ -2249,10 +2254,7 @@ mod loopback_tests {
         };
         let server_path = server.to_string_lossy().into_owned();
         let fonts = own_fonts(&directory, &repo);
-        let with_server = |time: &str| {
-            let args = argv(time, &["--run-context", "loopback", "--server-harness", &server_path]);
-            run_once_with(&args, |engine| *engine.text().borrow_mut() = Some(TextEngine::new(fonts.clone()))).unwrap()
-        };
+        let with_server = |time: &str| run_once_with_fonts(&argv(time, &["--run-context", "loopback", "--server-harness", &server_path]), &fonts).unwrap();
 
         let (printed, glyphs) = shown(&with_server("0.1"));
         for (label, text) in [("Side", "client true"), ("Greeting", "hello from the server"), ("Count", "nothing yet")] {
