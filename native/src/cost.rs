@@ -5173,22 +5173,47 @@ pub(crate) fn validate_arguments(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Writes `text` to stdout, returning `Ok(false)` when the reader closed the pipe early so `rur cost`
+/// can exit `0` quietly instead of panicking with exit code 101.
+fn write_stdout_quiet_pipe(text: &str) -> Result<bool, std::io::Error> {
+    use std::io::Write as _;
+    let mut out = std::io::stdout().lock();
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe || err.raw_os_error() == Some(232) => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
 /// Entrypoint for `rur-native cost ...`.
 pub fn cli(argv: &[String]) -> i32 {
     if argv.iter().any(|a| a == "--help" || a == "-h") {
-        print!("{HELP}");
+        if let Err(err) = write_stdout_quiet_pipe(HELP) {
+            eprintln!("rur cost: stdout: {err}");
+            return 1;
+        }
         return 0;
     }
     match run_cli(argv) {
         Ok(out) => {
-            if out.json {
-                if let Ok(text) = serde_json::to_string_pretty(&out.value) {
-                    println!("{text}");
+            let wrote = if out.json {
+                match serde_json::to_string_pretty(&out.value) {
+                    Ok(text) => write_stdout_quiet_pipe(&format!("{text}\n")),
+                    Err(_) => Ok(true),
                 }
             } else {
-                print!("{}", out.summary);
+                write_stdout_quiet_pipe(&out.summary)
+            };
+            match wrote {
+                Ok(true) => {
+                    if out.failed { 2 } else { 0 }
+                }
+                Ok(false) => 0,
+                Err(err) => {
+                    eprintln!("rur cost: stdout: {err}");
+                    1
+                }
             }
-            if out.failed { 2 } else { 0 }
         }
         Err(failure) => {
             eprintln!("rur cost: {}", failure.message());

@@ -1087,6 +1087,28 @@ end
 		const nativeCmp = JSON.parse(rNativeCmp.stdout);
 		assert.equal(nativeCmp.verdict, "refused");
 		assert.match(nativeCmp.reason, /device/i);
+
+		// Closed stdout pipe (e.g. `| head -c 0`): `rur-native cost` must exit 0 quietly, never panic (101).
+		const { spawn } = await import("node:child_process");
+		const runClosedStdout = (args) => new Promise((resolve, reject) => {
+			const child = spawn(nativeExe, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, env });
+			let stderr = "";
+			child.stderr.on("data", chunk => { stderr += chunk.toString("utf8"); });
+			child.stdout.destroy();
+			child.on("error", reject);
+			child.on("close", code => resolve({ code, stderr }));
+		});
+		const closedHelp = await runClosedStdout(["cost", "--help"]);
+		assert.equal(closedHelp.code, 0, `closed stdout on cost --help exited ${closedHelp.code}: ${closedHelp.stderr}`);
+		assert.doesNotMatch(closedHelp.stderr, /panicked|BrokenPipe/i);
+		const outClosedJson = path.join(dir, "closed-json");
+		const closedJson = await runClosedStdout([
+			"cost", "--repo", root, "--roots", path.join(root, "tools", "tests", "oracle-root"),
+			"--fixture", touchFixture, "--no-snapshots", "--viewport", "800x600", "--scale", "1",
+			"--time", "0.1", "--json", "--out", outClosedJson,
+		]);
+		assert.equal(closedJson.code, 0, `closed stdout on cost --json exited ${closedJson.code}: ${closedJson.stderr}`);
+		assert.doesNotMatch(closedJson.stderr, /panicked|BrokenPipe/i);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
