@@ -77,6 +77,7 @@ In sequence mode (`rur cost --from/--to/--frames/--duration/--fps` or `rur seque
 - `runMode` and `runModeInfo`: every `cost.json` records the engine run mode (`"play"`, `"edit"`, or `"scene"`) and its Heartbeat cadence.
   - **`rur cost` sequence mode defaults to `--mode play`** (60 Hz client cadence, 1 `Heartbeat` per frame), so Heartbeat-driven UI is priced for one playing client frame.
   - **Explicit `--mode edit`** (and `rur sequence --cost` without `--mode play`) runs Studio's 240 Hz edit-mode `Heartbeat` (4 beats per 60 Hz frame), which can fire Heartbeat-driven work up to 4x a client's rate. Because of this, `rur cost` **refuses** per-frame `layoutCpuMs` in `--mode edit` (`status: "refused"`, `ms: null`) and directs you to re-run with `--mode play`. Single-moment `rur cost` defaults to `--mode edit` (matching `rur render`) and already refuses per-frame `layoutCpuMs` in both modes.
+  - **Failing or empty-mount runs:** If a story errors or mounts nothing (`status: "error"` or `"empty"`), `rur cost` prints the failure cause on stdout/stderr and in `cost.json`, refuses `layoutCpuMs` (never reporting `0.0000 ms` as a valid UI cost), and exits `2`. When a play-mode run fails or mounts nothing while `--mode edit` mounts UI, the screen and report note that `--mode edit` can measure static counts, CanvasGroup RT, overdraw, and hidden DOM (while per-frame `layoutCpuMs` stays refused in edit mode).
 
 ### 5. Attribution, extrapolation, and explicit refusals
 

@@ -111,6 +111,9 @@ pub struct DomHiddenSummary {
     /// True when walked from the live DOM; false when derived only from a saved `scene.json`
     /// (which drops descendants below `Visible = false` nodes).
     pub complete: bool,
+    /// True when the live DOM walk saw zero mounted user instances outside the empty host
+    /// (`CoreGui.RURStory` / `StoryTarget`), zero hidden GuiObjects, and zero disabled ScreenGuis.
+    pub mounted_empty: bool,
     pub roots: u64,
     pub gui_objects: u64,
     pub instances: u64,
@@ -172,10 +175,24 @@ pub fn collect_dom_hidden(engine: &Engine, roots: &[InstanceId]) -> DomHiddenSum
     };
     let mut seen_enabled = HashSet::new();
     let mut seen_disabled = HashSet::new();
+    let mut mounted_user_instances = 0u64;
 
     for &root in roots {
         if dom.get(root).is_none() {
             continue;
+        }
+        let is_story_host = dom.at(root).name.to_string() == "RURStory"
+            && core_gui.is_some_and(|cg| dom.at(root).parent == Some(cg));
+        if is_story_host {
+            for &child in &dom.at(root).children {
+                if dom.at(child).name.to_string() == "StoryTarget" {
+                    mounted_user_instances += dom.at(child).children.len() as u64;
+                } else {
+                    mounted_user_instances += 1;
+                }
+            }
+        } else {
+            mounted_user_instances += 1;
         }
         let enabled = !matches!(dom.raw_get(root, K::Enabled as NameId), Some(EngineValue::Bool(false)));
         if !enabled {
@@ -287,6 +304,9 @@ pub fn collect_dom_hidden(engine: &Engine, roots: &[InstanceId]) -> DomHiddenSum
             .then_with(|| a.path.cmp(&b.path))
             .then_with(|| a.id.cmp(&b.id))
     });
+    summary.mounted_empty = mounted_user_instances == 0
+        && summary.gui_objects == 0
+        && summary.disabled_screen_guis == 0;
     summary
 }
 
@@ -1317,6 +1337,216 @@ pub fn run_mode_info(run_mode: &str) -> Value {
     }
 }
 
+/// Failure, hint, and edit-mode fallback metadata carried from an engine run into `rur-cost/1`.
+#[derive(Clone, Debug, Default)]
+pub struct RunOutcome {
+    pub status: Option<String>,
+    pub failure: Option<String>,
+    pub hint: Option<String>,
+    pub edit_mode_mounts: Option<bool>,
+}
+
+const EMPTY_MOUNT_MESSAGE: &str =
+    "story mounted nothing (0 instances under StoryTarget and 0 drawn nodes; zero counts are not a valid UI cost measurement)";
+
+/// Extracts the story's status, root failure cause (unwrapping Luau's generic require wrapper via
+/// `crate::hints::failure_cause`), and optional hint from a scene or sequence end report.
+pub fn extract_run_outcome(value: &Value) -> RunOutcome {
+    let status = value.get("status").and_then(Value::as_str).map(str::to_string);
+    let diagnostics = &value["diagnostics"];
+    let output = &diagnostics["output"];
+    let failure = value
+        .get("failure")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(|raw| crate::hints::failure_cause(raw, output).to_string())
+        .or_else(|| {
+            if status.as_deref() == Some("error") {
+                output
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|e| e["kind"] == "error")
+                    .filter_map(|e| e["message"].as_str())
+                    .find(|s| !s.trim().is_empty())
+                    .map(str::to_string)
+            } else {
+                None
+            }
+        });
+    let hint = diagnostics
+        .get("hint")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string);
+    RunOutcome {
+        status,
+        failure,
+        hint,
+        edit_mode_mounts: None,
+    }
+}
+
+/// Checks whether a source that failed or mounted nothing in play mode actually mounts UI under
+/// Studio `--mode edit`.
+fn probe_mounts_in_edit_mode(engine_args: &engine::cli::Args) -> bool {
+    let mut edit_args = engine_args.clone();
+    edit_args.mode = Some("edit".into());
+    if edit_args.time.is_none() {
+        edit_args.time = Some(0.05);
+    }
+    match engine::cli::run_once_with_cost(&edit_args) {
+        Ok(run) => {
+            run.scene.status == "ok"
+                && (!run.dom_hidden.mounted_empty
+                    || run.dom_hidden.gui_objects > 0
+                    || run.dom_hidden.disabled_screen_guis > 0)
+        }
+        Err(_) => false,
+    }
+}
+
+fn non_ok_reason(status: &str, failure: Option<&str>) -> String {
+    match status {
+        "empty" => EMPTY_MOUNT_MESSAGE.to_string(),
+        "yielded" => "Story mount yielded and did not finish before capture; counts are incomplete.".into(),
+        _ => match failure {
+            Some(msg) => format!("Story failed ({}); zero counts are not a valid UI cost measurement.", first_line(msg, 160)),
+            None => "Story failed to run; zero counts are not a valid UI cost measurement.".into(),
+        },
+    }
+}
+
+fn non_ok_settled_by(edit_mode_mounts: Option<bool>) -> &'static str {
+    if edit_mode_mounts == Some(true) {
+        "Story mounts in edit mode, not play; re-run with --mode edit for static counts, CanvasGroup RT, overdraw, and hidden DOM (per-frame layoutCpuMs is refused in edit mode), or fix the story to mount in play mode."
+    } else {
+        "Fix the story failure or mount path so the UI mounts cleanly before reading cost figures."
+    }
+}
+
+fn predicted_non_ok_json(status: &str, failure: Option<&str>, single_live: bool, edit_mode_mounts: Option<bool>) -> Value {
+    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
+    let basis = if status == "empty" { "nothing_mounted" } else { "story_failed" };
+    let scope = if status == "empty" { "refused_nothing_mounted" } else { "refused_story_failed" };
+    let layout_refusal = json!({
+        "status": "refused",
+        "basis": basis,
+        "scope": scope,
+        "ms": Value::Null,
+        "reason": non_ok_reason(status, failure),
+        "settledBy": non_ok_settled_by(edit_mode_mounts),
+    });
+    if single_live {
+        json!({
+            "desktop-ref": {
+                "layoutCpuMs": layout_refusal,
+                "fullTreeLayoutCpuMs": layout_refusal,
+                "drawPassCpuMs": draw_refusal,
+                "gpuUiMs": gpu_refusal
+            },
+            "phone-mid": {
+                "layoutCpuMs": layout_refusal,
+                "fullTreeLayoutCpuMs": layout_refusal,
+                "drawPassCpuMs": draw_refusal,
+                "gpuUiMs": gpu_refusal
+            }
+        })
+    } else {
+        json!({
+            "desktop-ref": {
+                "layoutCpuMs": layout_refusal,
+                "drawPassCpuMs": draw_refusal,
+                "gpuUiMs": gpu_refusal
+            },
+            "phone-mid": {
+                "layoutCpuMs": layout_refusal,
+                "drawPassCpuMs": draw_refusal,
+                "gpuUiMs": gpu_refusal
+            }
+        })
+    }
+}
+
+fn edit_mode_fallback_json() -> Value {
+    json!({
+        "mountsInEditMode": true,
+        "flag": "--mode edit",
+        "provides": ["quads", "glyphQuads", "canvasRtBytes", "overdraw", "hiddenInShown"],
+        "refuses": ["per-frame layoutCpuMs (240 Hz edit-mode Heartbeat)"],
+        "note": "Story mounts in edit mode, not play; pass --mode edit for static counts (quads, glyphs, CanvasGroup RT, overdraw, hidden DOM). Per-frame layoutCpuMs is refused in edit mode."
+    })
+}
+
+fn apply_run_outcome(report: &mut Value, outcome: &RunOutcome, single_live: bool) {
+    let Some(obj) = report.as_object_mut() else { return };
+    if let Some(s) = outcome.status.as_deref() {
+        let cur = obj.get("status").and_then(Value::as_str).unwrap_or("ok");
+        if s != "ok" || cur == "ok" {
+            obj.insert("status".into(), json!(s));
+        }
+    }
+    let status = obj.get("status").and_then(Value::as_str).unwrap_or("ok").to_string();
+    if let Some(hint) = &outcome.hint {
+        obj.insert("hint".into(), json!(hint));
+    }
+    if status == "ok" {
+        return;
+    }
+    let failure_text = if status == "empty" {
+        EMPTY_MOUNT_MESSAGE.to_string()
+    } else if let Some(msg) = &outcome.failure {
+        msg.clone()
+    } else if status == "yielded" {
+        "story mount yielded and did not finish before capture".to_string()
+    } else {
+        format!("story run ended with status \"{status}\"")
+    };
+    obj.insert("failure".into(), json!(failure_text));
+    if outcome.edit_mode_mounts == Some(true) {
+        obj.insert("editModeFallback".into(), edit_mode_fallback_json());
+    }
+    obj.insert(
+        "predicted".into(),
+        predicted_non_ok_json(&status, Some(&failure_text), single_live, outcome.edit_mode_mounts),
+    );
+    if let Some(fid) = obj.get_mut("fidelity").and_then(Value::as_object_mut) {
+        fid.insert(
+            "layoutCpuMs".into(),
+            json!(format!("refused ({status}: {})", non_ok_reason(&status, Some(&failure_text)))),
+        );
+    }
+    if let Some(summary) = obj
+        .get_mut("sequence")
+        .and_then(|s| s.get_mut("summary"))
+        .and_then(Value::as_object_mut)
+    {
+        let basis = if status == "empty" { "nothing_mounted" } else { "story_failed" };
+        summary.insert(
+            "steadyStateLayoutCpuMs".into(),
+            json!({
+                "status": "refused",
+                "basis": basis,
+                "desktop-ref": Value::Null,
+                "phone-mid-range": Value::Null,
+                "phone-mid-band": Value::Null,
+                "reason": non_ok_reason(&status, Some(&failure_text)),
+                "settledBy": non_ok_settled_by(outcome.edit_mode_mounts),
+            }),
+        );
+    }
+}
+
+fn first_line(s: &str, max_chars: usize) -> String {
+    let line = s.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").trim();
+    if line.chars().count() <= max_chars || max_chars <= 3 {
+        line.to_string()
+    } else {
+        let head: String = line.chars().take(max_chars - 3).collect();
+        format!("{head}...")
+    }
+}
+
 fn predicted_edit_mode_sequence_json(run_mode: &str, scope: &'static str) -> Value {
     let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
     let reason = if run_mode == "edit" {
@@ -1576,11 +1806,17 @@ pub fn analyze_scene_with_mode(
         })
         .collect();
 
-    let status = scene
+    let raw_status = scene
         .header()
         .get("status")
         .and_then(Value::as_str)
         .unwrap_or("ok");
+    let mounted_empty = raw_status == "ok"
+        && analyzer.totals.drawn_nodes == 0
+        && hidden.gui_objects == 0
+        && hidden.disabled_screen_guis == 0
+        && dom_hidden.is_some_and(|h| h.mounted_empty);
+    let status = if mounted_empty { "empty" } else { raw_status };
 
     let mut report = Map::new();
     report.insert("schema".into(), json!("rur-cost/1"));
@@ -1602,9 +1838,16 @@ pub fn analyze_scene_with_mode(
     report.insert("totals".into(), totals_json);
     if dom_hidden.is_some() {
         report.insert("fullTreeLayout".into(), layout_stats_json_scoped(layout, "full_tree_export_pass"));
-        report.insert("predicted".into(), predicted_single_live_json(layout));
+        if status == "ok" {
+            report.insert("predicted".into(), predicted_single_live_json(layout));
+        } else {
+            report.insert("predicted".into(), predicted_non_ok_json(status, None, true, None));
+        }
     } else {
         report.insert("predicted".into(), predicted_scene_only_json());
+    }
+    if mounted_empty {
+        report.insert("failure".into(), json!(EMPTY_MOUNT_MESSAGE));
     }
     report.insert("screenGuis".into(), json!(screen_guis_json));
     report.insert("objects".into(), json!(objects_json));
@@ -2072,6 +2315,8 @@ pub struct SequenceAccumulator {
     last_report: Option<Value>,
     unchanged_frames: u32,
     active_frames: u32,
+    saw_live_dom: bool,
+    any_non_empty: bool,
 }
 
 impl SequenceAccumulator {
@@ -2086,6 +2331,8 @@ impl SequenceAccumulator {
             last_report: None,
             unchanged_frames: 0,
             active_frames: 0,
+            saw_live_dom: false,
+            any_non_empty: false,
         }
     }
 
@@ -2102,6 +2349,7 @@ impl SequenceAccumulator {
         dom_hidden: Option<DomHiddenSummary>,
     ) {
         if dom_hidden.is_some() {
+            self.saw_live_dom = true;
             self.last_dom_hidden = dom_hidden;
         }
         let report = if !unchanged || self.last_report.is_none() {
@@ -2111,6 +2359,11 @@ impl SequenceAccumulator {
         } else {
             self.last_report.as_ref().expect("checked above").clone()
         };
+        if self.last_dom_hidden.as_ref().is_some_and(|h| !h.mounted_empty || h.gui_objects > 0 || h.disabled_screen_guis > 0)
+            || report["totals"]["drawnNodes"].as_u64().unwrap_or(0) > 0
+        {
+            self.any_non_empty = true;
+        }
         if unchanged {
             self.unchanged_frames += 1;
         } else {
@@ -2155,6 +2408,16 @@ impl SequenceAccumulator {
     }
 
     pub fn finish(self, status_override: Option<&str>) -> Value {
+        let outcome = RunOutcome {
+            status: status_override.map(str::to_string),
+            ..Default::default()
+        };
+        self.finish_with_outcome(&outcome)
+    }
+
+    pub fn finish_with_outcome(self, outcome: &RunOutcome) -> Value {
+        let saw_live_dom = self.saw_live_dom;
+        let any_non_empty = self.any_non_empty;
         let count = self.metrics.len();
         let agg = |extract: fn(&FrameMetrics) -> f64| -> (f64, f64, f64) {
             if count == 0 {
@@ -2251,13 +2514,22 @@ impl SequenceAccumulator {
                 "settledBy": "Re-run with --mode play for a playing client's 60 Hz Heartbeat cadence (1 beat per frame).",
             })
         };
+        let raw_status = outcome
+            .status
+            .as_deref()
+            .or_else(|| base.get("status").and_then(Value::as_str))
+            .unwrap_or("ok")
+            .to_string();
+        let final_status = if raw_status == "ok" && saw_live_dom && !any_non_empty {
+            "empty".to_string()
+        } else {
+            raw_status
+        };
         if let Some(obj) = base.as_object_mut() {
             obj.insert("mode".into(), json!("sequence"));
             obj.insert("runMode".into(), json!(self.run_mode));
             obj.insert("runModeInfo".into(), run_mode_info(&self.run_mode));
-            if let Some(status) = status_override {
-                obj.insert("status".into(), json!(status));
-            }
+            obj.insert("status".into(), json!(final_status));
             obj.remove("fullTreeLayout");
             obj.insert("layout".into(), steady_layout_json.clone());
             obj.insert(
@@ -2307,6 +2579,9 @@ impl SequenceAccumulator {
                 }),
             );
         }
+        let mut effective = outcome.clone();
+        effective.status = Some(final_status.to_string());
+        apply_run_outcome(&mut base, &effective, false);
         sort_json(base)
     }
 }
@@ -2351,6 +2626,7 @@ pub fn run_sequence_cost(
     let mut acc = SequenceAccumulator::new(spec.fps, &run_mode);
     let mut next = Some(first);
     let mut ready_status: Option<String> = None;
+    let mut ready_diagnostics: Option<Value> = None;
     let end = loop {
         let frame = match next.take() {
             Some(frame) => frame,
@@ -2365,11 +2641,14 @@ pub fn run_sequence_cost(
         if reply["type"] == "error" {
             return Err(format!("frame {index}: {}", reply["message"].as_str().unwrap_or("the engine failed")));
         }
-        let unchanged = index > 0 && reply["unchanged"] == true;
-        let outcome = scene.apply_owned(&mut reply).map_err(|e| format!("frame {index}: {e}"))?;
         if index == 0 {
             ready_status = reply.pointer("/delta/header/status").and_then(Value::as_str).map(str::to_string);
+            if !reply["diagnostics"].is_null() {
+                ready_diagnostics = Some(reply["diagnostics"].clone());
+            }
         }
+        let unchanged = index > 0 && reply["unchanged"] == true;
+        let outcome = scene.apply_owned(&mut reply).map_err(|e| format!("frame {index}: {e}"))?;
         acc.record_frame(
             index,
             time,
@@ -2381,12 +2660,24 @@ pub fn run_sequence_cost(
             dom_hidden,
         );
     };
-    let status = end["status"]
-        .as_str()
-        .map(str::to_string)
+    let mut merged_end = end;
+    if merged_end["diagnostics"].is_null() {
+        if let Some(diag) = ready_diagnostics {
+            merged_end["diagnostics"] = diag;
+        }
+    }
+    let mut run_outcome = extract_run_outcome(&merged_end);
+    let status = run_outcome
+        .status
+        .clone()
         .or(ready_status)
         .unwrap_or_else(|| "ok".into());
-    Ok(acc.finish(Some(&status)))
+    run_outcome.status = Some(status.clone());
+    let is_empty_mount = status == "ok" && acc.saw_live_dom && !acc.any_non_empty;
+    if run_mode == "play" && (status != "ok" || is_empty_mount) {
+        run_outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args));
+    }
+    Ok(acc.finish_with_outcome(&run_outcome))
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -2492,6 +2783,28 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
         );
     }
 
+    if status != "ok" {
+        if let Some(failure) = report.get("failure").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+            let label = if status == "empty" { "empty" } else { "failure" };
+            let mut lines = failure.lines().map(str::trim).filter(|l| !l.is_empty());
+            if let Some(first) = lines.next() {
+                let _ = writeln!(out, "  {label}:   {}", first_line(first, 180));
+            }
+            if let Some(second) = lines.next() {
+                let _ = writeln!(out, "             {}", first_line(second, 180));
+            }
+        }
+        if let Some(hint) = report.get("hint").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+            let _ = writeln!(out, "  hint:      {}", first_line(hint, 180));
+        }
+        if report.pointer("/editModeFallback/mountsInEditMode").and_then(Value::as_bool) == Some(true) {
+            let _ = writeln!(
+                out,
+                "  mode note: mounts in edit mode, not play; pass --mode edit for counts/RT/overdraw/hidden DOM (per-frame layoutCpuMs is refused in edit mode)",
+            );
+        }
+    }
+
     let _ = writeln!(
         out,
         "  guis:      {} enabled, {} disabled ({} insts) | nodes: {}/{} drawn",
@@ -2564,7 +2877,12 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             seq["activeFrames"].as_u64().unwrap_or(0),
             seq["unchangedFrames"].as_u64().unwrap_or(0),
         );
-        if run_mode == "play" {
+        if status != "ok" {
+            let _ = writeln!(
+                out,
+                "  layoutMs:  refused ({status}; zero counts are not a valid UI cost measurement)",
+            );
+        } else if run_mode == "play" {
             let desk_ms = seq.pointer("/steadyStateLayoutCpuMs/desktop-ref").and_then(Value::as_f64).unwrap_or(0.0);
             let phone_range = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-range");
             let phone_band = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-band");
@@ -2580,9 +2898,6 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             );
         }
     } else if let Some(ft) = report.get("fullTreeLayout") {
-        let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
-        let phone_range = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/rangeMs");
-        let phone_band = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/bandMs");
         let _ = writeln!(
             out,
             "  layout:    full-tree {}p / {}s / {}m (per-frame layoutCpuMs refused; use --from and --frames)",
@@ -2590,11 +2905,21 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             ft["stored"].as_u64().unwrap_or(0),
             ft["moved"].as_u64().unwrap_or(0),
         );
-        let _ = writeln!(
-            out,
-            "  fullTree:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
-            format_phone_range(&phone_range, &phone_band),
-        );
+        if status != "ok" {
+            let _ = writeln!(
+                out,
+                "  fullTree:  refused ({status}; zero counts are not a valid UI cost measurement)",
+            );
+        } else {
+            let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
+            let phone_range = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/rangeMs");
+            let phone_band = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/bandMs");
+            let _ = writeln!(
+                out,
+                "  fullTree:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
+                format_phone_range(&phone_range, &phone_band),
+            );
+        }
     } else {
         let _ = writeln!(
             out,
@@ -2795,7 +3120,21 @@ pub fn format_one_screen_compare(diff: &Value, dest: Option<&Path>) -> String {
 fn print_summary(report: &Value, dest: &Path) {
     let t = &report["totals"];
     let rt_bytes = t["canvasRtBytes"].as_u64().unwrap_or(0);
+    let status = report["status"].as_str().unwrap_or("?");
     let run_mode = report["runMode"].as_str().unwrap_or("unknown");
+    if status != "ok" {
+        if let Some(failure) = report.get("failure").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+            eprintln!("rur cost: {status}: {failure}");
+        }
+        if let Some(hint) = report.get("hint").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+            eprintln!("rur cost: hint: {hint}");
+        }
+        if report.pointer("/editModeFallback/mountsInEditMode").and_then(Value::as_bool) == Some(true) {
+            eprintln!(
+                "rur cost: story mounts in edit mode, not play; pass --mode edit for static counts/RT/overdraw/hidden DOM (per-frame layoutCpuMs is refused in edit mode)"
+            );
+        }
+    }
     if let Some(seq) = report.pointer("/sequence/summary") {
         let frames = seq["frameCount"].as_u64().unwrap_or(0);
         let fps = seq["fps"].as_f64().unwrap_or(60.0);
@@ -2805,7 +3144,9 @@ fn print_summary(report: &Value, dest: &Path) {
             "edit" => "mode=edit 240 Hz",
             other => other,
         };
-        let layout_timing = if run_mode == "play" {
+        let layout_timing = if status != "ok" {
+            format!("layout ms refused ({status}); draw/gpu refused")
+        } else if run_mode == "play" {
             let desk_ms = seq.pointer("/steadyStateLayoutCpuMs/desktop-ref").and_then(Value::as_f64).unwrap_or(0.0);
             let phone_range = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-range");
             let phone_band = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-band");
@@ -2818,7 +3159,7 @@ fn print_summary(report: &Value, dest: &Path) {
         };
         eprintln!(
             "rur cost: {} ({} frames @ {} fps, {}) | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m/{:.1}sp/{:.1}sm ({}) | model draws={} breaks={} (unmeasured) -> {}",
-            report["status"].as_str().unwrap_or("?"),
+            status,
             frames,
             fps,
             mode_label,
@@ -2841,12 +3182,20 @@ fn print_summary(report: &Value, dest: &Path) {
         return;
     }
     if let Some(ft) = report.get("fullTreeLayout") {
-        let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
-        let phone_range = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/rangeMs");
-        let phone_band = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/bandMs");
+        let timing_str = if status != "ok" {
+            format!("layout ms refused ({status}); draw/gpu refused")
+        } else {
+            let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
+            let phone_range = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/rangeMs");
+            let phone_band = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/bandMs");
+            format!(
+                "extrapolated desk {desk_ms:.4} ms, {}; per-frame cost needs --from and --frames; draw/gpu refused",
+                format_phone_range(&phone_range, &phone_band)
+            )
+        };
         eprintln!(
-            "rur cost: {} (mode={}) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s (extrapolated desk {:.4} ms, {}; per-frame cost needs --from and --frames; draw/gpu refused) | model draws={} breaks={} (unmeasured) -> {}",
-            report["status"].as_str().unwrap_or("?"),
+            "rur cost: {} (mode={}) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s ({}) | model draws={} breaks={} (unmeasured) -> {}",
+            status,
             run_mode,
             t["screenGuis"].as_u64().unwrap_or(0),
             t["disabledScreenGuis"].as_u64().unwrap_or(0),
@@ -2861,8 +3210,7 @@ fn print_summary(report: &Value, dest: &Path) {
             t["hiddenInShown"]["guiObjects"].as_u64().unwrap_or(0),
             ft["passes"].as_u64().unwrap_or(0),
             ft["stored"].as_u64().unwrap_or(0),
-            desk_ms,
-            format_phone_range(&phone_range, &phone_band),
+            timing_str,
             t["drawCalls"].as_u64().unwrap_or(0),
             t["batchBreaks"].as_u64().unwrap_or(0),
             dest.display(),
@@ -3088,7 +3436,13 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
         let mut store = SceneStore::default();
         store.apply(&run.scene.scene).map_err(Failure::Error)?;
         let run_mode = engine_args.mode.as_deref().unwrap_or("edit");
-        let report = analyze_scene_with_mode(&store, run.layout, Some(&run.dom_hidden), run_mode);
+        let mut report = analyze_scene_with_mode(&store, run.layout, Some(&run.dom_hidden), run_mode);
+        let mut outcome = extract_run_outcome(&run.scene.scene);
+        if run_mode == "play" && (report["status"] != "ok" || outcome.status.as_deref().is_some_and(|s| s != "ok")) {
+            outcome.edit_mode_mounts = Some(probe_mounts_in_edit_mode(&engine_args));
+        }
+        apply_run_outcome(&mut report, &outcome, true);
+        let report = sort_json(report);
         let name = format!("{}-cost", crate::story_args::source_name(&source, false));
         (report, name)
     };
@@ -3098,7 +3452,7 @@ fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
     print_summary(&report, &dest);
 
     let mut summary = format_one_screen_report(&report, &dest);
-    let failed = report["status"].as_str() == Some("error");
+    let failed = report["status"].as_str() != Some("ok");
     if let Some(before_arg) = args.value("--compare") {
         let before_path = resolve_cost_file(&context.resolve(&before_arg));
         let before = read_json_file(&before_path)?;
@@ -3972,5 +4326,147 @@ end
                 assert_eq!(af["totals"][key], single_rep["totals"][key], "frame {i} mismatch on {key}");
             }
         }
+    }
+
+    #[test]
+    fn failing_and_empty_stories_surface_cause_refuse_zero_ms_and_note_edit_mode_fallback() {
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+        let dir = std::env::temp_dir().join(format!("rur-cost-fail-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let assert_edit = dir.join("assert_edit.luau");
+        std::fs::write(
+            &assert_edit,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	assert(not RunService:IsRunning(), "this story only mounts in edit mode")
+	local F = Instance.new("Frame")
+	F.Size = UDim2.fromOffset(100, 50)
+	F.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+
+        let calls_is_edit = dir.join("calls_is_edit.luau");
+        std::fs::write(
+            &calls_is_edit,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	local _ = RunService:IsEdit()
+	local F = Instance.new("Frame")
+	F.Size = UDim2.fromOffset(100, 50)
+	F.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+
+        let early_return = dir.join("early_return.luau");
+        std::fs::write(
+            &early_return,
+            r#"return function(Target)
+	local RunService = game:GetService("RunService")
+	if RunService:IsRunning() then
+		return
+	end
+	local F = Instance.new("Frame")
+	F.Size = UDim2.fromOffset(100, 50)
+	F.Parent = Target
+end
+"#,
+        )
+        .unwrap();
+
+        let always_err = dir.join("always_err.luau");
+        std::fs::write(
+            &always_err,
+            r#"return function(_Target)
+	error("always broken story")
+end
+"#,
+        )
+        .unwrap();
+
+        let make_args = |fixture: &Path, extra: &[&str]| {
+            let mut argv: Vec<String> = vec![
+                "--repo".into(), repo.to_string_lossy().into_owned(),
+                "--roots".into(), root.to_string_lossy().into_owned(),
+                "--fixture".into(), fixture.to_string_lossy().into_owned(),
+                "--viewport".into(), "800x600".into(),
+                "--scale".into(), "1".into(),
+                "--no-snapshots".into(),
+            ];
+            argv.extend(extra.iter().map(|s| s.to_string()));
+            engine::cli::parse(&argv).unwrap()
+        };
+        let seq_spec = engine::cli::SequenceSpec { from: 0.0, frames: 4, fps: 60.0, collect_cost: true };
+        let dest = Path::new("out/cost.json");
+
+        // 1. assert(not RunService:IsRunning()) -> error with cause, refused ms, and edit-mode fallback note
+        let rep_assert = run_sequence_cost(&make_args(&assert_edit, &[]), &seq_spec, &repo).unwrap();
+        assert_eq!(rep_assert["status"], "error");
+        let assert_fail = rep_assert["failure"].as_str().expect("missing failure text");
+        assert!(assert_fail.contains("this story only mounts in edit mode"), "got: {assert_fail}");
+        assert_eq!(rep_assert["predicted"]["desktop-ref"]["layoutCpuMs"]["status"], "refused");
+        assert!(rep_assert["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].is_null());
+        assert_eq!(rep_assert["sequence"]["summary"]["steadyStateLayoutCpuMs"]["status"], "refused");
+        assert!(rep_assert["sequence"]["summary"]["steadyStateLayoutCpuMs"]["desktop-ref"].is_null());
+        assert_eq!(rep_assert["editModeFallback"]["mountsInEditMode"], true);
+        let screen_assert = format_one_screen_report(&rep_assert, dest);
+        assert!(screen_assert.contains("this story only mounts in edit mode"), "{screen_assert}");
+        assert!(screen_assert.contains("--mode edit"), "{screen_assert}");
+        assert!(screen_assert.contains("refused"), "{screen_assert}");
+        assert!(!screen_assert.contains("0.0000 ms"), "must never print 0.0000 ms for errored story:\n{screen_assert}");
+
+        // 2. RunService:IsEdit() -> error with capability cause and edit-mode fallback note
+        let rep_isedit = run_sequence_cost(&make_args(&calls_is_edit, &[]), &seq_spec, &repo).unwrap();
+        assert_eq!(rep_isedit["status"], "error");
+        let isedit_fail = rep_isedit["failure"].as_str().expect("missing IsEdit failure text");
+        assert!(isedit_fail.contains("IsEdit"), "got: {isedit_fail}");
+        assert_eq!(rep_isedit["editModeFallback"]["mountsInEditMode"], true);
+
+        // 3. Early return in play mode -> status "empty" (NOT "ok"), refused ms, edit-mode fallback note
+        let rep_empty = run_sequence_cost(&make_args(&early_return, &[]), &seq_spec, &repo).unwrap();
+        assert_eq!(rep_empty["status"], "empty", "early-return story must not be ok: {rep_empty}");
+        let empty_fail = rep_empty["failure"].as_str().expect("missing empty reason");
+        assert!(empty_fail.contains("mounted nothing"), "got: {empty_fail}");
+        assert_eq!(rep_empty["predicted"]["desktop-ref"]["layoutCpuMs"]["status"], "refused");
+        assert!(rep_empty["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].is_null());
+        assert_eq!(rep_empty["editModeFallback"]["mountsInEditMode"], true);
+        let screen_empty = format_one_screen_report(&rep_empty, dest);
+        assert!(screen_empty.contains("rur cost: empty"), "{screen_empty}");
+        assert!(screen_empty.contains("mounted nothing"), "{screen_empty}");
+        assert!(screen_empty.contains("--mode edit"), "{screen_empty}");
+        assert!(screen_empty.contains("per-frame layoutCpuMs is refused in edit mode"), "{screen_empty}");
+        assert!(!screen_empty.contains("0.0000 ms"), "must never print 0.0000 ms for empty mount:\n{screen_empty}");
+
+        // Compare refuses empty reports
+        let cmp_empty = compare_reports(&rep_empty, &rep_empty).unwrap();
+        assert_eq!(cmp_empty["verdict"], "refused");
+
+        // 4. Story that errors in both play and edit -> surfaces cause, does NOT falsely claim edit-mode mount
+        let rep_always = run_sequence_cost(&make_args(&always_err, &[]), &seq_spec, &repo).unwrap();
+        assert_eq!(rep_always["status"], "error");
+        assert!(rep_always["failure"].as_str().unwrap_or("").contains("always broken story"));
+        assert!(rep_always.get("editModeFallback").is_none(), "must not claim edit-mode mount when edit also fails");
+
+        // Single-moment error also surfaces cause and refuses fullTreeLayoutCpuMs
+        let single_run = engine::cli::run_once_with_cost(&make_args(&always_err, &["--time", "0.05"])).unwrap();
+        let mut store = SceneStore::default();
+        store.apply(&single_run.scene.scene).unwrap();
+        let mut single_rep = analyze_scene_with_mode(&store, single_run.layout, Some(&single_run.dom_hidden), "edit");
+        let outcome = extract_run_outcome(&single_run.scene.scene);
+        apply_run_outcome(&mut single_rep, &outcome, true);
+        assert_eq!(single_rep["status"], "error");
+        assert!(single_rep["failure"].as_str().unwrap_or("").contains("always broken story"));
+        assert_eq!(single_rep["predicted"]["desktop-ref"]["fullTreeLayoutCpuMs"]["status"], "refused");
+        let screen_single = format_one_screen_report(&single_rep, dest);
+        assert!(screen_single.contains("always broken story"), "{screen_single}");
+        assert!(!screen_single.contains("0.0000 ms"), "{screen_single}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

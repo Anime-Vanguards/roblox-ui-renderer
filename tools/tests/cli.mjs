@@ -950,6 +950,51 @@ end
 		assert.ok(!rPlainCmp.stdout.trimStart().startsWith("{"), "plain `rur cost compare` must print a summary, not raw JSON");
 		assert.ok(rPlainCmp.stdout.split(/\r?\n/).filter(l => l.trim().length > 0).length <= 40);
 		assert.match(rPlainCmp.stdout, /rur cost compare: unchanged/);
+
+		// Failing or empty-mount stories under the play default must exit 2, print the real cause on
+		// stdout/stderr and in cost.json, never report 0.0000 ms, and note --mode edit when edit mounts.
+		const editOnlyAssert = path.join(dir, "edit-only-assert.luau");
+		fs.writeFileSync(editOnlyAssert, `return function(Target)
+	local RunService = game:GetService("RunService")
+	assert(not RunService:IsRunning(), "edit-only story assertion")
+	local F = Instance.new("Frame")
+	F.Size = UDim2.fromOffset(80, 40)
+	F.Parent = Target
+end
+`);
+		const outErrPlay = path.join(dir, "err-play");
+		const rErrPlay = runRur("cost", "--fixture", editOnlyAssert, "--no-snapshots", "--from", "0", "--frames", "4", "--fps", "60", "--out", outErrPlay);
+		assert.equal(rErrPlay.status, 2, `failing play story must exit 2, got ${rErrPlay.status}`);
+		assert.match(rErrPlay.stdout, /edit-only story assertion/);
+		assert.match(rErrPlay.stdout, /--mode edit/);
+		assert.doesNotMatch(rErrPlay.stdout, /0\.0000 ms/);
+		assert.match(rErrPlay.stderr, /edit-only story assertion/);
+		const cErrPlay = JSON.parse(fs.readFileSync(path.join(outErrPlay, "cost.json"), "utf8"));
+		assert.equal(cErrPlay.status, "error");
+		assert.match(cErrPlay.failure, /edit-only story assertion/);
+		assert.equal(cErrPlay.predicted["desktop-ref"].layoutCpuMs.status, "refused");
+		assert.equal(cErrPlay.editModeFallback?.mountsInEditMode, true);
+
+		const earlyReturn = path.join(dir, "early-return-play.luau");
+		fs.writeFileSync(earlyReturn, `return function(Target)
+	local RunService = game:GetService("RunService")
+	if RunService:IsRunning() then return end
+	local F = Instance.new("Frame")
+	F.Size = UDim2.fromOffset(80, 40)
+	F.Parent = Target
+end
+`);
+		const outEmptyPlay = path.join(dir, "empty-play");
+		const rEmptyPlay = runRur("cost", "--fixture", earlyReturn, "--no-snapshots", "--from", "0", "--frames", "4", "--fps", "60", "--out", outEmptyPlay);
+		assert.equal(rEmptyPlay.status, 2, `empty-mount play story must exit 2, got ${rEmptyPlay.status}`);
+		assert.match(rEmptyPlay.stdout, /rur cost: empty/);
+		assert.match(rEmptyPlay.stdout, /mounted nothing/);
+		assert.match(rEmptyPlay.stdout, /--mode edit/);
+		assert.doesNotMatch(rEmptyPlay.stdout, /0\.0000 ms/);
+		const cEmptyPlay = JSON.parse(fs.readFileSync(path.join(outEmptyPlay, "cost.json"), "utf8"));
+		assert.equal(cEmptyPlay.status, "empty");
+		assert.equal(cEmptyPlay.predicted["desktop-ref"].layoutCpuMs.status, "refused");
+		assert.equal(cEmptyPlay.editModeFallback?.mountsInEditMode, true);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}

@@ -771,7 +771,13 @@ pub fn draw_frames(
         .or_else(|| ready.pointer("/delta/header/status").and_then(Value::as_str).map(str::to_string))
         .unwrap_or_else(|| "ok".into());
     let cost_file = if let Some(acc) = cost_acc {
-        let report = acc.finish(Some(&status_str));
+        let mut merged_end = end.clone();
+        if merged_end["diagnostics"].is_null() {
+            merged_end["diagnostics"] = ready["diagnostics"].clone();
+        }
+        let mut outcome = crate::cost::extract_run_outcome(&merged_end);
+        outcome.status = Some(status_str.clone());
+        let report = acc.finish_with_outcome(&outcome);
         let path = out.join("cost.json");
         crate::cost::write_report(&path, &report).map_err(|e| anyhow!("writing {}: {e}", path.display()))?;
         Some(path)
