@@ -647,6 +647,27 @@ fn write_reply(out: &mut impl Write, buf: &mut Vec<u8>, mut reply: Json, flush: 
     Ok(())
 }
 
+/// Runs a fixed sequence of session commands (batch live sessions: cli.rs), streaming `@@RUR ` reply
+/// lines to stdout through a buffered writer.
+pub fn run_commands(lua: &Lua, session: &mut Session, commands: &[Json]) -> Result<(), String> {
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::with_capacity(64 * 1024, stdout.lock());
+    let mut buf = Vec::with_capacity(64 * 1024);
+    let ready = session.ready(lua).unwrap_or_else(|error| error_reply(&error));
+    write_reply(&mut out, &mut buf, ready, false).map_err(|e| e.to_string())?;
+    for command in commands {
+        if !command.is_object() {
+            write_reply(&mut out, &mut buf, json!({ "type": "error", "message": format!("bad command: {command}") }), false).map_err(|e| e.to_string())?;
+            continue;
+        }
+        match session.handle(lua, command) {
+            Some(reply) => write_reply(&mut out, &mut buf, reply, false).map_err(|e| e.to_string())?,
+            None => break,
+        }
+    }
+    out.flush().map_err(|e| e.to_string())
+}
+
 /// The stdio session loop (runtime/session.luau without a native transport).
 pub fn run_stdio(lua: &Lua, session: &mut Session) -> Result<(), String> {
     let stdout = std::io::stdout();

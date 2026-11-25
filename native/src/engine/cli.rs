@@ -276,6 +276,9 @@ fn plugin_settings(args: &Args) -> Result<Option<Json>, String> {
 /// The answers of [`batch`] start with this on a line of stdout
 pub const BATCH_ANSWER: &str = "@@RUR-BATCH ";
 
+/// An inline scene of [`batch`] (`{"inline": true}`) starts with this on a line of stdout
+pub const BATCH_SCENE: &str = "@@RUR-SCENE ";
+
 /// The command a release batch runner starts a child with: `rur-native engine-batch-job <engine
 /// arguments>` runs one job and answers it like [`batch`] does.
 pub const BATCH_JOB_COMMAND: &str = "engine-batch-job";
@@ -341,6 +344,8 @@ fn batch_job(job: &Json) -> Json {
     if argv.first().is_some_and(|arg| arg == "engine") {
         argv.remove(0);
     }
+    let inline = job["inline"].as_bool().unwrap_or(false);
+    let commands = job["commands"].as_array().map(Vec::as_slice);
     if crate::paths::is_standalone() {
         // Refused before the job picks this process or a child: neither may start work (or choose
         // a default location) for an unusable path.
@@ -353,7 +358,10 @@ fn batch_job(job: &Json) -> Json {
         // warm caches and saves a process start. Any other job gets a child that starts with them.
         let variables = job_variables(job);
         if crate::paths::batch_environment_matches(&variables, &argv) {
-            return run_batch_job(&argv);
+            return run_batch_job(&argv, inline, commands);
+        }
+        if inline || commands.is_some() {
+            return json!({"code": 2, "error": "inline and session batch jobs require matching process environment"});
         }
         return batch_job_process(&variables, &argv);
     }
@@ -372,20 +380,65 @@ fn batch_job(job: &Json) -> Json {
             }
         }
     }
-    run_batch_job(&argv)
+    run_batch_job(&argv, inline, commands)
+}
+
+enum BatchMode<'a> {
+    Standard,
+    InlineScene,
+    SessionCommands(&'a [Json]),
+}
+
+struct CaptureGuard(bool);
+
+impl CaptureGuard {
+    fn start() -> Self {
+        super::output::capture();
+        Self(true)
+    }
+
+    fn finish(mut self) -> String {
+        self.0 = false;
+        super::output::take_captured()
+    }
+}
+
+impl Drop for CaptureGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            let _ = super::output::take_captured();
+        }
+    }
 }
 
 /// The structured result is identical for checkout jobs, warm release jobs and child jobs.
-fn run_batch_job(argv: &[String]) -> Json {
+fn run_batch_job(argv: &[String], inline: bool, commands: Option<&[Json]>) -> Json {
     let args = match parse(argv) {
-        Ok(args) if !args.session => args,
+        Ok(args) if !args.session || commands.is_some() => args,
         Ok(_) => return json!({"code": 2, "error": "live sessions are not batched"}),
         Err(error) => {
             eprintln!("rur-native engine: {error}");
             return json!({"code": 2, "error": error});
         }
     };
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_with(args, true))) {
+    if args.session {
+        let cmds = commands.expect("checked above");
+        let capture = CaptureGuard::start();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_with_mode(args, true, BatchMode::SessionCommands(cmds))
+        }));
+        let captured = capture.finish();
+        return match outcome {
+            Ok(Ok(code)) => json!({"code": code, "stderr": captured}),
+            Ok(Err(error)) => {
+                eprintln!("rur-native engine: {error}");
+                json!({"code": 1, "error": error, "stderr": captured})
+            }
+            Err(_) => json!({"code": 101, "error": "the run panicked", "stderr": captured}),
+        };
+    }
+    let mode = if inline { BatchMode::InlineScene } else { BatchMode::Standard };
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_with_mode(args, true, mode))) {
         Ok(Ok(code)) => json!({"code": code}),
         Ok(Err(error)) => {
             eprintln!("rur-native engine: {error}");
@@ -482,19 +535,19 @@ fn batch_job_child(argv: &[String]) -> i32 {
         let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
         std::process::exit(1);
     });
-    let answer = run_batch_job(argv);
+    let answer = run_batch_job(argv, false, None);
     println!("{BATCH_ANSWER}{answer}");
     answer["code"].as_i64().unwrap_or(1) as i32
 }
 
 /// One render (or live session): returns the process exit code.
 pub fn run(args: Args) -> Result<i32, String> {
-    run_with(args, false)
+    run_with_mode(args, false, BatchMode::Standard)
 }
 
 /// [`run`], tearing the engine down after it when `free` (a batch's next run follows in this
 /// process; a process of its own just exits)
-fn run_with(args: Args, free: bool) -> Result<i32, String> {
+fn run_with_mode(args: Args, free: bool, mode: BatchMode<'_>) -> Result<i32, String> {
     let _memory = crate::memtrace::scope(crate::memtrace::Tag::Script);
     let started = Instant::now();
     // A bad --actions list stops the run before anything is loaded (input/actions.rs names the action)
@@ -515,7 +568,7 @@ fn run_with(args: Args, free: bool) -> Result<i32, String> {
         if args.test_hooks {
             install_test_hooks(&lua, &engine).map_err(|e| e.to_string())?;
         }
-        render(&lua, &engine, &args, project, prepared.target, started)
+        render(&lua, &engine, &args, project, prepared.target, started, mode)
     })();
     // Scripts may hold references into the engine; the VM goes first
     drop(lua);
@@ -795,6 +848,7 @@ fn render(
     project: story::Project,
     target: (f64, f64),
     started: Instant,
+    mode: BatchMode<'_>,
 ) -> Result<i32, String> {
     if args.session {
         let source = source_of(args);
@@ -805,11 +859,24 @@ fn render(
         session.transparent = args.transparent;
         session.run_time = exec_start.elapsed().as_secs_f64();
         crate::luau_profile::mark_frames();
-        super::session::run_stdio(lua, &mut session)?;
+        match mode {
+            BatchMode::SessionCommands(commands) => super::session::run_commands(lua, &mut session, commands)?,
+            _ => super::session::run_stdio(lua, &mut session)?,
+        }
         return Ok(0);
     }
     let output = run_scene(lua, engine, args, &project, target)?;
-    output.write(args, started)?;
+    if let BatchMode::InlineScene = mode {
+        if args.dependencies.is_some() {
+            output.save(args)?;
+        }
+        use std::io::Write;
+        let mut out = std::io::stdout().lock();
+        writeln!(out, "{BATCH_SCENE}{}", output.text).map_err(|e| e.to_string())?;
+        out.flush().map_err(|e| e.to_string())?;
+    } else {
+        output.write(args, started)?;
+    }
     Ok(0)
 }
 

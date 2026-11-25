@@ -303,12 +303,12 @@ function fetchFonts(ids) {
 const missingFonts = now => asArray((now.scene ?? now.lastScene)?.diagnostics?.missingFontAssets);
 
 // A family's JSON arrives first, then its faces
-async function withCloudFonts(entry, first) {
+async function withCloudFonts(entry, first, worker) {
 	let now = first;
 	for (let round = 0; round < 3; round++) {
 		const missing = missingFonts(now);
 		if (!missing.length || !(await fetchFonts(missing))) break;
-		now = entry.live ? await runLive(entry) : await runScene(entry);
+		now = entry.live ? await runLive(entry, worker) : await runScene(entry, worker);
 	}
 	return now;
 }
@@ -471,36 +471,51 @@ function run(argv, { env, input } = {}) {
 }
 
 // Batch workers (--no-batch turns them off): `rur-native engine-batch` reads one job a line,
-// {argv, env}, and answers each with a line starting BATCH_ANSWER (engine/cli.rs batch)
+// {argv, env, inline?, commands?}, streams inline scene / live reply lines, and answers each
+// with a line starting BATCH_ANSWER (engine/cli.rs batch)
 const BATCH_ANSWER = "@@RUR-BATCH ";
+const BATCH_SCENE = "@@RUR-SCENE ";
 let BATCH = true;
 
 // RUR_* variables that belong to the caller's environment (engine binary and state/cache directory),
 // preserved across entry runs so downloaded cloud fonts land in the same state dir the engine reads
 const KEEP_RUR_ENV = new Set(["RUR_NATIVE_ENGINE", "RUR_STATE_DIR", "RUR_CACHE_DIR"]);
+const BASE_ENV = {};
+const BASE_RUR_ENV = {};
+for (const [key, value] of Object.entries(process.env)) {
+	if (!key.startsWith("RUR_") || KEEP_RUR_ENV.has(key)) BASE_ENV[key] = value;
+	if (KEEP_RUR_ENV.has(key) && key !== "RUR_NATIVE_ENGINE") BASE_RUR_ENV[key] = value;
+}
 
 class BatchWorker {
 	constructor() {
 		this.child = null;
-		this.buffer = "";
 		this.waiting = null;
+		this.onLine = null;
 	}
 
 	start() {
-		const env = {};
-		for (const [key, value] of Object.entries(process.env)) if (!key.startsWith("RUR_") || KEEP_RUR_ENV.has(key)) env[key] = value;
-		const child = spawn(ENGINE, ["engine-batch"], { cwd: ROOT, env, windowsHide: true });
+		const child = spawn(ENGINE, ["engine-batch"], { cwd: ROOT, env: BASE_ENV, windowsHide: true });
 		this.child = child;
-		this.buffer = "";
+		let pending = "";
 		child.stdout.setEncoding("utf8");
 		child.stdout.on("data", chunk => {
-			this.buffer += chunk;
-			let newline;
-			while ((newline = this.buffer.indexOf("\n")) >= 0) {
-				const line = this.buffer.slice(0, newline).replace(/\r$/, "");
-				this.buffer = this.buffer.slice(newline + 1);
-				if (line.startsWith(BATCH_ANSWER)) this.answer(JSON.parse(line.slice(BATCH_ANSWER.length)));
+			let start = 0;
+			let newline = chunk.indexOf("\n");
+			if (newline < 0) {
+				pending += chunk;
+				return;
 			}
+			while (newline >= 0) {
+				const raw = start === 0 && pending ? pending + chunk.slice(0, newline) : chunk.slice(start, newline);
+				pending = "";
+				const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+				if (line.startsWith(BATCH_ANSWER)) this.answer(JSON.parse(line.slice(BATCH_ANSWER.length)));
+				else if (this.onLine) this.onLine(line);
+				start = newline + 1;
+				newline = chunk.indexOf("\n", start);
+			}
+			if (start < chunk.length) pending = chunk.slice(start);
 		});
 		child.stderr.on("data", () => {});
 		child.stdin.on("error", () => {});
@@ -514,11 +529,12 @@ class BatchWorker {
 	answer(value) {
 		const waiting = this.waiting;
 		this.waiting = null;
+		this.onLine = null;
 		if (waiting) waiting(value);
 	}
 
-	// The run's answer ({code, error}), "timeout", or null when the worker is gone
-	run(argv, env) {
+	// The run's answer ({code, error, stderr?}), "timeout", or null when the worker is gone
+	run(argv, env, { inline = false, commands = null, onLine = null } = {}) {
 		if (!this.child) this.start();
 		const child = this.child;
 		return new Promise(resolve => {
@@ -526,17 +542,22 @@ class BatchWorker {
 				this.stop();
 				resolve("timeout");
 			}, TIMEOUT * 1000);
+			this.onLine = onLine;
 			this.waiting = value => {
 				clearTimeout(timer);
 				resolve(value);
 			};
-			child.stdin.write(JSON.stringify({ argv, env }) + "\n");
+			const payload = { argv, env };
+			if (inline) payload.inline = true;
+			if (commands) payload.commands = commands;
+			child.stdin.write(JSON.stringify(payload) + "\n");
 		});
 	}
 
 	stop() {
 		const child = this.child;
 		this.child = null;
+		this.onLine = null;
 		if (!child) return;
 		child.stdin.end();
 		spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
@@ -544,23 +565,37 @@ class BatchWorker {
 	}
 
 	close() {
-		if (this.child) this.child.stdin.end();
+		const child = this.child;
 		this.child = null;
+		this.onLine = null;
+		if (!child) return Promise.resolve();
+		return new Promise(resolve => {
+			if (child.exitCode !== null || child.signalCode !== null) {
+				resolve();
+				return;
+			}
+			const done = () => resolve();
+			child.once("close", done);
+			child.once("error", done);
+			child.stdin.end();
+		});
 	}
 }
 
 // The RUR_* part of an entry's environment (a batch job's)
 function batchEnv(entry) {
-	return Object.fromEntries(Object.entries(entryEnv(entry)).filter(([key]) => key.startsWith("RUR_") && key !== "RUR_NATIVE_ENGINE"));
+	const env = { ...BASE_RUR_ENV, RUR_EPOCH: EPOCH };
+	if (FROZEN_FONTS) env.RUR_FONT_ROOT = FONTS;
+	for (const [key, value] of Object.entries(entry.env)) {
+		if (value !== null && value !== undefined && key.startsWith("RUR_") && key !== "RUR_NATIVE_ENGINE") env[key] = value;
+	}
+	return env;
 }
 
 // Environment of a run: only the entry's own RUR_* settings plus the caller's engine and state dir
 // (a caller's RUR_CLOCK or RUR_TEXT_SUBPIXEL must not leak in)
 function entryEnv(entry) {
-	const env = {};
-	for (const [key, value] of Object.entries(process.env)) if (!key.startsWith("RUR_") || KEEP_RUR_ENV.has(key)) env[key] = value;
-	// A fixed wall clock (os.time, DateTime.now, ...): stories print dates and countdowns
-	env.RUR_EPOCH = EPOCH;
+	const env = { ...BASE_ENV, RUR_EPOCH: EPOCH };
 	// The frozen fonts (--freeze-fonts), not the Studio install's and the cache's
 	if (FROZEN_FONTS) env.RUR_FONT_ROOT = FONTS;
 	for (const [key, value] of Object.entries(entry.env)) if (value !== null && value !== undefined) env[key] = value;
@@ -611,20 +646,46 @@ const FONT_PLACEHOLDERS = [
 ];
 
 function normalizeText(text) {
+	const hasSlash = text.includes("/") || text.includes("\\");
+	const hasAddr = text.includes(": 0x");
+	if (!hasSlash && !hasAddr) return text;
 	let result = text;
-	for (const [from, to] of FONT_PLACEHOLDERS) result = result.replace(from, to);
-	if (STATE_PLACEHOLDER) result = result.replace(STATE_PLACEHOLDER[0], STATE_PLACEHOLDER[1]);
-	for (const [from, to] of PLACEHOLDERS) result = result.split(from).join(to);
-	result = result.replace(STUDIO_CONTENT, "<studio-content>/").replace(STUDIO_ROOT, "<studio>/");
-	return result.replace(/\b(table|function|thread|userdata|buffer): 0x[0-9a-fA-F]+/g, "$1: 0x?");
+	if (hasSlash) {
+		for (const [from, to] of FONT_PLACEHOLDERS) result = result.replace(from, to);
+		if (STATE_PLACEHOLDER) result = result.replace(STATE_PLACEHOLDER[0], STATE_PLACEHOLDER[1]);
+		for (const [from, to] of PLACEHOLDERS) {
+			if (result.includes(from)) result = result.split(from).join(to);
+		}
+		if (/roblox/i.test(result)) result = result.replace(STUDIO_CONTENT, "<studio-content>/").replace(STUDIO_ROOT, "<studio>/");
+	}
+	if (hasAddr) result = result.replace(/\b(table|function|thread|userdata|buffer): 0x[0-9a-fA-F]+/g, "$1: 0x?");
+	return result;
 }
 
 function normalizeValue(value) {
 	if (typeof value === "string") return normalizeText(value);
-	if (Array.isArray(value)) return value.map(normalizeValue);
+	if (Array.isArray(value)) {
+		for (let i = 0; i < value.length; i++) value[i] = normalizeValue(value[i]);
+		return value;
+	}
 	if (value && typeof value === "object") {
+		const keys = Object.keys(value);
+		let sorted = true;
+		for (let i = 1; i < keys.length; i++) {
+			if (keys[i - 1] > keys[i]) {
+				sorted = false;
+				break;
+			}
+		}
+		if (sorted) {
+			for (let i = 0; i < keys.length; i++) {
+				const key = keys[i];
+				value[key] = normalizeValue(value[key]);
+			}
+			return value;
+		}
 		const result = {};
-		for (const key of Object.keys(value).sort()) result[key] = normalizeValue(value[key]);
+		for (const key of keys.sort()) result[key] = normalizeValue(value[key]);
 		return result;
 	}
 	return value;
@@ -676,21 +737,24 @@ function normalizeReply(reply) {
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 async function runScene(entry, worker) {
-	const scratch = path.join(GOLDEN, "tmp", String(process.pid), `${entry.corpus}-${entry.name.replace(/[\\/:*?"<>|]/g, "_")}.json`);
-	fs.mkdirSync(path.dirname(scratch), { recursive: true });
-	fs.rmSync(scratch, { force: true });
 	if (worker) {
-		const answer = await worker.run(engineArgs(entry, ["--out", scratch]), batchEnv(entry));
+		let sceneLine = null;
+		const answer = await worker.run(engineArgs(entry, []), batchEnv(entry), {
+			inline: true,
+			onLine(line) {
+				if (line.startsWith(BATCH_SCENE)) sceneLine = line.slice(BATCH_SCENE.length);
+			},
+		});
 		if (answer === "timeout") return { status: "timeout" };
-		if (answer && answer.code === 0 && fs.existsSync(scratch)) {
-			const scene = JSON.parse(fs.readFileSync(scratch, "utf8"));
-			fs.rmSync(scratch, { force: true });
-			return { status: "scene", scene: normalizeScene(scene) };
+		if (answer && answer.code === 0 && sceneLine !== null) {
+			return { status: "scene", scene: normalizeScene(JSON.parse(sceneLine)) };
 		}
 		// A failed run (or a worker that went away): again in a process of its own, whose message
 		// (its stderr) is the entry's
-		fs.rmSync(scratch, { force: true });
 	}
+	const scratch = path.join(GOLDEN, "tmp", String(process.pid), `${entry.corpus}-${entry.name.replace(/[\\/:*?"<>|]/g, "_")}.json`);
+	fs.mkdirSync(path.dirname(scratch), { recursive: true });
+	fs.rmSync(scratch, { force: true });
 	const result = await run(engineArgs(entry, ["--out", scratch]), { env: entryEnv(entry) });
 	if (result.timedOut) return { status: "timeout" };
 	if (result.status !== 0 || !fs.existsSync(scratch)) {
@@ -702,17 +766,42 @@ async function runScene(entry, worker) {
 	return { status: "scene", scene: normalizeScene(scene) };
 }
 
-function sessionReplies(stdout) {
-	return stdout.split("\n").filter(line => line.startsWith("@@RUR ")).map(line => {
-		try {
-			return JSON.parse(line.slice(6));
-		} catch (error) {
-			return { type: "error", message: `unparsable reply line (${line.length} bytes): ${error.message}` };
+function makeLiveTracker() {
+	// Presentation snapshots list every ScrollingFrame with a layout record, unparented ones included
+	// until the engine's instance collector frees them (its timing follows the Luau GC): only rows of
+	// frames the client holds are compared (as the former Luau-vs-Rust harness did)
+	const held = new Set();
+	const frames = [], scenes = [];
+	let ready = null, lastScene = null, count = 0;
+	const track = reply => {
+		for (const node of asArray(reply.delta?.nodes)) held.add(node.id);
+		for (const id of asArray(reply.delta?.removed)) held.delete(id);
+		if (reply.presentation && Array.isArray(reply.presentation.scrolls)) {
+			reply = { ...reply, presentation: { ...reply.presentation, scrolls: reply.presentation.scrolls.filter(row => held.has(row.id)) } };
 		}
-	});
+		return normalizeReply(reply);
+	};
+	return {
+		count: () => count,
+		pushLine(line) {
+			if (!line.startsWith("@@RUR ")) return;
+			let reply;
+			try {
+				reply = JSON.parse(line.slice(6));
+			} catch (error) {
+				reply = { type: "error", message: `unparsable reply line (${line.length} bytes): ${error.message}` };
+			}
+			if (count++ === 0) ready = track(reply);
+			else if (reply.type === "scene") {
+				lastScene = normalizeScene(reply.scene);
+				scenes.push(digest(lastScene));
+			} else frames.push(track(reply));
+		},
+		result: output => ({ status: "live", ready, frames, scenes, lastScene, output }),
+	};
 }
 
-async function runLive(entry) {
+async function runLive(entry, worker) {
 	const [width, height] = entry.options.viewport.split("x").map(Number);
 	const events = entry.events ?? [
 		// the retired live-protocol check's default script: hover, scroll, hover elsewhere
@@ -725,37 +814,33 @@ async function runLive(entry) {
 	for (let frame = 0; frame < entry.frames; frame++) {
 		const batch = events.filter(event => event.frame === frame && (!entry.noInput || event.type === "control")).map(({ frame: _, ...event }) => event);
 		const presentation = entry.presentation ? { presentation: { version: 1, seq: frame, scrolls: [] } } : {};
-		commands.push(JSON.stringify({ cmd: "frame", dt: entry.dt, cadence: entry.cadence ?? undefined, events: batch, ...presentation }));
-		commands.push(JSON.stringify({ cmd: "scene" }));
+		const cmd = { cmd: "frame", dt: entry.dt, events: batch, ...presentation };
+		if (entry.cadence !== null && entry.cadence !== undefined) cmd.cadence = entry.cadence;
+		commands.push(cmd);
+		commands.push({ cmd: "scene" });
 	}
-	commands.push(JSON.stringify({ cmd: "quit" }));
-	const result = await run(engineArgs(entry, ["--session", "1", "--verbose"]), { env: entryEnv(entry), input: commands.join("\n") + "\n" });
-	if (result.timedOut) return { status: "timeout" };
-	const replies = sessionReplies(result.stdout);
-	if (!replies.length) return { status: "failed", exit: result.status, message: normalizeText(result.stderr.trim().split(/\r?\n/).slice(-3).join("\n")) };
-	// Presentation snapshots list every ScrollingFrame with a layout record, unparented ones included
-	// until the engine's instance collector frees them (its timing follows the Luau GC): only rows of
-	// frames the client holds are compared (as the former Luau-vs-Rust harness did)
-	const held = new Set();
-	const track = reply => {
-		for (const node of asArray(reply.delta?.nodes)) held.add(node.id);
-		for (const id of asArray(reply.delta?.removed)) held.delete(id);
-		if (reply.presentation && Array.isArray(reply.presentation.scrolls)) {
-			reply = { ...reply, presentation: { ...reply.presentation, scrolls: reply.presentation.scrolls.filter(row => held.has(row.id)) } };
+	commands.push({ cmd: "quit" });
+	if (worker) {
+		const tracker = makeLiveTracker();
+		const answer = await worker.run(engineArgs(entry, ["--session", "1", "--verbose"]), batchEnv(entry), {
+			commands,
+			onLine: line => tracker.pushLine(line),
+		});
+		if (answer === "timeout") return { status: "timeout" };
+		if (answer && answer.code === 0 && tracker.count() > 0) {
+			const stderr = typeof answer.stderr === "string" ? answer.stderr : "";
+			const output = stderr.split(/\r?\n/).filter(line => line.startsWith("[warn] ") || line.startsWith("[error] ")).map(normalizeText);
+			return tracker.result(output);
 		}
-		return normalizeReply(reply);
-	};
-	const ready = track(replies[0]);
-	const frames = [], scenes = [];
-	let lastScene = null;
-	for (const reply of replies.slice(1)) {
-		if (reply.type === "scene") {
-			lastScene = normalizeScene(reply.scene);
-			scenes.push(digest(lastScene));
-		} else frames.push(track(reply));
 	}
+	const input = commands.map(cmd => JSON.stringify(cmd)).join("\n") + "\n";
+	const result = await run(engineArgs(entry, ["--session", "1", "--verbose"]), { env: entryEnv(entry), input });
+	if (result.timedOut) return { status: "timeout" };
+	const tracker = makeLiveTracker();
+	for (const line of result.stdout.split("\n")) tracker.pushLine(line.endsWith("\r") ? line.slice(0, -1) : line);
+	if (!tracker.count()) return { status: "failed", exit: result.status, message: normalizeText(result.stderr.trim().split(/\r?\n/).slice(-3).join("\n")) };
 	const output = result.stderr.split(/\r?\n/).filter(line => line.startsWith("[warn] ") || line.startsWith("[error] ")).map(normalizeText);
-	return { status: "live", ready, frames, scenes, lastScene, output };
+	return tracker.result(output);
 }
 
 // Comparison (the categories of the former Luau-vs-Rust harness)
@@ -1027,10 +1112,17 @@ async function main() {
 				continue;
 			}
 			const t0 = performance.now();
-			let now = entry.live ? await runLive(entry) : await runScene(entry, worker);
-			if (write || digest(now) !== manifest.entries[key]?.digest) now = await withCloudFonts(entry, now);
+			let now = entry.live ? await runLive(entry, worker) : await runScene(entry, worker);
+			let value = write ? null : digest(now);
+			if (write || value !== manifest.entries[key]?.digest) {
+				const retried = await withCloudFonts(entry, now, worker);
+				if (retried !== now) {
+					now = retried;
+					value = null;
+				}
+			}
 			durations[key] = Math.round(performance.now() - t0);
-			const value = digest(now);
+			if (value === null) value = digest(now);
 			let verdict, detail = "";
 			delete verified.entries[key];
 			const absent = missingFonts(now).map(id => {
@@ -1073,7 +1165,7 @@ async function main() {
 			print();
 		}
 		} finally {
-			worker?.close();
+			await worker?.close();
 		}
 	}));
 	if (write) {
