@@ -918,6 +918,38 @@ end
 		assert.equal(JSON.parse(playVsEdit.stdout).verdict, "refused");
 		assert.match(playVsEdit.stderr, /runMode/i);
 		assert.match(playVsEdit.stderr, /--mode/i);
+
+		// Without --json, stdout is a one-screen summary (<= 40 non-empty lines, <= 4096 bytes) naming the report file
+		// and exact RT bytes; with --json, stdout equals cost.json.
+		const outPlainSingle = path.join(dir, "plain-single");
+		const rPlainSingle = runRur("cost", "--fixture", path.join(root, "fixtures", "canvasgroup.luau"), "--no-snapshots", "--out", outPlainSingle);
+		assert.equal(rPlainSingle.status, 0, rPlainSingle.stderr);
+		const plainSingleLines = rPlainSingle.stdout.split(/\r?\n/).filter(l => l.trim().length > 0);
+		assert.ok(!rPlainSingle.stdout.trimStart().startsWith("{"), "plain `rur cost` must not dump raw JSON to stdout");
+		assert.ok(plainSingleLines.length <= 40, `plain single stdout too tall (${plainSingleLines.length} lines)`);
+		assert.ok(Buffer.byteLength(rPlainSingle.stdout, "utf8") <= 4096, `plain single stdout too large (${rPlainSingle.stdout.length} bytes)`);
+		assert.match(rPlainSingle.stdout, /723600 B/);
+		assert.match(rPlainSingle.stdout, /cost\.json/);
+		assert.match(rPlainSingle.stdout, /derived 3\.9x\.\.6\.3x/);
+		assert.match(rPlainSingle.stdout, /2\.55x\.\.12\.32x/);
+		assert.deepEqual(JSON.parse(rA.stdout), costA, "`rur cost --json` stdout must equal cost.json");
+
+		const outPlainSeq = path.join(dir, "plain-seq");
+		const rPlainSeq = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "6", "--fps", "60", "--out", outPlainSeq);
+		assert.equal(rPlainSeq.status, 0, rPlainSeq.stderr);
+		const plainSeqLines = rPlainSeq.stdout.split(/\r?\n/).filter(l => l.trim().length > 0);
+		assert.ok(!rPlainSeq.stdout.trimStart().startsWith("{"), "plain sequence `rur cost` must not dump raw JSON to stdout");
+		assert.ok(plainSeqLines.length <= 40, `plain sequence stdout too tall (${plainSeqLines.length} lines)`);
+		assert.ok(Buffer.byteLength(rPlainSeq.stdout, "utf8") <= 4096, `plain sequence stdout too large (${rPlainSeq.stdout.length} bytes)`);
+		assert.match(rPlainSeq.stdout, /mode=play 60 Hz/);
+		assert.match(rPlainSeq.stdout, /0\.0994 ms/);
+		assert.match(rPlainSeq.stdout, /cost\.json/);
+
+		const rPlainCmp = runRur("cost", "compare", outA, outB);
+		assert.equal(rPlainCmp.status, 0, rPlainCmp.stderr);
+		assert.ok(!rPlainCmp.stdout.trimStart().startsWith("{"), "plain `rur cost compare` must print a summary, not raw JSON");
+		assert.ok(rPlainCmp.stdout.split(/\r?\n/).filter(l => l.trim().length > 0).length <= 40);
+		assert.match(rPlainCmp.stdout, /rur cost compare: unchanged/);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}

@@ -146,13 +146,13 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/cost.rs",
         "pub fn cli(",
-        0x1091f03b2a6b1e8f,
+        0xc29abc188b6c05df,
     ),
     (
         Crate::Native,
         "src/cost.rs",
         "fn run_cli(",
-        0x9258430629a125c3,
+        0x6b609447eb44f7a7,
     ),
     // `rur-native assets`: its positionals are content URIs, read and never written; it writes only into
     // the state directory, and its one path option, `--repo`, is in PATH_OPTIONS

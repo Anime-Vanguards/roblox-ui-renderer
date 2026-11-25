@@ -27,7 +27,7 @@ node cli/rur.mjs cost compare out/before/cost.json out/after/cost.json --json
 node cli/rur.mjs cost --story path/to/Hud.story.luau --compare out/before/cost.json --out out/after
 ```
 
-`rur cost` delegates directly to `rur-native cost`, so standalone release binaries support every flag without Node. Pass `--json` for single-line JSON on stdout; `--out` accepts either a directory (writes `<dir>/cost.json`) or a `.json` file path.
+`rur cost` delegates directly to `rur-native cost`, so standalone release binaries support every flag without Node. Without `--json`, stdout prints a compact one-screen summary while the full deterministic JSON is written to `<out>/cost.json`; pass `--json` to print the full JSON on stdout. `--out` accepts either a directory (writes `<dir>/cost.json`) or a `.json` file path.
 
 ## What `rur cost` counts
 

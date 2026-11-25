@@ -2426,6 +2426,372 @@ fn pair_at(value: &Value, ptr: &str) -> [f64; 2] {
     [a, b]
 }
 
+fn trim_left(s: &str, max_chars: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_chars || max_chars <= 3 {
+        return s.to_string();
+    }
+    let skip = count - (max_chars - 3);
+    let tail: String = s.chars().skip(skip).collect();
+    format!("...{tail}")
+}
+
+fn format_signed_num(v: f64) -> String {
+    if !v.is_finite() || v.abs() < 1e-9 {
+        "0".into()
+    } else if (v - v.round()).abs() < 1e-6 {
+        let i = v.round() as i64;
+        if i > 0 { format!("+{i}") } else { format!("{i}") }
+    } else if v > 0.0 {
+        format!("+{v:.3}")
+    } else {
+        format!("{v:.3}")
+    }
+}
+
+/// Formats a `rur-cost/1` report as a compact, agent-readable one-screen stdout summary
+/// (always <= 32 non-empty lines and well under 4 KiB; full JSON lives in `dest` or `--json`).
+pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let status = report["status"].as_str().unwrap_or("?");
+    let mode = report["mode"].as_str().unwrap_or("single");
+    let run_mode = report["runMode"].as_str().unwrap_or("unknown");
+    let mode_cadence = match run_mode {
+        "play" => "play 60 Hz",
+        "edit" => "edit 240 Hz",
+        "scene" => "scene",
+        other => other,
+    };
+    let vp = &report["viewport"];
+    let t = &report["totals"];
+    let rt_bytes = t["canvasRtBytes"].as_u64().unwrap_or(0);
+
+    if let Some(seq) = report.pointer("/sequence/summary") {
+        let _ = writeln!(
+            out,
+            "rur cost: {status} (sequence, {} frames @ {} fps, mode={mode_cadence}) | {}x{} @ {}x ({}x{} px)",
+            seq["frameCount"].as_u64().unwrap_or(0),
+            seq["fps"].as_f64().unwrap_or(60.0),
+            vp["width"].as_f64().unwrap_or(0.0),
+            vp["height"].as_f64().unwrap_or(0.0),
+            vp["scale"].as_f64().unwrap_or(1.0),
+            vp["physicalWidth"].as_u64().unwrap_or(0),
+            vp["physicalHeight"].as_u64().unwrap_or(0),
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "rur cost: {status} ({mode}, mode={mode_cadence}) | {}x{} @ {}x ({}x{} px)",
+            vp["width"].as_f64().unwrap_or(0.0),
+            vp["height"].as_f64().unwrap_or(0.0),
+            vp["scale"].as_f64().unwrap_or(1.0),
+            vp["physicalWidth"].as_u64().unwrap_or(0),
+            vp["physicalHeight"].as_u64().unwrap_or(0),
+        );
+    }
+
+    let _ = writeln!(
+        out,
+        "  guis:      {} enabled, {} disabled ({} insts) | nodes: {}/{} drawn",
+        t["screenGuis"].as_u64().unwrap_or(0),
+        t["disabledScreenGuis"].as_u64().unwrap_or(0),
+        t["disabledScreenGuiInstances"].as_u64().unwrap_or(0),
+        t["drawnNodes"].as_u64().unwrap_or(0),
+        t["totalNodes"].as_u64().unwrap_or(0),
+    );
+
+    let mut kind_parts: Vec<String> = Vec::new();
+    if let Some(kinds) = t["quadsByKind"].as_object() {
+        let mut pairs: Vec<(&str, u64)> = kinds
+            .iter()
+            .filter_map(|(k, v)| v.as_u64().filter(|&n| n > 0).map(|n| (k.as_str(), n)))
+            .collect();
+        pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+        for (k, n) in pairs.into_iter().take(5) {
+            kind_parts.push(format!("{k}={n}"));
+        }
+    }
+    let kind_str = if kind_parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", kind_parts.join(", "))
+    };
+    let _ = writeln!(
+        out,
+        "  quads:     {}{kind_str} | glyphs: {} ({} fill + {} stroke)",
+        t["quads"].as_u64().unwrap_or(0),
+        t["glyphQuads"].as_u64().unwrap_or(0),
+        t["fillGlyphQuads"].as_u64().unwrap_or(0),
+        t["strokeGlyphQuads"].as_u64().unwrap_or(0),
+    );
+    let _ = writeln!(
+        out,
+        "  canvasRT:  {} | {} targets, {} switches, max depth {}",
+        format_bytes(rt_bytes),
+        t["canvasGroupTargets"].as_u64().unwrap_or(0),
+        t["canvasRtSwitches"].as_u64().unwrap_or(0),
+        t["maxCanvasGroupDepth"].as_u64().unwrap_or(0),
+    );
+    let _ = writeln!(
+        out,
+        "  overdraw:  {:.3}x screen, {:.3}x offscreen, {:.3}x total",
+        t["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
+        t["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+        t["totalOverdrawViewports"].as_f64().unwrap_or(0.0),
+    );
+    let hid = &t["hiddenInShown"];
+    let hid_scope = if hid["complete"].as_bool() == Some(true) { "live DOM" } else { "scene.json incomplete" };
+    let _ = writeln!(
+        out,
+        "  hidden:    {} roots, {} guiObjects, {} instances ({hid_scope})",
+        hid["roots"].as_u64().unwrap_or(0),
+        hid["guiObjects"].as_u64().unwrap_or(0),
+        hid["instances"].as_u64().unwrap_or(0),
+    );
+
+    if let Some(seq) = report.pointer("/sequence/summary") {
+        let steady = &seq["steadyStateLayoutMean"];
+        let _ = writeln!(
+            out,
+            "  layout:    steady {:.2}p / {:.1}s / {:.1}m / {:.1}sp / {:.1}sm ({} active, {} unchanged)",
+            steady["passes"].as_f64().unwrap_or(0.0),
+            steady["stored"].as_f64().unwrap_or(0.0),
+            steady["moved"].as_f64().unwrap_or(0.0),
+            steady["scrollPasses"].as_f64().unwrap_or(0.0),
+            steady["scrollMoved"].as_f64().unwrap_or(0.0),
+            seq["activeFrames"].as_u64().unwrap_or(0),
+            seq["unchangedFrames"].as_u64().unwrap_or(0),
+        );
+        if run_mode == "play" {
+            let desk_ms = seq.pointer("/steadyStateLayoutCpuMs/desktop-ref").and_then(Value::as_f64).unwrap_or(0.0);
+            let phone_range = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-range");
+            let phone_band = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-band");
+            let _ = writeln!(
+                out,
+                "  layoutMs:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
+                format_phone_range(&phone_range, &phone_band),
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "  layoutMs:  refused in edit mode (240 Hz, 4 beats/frame; pass --mode play for 60 Hz client per-frame ms)",
+            );
+        }
+    } else if let Some(ft) = report.get("fullTreeLayout") {
+        let desk_ms = report.pointer("/predicted/desktop-ref/fullTreeLayoutCpuMs/ms").and_then(Value::as_f64).unwrap_or(0.0);
+        let phone_range = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/rangeMs");
+        let phone_band = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/bandMs");
+        let _ = writeln!(
+            out,
+            "  layout:    full-tree {}p / {}s / {}m (per-frame layoutCpuMs refused; use --from and --frames)",
+            ft["passes"].as_u64().unwrap_or(0),
+            ft["stored"].as_u64().unwrap_or(0),
+            ft["moved"].as_u64().unwrap_or(0),
+        );
+        let _ = writeln!(
+            out,
+            "  fullTree:  desktop-ref {desk_ms:.4} ms (extrapolated) | {}",
+            format_phone_range(&phone_range, &phone_band),
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "  layout:    refused (--scene has no layout counters; run live with --from and --frames)",
+        );
+    }
+
+    let _ = writeln!(out, "  refused:   drawPassCpuMs=null, gpuUiMs=null (uncalibrated)");
+
+    let mut cause_parts: Vec<String> = Vec::new();
+    if let Some(causes) = t["batchBreaksByCause"].as_object() {
+        for cause in ["layerPass", "renderTarget", "clip", "shader", "texture", "rotation"] {
+            let n = causes.get(cause).and_then(Value::as_u64).unwrap_or(0);
+            if n > 0 {
+                cause_parts.push(format!("{cause}={n}"));
+            }
+        }
+    }
+    let cause_str = if cause_parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", cause_parts.join(", "))
+    };
+    let _ = writeln!(
+        out,
+        "  model:     draws={}, breaks={}{cause_str} [unmeasured, informational]",
+        t["drawCalls"].as_u64().unwrap_or(0),
+        t["batchBreaks"].as_u64().unwrap_or(0),
+    );
+
+    if let Some(guis) = report["screenGuis"].as_array() {
+        let mut enabled: Vec<&Value> = guis.iter().filter(|g| g["enabled"].as_bool() != Some(false)).collect();
+        enabled.sort_by(|a, b| {
+            b["canvasRtBytes"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&a["canvasRtBytes"].as_u64().unwrap_or(0))
+                .then_with(|| {
+                    (b["quads"].as_u64().unwrap_or(0) + b["glyphQuads"].as_u64().unwrap_or(0))
+                        .cmp(&(a["quads"].as_u64().unwrap_or(0) + a["glyphQuads"].as_u64().unwrap_or(0)))
+                })
+                .then_with(|| a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or("")))
+        });
+        if !enabled.is_empty() {
+            let shown = enabled.len().min(3);
+            let _ = writeln!(out, "  top guis ({shown}/{}):", enabled.len());
+            for g in enabled.into_iter().take(3) {
+                let _ = writeln!(
+                    out,
+                    "    {} | quads={} glyphs={} rt={} B ov={:.3}x/{:.3}x hid={}",
+                    trim_left(g["name"].as_str().unwrap_or("?"), 36),
+                    g["quads"].as_u64().unwrap_or(0),
+                    g["glyphQuads"].as_u64().unwrap_or(0),
+                    g["canvasRtBytes"].as_u64().unwrap_or(0),
+                    g["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
+                    g["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+                    g["hiddenGuiObjects"].as_u64().unwrap_or(0),
+                );
+            }
+        }
+    }
+
+    if let Some(objs) = report["objects"].as_array().filter(|a| !a.is_empty()) {
+        let shown = objs.len().min(3);
+        let _ = writeln!(out, "  top objs ({shown}/{}):", objs.len());
+        for o in objs.iter().take(3) {
+            let _ = writeln!(
+                out,
+                "    {} ({}) | quads={} glyphs={} rt={} B ov={:.3}x/{:.3}x",
+                trim_left(o["path"].as_str().unwrap_or("?"), 44),
+                o["class"].as_str().unwrap_or("?"),
+                o["quads"].as_u64().unwrap_or(0),
+                o["glyphQuads"].as_u64().unwrap_or(0),
+                o["canvasRtBytes"].as_u64().unwrap_or(0),
+                o["screenOverdrawViewports"].as_f64().unwrap_or(0.0),
+                o["offscreenOverdrawViewports"].as_f64().unwrap_or(0.0),
+            );
+        }
+    }
+
+    if let Some(hids) = report["hiddenSubtrees"].as_array().filter(|a| !a.is_empty()) {
+        let shown = hids.len().min(2);
+        let _ = writeln!(out, "  top hidden ({shown}/{}):", hids.len());
+        for h in hids.iter().take(2) {
+            let _ = writeln!(
+                out,
+                "    {} ({}) | {} guiObjects ({} insts)",
+                trim_left(h["path"].as_str().unwrap_or("?"), 48),
+                h["class"].as_str().unwrap_or("?"),
+                h["guiObjects"].as_u64().unwrap_or(0),
+                h["instances"].as_u64().unwrap_or(0),
+            );
+        }
+    }
+
+    let _ = writeln!(out, "  report:    {} (full JSON; pass --json for stdout JSON)", dest.display());
+    out
+}
+
+/// Formats an `rrr-ab/1` comparison report as a compact one-screen stdout summary.
+pub fn format_one_screen_compare(diff: &Value, dest: Option<&Path>) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let verdict = diff["verdict"].as_str().unwrap_or("?");
+    if verdict == "refused" {
+        let _ = writeln!(out, "rur cost compare: refused");
+        let _ = writeln!(out, "  reason: {}", diff["reason"].as_str().unwrap_or("incomparable reports"));
+        let _ = writeln!(out, "  remedy: {}", diff["remedy"].as_str().unwrap_or(""));
+        if let Some(p) = dest {
+            let _ = writeln!(out, "  report: {} (full JSON; pass --json for stdout JSON)", p.display());
+        }
+        return out;
+    }
+
+    let _ = writeln!(out, "rur cost compare: {verdict} (measured counts only; noise=0.0)");
+    let num = |ptr: &str| diff.pointer(ptr).and_then(Value::as_f64).unwrap_or(0.0);
+    let _ = writeln!(
+        out,
+        "  quads:     {} -> {} ({}) | glyphs: {} -> {} ({})",
+        num("/counts/before/quads") as u64,
+        num("/counts/after/quads") as u64,
+        format_signed_num(num("/counts/delta/quads")),
+        num("/counts/before/glyphQuads") as u64,
+        num("/counts/after/glyphQuads") as u64,
+        format_signed_num(num("/counts/delta/glyphQuads")),
+    );
+    let _ = writeln!(
+        out,
+        "  canvasRT:  {} B -> {} B ({} B) | targets: {} -> {} | switches: {} -> {}",
+        num("/counts/before/canvasRtBytes") as u64,
+        num("/counts/after/canvasRtBytes") as u64,
+        format_signed_num(num("/counts/delta/canvasRtBytes")),
+        num("/counts/before/canvasGroupTargets") as u64,
+        num("/counts/after/canvasGroupTargets") as u64,
+        num("/counts/before/canvasRtSwitches") as u64,
+        num("/counts/after/canvasRtSwitches") as u64,
+    );
+    let _ = writeln!(
+        out,
+        "  overdraw:  screen {:.3}x -> {:.3}x ({}) | offscreen {:.3}x -> {:.3}x ({})",
+        num("/counts/before/screenOverdrawViewports"),
+        num("/counts/after/screenOverdrawViewports"),
+        format_signed_num(num("/counts/delta/screenOverdrawViewports")),
+        num("/counts/before/offscreenOverdrawViewports"),
+        num("/counts/after/offscreenOverdrawViewports"),
+        format_signed_num(num("/counts/delta/offscreenOverdrawViewports")),
+    );
+    let _ = writeln!(
+        out,
+        "  hidden:    {} -> {} ({} guiObjects)",
+        num("/counts/before/hiddenGuiObjects") as u64,
+        num("/counts/after/hiddenGuiObjects") as u64,
+        format_signed_num(num("/counts/delta/hiddenGuiObjects")),
+    );
+    if let (Some(b_ms), Some(a_ms), Some(d_ms)) = (
+        diff.pointer("/predicted/desktop-ref/layoutCpuMs/beforeMs").and_then(Value::as_f64),
+        diff.pointer("/predicted/desktop-ref/layoutCpuMs/afterMs").and_then(Value::as_f64),
+        diff.pointer("/predicted/desktop-ref/layoutCpuMs/deltaMs").and_then(Value::as_f64),
+    ) {
+        let _ = writeln!(
+            out,
+            "  layoutMs:  desktop-ref {b_ms:.4} -> {a_ms:.4} ms ({d_ms:+.4} ms, extrapolated)",
+        );
+    }
+    let _ = writeln!(
+        out,
+        "  model:     draws {} -> {} ({}), breaks {} -> {} ({}) [unmeasured, informational]",
+        num("/counts/before/drawCalls") as u64,
+        num("/counts/after/drawCalls") as u64,
+        format_signed_num(num("/counts/delta/drawCalls")),
+        num("/counts/before/batchBreaks") as u64,
+        num("/counts/after/batchBreaks") as u64,
+        format_signed_num(num("/counts/delta/batchBreaks")),
+    );
+    if let Some(movers) = diff["screenGuiMovers"].as_array().filter(|m| !m.is_empty()) {
+        let shown = movers.len().min(5);
+        let _ = writeln!(out, "  movers ({shown}/{}):", movers.len());
+        for m in movers.iter().take(5) {
+            let _ = writeln!(
+                out,
+                "    {} | quads {} glyphs {} rt {} B ov {} hid {}",
+                trim_left(m["name"].as_str().unwrap_or("?"), 32),
+                format_signed_num(m["deltaQuads"].as_f64().unwrap_or(0.0)),
+                format_signed_num(m["deltaGlyphQuads"].as_f64().unwrap_or(0.0)),
+                format_signed_num(m["deltaCanvasRtBytes"].as_f64().unwrap_or(0.0)),
+                format_signed_num(m["deltaScreenOverdrawViewports"].as_f64().unwrap_or(0.0)),
+                format_signed_num(m["deltaHiddenGuiObjects"].as_f64().unwrap_or(0.0)),
+            );
+        }
+    }
+    if let Some(p) = dest {
+        let _ = writeln!(out, "  report:    {} (full JSON; pass --json for stdout JSON)", p.display());
+    }
+    out
+}
+
 fn print_summary(report: &Value, dest: &Path) {
     let t = &report["totals"];
     let rt_bytes = t["canvasRtBytes"].as_u64().unwrap_or(0);
@@ -2598,15 +2964,23 @@ Usage:
   rur cost compare <before> <after> [--out <dir|file.json>] [--json]
 
 Outputs:
+  stdout             compact one-screen summary (or full single-line JSON with --json).
   <out>/cost.json    deterministic JSON (zero wall-clock fields): quads & glyph quads, clipped
                      overdraw, Studio CanvasGroup RT dimensions & switches, live-DOM hidden-in-shown
                      subtrees, layout pass counters (and per-frame churn in sequence mode),
-                     extrapolated desktop / phone-mid layout CPU ms, an unmeasured state-transition
-                     draw/batch model, and explicit refusals for uncalibrated draw-pass CPU and
-                     mobile GPU UI ms.
+                     extrapolated desktop / derived phone-mid layout CPU ms, an unmeasured
+                     state-transition draw/batch model, and explicit refusals for uncalibrated
+                     draw-pass CPU and mobile GPU UI ms.
 ";
 
-fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
+struct CliOutput {
+    value: Value,
+    summary: String,
+    json: bool,
+    failed: bool,
+}
+
+fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
     let (context, args) = Context::new(argv)?;
 
     if args.positional.first().map(String::as_str) == Some("compare") {
@@ -2621,7 +2995,7 @@ fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
         validate_cost_report(&after, "after", Some(&after_path)).map_err(Failure::Error)?;
         let diff = compare_reports(&before, &after).map_err(Failure::Error)?;
         let refused = diff["verdict"].as_str() == Some("refused");
-        if args.value("--out").is_some() {
+        let out_path = if args.value("--out").is_some() {
             let out = resolve_output_file(&context, &args, "cost-compare", "compare.json");
             write_json_file(&out, &diff)?;
             if refused {
@@ -2634,16 +3008,26 @@ fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
             } else {
                 eprintln!("rur cost compare: {} -> {}", diff["verdict"].as_str().unwrap_or("?"), out.display());
             }
-        } else if refused {
-            eprintln!(
-                "rur cost compare: refused — {} | Remedy: {}",
-                diff["reason"].as_str().unwrap_or("incomparable reports"),
-                diff["remedy"].as_str().unwrap_or("")
-            );
+            Some(out)
         } else {
-            eprintln!("rur cost compare: {}", diff["verdict"].as_str().unwrap_or("?"));
-        }
-        return Ok((diff, args.truthy("--json"), refused));
+            if refused {
+                eprintln!(
+                    "rur cost compare: refused — {} | Remedy: {}",
+                    diff["reason"].as_str().unwrap_or("incomparable reports"),
+                    diff["remedy"].as_str().unwrap_or("")
+                );
+            } else {
+                eprintln!("rur cost compare: {}", diff["verdict"].as_str().unwrap_or("?"));
+            }
+            None
+        };
+        let summary = format_one_screen_compare(&diff, out_path.as_deref());
+        return Ok(CliOutput {
+            value: diff,
+            summary,
+            json: args.truthy("--json"),
+            failed: refused,
+        });
     }
 
     let is_sequence = ["--from", "--to", "--frames", "--duration", "--fps"].iter().any(|k| args.present(k));
@@ -2713,6 +3097,7 @@ fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
     write_json_file(&dest, &report)?;
     print_summary(&report, &dest);
 
+    let mut summary = format_one_screen_report(&report, &dest);
     let failed = report["status"].as_str() == Some("error");
     if let Some(before_arg) = args.value("--compare") {
         let before_path = resolve_cost_file(&context.resolve(&before_arg));
@@ -2720,7 +3105,7 @@ fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
         validate_cost_report(&before, "before", Some(&before_path)).map_err(Failure::Error)?;
         let diff = compare_reports(&before, &report).map_err(Failure::Error)?;
         let refused = diff["verdict"].as_str() == Some("refused");
-        if let Some(parent) = dest.parent() {
+        let cmp_path = if let Some(parent) = dest.parent() {
             let cmp_path = parent.join("compare.json");
             write_json_file(&cmp_path, &diff)?;
             if refused {
@@ -2733,15 +3118,25 @@ fn run_cli(argv: &[String]) -> Result<(Value, bool, bool), Failure> {
             } else {
                 eprintln!("rur cost compare: {} -> {}", diff["verdict"].as_str().unwrap_or("?"), cmp_path.display());
             }
-        }
-        return Ok((
-            sort_json(json!({ "cost": report, "comparison": diff })),
-            args.truthy("--json"),
-            failed || refused,
-        ));
+            Some(cmp_path)
+        } else {
+            None
+        };
+        summary.push_str(&format_one_screen_compare(&diff, cmp_path.as_deref()));
+        return Ok(CliOutput {
+            value: sort_json(json!({ "cost": report, "comparison": diff })),
+            summary,
+            json: args.truthy("--json"),
+            failed: failed || refused,
+        });
     }
 
-    Ok((report, args.truthy("--json"), failed))
+    Ok(CliOutput {
+        value: report,
+        summary,
+        json: args.truthy("--json"),
+        failed,
+    })
 }
 
 /// The reports `rur-native cost compare <before> <after>` reads, named without an option
@@ -2780,16 +3175,15 @@ pub fn cli(argv: &[String]) -> i32 {
         return 0;
     }
     match run_cli(argv) {
-        Ok((value, compact, failed)) => {
-            let out = if compact {
-                serde_json::to_string(&value)
+        Ok(out) => {
+            if out.json {
+                if let Ok(text) = serde_json::to_string(&out.value) {
+                    println!("{text}");
+                }
             } else {
-                serde_json::to_string_pretty(&value)
-            };
-            if let Ok(text) = out {
-                println!("{text}");
+                print!("{}", out.summary);
             }
-            if failed { 2 } else { 0 }
+            if out.failed { 2 } else { 0 }
         }
         Err(failure) => {
             eprintln!("rur cost: {}", failure.message());
@@ -2806,6 +3200,78 @@ mod tests {
         let mut store = SceneStore::default();
         store.apply(&scene).unwrap();
         store
+    }
+
+    #[test]
+    fn one_screen_summary_fits_one_screen_for_single_sequence_and_compare() {
+        // Large single-moment report with many objects and hidden subtrees must stay compact (<= 40 lines, <= 4096 bytes)
+        let mut nodes = vec![json!({"id": 1, "name": "Hud", "path": "PlayerGui.Hud", "class": "ScreenGui", "rect": [0, 0, 1920, 1080], "enabled": true})];
+        let mut draw = Vec::new();
+        for i in 2..=60u64 {
+            nodes.push(json!({
+                "id": i, "name": format!("Item{i}"), "path": format!("PlayerGui.Hud.List.Item{i}"),
+                "class": "Frame", "rect": [(i % 10) * 80, (i / 10) * 80, 60, 60],
+                "bg": {"color": [1, 1, 1], "transparency": 0}
+            }));
+            draw.push(json!(i));
+        }
+        let scene = store_of(json!({
+            "viewport": {"width": 1920, "height": 1080, "scale": 1.0},
+            "status": "ok",
+            "nodes": nodes,
+            "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": draw}],
+            "fonts": [],
+            "images": []
+        }));
+        let mut hidden = DomHiddenSummary { complete: true, roots: 5, gui_objects: 50, instances: 75, ..Default::default() };
+        for i in 0..5u64 {
+            hidden.subtrees.push(HiddenSubtree {
+                id: 100 + i, name: format!("Modal{i}"), path: format!("PlayerGui.Hud.Modal{i}"),
+                class: "Frame".into(), screen_gui: "Hud".into(), gui_objects: 10, instances: 15,
+            });
+        }
+        let single = analyze_scene_with_mode(&scene, LayoutStats { passes: 1, stored: 60, ..Default::default() }, Some(&hidden), "edit");
+        let dest = Path::new("out/hud/cost.json");
+        let text = format_one_screen_report(&single, dest);
+        let non_empty = text.lines().filter(|l| !l.trim().is_empty()).count();
+        assert!(non_empty <= 32, "single one-screen summary too tall ({non_empty} lines):\n{text}");
+        assert!(text.len() <= 4096, "single one-screen summary too large ({} bytes)", text.len());
+        assert!(!text.trim_start().starts_with('{'), "plain summary must not dump raw JSON");
+        assert!(text.contains("0 B"), "summary must include exact RT bytes: {text}");
+        assert!(text.contains("cost.json"), "summary must name report path: {text}");
+        assert!(text.contains("derived 3.9x..6.3x") && text.contains("2.55x..12.32x"), "{text}");
+
+        // Sequence summary (both play and edit modes) must stay <= 32 lines even for many frames
+        let mut acc_play = SequenceAccumulator::new(60.0, "play");
+        let mut acc_edit = SequenceAccumulator::new(60.0, "edit");
+        for i in 0..10u32 {
+            let st = LayoutStats { scroll_passes: 1, scroll_moved: 120, ..Default::default() };
+            acc_play.record_frame(i, f64::from(i) / 60.0, false, 1, 0, &scene, st, if i == 0 { Some(hidden.clone()) } else { None });
+            acc_edit.record_frame(i, f64::from(i) / 60.0, false, 1, 0, &scene, st, if i == 0 { Some(hidden.clone()) } else { None });
+        }
+        let play_text = format_one_screen_report(&acc_play.finish(Some("ok")), dest);
+        let play_lines = play_text.lines().filter(|l| !l.trim().is_empty()).count();
+        assert!(play_lines <= 32 && play_text.len() <= 4096, "play seq summary too large ({play_lines} lines, {} B):\n{play_text}", play_text.len());
+        assert!(play_text.contains("mode=play 60 Hz") && play_text.contains("0.0994 ms"), "{play_text}");
+
+        let edit_text = format_one_screen_report(&acc_edit.finish(Some("ok")), dest);
+        let edit_lines = edit_text.lines().filter(|l| !l.trim().is_empty()).count();
+        assert!(edit_lines <= 32 && edit_text.len() <= 4096, "edit seq summary too large ({edit_lines} lines, {} B)", edit_text.len());
+        assert!(edit_text.contains("mode=edit 240 Hz") && edit_text.contains("refused in edit mode"), "{edit_text}");
+
+        // Compare summary (comparable + refused)
+        let before = sample_cost_report("single", "live", "ok", 1920.0, 1080.0, 1.5, true, 10, 400_000, 10);
+        let after = sample_cost_report("single", "live", "ok", 1920.0, 1080.0, 1.5, true, 8, 200_000, 0);
+        let diff = compare_reports(&before, &after).unwrap();
+        let cmp_text = format_one_screen_compare(&diff, Some(Path::new("out/compare.json")));
+        assert!(cmp_text.lines().filter(|l| !l.trim().is_empty()).count() <= 20 && cmp_text.len() <= 2048, "{cmp_text}");
+        assert!(cmp_text.contains("rur cost compare: improved") && cmp_text.contains("compare.json"), "{cmp_text}");
+
+        let mut play_before = before.clone();
+        play_before["runMode"] = json!("play");
+        let ref_diff = compare_reports(&before, &play_before).unwrap();
+        let ref_text = format_one_screen_compare(&ref_diff, None);
+        assert!(ref_text.contains("rur cost compare: refused") && ref_text.contains("runMode"), "{ref_text}");
     }
 
     #[test]
