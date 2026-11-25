@@ -955,3 +955,31 @@ end
 	}
 	console.log("CLI cost: PASS (rur cost, compare, sequence churn, and sequence --cost)");
 }
+
+// Golden suite: RUR_STATE_DIR is preserved into engine/batch runs so cloud fonts fetched into an
+// isolated state dir are read by the engine and normalized to match golden.json, and skipped runs
+// are stated explicitly in the summary.
+{
+	const os = await import("node:os");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rur-golden-state-"));
+	const stateDir = path.join(dir, "state");
+	const env = { ...process.env, RUR_STATE_DIR: stateDir, RUR_NO_SERVICE: "1" };
+	try {
+		const first = spawnSync(process.execPath, ["tools/engine/golden.mjs", "--fast", "--filter", "fast/edit/text-probe-rich@quarter", "--rerun"], {
+			cwd: root, encoding: "utf8", windowsHide: true, env,
+		});
+		assert.equal(first.status, 0, `golden in isolated RUR_STATE_DIR failed:\n${first.stdout}\n${first.stderr}`);
+		assert.match(first.stdout, /1\/1 identical to the golden output/, first.stdout);
+		assert.doesNotMatch(first.stdout, /could not get cloud font inputs/, first.stdout);
+		assert.ok(fs.existsSync(path.join(stateDir, "assets")), "cloud fonts must be cached inside RUR_STATE_DIR/assets");
+
+		const second = spawnSync(process.execPath, ["tools/engine/golden.mjs", "--fast", "--filter", "fast/edit/text-probe-rich@quarter"], {
+			cwd: root, encoding: "utf8", windowsHide: true, env,
+		});
+		assert.equal(second.status, 0, `golden cached rerun failed:\n${second.stdout}\n${second.stderr}`);
+		assert.match(second.stdout, /skipped as unchanged/, second.stdout);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+	console.log("Golden isolated state: PASS (RUR_STATE_DIR cloud fonts pass and skips are reported)");
+}

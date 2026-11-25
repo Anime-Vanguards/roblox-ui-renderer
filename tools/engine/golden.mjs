@@ -67,7 +67,7 @@ import zlib from "node:zlib";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_STATE_DIR, sharedStatePath } from "../../cli/paths.mjs";
+import { isDefaultStateDir, sharedStatePath, stateDir } from "../../cli/paths.mjs";
 import { resolveAll, studioContentRoots } from "../../cli/assets.mjs";
 
 import { engineBaseArgs, ensureEngine } from "../../cli/engine.mjs";
@@ -218,7 +218,7 @@ function freezeFonts(studio) {
 	if (!version || !fs.existsSync(path.join(version, "content", "fonts"))) {
 		throw new Error(`--freeze-fonts: ${version ? `${version} has no content/fonts` : "no Studio install found"} (pass a …/Roblox/Versions/version-<hash> directory)`);
 	}
-	const cache = path.join(DEFAULT_STATE_DIR, "assets");
+	const cache = path.join(stateDir(), "assets");
 	const target = `${FONTS}.${process.pid}.tmp`;
 	fs.rmSync(target, { recursive: true, force: true });
 	const files = {};
@@ -268,6 +268,7 @@ function addFrozenFont(file) {
 }
 
 const fontFailures = new Map();
+const fetchedFonts = new Map();
 let fontFetches = Promise.resolve();
 
 // One download at a time: job slots ask for the same fonts (`rur-native assets fetch --fonts`, the engine's
@@ -279,17 +280,19 @@ function fetchFonts(ids) {
 		try {
 			results = await resolveAll(ids.map(String), { fonts: true, engine: ENGINE });
 		} catch (error) {
-			for (const id of ids) fontFailures.set(id, error.message);
+			for (const id of ids) fontFailures.set(String(id), error.message);
 			return false;
 		}
 		for (const id of ids) {
-			const { kind, file, error } = results.get(String(id)) ?? { error: "unresolved" };
+			const key = String(id);
+			const { kind, file, error } = results.get(key) ?? { error: "unresolved" };
 			if (error || (kind !== "font" && kind !== "json")) {
-				fontFailures.set(id, error || `asset ${id} is a ${kind}, not a font`);
+				fontFailures.set(key, error || `asset ${id} is a ${kind}, not a font`);
 				continue;
 			}
 			if (FROZEN_FONTS && !FROZEN_FONTS.files[path.posix.join("assets", path.basename(file))]) addFrozenFont(file);
-			fontFailures.delete(id);
+			fontFailures.delete(key);
+			fetchedFonts.set(key, file);
 			arrived = true;
 		}
 		return arrived;
@@ -472,6 +475,10 @@ function run(argv, { env, input } = {}) {
 const BATCH_ANSWER = "@@RUR-BATCH ";
 let BATCH = true;
 
+// RUR_* variables that belong to the caller's environment (engine binary and state/cache directory),
+// preserved across entry runs so downloaded cloud fonts land in the same state dir the engine reads
+const KEEP_RUR_ENV = new Set(["RUR_NATIVE_ENGINE", "RUR_STATE_DIR", "RUR_CACHE_DIR"]);
+
 class BatchWorker {
 	constructor() {
 		this.child = null;
@@ -481,7 +488,7 @@ class BatchWorker {
 
 	start() {
 		const env = {};
-		for (const [key, value] of Object.entries(process.env)) if (!key.startsWith("RUR_") || key === "RUR_NATIVE_ENGINE") env[key] = value;
+		for (const [key, value] of Object.entries(process.env)) if (!key.startsWith("RUR_") || KEEP_RUR_ENV.has(key)) env[key] = value;
 		const child = spawn(ENGINE, ["engine-batch"], { cwd: ROOT, env, windowsHide: true });
 		this.child = child;
 		this.buffer = "";
@@ -547,10 +554,11 @@ function batchEnv(entry) {
 	return Object.fromEntries(Object.entries(entryEnv(entry)).filter(([key]) => key.startsWith("RUR_") && key !== "RUR_NATIVE_ENGINE"));
 }
 
-// Environment of a run: only the entry's own RUR_* settings (a caller's RUR_CLOCK must not leak in)
+// Environment of a run: only the entry's own RUR_* settings plus the caller's engine and state dir
+// (a caller's RUR_CLOCK or RUR_TEXT_SUBPIXEL must not leak in)
 function entryEnv(entry) {
 	const env = {};
-	for (const [key, value] of Object.entries(process.env)) if (!key.startsWith("RUR_") || key === "RUR_NATIVE_ENGINE") env[key] = value;
+	for (const [key, value] of Object.entries(process.env)) if (!key.startsWith("RUR_") || KEEP_RUR_ENV.has(key)) env[key] = value;
 	// A fixed wall clock (os.time, DateTime.now, ...): stories print dates and countdowns
 	env.RUR_EPOCH = EPOCH;
 	// The frozen fonts (--freeze-fonts), not the Studio install's and the cache's
@@ -569,7 +577,18 @@ function engineArgs(entry, extra) {
 
 // Normalization
 
-const PLACEHOLDERS = [[PROJECT, "<project>"], [ROOT, "<repo>"]].flatMap(([dir, name]) => [
+const STATE_DIR = stateDir();
+function dirPlaceholder(dir) {
+	const leading = dir.startsWith("\\\\") ? String.raw`[\\/]{2}` : dir.startsWith("/") || dir.startsWith("\\") ? String.raw`[\\/]+` : "";
+	const body = dir.split(/[\\/]+/).filter(Boolean).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(String.raw`[\\/]+`);
+	return new RegExp(`${leading}${body}[\\\\/]+`, "gi");
+}
+const STATE_PLACEHOLDER = isDefaultStateDir(STATE_DIR) ? null : [dirPlaceholder(STATE_DIR), "<repo>/.cache/"];
+const PLACEHOLDERS = [
+	...(isDefaultStateDir(STATE_DIR) ? [] : [[STATE_DIR, "<repo>/.cache"]]),
+	[PROJECT, "<project>"],
+	[ROOT, "<repo>"],
+].flatMap(([dir, name]) => [
 	[dir, name], [dir.split(path.sep).join("/"), name], [dir.split(path.sep).join("\\\\"), name],
 ]);
 
@@ -594,6 +613,7 @@ const FONT_PLACEHOLDERS = [
 function normalizeText(text) {
 	let result = text;
 	for (const [from, to] of FONT_PLACEHOLDERS) result = result.replace(from, to);
+	if (STATE_PLACEHOLDER) result = result.replace(STATE_PLACEHOLDER[0], STATE_PLACEHOLDER[1]);
 	for (const [from, to] of PLACEHOLDERS) result = result.split(from).join(to);
 	result = result.replace(STUDIO_CONTENT, "<studio-content>/").replace(STUDIO_ROOT, "<studio>/");
 	return result.replace(/\b(table|function|thread|userdata|buffer): 0x[0-9a-fA-F]+/g, "$1: 0x?");
@@ -895,6 +915,7 @@ function runContext() {
 		fixtures: treeDigest(path.join(ROOT, "fixtures")),
 		probes: treeDigest(path.join(ROOT, "tools", "engine", "probes")),
 		studio: studioContentRoots(),
+		stateDir: STATE_DIR,
 	}));
 }
 
@@ -945,13 +966,15 @@ async function main() {
 	}
 	ENGINE = await ensureEngine();
 	console.log(FROZEN_FONTS ? `fonts: ${path.relative(ROOT, FONTS)} (frozen ${FROZEN_FONTS.frozen} from ${path.basename(FROZEN_FONTS.studio)})`
-		: "fonts: the Studio install's and the asset cache's (not frozen: --freeze-fonts)");
+		: `fonts: the Studio install's and the asset cache's (${path.join(STATE_DIR, "assets")}; not frozen: --freeze-fonts)`);
 	const corpora = args.all ? ["fixtures", "stories", "compares", "live"]
 		: args.corpus && args.corpus !== true ? String(args.corpus).split(",") : ["fixtures", "live"];
 	const fast = Boolean(args.fast);
 	let entries = [];
+	const skippedCorpora = [];
 	for (const corpus of fast ? ["fixtures", "live"] : corpora) {
 		if (!fast && !frozen()) {
+			skippedCorpora.push(corpus);
 			console.log(`${corpus}: skipped (no frozen project in ${path.relative(ROOT, GOLDEN)}; record one with --write --freeze)`);
 			continue;
 		}
@@ -970,7 +993,7 @@ async function main() {
 	// Engine runs are separate processes: about half the cores by default (RUR_JOBS / --jobs override)
 	const jobs = Math.max(1, Number(args.jobs) || Number(process.env.RUR_JOBS) || Math.max(6, Math.min(16, Math.floor(os.availableParallelism() / 2))));
 	const started = Date.now();
-	let same = 0, differ = 0, missing = 0, unchanged = 0, next = 0, printed = 0;
+	let same = 0, differ = 0, missing = 0, unchanged = 0, missingInputs = 0, timedOut = 0, next = 0, printed = 0;
 	const results = new Array(entries.length);
 	const print = () => {
 		while (printed < entries.length && results[printed]) {
@@ -1010,17 +1033,26 @@ async function main() {
 			const value = digest(now);
 			let verdict, detail = "";
 			delete verified.entries[key];
+			const absent = missingFonts(now).map(id => {
+				const fontKey = String(id);
+				if (fontFailures.has(fontKey)) return `${fontKey} (${fontFailures.get(fontKey)})`;
+				if (fetchedFonts.has(fontKey)) return `${fontKey} (fetched to ${path.dirname(fetchedFonts.get(fontKey))}, not read by engine)`;
+				return fontKey;
+			});
+			if (now.status === "timeout") timedOut++;
+			if (absent.length) missingInputs++;
 			if (write) {
 				fs.mkdirSync(path.dirname(goldenFile(entry)), { recursive: true });
 				fs.writeFileSync(goldenFile(entry), zlib.gzipSync(JSON.stringify(now)));
 				manifest.entries[key] = { digest: value, status: now.status === "scene" ? now.scene.status : now.status };
 				verdict = `recorded (${manifest.entries[key].status})`;
+				if (absent.length) verdict += `; missing cloud font inputs: ${absent.join(", ")}`;
 				same++;
 			} else if (!manifest.entries[key]) {
 				verdict = "no golden (record with --write)";
 				missing++;
 			} else if (manifest.entries[key].digest === value) {
-				verdict = "same";
+				verdict = absent.length ? `same (missing cloud font inputs: ${absent.join(", ")})` : "same";
 				same++;
 				if (digests[index]) verified.entries[key] = digests[index];
 			} else {
@@ -1033,7 +1065,6 @@ async function main() {
 				} else {
 					verdict = "DIFFERS (digest; no recorded output in out/golden to explain it)";
 				}
-				const absent = missingFonts(now).map(id => `${id}${fontFailures.has(id) ? ` (${fontFailures.get(id)})` : ""}`);
 				if (absent.length) verdict += `; cloud fonts it could not get: ${absent.join(", ")}`;
 				fs.mkdirSync(path.join(GOLDEN, "failed", entry.corpus), { recursive: true });
 				fs.writeFileSync(path.join(GOLDEN, "failed", entry.corpus, `${entry.name.replace(/[\\/]/g, "__")}.json.gz`), zlib.gzipSync(JSON.stringify(now)));
@@ -1055,8 +1086,14 @@ async function main() {
 	writeJson(VERIFIED, verified);
 	writeJson(DURATIONS, durations);
 	const seconds = ((Date.now() - started) / 1000).toFixed(1);
+	const ran = entries.length - unchanged;
+	const notes = [];
+	if (unchanged) notes.push(`${ran} run, ${unchanged} skipped as unchanged from an earlier run of this engine on unchanged inputs; --rerun runs all`);
+	if (skippedCorpora.length) notes.push(`skipped corpora: ${skippedCorpora.join(", ")} (no frozen project)`);
+	if (missingInputs) notes.push(`${missingInputs} entries could not get cloud font inputs`);
+	if (timedOut) notes.push(`${timedOut} timed out`);
 	console.log(`\n${write ? `${same} recorded` : `${same}/${entries.length} identical to the golden output${differ ? `, ${differ} differ (now: out/golden/failed)` : ""}${missing ? `, ${missing} without golden` : ""}`} in ${seconds} s`
-		+ (unchanged ? ` (${unchanged} not run again: identical in an earlier run of this engine on unchanged inputs; --rerun runs them)` : ""));
+		+ (notes.length ? ` (${notes.join("; ")})` : ""));
 	process.exit(differ || missing ? 1 : 0);
 }
 
