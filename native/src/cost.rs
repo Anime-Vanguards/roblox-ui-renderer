@@ -35,8 +35,8 @@ use crate::{
         value::Value as EngineValue,
     },
     render::geometry::{
-        Rect, alpha8, clip_rect, device_span, group_texture_dims, node_transform, physical_rect,
-        text_clip_rect, transformed_extent,
+        IDENTITY, Rect, Transform, alpha8, apply, clip_rect, component, device_span,
+        group_texture_dims, invert, multiply, physical_rect, text_clip_rect,
     },
     scene::{SceneStore, layer_pass, node_id},
     story_args::{Args, Context, Failure},
@@ -449,16 +449,87 @@ fn is_rotated(node: &Value) -> bool {
     (m0 - 1.0).abs() > 1e-6 || m1.abs() > 1e-6 || m2.abs() > 1e-6 || (m3 - 1.0).abs() > 1e-6
 }
 
-fn quad_bounds_device(node: &Value, rect: Rect, scale: f64) -> [f64; 4] {
-    if node.get("matrix").and_then(Value::as_array).is_some_and(|m| m.len() >= 6) {
-        let m = node_transform(node, [0.0, 0.0], scale);
-        transformed_extent(m, rect)
-    } else {
-        rect.bounds()
+/// Returns the device-space affine transform carrying `node`'s local device rect into the current
+/// render target, or `None` when axis-aligned (identity). Inside a rotated `CanvasGroup`,
+/// `target_unturn` holds `invert(group_screen_matrix)` in logical units so descendants are
+/// measured in the group's own flat texture coordinates, matching `render::groups::localized`.
+fn effective_node_transform(
+    node: &Value,
+    scale: f64,
+    target_unturn: Option<Transform>,
+) -> Option<Transform> {
+    let has_matrix = node.get("matrix").and_then(Value::as_array).is_some_and(|m| m.len() >= 6);
+    let mut m = match (target_unturn, has_matrix) {
+        (None, false) => return None,
+        (None, true) => std::array::from_fn(|i| component(&node["matrix"], i, IDENTITY[i])),
+        (Some(inv), _) => {
+            let mat: Transform = if has_matrix {
+                std::array::from_fn(|i| component(&node["matrix"], i, IDENTITY[i]))
+            } else {
+                IDENTITY
+            };
+            multiply(inv, mat)
+        }
+    };
+    if (0..4).all(|i| (m[i] - IDENTITY[i]).abs() < 1e-6) && m[4].abs() < 1e-3 && m[5].abs() < 1e-3 {
+        return None;
     }
+    m[4] *= scale;
+    m[5] *= scale;
+    Some(m)
 }
 
-fn intersect_area(bounds: [f64; 4], clip: Option<[f64; 4]>, target: [f64; 4]) -> f64 {
+fn clip_half_plane(
+    src: &[[f64; 2]; 16],
+    len: usize,
+    axis: usize,
+    bound: f64,
+    keep_ge: bool,
+) -> ([[f64; 2]; 16], usize) {
+    let mut dst = [[0.0; 2]; 16];
+    if len == 0 {
+        return (dst, 0);
+    }
+    let mut out = 0usize;
+    let inside = |p: [f64; 2]| if keep_ge { p[axis] >= bound } else { p[axis] <= bound };
+    let mut prev = src[len - 1];
+    let mut prev_in = inside(prev);
+    for &curr in &src[..len] {
+        let curr_in = inside(curr);
+        if curr_in != prev_in {
+            let d = curr[axis] - prev[axis];
+            if d.abs() > 1e-12 {
+                let t = ((bound - prev[axis]) / d).clamp(0.0, 1.0);
+                let other = 1 - axis;
+                let mut pt = [0.0; 2];
+                pt[axis] = bound;
+                pt[other] = prev[other] + t * (curr[other] - prev[other]);
+                if out < dst.len() {
+                    dst[out] = pt;
+                    out += 1;
+                }
+            }
+        }
+        if curr_in && out < dst.len() {
+            dst[out] = curr;
+            out += 1;
+        }
+        prev = curr;
+        prev_in = curr_in;
+    }
+    (dst, out)
+}
+
+/// Exact area (in target device pixels) of `rect`, optionally transformed by `xform`, clipped to
+/// `clip ∩ target`. Axis-aligned rects take a direct intersection fast path; rotated quads use
+/// Sutherland-Hodgman polygon clipping against the four half-planes followed by shoelace area so
+/// rotation preserves true covered area instead of inflating to an axis-aligned bounding box.
+fn clipped_quad_area(
+    rect: Rect,
+    xform: Option<Transform>,
+    clip: Option<[f64; 4]>,
+    target: [f64; 4],
+) -> f64 {
     let (mut cx0, mut cy0, mut cx1, mut cy1) = (target[0], target[1], target[2], target[3]);
     if let Some(c) = clip {
         cx0 = cx0.max(c[0]);
@@ -466,15 +537,35 @@ fn intersect_area(bounds: [f64; 4], clip: Option<[f64; 4]>, target: [f64; 4]) ->
         cx1 = cx1.min(c[2]);
         cy1 = cy1.min(c[3]);
     }
-    let ix0 = bounds[0].max(cx0);
-    let iy0 = bounds[1].max(cy0);
-    let ix1 = bounds[2].min(cx1);
-    let iy1 = bounds[3].min(cy1);
-    if ix1 <= ix0 || iy1 <= iy0 {
-        0.0
-    } else {
-        (ix1 - ix0) * (iy1 - iy0)
+    if cx1 <= cx0 || cy1 <= cy0 || rect.w <= 0.0 || rect.h <= 0.0 {
+        return 0.0;
     }
+    let Some(m) = xform else {
+        let ix0 = rect.x.max(cx0);
+        let iy0 = rect.y.max(cy0);
+        let ix1 = (rect.x + rect.w).min(cx1);
+        let iy1 = (rect.y + rect.h).min(cy1);
+        return if ix1 <= ix0 || iy1 <= iy0 { 0.0 } else { (ix1 - ix0) * (iy1 - iy0) };
+    };
+    let mut poly = [[0.0f64; 2]; 16];
+    poly[0] = apply(m, rect.x, rect.y);
+    poly[1] = apply(m, rect.x + rect.w, rect.y);
+    poly[2] = apply(m, rect.x + rect.w, rect.y + rect.h);
+    poly[3] = apply(m, rect.x, rect.y + rect.h);
+    let (poly, len) = clip_half_plane(&poly, 4, 0, cx0, true);
+    let (poly, len) = clip_half_plane(&poly, len, 0, cx1, false);
+    let (poly, len) = clip_half_plane(&poly, len, 1, cy0, true);
+    let (poly, len) = clip_half_plane(&poly, len, 1, cy1, false);
+    if len < 3 {
+        return 0.0;
+    }
+    let mut twice = 0.0;
+    for i in 0..len {
+        let a = poly[i];
+        let b = poly[(i + 1) % len];
+        twice += a[0] * b[1] - b[0] * a[1];
+    }
+    0.5 * twice.abs()
 }
 
 /// Effective scissor state within `target_bounds`. A clip rect that covers the entire render
@@ -896,6 +987,7 @@ impl<'a> Analyzer<'a> {
         target_id: u64,
         target_bounds: [f64; 4],
         target_area_scale: f64,
+        target_unturn: Option<Transform>,
         pass_id: u8,
         in_group: bool,
         group_ancestor_clip: Option<[f64; 4]>,
@@ -905,14 +997,15 @@ impl<'a> Analyzer<'a> {
         }
         let mut drawn_any = false;
         let rot = is_rotated(node);
+        let xform = if in_group { None } else { effective_node_transform(node, self.scale, target_unturn) };
 
         // Path2D
         if let Some(p2d) = node.get("path2d").and_then(Value::as_object) {
             let segs = p2d.get("segments").and_then(Value::as_array).map_or(0, Vec::len) as u64;
             if segs > 0 {
-                let phys = physical_rect(node, self.scale).rect;
+                let phys = if in_group { flat_physical_rect(node, self.scale) } else { physical_rect(node, self.scale).rect };
                 let clip = self.effective_node_clip(node, nid, target_id, target_bounds, in_group, group_ancestor_clip);
-                let area = intersect_area(phys.bounds(), clip, target_bounds);
+                let area = clipped_quad_area(phys, xform, clip, target_bounds);
                 if area > 0.0 {
                     self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, "path2d", "path2d", None, clip, false, segs, area);
                     drawn_any = true;
@@ -925,10 +1018,9 @@ impl<'a> Analyzer<'a> {
             return;
         }
 
-        let phys = physical_rect(node, self.scale).rect;
-        let bounds = quad_bounds_device(node, phys, self.scale);
+        let phys = if in_group { flat_physical_rect(node, self.scale) } else { physical_rect(node, self.scale).rect };
         let clip = self.effective_node_clip(node, nid, target_id, target_bounds, in_group, group_ancestor_clip);
-        let clipped_area = intersect_area(bounds, clip, target_bounds);
+        let clipped_area = clipped_quad_area(phys, xform, clip, target_bounds);
         let corner = if in_group { false } else { has_corner(node) };
         let gradient = if in_group { false } else { node.get("gradient").is_some_and(Value::is_object) };
         let has_text = node.get("text").is_some_and(Value::is_object);
@@ -1017,8 +1109,8 @@ impl<'a> Analyzer<'a> {
                     let lt = line_obj.get("top").and_then(Value::as_f64).unwrap_or(0.0);
                     let lw = line_obj.get("width").and_then(Value::as_f64).unwrap_or(0.0);
                     let lh = line_obj.get("height").and_then(Value::as_f64).unwrap_or(0.0);
-                    let la = intersect_area([lx, lt, lx + lw, lt + lh], tclip, target_bounds);
-                    if la > 0.0 || rot {
+                    let la = clipped_quad_area(Rect::new(lx, lt, lw, lh), xform, tclip, target_bounds);
+                    if la > 0.0 {
                         glyphs += drawn_g;
                         line_area += la;
                     }
@@ -1155,6 +1247,7 @@ impl<'a> Analyzer<'a> {
         target_id: u64,
         target_bounds: [f64; 4],
         target_area_scale: f64,
+        target_unturn: Option<Transform>,
         pass_id: u8,
         depth: u64,
         skip_group: Option<u64>,
@@ -1194,20 +1287,27 @@ impl<'a> Analyzer<'a> {
                     self.object_entry(gnode, gid, &sg.name).canvas_rt_bytes += rt_bytes;
 
                     // Recurse into offscreen CanvasGroup render target: background and descendants
-                    // draw into the group's texture clipped only by the group's bounds and interior
-                    // clipping ancestors, measured in actual offscreen RT texels.
+                    // draw into the group's flat texture clipped only by the group's bounds and
+                    // interior clipping ancestors, measured in actual offscreen RT texels.
                     let rt_bounds = flat.bounds();
                     let raw_group_clip = clip_rect(gnode, [0.0, 0.0], self.scale);
+                    let child_unturn = if gnode.get("matrix").and_then(Value::as_array).is_some_and(|m| m.len() >= 6) {
+                        let turn: Transform = std::array::from_fn(|i| component(&gnode["matrix"], i, IDENTITY[i]));
+                        let det = turn[0] * turn[3] - turn[1] * turn[2];
+                        if det.abs() > 1e-12 { Some(invert(turn)) } else { None }
+                    } else {
+                        None
+                    };
                     self.last_state_by_target.remove(&gid);
                     if let Some(sub_draw) = obj.get("draw").and_then(Value::as_array) {
-                        self.walk_entries(sg, sub_draw, gid, rt_bounds, group_area_scale, pass_id, new_depth, Some(gid), raw_group_clip);
+                        self.walk_entries(sg, sub_draw, gid, rt_bounds, group_area_scale, child_unturn, pass_id, new_depth, Some(gid), raw_group_clip);
                     }
 
-                    // Composite offscreen RT onto parent target (parent's interior clip applies here)
+                    // Composite offscreen RT onto parent target (parent's interior clip and unturn apply here)
                     let phys = physical_rect(gnode, self.scale).rect;
-                    let bounds = quad_bounds_device(gnode, phys, self.scale);
+                    let xform = effective_node_transform(gnode, self.scale, target_unturn);
                     let clip = self.effective_node_clip(gnode, gid, target_id, target_bounds, false, group_ancestor_clip);
-                    let area = intersect_area(bounds, clip, target_bounds);
+                    let area = clipped_quad_area(phys, xform, clip, target_bounds);
                     if area > 0.0 {
                         self.emit_quads(
                             sg,
@@ -1244,7 +1344,7 @@ impl<'a> Analyzer<'a> {
             if raw < 0 {
                 self.draw_post(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, group_ancestor_clip);
             } else {
-                self.draw_node(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, skip_group == Some(nid), group_ancestor_clip);
+                self.draw_node(sg, node, nid, target_id, target_bounds, target_area_scale, target_unturn, pass_id, skip_group == Some(nid), group_ancestor_clip);
             }
         }
     }
@@ -2119,7 +2219,7 @@ pub fn analyze_scene_with_mode(
             ..Default::default()
         };
         if let Some(draw_list) = layer.get("draw").and_then(Value::as_array) {
-            analyzer.walk_entries(&mut sg, draw_list, 0, screen_bounds, 1.0, pass_id, 0, None, None);
+            analyzer.walk_entries(&mut sg, draw_list, 0, screen_bounds, 1.0, None, pass_id, 0, None, None);
         }
         screen_guis.push(sg);
     }
@@ -6005,5 +6105,186 @@ end
         assert_eq!(rep_delayed["editModeFallback"]["mountsInEditMode"], true, "edit probe must run at --from (0.5)");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotated_quad_area_is_clipped_polygon_not_bounding_box() {
+        let vp = 800.0 * 600.0;
+
+        // Case 1: 100x100 Frame at Rotation = 45 on 800x600 @ 1x -> 10,000 px (not 20,000 bbox)
+        let rep1 = run_cg_shape_fixture(
+            "rot45",
+            r#"return function(Target)
+	local f = Instance.new("Frame")
+	f.Name = "Box45"
+	f.Size = UDim2.fromOffset(100, 100)
+	f.Position = UDim2.fromOffset(200, 200)
+	f.Rotation = 45
+	f.BorderSizePixel = 0
+	f.Parent = Target
+end
+"#,
+        );
+        let ov1 = rep1["totals"]["screenOverdrawViewports"].as_f64().unwrap();
+        assert!((ov1 * vp - 10_000.0).abs() < 1.0, "100x100 @ 45 deg must be 10,000 px, got {}", ov1 * vp);
+
+        // Case 2: 200x200 Frame under 15-deg ancestor -> 40,000 px on screen AND inside a CanvasGroup
+        let rep2_screen = run_cg_shape_fixture(
+            "rot15_screen",
+            r#"return function(Target)
+	local anc = Instance.new("Frame")
+	anc.Size = UDim2.fromOffset(400, 400)
+	anc.Position = UDim2.fromOffset(200, 100)
+	anc.Rotation = 15
+	anc.BackgroundTransparency = 1
+	anc.BorderSizePixel = 0
+	anc.Parent = Target
+	local f = Instance.new("Frame")
+	f.Name = "Child200"
+	f.Size = UDim2.fromOffset(200, 200)
+	f.Position = UDim2.fromOffset(100, 100)
+	f.BorderSizePixel = 0
+	f.Parent = anc
+end
+"#,
+        );
+        let ov2_s = rep2_screen["totals"]["screenOverdrawViewports"].as_f64().unwrap();
+        assert!((ov2_s * vp - 40_000.0).abs() < 1.0, "200x200 @ 15 deg on screen must be 40,000 px, got {}", ov2_s * vp);
+
+        let rep2_group = run_cg_shape_fixture(
+            "rot15_group",
+            r#"return function(Target)
+	local grp = Instance.new("CanvasGroup")
+	grp.Name = "Grp"
+	grp.Size = UDim2.fromOffset(600, 500)
+	grp.Position = UDim2.fromOffset(100, 50)
+	grp.BackgroundTransparency = 1
+	grp.BorderSizePixel = 0
+	grp.Parent = Target
+	local anc = Instance.new("Frame")
+	anc.Size = UDim2.fromOffset(400, 400)
+	anc.Position = UDim2.fromOffset(100, 50)
+	anc.Rotation = 15
+	anc.BackgroundTransparency = 1
+	anc.BorderSizePixel = 0
+	anc.Parent = grp
+	local f = Instance.new("Frame")
+	f.Name = "Child200"
+	f.Size = UDim2.fromOffset(200, 200)
+	f.Position = UDim2.fromOffset(100, 100)
+	f.BorderSizePixel = 0
+	f.Parent = anc
+end
+"#,
+        );
+        let child_off = rep2_group["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["name"] == "Child200")
+            .unwrap()["offscreenOverdrawViewports"]
+            .as_f64()
+            .unwrap();
+        assert!((child_off * vp - 40_000.0).abs() < 1.0, "200x200 @ 15 deg in CanvasGroup must be 40,000 px, got {}", child_off * vp);
+
+        // Case 3: Holdout 2 — 4096x512 outer CanvasGroup (0.25x area scale) -> Folder ->
+        // 15-deg clipping Frame -> 200x100 inner CanvasGroup with text.
+        // Fully inside outer CG: inner composite is 200 * 100 * 0.25 = 5,000 texels (not 8,125 bbox).
+        let rep3_inside = run_cg_shape_fixture(
+            "holdout2_inside",
+            r#"return function(Target)
+	local outer = Instance.new("CanvasGroup")
+	outer.Name = "Outer"
+	outer.Size = UDim2.fromOffset(4096, 512)
+	outer.Position = UDim2.fromOffset(0, 0)
+	outer.BackgroundTransparency = 1
+	outer.BorderSizePixel = 0
+	outer.Parent = Target
+	local folder = Instance.new("Folder")
+	folder.Name = "Wrap"
+	folder.Parent = outer
+	local clip = Instance.new("Frame")
+	clip.Name = "Clip15"
+	clip.Size = UDim2.fromOffset(400, 300)
+	clip.Position = UDim2.fromOffset(100, 100)
+	clip.Rotation = 15
+	clip.ClipsDescendants = true
+	clip.BackgroundTransparency = 1
+	clip.BorderSizePixel = 0
+	clip.Parent = folder
+	local inner = Instance.new("CanvasGroup")
+	inner.Name = "Inner"
+	inner.Size = UDim2.fromOffset(200, 100)
+	inner.Position = UDim2.fromOffset(80, 80)
+	inner.BorderSizePixel = 0
+	inner.Parent = clip
+	local lbl = Instance.new("TextLabel")
+	lbl.Name = "Title"
+	lbl.Size = UDim2.fromOffset(120, 30)
+	lbl.Position = UDim2.fromOffset(10, 10)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = "Hello"
+	lbl.Parent = inner
+end
+"#,
+        );
+        let inner_obj = rep3_inside["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["name"] == "Inner")
+            .unwrap();
+        // Inner draws 200x100 = 20,000 texels into its own 1x RT + 200x100 * 0.25 = 5,000 texels
+        // composited onto Outer's capped RT -> 25,000 texels total (was 28,125 with bbox).
+        let inner_texels = inner_obj["offscreenOverdrawViewports"].as_f64().unwrap() * vp;
+        assert!(
+            (inner_texels - 25_000.0).abs() < 2.0,
+            "Inner CG own RT (20,000) + rotated composite into 0.25x Outer (5,000) must be 25,000 texels, got {inner_texels}"
+        );
+
+        // Overhanging edge: 100x100 @ 45 deg centered at (0, 200) -> exactly half (5,000 px) inside viewport [0..800]
+        let rep_clip = run_cg_shape_fixture(
+            "rot45_half_clipped",
+            r#"return function(Target)
+	local f = Instance.new("Frame")
+	f.Name = "HalfBox"
+	f.AnchorPoint = Vector2.new(0.5, 0.5)
+	f.Size = UDim2.fromOffset(100, 100)
+	f.Position = UDim2.fromOffset(0, 200)
+	f.Rotation = 45
+	f.BorderSizePixel = 0
+	f.Parent = Target
+end
+"#,
+        );
+        let half_px = rep_clip["totals"]["screenOverdrawViewports"].as_f64().unwrap() * vp;
+        assert!((half_px - 5_000.0).abs() < 2.0, "half-clipped 100x100 @ 45 deg must be 5,000 px, got {half_px}");
+
+        // Case 4: Constant overdraw across rotation angles (0, 15, 37, 45, 72 deg)
+        let mut angle_overdraws = Vec::new();
+        for deg in [0, 15, 37, 45, 72] {
+            let rep = run_cg_shape_fixture(
+                &format!("angle_{deg}"),
+                &format!(
+                    r#"return function(Target)
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromOffset(120, 80)
+	f.Position = UDim2.fromOffset(300, 250)
+	f.Rotation = {deg}
+	f.BorderSizePixel = 0
+	f.Parent = Target
+end
+"#
+                ),
+            );
+            angle_overdraws.push(rep["totals"]["screenOverdrawViewports"].as_f64().unwrap());
+        }
+        for (i, &ov) in angle_overdraws.iter().enumerate() {
+            assert!(
+                (ov - angle_overdraws[0]).abs() < 1e-6,
+                "angle index {i} overdraw {ov} diverged from 0 deg ({})",
+                angle_overdraws[0]
+            );
+        }
     }
 }
