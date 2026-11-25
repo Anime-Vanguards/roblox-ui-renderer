@@ -7,10 +7,19 @@
 //! environment otherwise. Fonts are resolved lazily: a font missing from the cache is generated alone.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+type HintedCacheKey = (String, String, u64, String);
+type HintedCacheEntry = (roblox_engine_emulator::files::Stamp, Option<Arc<HintedData>>);
+
+fn hinted_cache() -> &'static RwLock<HashMap<HintedCacheKey, HintedCacheEntry>> {
+    static CACHE: OnceLock<RwLock<HashMap<HintedCacheKey, HintedCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| roblox_engine_emulator::alloc::long_lived(|| RwLock::new(HashMap::new())))
+}
 
 /// Bump when the generation (size request, load flags, glyph choice) changes
 pub const GENERATOR_VERSION: u32 = 4;
@@ -163,6 +172,28 @@ impl Hinted {
     }
 
     fn prepare_inner(&mut self, path: &str) -> Result<Option<Arc<HintedData>>, String> {
+        let keep = roblox_engine_emulator::lua::modules::keeping_between_runs();
+        let stamp = if keep { roblox_engine_emulator::files::stamp(Path::new(path)) } else { None };
+        if let Some(stamp) = stamp {
+            let key = (path.to_string(), self.cache.clone(), self.maximum.to_bits(), self.fingerprint.clone());
+            let cache = hinted_cache().read().unwrap();
+            if let Some((cached_stamp, data)) = cache.get(&key) {
+                if *cached_stamp == stamp {
+                    return Ok(data.clone());
+                }
+            }
+        }
+        let result = self.prepare_uncached(path)?;
+        if let Some(stamp) = stamp {
+            let key = (path.to_string(), self.cache.clone(), self.maximum.to_bits(), self.fingerprint.clone());
+            roblox_engine_emulator::alloc::long_lived(|| {
+                hinted_cache().write().unwrap().insert(key, (stamp, result.clone()));
+            });
+        }
+        Ok(result)
+    }
+
+    fn prepare_uncached(&mut self, path: &str) -> Result<Option<Arc<HintedData>>, String> {
         let Ok(bytes) = std::fs::read(path) else {
             return Ok(None);
         };
@@ -178,13 +209,27 @@ impl Hinted {
             }
         }
         let cache = format!("{}/hinted/{key}.json", self.cache);
-        if let Some(data) = self.load(&cache, &key) {
+        let keep = roblox_engine_emulator::lua::modules::keeping_between_runs();
+        let loaded = if keep {
+            roblox_engine_emulator::alloc::long_lived(|| self.load(&cache, &key))
+        } else {
+            self.load(&cache, &key)
+        };
+        if let Some(data) = loaded {
             self.by_key.insert(key, Some(data.clone()));
             return Ok(Some(data));
         }
-        let (glyph, advances) = crate::glyphs::truncation_advances(&bytes, self.maximum as u32)
-            .map_err(|error| format!("hinted metric generation failed: {error:#}"))?;
-        let data = Arc::new(HintedData { glyph, advances });
+        let (glyph, advances) = if keep {
+            roblox_engine_emulator::alloc::long_lived(|| crate::glyphs::truncation_advances(&bytes, self.maximum as u32))
+        } else {
+            crate::glyphs::truncation_advances(&bytes, self.maximum as u32)
+        }
+        .map_err(|error| format!("hinted metric generation failed: {error:#}"))?;
+        let data = if keep {
+            roblox_engine_emulator::alloc::long_lived(|| Arc::new(HintedData { glyph, advances }))
+        } else {
+            Arc::new(HintedData { glyph, advances })
+        };
         // A cache that cannot be written only costs the next start a regeneration
         let _ = self.store(&cache, &key, &data);
         self.by_key.insert(key, Some(data.clone()));

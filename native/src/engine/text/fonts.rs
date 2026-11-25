@@ -7,7 +7,8 @@
 //! the scene export writes into its font registry.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use serde_json::Value;
 
@@ -92,6 +93,13 @@ pub fn discover_content_root() -> Option<String> {
             return Some(normalize(&path));
         }
     }
+    static DISCOVERED: OnceLock<Option<String>> = OnceLock::new();
+    DISCOVERED
+        .get_or_init(|| roblox_engine_emulator::alloc::long_lived(discover_installed_content_root))
+        .clone()
+}
+
+fn discover_installed_content_root() -> Option<String> {
     if let Ok(studio) = roblox_install::RobloxStudio::locate() {
         let path = studio.content_path().display().to_string();
         if is_dir(&path) {
@@ -175,6 +183,180 @@ struct Family {
     faces: Vec<FamilyFace>,
 }
 
+struct CachedFontDir {
+    stamps: Vec<(PathBuf, roblox_engine_emulator::files::Stamp)>,
+    files: Arc<HashSet<String>>,
+}
+
+fn enum_faces() -> Arc<HashMap<String, Vec<String>>> {
+    static FACES: OnceLock<Arc<HashMap<String, Vec<String>>>> = OnceLock::new();
+    FACES
+        .get_or_init(|| {
+            roblox_engine_emulator::alloc::long_lived(|| {
+                let mut map = HashMap::new();
+                if let Ok(Value::Object(data)) = serde_json::from_slice::<Value>(roblox_engine_emulator::data::FONT_ENUMS) {
+                    if let Some(Value::Object(from_enum)) = data.get("fromEnum") {
+                        for (name, face) in from_enum {
+                            if let Some(parts) = face.as_array() {
+                                let parts = parts.iter().map(|part| part.as_str().unwrap_or("").to_string()).collect();
+                                map.insert(name.clone(), parts);
+                            }
+                        }
+                    }
+                }
+                Arc::new(map)
+            })
+        })
+        .clone()
+}
+
+fn font_dirs_cache() -> &'static RwLock<HashMap<(String, bool, bool), CachedFontDir>> {
+    static CACHE: OnceLock<RwLock<HashMap<(String, bool, bool), CachedFontDir>>> = OnceLock::new();
+    CACHE.get_or_init(|| roblox_engine_emulator::alloc::long_lived(|| RwLock::new(HashMap::new())))
+}
+
+fn families_cache() -> &'static RwLock<HashMap<String, (roblox_engine_emulator::files::Stamp, Option<Arc<Family>>)>> {
+    static CACHE: OnceLock<RwLock<HashMap<String, (roblox_engine_emulator::files::Stamp, Option<Arc<Family>>)>>> = OnceLock::new();
+    CACHE.get_or_init(|| roblox_engine_emulator::alloc::long_lived(|| RwLock::new(HashMap::new())))
+}
+
+fn parsed_fonts_cache() -> &'static RwLock<HashMap<String, (roblox_engine_emulator::files::Stamp, Result<Arc<Font>, String>)>> {
+    static CACHE: OnceLock<RwLock<HashMap<String, (roblox_engine_emulator::files::Stamp, Result<Arc<Font>, String>)>>> = OnceLock::new();
+    CACHE.get_or_init(|| roblox_engine_emulator::alloc::long_lived(|| RwLock::new(HashMap::new())))
+}
+
+fn scan_font_dir(
+    directory: &str,
+    recursive: bool,
+    skip_fonts_json: bool,
+    stamps: &mut Vec<(PathBuf, roblox_engine_emulator::files::Stamp)>,
+    files: &mut HashSet<String>,
+) {
+    let dir_path = Path::new(directory);
+    if let Some(stamp) = roblox_engine_emulator::files::stamp(dir_path) {
+        stamps.push((dir_path.to_path_buf(), stamp));
+    }
+    let Ok(entries) = std::fs::read_dir(dir_path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = format!("{directory}/{name}");
+        if recursive {
+            if entry_kind(&entry, &path).0 {
+                scan_font_dir(&path, true, skip_fonts_json, stamps, files);
+            } else if (!skip_fonts_json || name != "fonts.json") && is_font_file(&name) {
+                files.insert(path);
+            }
+        } else if (!skip_fonts_json || name != "fonts.json") && is_font_file(&name) && entry_kind(&entry, &path).1 {
+            files.insert(path);
+        }
+    }
+}
+
+fn preload_font_dir(directory: &str, recursive: bool, skip_fonts_json: bool) -> Arc<HashSet<String>> {
+    let keep = roblox_engine_emulator::lua::modules::keeping_between_runs();
+    if keep {
+        let cache = font_dirs_cache().read().unwrap();
+        if let Some(entry) = cache.get(&(directory.to_string(), recursive, skip_fonts_json)) {
+            if entry.stamps.iter().all(|(path, stamp)| roblox_engine_emulator::files::stamp(path) == Some(*stamp)) {
+                return entry.files.clone();
+            }
+        }
+    }
+    let mut stamps = Vec::new();
+    let mut files = HashSet::new();
+    if keep {
+        roblox_engine_emulator::alloc::long_lived(|| {
+            scan_font_dir(directory, recursive, skip_fonts_json, &mut stamps, &mut files);
+        });
+        let files = roblox_engine_emulator::alloc::long_lived(|| Arc::new(files));
+        if !stamps.is_empty() {
+            roblox_engine_emulator::alloc::long_lived(|| {
+                font_dirs_cache().write().unwrap().insert(
+                    (directory.to_string(), recursive, skip_fonts_json),
+                    CachedFontDir { stamps, files: files.clone() },
+                );
+            });
+        }
+        files
+    } else {
+        scan_font_dir(directory, recursive, skip_fonts_json, &mut stamps, &mut files);
+        Arc::new(files)
+    }
+}
+
+fn parse_family_file(path: &str) -> Option<Arc<Family>> {
+    let bytes = std::fs::read(path).ok()?;
+    let Value::Object(data) = serde_json::from_slice::<Value>(&bytes).ok()? else {
+        return None;
+    };
+    let faces = data.get("faces").filter(|faces| !faces.is_null() && faces.as_bool() != Some(false))?;
+    let list: Vec<&Value> = match faces {
+        Value::Array(items) => items.iter().collect(),
+        Value::Object(map) => map.values().collect(),
+        _ => Vec::new(),
+    };
+    let faces = list
+        .into_iter()
+        .map(|face| FamilyFace {
+            name: face.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+            weight: face.get("weight").and_then(Value::as_f64).unwrap_or(f64::NAN),
+            style: face.get("style").and_then(Value::as_str).unwrap_or("").to_string(),
+            asset_id: face.get("assetId").and_then(Value::as_str).unwrap_or("").to_string(),
+        })
+        .collect();
+    Some(Arc::new(Family { faces }))
+}
+
+fn load_family_file(path: &str) -> Option<Arc<Family>> {
+    if !roblox_engine_emulator::lua::modules::keeping_between_runs() {
+        return parse_family_file(path);
+    }
+    let Some(stamp) = roblox_engine_emulator::files::stamp(Path::new(path)) else {
+        return parse_family_file(path);
+    };
+    {
+        let cache = families_cache().read().unwrap();
+        if let Some((cached_stamp, family)) = cache.get(path) {
+            if *cached_stamp == stamp {
+                return family.clone();
+            }
+        }
+    }
+    let family = roblox_engine_emulator::alloc::long_lived(|| parse_family_file(path));
+    roblox_engine_emulator::alloc::long_lived(|| {
+        families_cache().write().unwrap().insert(path.to_string(), (stamp, family.clone()));
+    });
+    family
+}
+
+fn load_parsed_font(path: &str) -> Result<Arc<Font>, String> {
+    let read_and_parse = || match std::fs::read(path) {
+        Ok(bytes) => Font::parse(bytes, path).map(Arc::new),
+        Err(error) => Err(format!("failed to parse font {path}: {error}")),
+    };
+    if !roblox_engine_emulator::lua::modules::keeping_between_runs() {
+        return read_and_parse();
+    }
+    let Some(stamp) = roblox_engine_emulator::files::stamp(Path::new(path)) else {
+        return read_and_parse();
+    };
+    {
+        let cache = parsed_fonts_cache().read().unwrap();
+        if let Some((cached_stamp, result)) = cache.get(path) {
+            if *cached_stamp == stamp {
+                return result.clone();
+            }
+        }
+    }
+    let result = roblox_engine_emulator::alloc::long_lived(read_and_parse);
+    roblox_engine_emulator::alloc::long_lived(|| {
+        parsed_fonts_cache().write().unwrap().insert(path.to_string(), (stamp, result.clone()));
+    });
+    result
+}
+
 /// CSS-style closeness of a candidate weight to the requested one.
 fn weight_distance(requested: f64, candidate: f64) -> f64 {
     if candidate == requested {
@@ -207,8 +389,9 @@ pub struct FontRegistry {
     font_content: Option<String>,
     font_version: Option<String>,
     assets: String,
-    preloaded: HashSet<String>,
-    enum_faces: HashMap<String, Vec<String>>,
+    preloaded_sets: Vec<Arc<HashSet<String>>>,
+    restricted_assets: Option<(String, HashSet<String>)>,
+    enum_faces: Arc<HashMap<String, Vec<String>>>,
     family_cache: HashMap<String, Option<Arc<Family>>>,
     parsed_cache: HashMap<String, Option<Arc<Font>>>,
     face_cache: HashMap<(String, u64, String), Option<FaceId>>,
@@ -244,8 +427,9 @@ impl FontRegistry {
             font_content,
             font_version,
             assets,
-            preloaded: HashSet::new(),
-            enum_faces: HashMap::new(),
+            preloaded_sets: Vec::with_capacity(3),
+            restricted_assets: None,
+            enum_faces: enum_faces(),
             family_cache: HashMap::new(),
             parsed_cache: HashMap::new(),
             face_cache: HashMap::new(),
@@ -265,8 +449,19 @@ impl FontRegistry {
     /// downloaded (cached family files stay): a frozen corpus resolves faces as it was recorded,
     /// whatever the cache gained since. Call before the first lookup.
     pub fn restrict_cached_assets(&mut self, keep: &HashSet<String>) {
-        let assets = format!("{}/", self.assets);
-        self.preloaded.retain(|path| !path.starts_with(&assets) || path.ends_with(".json") || keep.contains(path));
+        match &mut self.restricted_assets {
+            Some((_, existing)) => existing.retain(|path| keep.contains(path)),
+            None => self.restricted_assets = Some((format!("{}/", self.assets), keep.clone())),
+        }
+    }
+
+    fn has_preloaded(&self, path: &str) -> bool {
+        if let Some((assets_prefix, keep)) = &self.restricted_assets {
+            if path.starts_with(assets_prefix.as_str()) && !path.ends_with(".json") && !keep.contains(path) {
+                return false;
+            }
+        }
+        self.preloaded_sets.iter().any(|set| set.contains(path))
     }
 
     /// The cloud fonts' directory: the cache's `assets`, or the frozen font set's.
@@ -280,47 +475,13 @@ impl FontRegistry {
     }
 
     fn preload(&mut self) {
-        if let Ok(Value::Object(data)) = serde_json::from_slice::<Value>(roblox_engine_emulator::data::FONT_ENUMS) {
-            if let Some(Value::Object(from_enum)) = data.get("fromEnum") {
-                for (name, face) in from_enum {
-                    if let Some(parts) = face.as_array() {
-                        let parts = parts.iter().map(|part| part.as_str().unwrap_or("").to_string()).collect();
-                        self.enum_faces.insert(name.clone(), parts);
-                    }
-                }
-            }
+        if let Some(content) = &self.font_content {
+            self.preloaded_sets.push(preload_font_dir(&format!("{content}/fonts"), true, false));
         }
-        if let Some(content) = self.font_content.clone() {
-            self.preload_directory(&format!("{content}/fonts"));
+        if let Some(version) = &self.font_version {
+            self.preloaded_sets.push(preload_font_dir(&format!("{version}/ExtraContent/LuaPackages/Packages/_Index/BuilderIcons"), true, false));
         }
-        if let Some(version) = self.font_version.clone() {
-            self.preload_directory(&format!("{version}/ExtraContent/LuaPackages/Packages/_Index/BuilderIcons"));
-        }
-        let assets = self.assets.clone();
-        if let Ok(entries) = std::fs::read_dir(&assets) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let path = format!("{assets}/{name}");
-                if name != "fonts.json" && is_font_file(&name) && entry_kind(&entry, &path).1 {
-                    self.preloaded.insert(path);
-                }
-            }
-        }
-    }
-
-    fn preload_directory(&mut self, directory: &str) {
-        let Ok(entries) = std::fs::read_dir(directory) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let path = format!("{directory}/{name}");
-            if entry_kind(&entry, &path).0 {
-                self.preload_directory(&path);
-            } else if is_font_file(&name) {
-                self.preloaded.insert(path);
-            }
-        }
+        self.preloaded_sets.push(preload_font_dir(&self.assets, false, true));
     }
 
     pub fn content_root(&self) -> Option<&str> {
@@ -357,15 +518,18 @@ impl FontRegistry {
                 return None;
             }
             let content = self.font_content.as_ref()?;
-            let mut bases = vec![content.clone()];
-            if let Some(version) = &self.font_version {
-                bases.push(format!("{version}/ExtraContent"));
-                bases.push(format!("{version}/PlatformContent/pc"));
+            let candidate = format!("{content}/{relative}");
+            if self.has_preloaded(&candidate) {
+                return Some(candidate);
             }
-            for base in bases {
-                let candidate = format!("{base}/{relative}");
-                if self.preloaded.contains(&candidate) {
-                    return Some(candidate);
+            if let Some(version) = &self.font_version {
+                let extra = format!("{version}/ExtraContent/{relative}");
+                if self.has_preloaded(&extra) {
+                    return Some(extra);
+                }
+                let platform = format!("{version}/PlatformContent/pc/{relative}");
+                if self.has_preloaded(&platform) {
+                    return Some(platform);
                 }
             }
             return None;
@@ -374,7 +538,7 @@ impl FontRegistry {
         let key = asset.key();
         for extension in ["", ".ttf", ".otf", ".ttc", ".json", ".bin"] {
             let candidate = format!("{}/{key}{extension}", self.assets);
-            if self.preloaded.contains(&candidate) {
+            if self.has_preloaded(&candidate) {
                 return Some(candidate);
             }
         }
@@ -390,30 +554,7 @@ impl FontRegistry {
             return cached.clone();
         }
         let target = FAMILY_REDIRECTS.iter().find(|(from, _)| *from == uri).map(|(_, to)| *to).unwrap_or(uri);
-        let mut family = None;
-        if let Some(path) = self.resolve_uri(target) {
-            if let Ok(bytes) = std::fs::read(&path) {
-                if let Ok(Value::Object(data)) = serde_json::from_slice::<Value>(&bytes) {
-                    if let Some(faces) = data.get("faces").filter(|faces| !faces.is_null() && faces.as_bool() != Some(false)) {
-                        let list: Vec<&Value> = match faces {
-                            Value::Array(items) => items.iter().collect(),
-                            Value::Object(map) => map.values().collect(),
-                            _ => Vec::new(),
-                        };
-                        let faces = list
-                            .into_iter()
-                            .map(|face| FamilyFace {
-                                name: face.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
-                                weight: face.get("weight").and_then(Value::as_f64).unwrap_or(f64::NAN),
-                                style: face.get("style").and_then(Value::as_str).unwrap_or("").to_string(),
-                                asset_id: face.get("assetId").and_then(Value::as_str).unwrap_or("").to_string(),
-                            })
-                            .collect();
-                        family = Some(Arc::new(Family { faces }));
-                    }
-                }
-            }
-        }
+        let family = self.resolve_uri(target).and_then(|path| load_family_file(&path));
         if family.is_none() {
             self.diagnostics.insert(
                 uri.to_string(),
@@ -429,11 +570,7 @@ impl FontRegistry {
         if let Some(cached) = self.parsed_cache.get(path) {
             return cached.clone();
         }
-        let result = match std::fs::read(path) {
-            Ok(bytes) => Font::parse(bytes, path).map(Arc::new),
-            Err(error) => Err(format!("failed to parse font {path}: {error}")),
-        };
-        let font = match result {
+        let font = match load_parsed_font(path) {
             Ok(font) => Some(font),
             Err(message) => {
                 self.diagnostics.insert(path.to_string(), message);
