@@ -534,7 +534,7 @@ class BatchWorker {
 	}
 
 	// The run's answer ({code, error, stderr?}), "timeout", or null when the worker is gone
-	run(argv, env, { inline = false, commands = null, onLine = null } = {}) {
+	run(argv, env, { inline = false, commands = null, dedupScenes = false, onLine = null } = {}) {
 		if (!this.child) this.start();
 		const child = this.child;
 		return new Promise(resolve => {
@@ -550,6 +550,7 @@ class BatchWorker {
 			const payload = { argv, env };
 			if (inline) payload.inline = true;
 			if (commands) payload.commands = commands;
+			if (dedupScenes) payload.dedupScenes = true;
 			child.stdin.write(JSON.stringify(payload) + "\n");
 		});
 	}
@@ -766,13 +767,42 @@ async function runScene(entry, worker) {
 	return { status: "scene", scene: normalizeScene(scene) };
 }
 
+function digestSceneWithNodeCache(scene, nodeStrings) {
+	if (!Array.isArray(scene.nodes) || !nodeStrings) return digest(scene);
+	const hash = createHash("sha256");
+	hash.update("{");
+	const keys = Object.keys(scene);
+	let first = true;
+	for (let i = 0; i < keys.length; i++) {
+		const key = keys[i];
+		const val = scene[key];
+		if (val === undefined) continue;
+		if (!first) hash.update(",");
+		first = false;
+		hash.update(JSON.stringify(key));
+		hash.update(":");
+		if (key === "nodes") {
+			hash.update("[");
+			for (let j = 0; j < nodeStrings.length; j++) {
+				if (j > 0) hash.update(",");
+				hash.update(nodeStrings[j]);
+			}
+			hash.update("]");
+		} else {
+			hash.update(JSON.stringify(val));
+		}
+	}
+	hash.update("}");
+	return hash.digest("hex");
+}
+
 function makeLiveTracker() {
 	// Presentation snapshots list every ScrollingFrame with a layout record, unparented ones included
 	// until the engine's instance collector frees them (its timing follows the Luau GC): only rows of
 	// frames the client holds are compared (as the former Luau-vs-Rust harness did)
 	const held = new Set();
 	const frames = [], scenes = [];
-	let ready = null, lastScene = null, count = 0;
+	let ready = null, lastScene = null, lastSceneDigest = null, nodeStrings = null, count = 0;
 	const track = reply => {
 		for (const node of asArray(reply.delta?.nodes)) held.add(node.id);
 		for (const id of asArray(reply.delta?.removed)) held.delete(id);
@@ -793,8 +823,53 @@ function makeLiveTracker() {
 			}
 			if (count++ === 0) ready = track(reply);
 			else if (reply.type === "scene") {
-				lastScene = normalizeScene(reply.scene);
-				scenes.push(digest(lastScene));
+				if (reply.same) {
+					scenes.push(lastSceneDigest);
+				} else if (reply.patch) {
+					let keysChanged = false;
+					if (Array.isArray(reply.patch.del)) {
+						for (const key of reply.patch.del) {
+							delete lastScene[key];
+							keysChanged = true;
+						}
+					}
+					if (reply.patch.set) {
+						for (const [key, val] of Object.entries(reply.patch.set)) {
+							if (!(key in lastScene)) keysChanged = true;
+							if (key === "diagnostics") {
+								lastScene.diagnostics = normalizeScene({ diagnostics: val }).diagnostics;
+							} else if (key === "nodes") {
+								lastScene.nodes = normalizeValue(val);
+								nodeStrings = Array.isArray(lastScene.nodes) ? lastScene.nodes.map(node => JSON.stringify(node)) : null;
+							} else {
+								lastScene[key] = normalizeValue(val);
+							}
+						}
+					}
+					if (reply.patch.nodesPatch) {
+						const { len, set } = reply.patch.nodesPatch;
+						lastScene.nodes.length = len;
+						if (nodeStrings) nodeStrings.length = len;
+						for (const [idx, node] of set) {
+							const normalized = normalizeValue(node);
+							lastScene.nodes[idx] = normalized;
+							if (nodeStrings) nodeStrings[idx] = JSON.stringify(normalized);
+						}
+					}
+					if (keysChanged) {
+						const sorted = {};
+						for (const key of Object.keys(lastScene).sort()) sorted[key] = lastScene[key];
+						lastScene = sorted;
+					}
+					lastSceneDigest = digestSceneWithNodeCache(lastScene, nodeStrings);
+					scenes.push(lastSceneDigest);
+				} else {
+					lastScene = normalizeScene(reply.scene);
+					const hasEditable = Array.isArray(lastScene.images) && lastScene.images.some(uri => typeof uri === "string" && uri.includes("editable-images/"));
+					nodeStrings = !hasEditable && Array.isArray(lastScene.nodes) ? lastScene.nodes.map(node => JSON.stringify(node)) : null;
+					lastSceneDigest = digestSceneWithNodeCache(lastScene, nodeStrings);
+					scenes.push(lastSceneDigest);
+				}
 			} else frames.push(track(reply));
 		},
 		result: output => ({ status: "live", ready, frames, scenes, lastScene, output }),
@@ -824,6 +899,7 @@ async function runLive(entry, worker) {
 		const tracker = makeLiveTracker();
 		const answer = await worker.run(engineArgs(entry, ["--session", "1", "--verbose"]), batchEnv(entry), {
 			commands,
+			dedupScenes: true,
 			onLine: line => tracker.pushLine(line),
 		});
 		if (answer === "timeout") return { status: "timeout" };

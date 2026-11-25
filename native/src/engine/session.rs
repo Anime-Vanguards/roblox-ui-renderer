@@ -647,12 +647,110 @@ fn write_reply(out: &mut impl Write, buf: &mut Vec<u8>, mut reply: Json, flush: 
     Ok(())
 }
 
+fn scene_has_editable_images(scene: &Json) -> bool {
+    scene
+        .get("images")
+        .and_then(Json::as_array)
+        .is_some_and(|images| images.iter().any(|uri| uri.as_str().is_some_and(|s| s.contains("editable-images/"))))
+}
+
+fn strip_scene_volatile(scene: &mut Json) {
+    if let Some(diagnostics) = scene.get_mut("diagnostics").and_then(Json::as_object_mut) {
+        diagnostics.remove("timings");
+        diagnostics.remove("hint");
+    }
+}
+
+fn write_dedup_scene(out: &mut impl Write, buf: &mut Vec<u8>, prev_scene: &mut Option<Json>, mut reply: Json) -> std::io::Result<()> {
+    empty_arrays_as_objects(&mut reply);
+    let mut cur_scene = reply.get_mut("scene").map(Json::take).unwrap_or(Json::Null);
+    strip_scene_volatile(&mut cur_scene);
+    if !cur_scene.is_object() || scene_has_editable_images(&cur_scene) {
+        *prev_scene = None;
+        if let Some(obj) = reply.as_object_mut() {
+            obj.insert("scene".into(), cur_scene);
+        }
+        buf.clear();
+        buf.extend_from_slice(PREFIX.as_bytes());
+        serde_json::to_writer(&mut *buf, &reply).map_err(std::io::Error::other)?;
+        buf.push(b'\n');
+        return out.write_all(buf);
+    }
+    let Some(prev_obj) = prev_scene.as_ref().and_then(Json::as_object) else {
+        buf.clear();
+        buf.extend_from_slice(PREFIX.as_bytes());
+        buf.extend_from_slice(br#"{"type":"scene","scene":"#);
+        serde_json::to_writer(&mut *buf, &cur_scene).map_err(std::io::Error::other)?;
+        buf.extend_from_slice(b"}\n");
+        out.write_all(buf)?;
+        *prev_scene = Some(cur_scene);
+        return Ok(());
+    };
+    let cur_obj = cur_scene.as_object().expect("checked object");
+    let mut set = Map::new();
+    let mut del: Vec<Json> = Vec::new();
+    let mut nodes_patch: Option<Json> = None;
+    for key in prev_obj.keys() {
+        if !cur_obj.contains_key(key) {
+            del.push(Json::String(key.clone()));
+        }
+    }
+    for (key, cur_val) in cur_obj {
+        if key == "nodes" {
+            if let (Some(Json::Array(prev_nodes)), Json::Array(cur_nodes)) = (prev_obj.get("nodes"), cur_val) {
+                let changed: Vec<usize> = (0..cur_nodes.len()).filter(|&i| prev_nodes.get(i) != Some(&cur_nodes[i])).collect();
+                if changed.is_empty() && prev_nodes.len() == cur_nodes.len() {
+                    continue;
+                }
+                if changed.len() * 2 <= cur_nodes.len() {
+                    let items: Vec<Json> = changed.into_iter().map(|i| Json::Array(vec![Json::from(i), cur_nodes[i].clone()])).collect();
+                    let mut np = Map::new();
+                    np.insert("len".into(), Json::from(cur_nodes.len()));
+                    np.insert("set".into(), Json::Array(items));
+                    nodes_patch = Some(Json::Object(np));
+                } else {
+                    set.insert("nodes".into(), cur_val.clone());
+                }
+            } else if prev_obj.get("nodes") != Some(cur_val) {
+                set.insert("nodes".into(), cur_val.clone());
+            }
+        } else if prev_obj.get(key) != Some(cur_val) {
+            set.insert(key.clone(), cur_val.clone());
+        }
+    }
+    if del.is_empty() && set.is_empty() && nodes_patch.is_none() {
+        return out.write_all(b"@@RUR {\"type\":\"scene\",\"same\":true}\n");
+    }
+    let mut patch = Map::new();
+    if !del.is_empty() {
+        patch.insert("del".into(), Json::Array(del));
+    }
+    if !set.is_empty() {
+        patch.insert("set".into(), Json::Object(set));
+    }
+    if let Some(np) = nodes_patch {
+        patch.insert("nodesPatch".into(), np);
+    }
+    let mut wrapped = Map::new();
+    wrapped.insert("type".into(), Json::String("scene".into()));
+    wrapped.insert("patch".into(), Json::Object(patch));
+    buf.clear();
+    buf.extend_from_slice(PREFIX.as_bytes());
+    serde_json::to_writer(&mut *buf, &Json::Object(wrapped)).map_err(std::io::Error::other)?;
+    buf.push(b'\n');
+    out.write_all(buf)?;
+    *prev_scene = Some(cur_scene);
+    Ok(())
+}
+
 /// Runs a fixed sequence of session commands (batch live sessions: cli.rs), streaming `@@RUR ` reply
-/// lines to stdout through a buffered writer.
-pub fn run_commands(lua: &Lua, session: &mut Session, commands: &[Json]) -> Result<(), String> {
+/// lines to stdout through a buffered writer. When `dedup_scenes` is set, consecutive `scene` replies
+/// emit `"same":true` or minimal node patches while still running the full export on every frame.
+pub fn run_commands(lua: &Lua, session: &mut Session, commands: &[Json], dedup_scenes: bool) -> Result<(), String> {
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::with_capacity(64 * 1024, stdout.lock());
     let mut buf = Vec::with_capacity(64 * 1024);
+    let mut prev_scene: Option<Json> = None;
     let ready = session.ready(lua).unwrap_or_else(|error| error_reply(&error));
     write_reply(&mut out, &mut buf, ready, false).map_err(|e| e.to_string())?;
     for command in commands {
@@ -661,6 +759,9 @@ pub fn run_commands(lua: &Lua, session: &mut Session, commands: &[Json]) -> Resu
             continue;
         }
         match session.handle(lua, command) {
+            Some(reply) if dedup_scenes && reply.get("type").and_then(Json::as_str) == Some("scene") => {
+                write_dedup_scene(&mut out, &mut buf, &mut prev_scene, reply).map_err(|e| e.to_string())?;
+            }
             Some(reply) => write_reply(&mut out, &mut buf, reply, false).map_err(|e| e.to_string())?,
             None => break,
         }

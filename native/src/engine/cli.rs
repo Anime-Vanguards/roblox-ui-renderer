@@ -346,6 +346,7 @@ fn batch_job(job: &Json) -> Json {
     }
     let inline = job["inline"].as_bool().unwrap_or(false);
     let commands = job["commands"].as_array().map(Vec::as_slice);
+    let dedup_scenes = job["dedupScenes"].as_bool().unwrap_or(false);
     if crate::paths::is_standalone() {
         // Refused before the job picks this process or a child: neither may start work (or choose
         // a default location) for an unusable path.
@@ -358,7 +359,7 @@ fn batch_job(job: &Json) -> Json {
         // warm caches and saves a process start. Any other job gets a child that starts with them.
         let variables = job_variables(job);
         if crate::paths::batch_environment_matches(&variables, &argv) {
-            return run_batch_job(&argv, inline, commands);
+            return run_batch_job(&argv, inline, commands, dedup_scenes);
         }
         if inline || commands.is_some() {
             return json!({"code": 2, "error": "inline and session batch jobs require matching process environment"});
@@ -380,13 +381,13 @@ fn batch_job(job: &Json) -> Json {
             }
         }
     }
-    run_batch_job(&argv, inline, commands)
+    run_batch_job(&argv, inline, commands, dedup_scenes)
 }
 
 enum BatchMode<'a> {
     Standard,
     InlineScene,
-    SessionCommands(&'a [Json]),
+    SessionCommands(&'a [Json], bool),
 }
 
 struct CaptureGuard(bool);
@@ -412,7 +413,7 @@ impl Drop for CaptureGuard {
 }
 
 /// The structured result is identical for checkout jobs, warm release jobs and child jobs.
-fn run_batch_job(argv: &[String], inline: bool, commands: Option<&[Json]>) -> Json {
+fn run_batch_job(argv: &[String], inline: bool, commands: Option<&[Json]>, dedup_scenes: bool) -> Json {
     let args = match parse(argv) {
         Ok(args) if !args.session || commands.is_some() => args,
         Ok(_) => return json!({"code": 2, "error": "live sessions are not batched"}),
@@ -425,7 +426,7 @@ fn run_batch_job(argv: &[String], inline: bool, commands: Option<&[Json]>) -> Js
         let cmds = commands.expect("checked above");
         let capture = CaptureGuard::start();
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_with_mode(args, true, BatchMode::SessionCommands(cmds))
+            run_with_mode(args, true, BatchMode::SessionCommands(cmds, dedup_scenes))
         }));
         let captured = capture.finish();
         return match outcome {
@@ -535,7 +536,7 @@ fn batch_job_child(argv: &[String]) -> i32 {
         let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
         std::process::exit(1);
     });
-    let answer = run_batch_job(argv, false, None);
+    let answer = run_batch_job(argv, false, None, false);
     println!("{BATCH_ANSWER}{answer}");
     answer["code"].as_i64().unwrap_or(1) as i32
 }
@@ -860,7 +861,7 @@ fn render(
         session.run_time = exec_start.elapsed().as_secs_f64();
         crate::luau_profile::mark_frames();
         match mode {
-            BatchMode::SessionCommands(commands) => super::session::run_commands(lua, &mut session, commands)?,
+            BatchMode::SessionCommands(commands, dedup_scenes) => super::session::run_commands(lua, &mut session, commands, dedup_scenes)?,
             _ => super::session::run_stdio(lua, &mut session)?,
         }
         return Ok(0);
