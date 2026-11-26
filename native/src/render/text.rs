@@ -336,8 +336,7 @@ fn shading(q: &Quad, x: f64, y: f64, coverage: f64) -> [f64; 4] {
 /// thickness 1.8 at 1.5x is 2.7 px, not the 2.6 of f32(f32(thickness x DPI) x 10) (a "Play" button
 /// 224 -> 0 px > 2, notes/text.md).
 fn stroke_radius(stroke: &Value, scale: f64) -> f64 {
-    let tenths = (n(stroke, "thickness", 0.0) as f32) * ((scale * 10.0) as f32);
-    ((tenths.floor() as f64 / 10.0) * 64.0).floor() / 64.0
+    crate::glyphs::text_stroke_radius(n(stroke, "thickness", 0.0), scale)
 }
 fn glyph_keys(p: &Placement, stroke: f64, join: Option<&str>) -> Vec<GlyphKey> {
     let mut style = join.unwrap_or("").to_string();

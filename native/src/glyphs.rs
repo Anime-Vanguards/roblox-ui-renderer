@@ -245,13 +245,19 @@ impl AtlasEntry {
     }
 }
 
-/// cli/rur.mjs textStrokeRadius: floor(10 t) / 10 physical px truncated to 26.6, t = thickness * scale
-/// in float32.
+/// A text UIStroke's reach: floor(10 t) / 10 physical px truncated to 26.6, t = thickness * scale in float32, at most
+/// TEXT_STROKE_REACH.
 pub fn text_stroke_radius(thickness: f64, scale: f64) -> f64 {
     let fround = |value: f64| value as f32 as f64;
     let tenths = fround(fround(thickness) * fround(scale * 10.0));
-    (tenths.floor() / 10.0 * 64.0).floor() / 64.0
+    let radius = (tenths.floor() / 10.0 * 64.0).floor() / 64.0;
+    if radius > TEXT_STROKE_REACH { TEXT_STROKE_REACH } else { radius }
 }
+
+/// The most a text UIStroke reaches past its glyphs, in device px: a client draws Thickness 9, 12 and 13 at 3x
+/// (27 to 39 px) and 13 at 2x (26 px) 25.5 px out, at TextSize 48, 72, 96 and 120 alike, and every thickness up to
+/// 24 px as given (fixtures/stroke-text-probe-cap.luau, stroke-text-a)
+pub const TEXT_STROKE_REACH: f64 = 25.5;
 
 /// cli/rur.mjs textStrokeJoin: "miter" / "bevel", round (None) otherwise
 fn text_stroke_join(stroke: &Value) -> Option<&'static str> {
@@ -1275,6 +1281,11 @@ mod tests {
         assert_eq!(text_stroke_radius(0.7, 1.5), 1.0);
         assert_eq!(text_stroke_radius(0.0, 1.5), 0.0);
         assert!(text_stroke_radius(f64::NAN, 1.5).is_nan());
+        // a reach past 25.5 px stops there (fixtures/stroke-text-probe-cap.luau at 2x and 3x)
+        assert_eq!(text_stroke_radius(8.0, 3.0), 24.0);
+        assert_eq!(text_stroke_radius(9.0, 3.0), 25.5);
+        assert_eq!(text_stroke_radius(13.0, 2.0), 25.5);
+        assert_eq!(text_stroke_radius(17.0, 1.5), 25.5);
     }
 
     /// A label under a text shadow with a blur also wants each glyph unhinted (the glow's outlines); a
