@@ -230,11 +230,11 @@ fn line_gap_faces() {
             engine.layout(&LayoutParams::new(b"a", &family, weight(&row["weight"]), "normal", 20.0, 1.5), false);
         }
     });
-    // Known misses: one Permanent Marker string at DPI 1.5 (1 px), and at DPI 1 the two trailing spaces of
-    // "Hello  " in Guru, which Studio measures narrower at 13 of the 17 sizes
+    // Known miss: one Permanent Marker string at DPI 1.5 (1 px). (The 1x file's 13 Guru "Hello  " values that Studio
+    // measured narrower were a first TextBounds read after a Text change, re-measured with two reads.)
     for (file, scale, known) in [
         ("data/studio/text-bounds-linegap-1.5x.json", 1.5, ("PermanentMarker-Regular", 255)),
-        ("data/studio/text-bounds-linegap-1x.json", 1.0, ("Guru-Regular", 242)),
+        ("data/studio/text-bounds-linegap-1x.json", 1.0, ("", 255)),
     ] {
         let (_, total, per_font, misses) = text_bounds_at(&mut engine, file, scale);
         assert_eq!((per_font.len(), total), (12, 3060), "{file}");
@@ -385,20 +385,17 @@ fn whole_pixel_datasets() {
 /// sweep's and the ellipsis probe's 1.5, FFlagTextBoundsRoundUpToLogicalPixels off so the bounds are the exact device
 /// pixels over the scale (production has it on and rounds every TextBounds up to a whole logical pixel; the layout is
 /// the same). The client's 1.5x run of the same probes equals data/studio/whole/*-1.5x.json to the last value.
-/// 2x and 3x match everywhere. Known misses, all at 1x: two trailing spaces ("Hello  ") measured 2 to 14 px narrower
-/// by the client in 6 text-bounds cells and 9 line-gap cells (SourceSansPro, Roboto, Arimo, Guru, Ubuntu), and a
-/// lone space in SourceSansPro at 7 and 8 px, 2 px in the client and 1 here.
+/// Every scale matches everywhere. The 1x sets read each TextBounds twice: at 1x the first read after a Text change
+/// can return the previous text's bounds ("Hello" -> "Hello " always, "Hello " -> "Hello  " never), and a single read
+/// had put 17 such values in them ("Hello  " 2 to 14 px narrow in 15 cells, a lone space 2 px wide in 2).
 #[test]
 fn whole_pixel_datasets_at_device_scales() {
-    for (scale, text_bounds, sweep, linegap) in [(1.0, 3564, 4783, 3051), (2.0, 3570, 4785, 3060), (3.0, 3570, 4785, 3060)] {
+    for scale in [1.0, 2.0, 3.0] {
         let mut engine = whole_engine();
-        for (name, expected) in [("text-bounds", (text_bounds, 3570)), ("sweep", (sweep, 4785)), ("text-bounds-linegap", (linegap, 3060))] {
+        for (name, count) in [("text-bounds", 3570), ("sweep", 4785), ("text-bounds-linegap", 3060)] {
             let file = format!("data/studio/whole/{name}-{scale}x.json");
             let (hits, total, _, misses) = text_bounds_at(&mut engine, &file, scale);
-            assert_eq!((hits, total), expected, "{file} misses: {misses:#?}");
-            if scale == 1.0 {
-                assert!(misses.iter().all(|miss| miss.contains("\"Hello  \"") || miss.contains("\" \"")), "{file}: {misses:#?}");
-            }
+            assert_eq!((hits, total), (count, count), "{file} misses: {misses:#?}");
         }
         let file = format!("data/studio/whole/wrap-{scale}x.json");
         let (hits, total, misses) = wrap_hits_at(&file, false, scale);

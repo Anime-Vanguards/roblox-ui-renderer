@@ -21,6 +21,7 @@ for _, FontSpec in Fonts do
 		local Widths = {}
 		for _, Text in Strings do
 			Label.Text = Text
+			local _ = Label.TextBounds -- (read twice: at device scale 1 the first TextBounds read after a Text change can be the previous text's)
 			table.insert(Widths, math.round(Label.TextBounds.X * Scale))
 		end
 		table.insert(Rows, { font = FontSpec[1], S = S, h = math.round(Label.TextBounds.Y * Scale), widths = Widths })

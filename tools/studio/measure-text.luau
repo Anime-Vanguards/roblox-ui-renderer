@@ -41,6 +41,7 @@ for _, FontSpec in Fonts do
 		local Height = 0
 		for _, Text in Strings do
 			Label.Text = Text
+			local _ = Label.TextBounds -- (read twice: at device scale 1 the first TextBounds read after a Text change can be the previous text's)
 			local Bounds = Label.TextBounds
 			table.insert(Widths, Bounds.X)
 			Height = Bounds.Y
