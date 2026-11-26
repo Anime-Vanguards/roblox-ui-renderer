@@ -332,6 +332,10 @@
 			"digest": "77498154a4aa8ba5ec55f7b1c7faf3dbfef10e3b29920bae30290878d5494615",
 			"status": "ok"
 		},
+		"fast/edit/path2d-probe-offscreen": {
+			"digest": "7b6f44e95428c44098c63c870056238a8903332e039ea7d07f92016eae443863",
+			"status": "ok"
+		},
 		"fast/edit/path2d-probe-snap": {
 			"digest": "856a2cef099b4babe76f973e0e110e25763bee5bcba4bab3f7f2c7ca2cb77873",
 			"status": "ok"
@@ -1492,6 +1496,10 @@
 			"digest": "fcf39acbb289d91e33c1184b88fe90f901e94d8e2871e94a5ee88d3f682afe66",
 			"status": "ok"
 		},
+		"fixtures/edit/path2d-probe-offscreen": {
+			"digest": "df93de2324583af1d5f778a1bcb6bfca714844c358d5277368df6e5d288533c3",
+			"status": "ok"
+		},
 		"fixtures/edit/path2d-probe-snap": {
 			"digest": "2196da56ac673b65b2fbffe228f5fd614979c7e7257f2500ee76bc402815907a",
 			"status": "ok"
@@ -2604,6 +2612,10 @@
 			"digest": "18a81274e672db873a2232993b0da8babaebbca0d06d03933d8178820127892e",
 			"status": "ok"
 		},
+		"fixtures/play/path2d-probe-offscreen": {
+			"digest": "a621b5b435ab4be3bdf19ab725c758ce14f94e42be0aaad50b3b834fd9eb263b",
+			"status": "ok"
+		},
 		"fixtures/play/path2d-probe-snap": {
 			"digest": "1cea36b901a242cfe30414496ce79c3072658e91f05dd56a4a5a79fa751a9c08",
 			"status": "ok"
@@ -3433,7 +3445,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-26T17:39:08.422Z",
+	"recorded": "2026-11-26T18:51:53.173Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
