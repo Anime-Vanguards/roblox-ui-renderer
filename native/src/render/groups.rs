@@ -383,14 +383,17 @@ impl DrawPreparer {
             let Some(child) = scene.node(id.unsigned_abs()) else {
                 continue;
             };
-            let local = self.localized(child);
-            let child = local.as_ref().unwrap_or(child);
+            // The group's own background fills its texture over whole texels, as an unturned frame's does, also
+            // when the group is turned (tools/studio/group-probe-content.luau: a 121 x 91 group turned 90 degrees,
+            // 181.5 x 136.5 px in a 182 x 137 texture, 499 px > 2 -> 0)
+            let in_group = child["id"] == node["id"];
+            let local = if in_group { None } else { self.localized(child) };
+            let child = if in_group { node } else { local.as_ref().unwrap_or(child) };
             let owned = texture_clip_node(child, node, self.scale, resampled);
             let child = owned.as_ref().unwrap_or(child);
             if child["culled"].as_bool().unwrap_or(false) {
                 continue;
             }
-            let in_group = child["id"] == node["id"];
             if id < 0 {
                 let screen = self.screen_segment(&mut segment, texture, space, empty)?;
                 self.draw_post(screen, child, assets)?;
@@ -1479,6 +1482,19 @@ mod tests {
         // The scratch target holds the group's own background only
         let scratch = records(&packet, pass_of(&packet, 225, 180));
         assert!(scratch.iter().all(|r| r.0 != 15 && r.0 != LAYER), "{scratch:?}");
+    }
+
+    /// tools/studio/group-probe-content.luau: a 121 x 91 group turned 90 degrees is 181.5 x 136.5 px in a 182 x 137
+    /// texture, and its own background fills every texel, as an unturned frame's would (Studio fills the screen
+    /// up to the quad's edges: 499 px > 2 -> 0)
+    #[test]
+    fn a_turned_groups_background_fills_its_texture_over_whole_texels() {
+        let nodes = serde_json::json!([
+            {"id":1,"rect":[970,620,121,91],"matrix":[0, 1, -1, 0, 1696, -365],"rotation":90,"group":{"color":[1,1,1],"transparency":0},"bg":{"color":[0.1,0.2,0.4],"transparency":0}}
+        ]);
+        let packet = prepared(nodes, serde_json::json!([{"group":1,"draw":[1]}]), None);
+        let texture = records(&packet, pass_of(&packet, 182, 137));
+        assert_eq!(texture.first().map(|r| (r.0, r.1)), Some((1, [0.0, 0.0, 182.0, 137.0])), "{texture:?}");
     }
 
     #[test]
