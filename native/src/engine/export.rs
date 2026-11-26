@@ -956,6 +956,12 @@ fn text_lines(
     // Quarter-pixel text under a text glow: each glyph entry's exact pen (`pens`), which its glow follows
     let glow_pens = subpixel && !rotated && text_glow(ctx, id);
     let mut lines = Vec::with_capacity(result.lines.len());
+    // A line after the first at a LineHeight other than 1 sits at the block's whole pixel plus its offset floored, the
+    // offset summed in float32 (sim client 0.747, fixtures/text-probe-linepitch.luau: 599 of 600 lines at 1x, 1.5x,
+    // 2x and 3x, where rounding its exact top gave 492; LineHeight 0.7 at TextSize 17 and 1x: 160 / 172 / 184 for
+    // 160.9 / 172.8 / 184.7). Rotated text keeps its exact tops.
+    let factor = if result.size > 0.0 { (result.line_height / result.size) as f32 } else { 1.0 };
+    let mut offset = 0.0_f32;
     for (index, line) in result.lines.iter().enumerate() {
         let line_width = line.width;
         let left = if x_align == "Left" {
@@ -965,7 +971,12 @@ fn text_lines(
         } else {
             content_x + (content_w - line_width) / 2.0
         };
-        let line_top = top + line.top;
+        let line_top = if index > 0 && !rotated && factor != 1.0 {
+            super::text::layout::snap_pixel(top) + f64::from(offset).floor()
+        } else {
+            top + line.top
+        };
+        offset += line.height as f32 * factor;
         let (mut glyphs, runs, pens, starts) = match cached.and_then(|lines| lines.get(index)) {
             Some((glyphs, runs, pens, starts)) => (glyphs.clone(), runs.clone(), pens.clone(), starts.clone()),
             None => {

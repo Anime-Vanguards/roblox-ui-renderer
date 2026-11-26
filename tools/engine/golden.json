@@ -1012,12 +1012,20 @@
 			"digest": "7356a3d24b07d945aaf7afb01aa82b0c1639db96fba4e53929fcdb1dc37d4963",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-linepitch": {
+			"digest": "21d222970979a26ae947565bba0aa646fd14700a105dbea78bcabc40b943033c",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-linepitch@quarter": {
+			"digest": "283e461966bd3d5aea82caf198f5b0ba0fbe1944c388e363538b59768f227821",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-overlap": {
-			"digest": "a89ab2c81ec23a10ad7cb7f9b432b297a42ac2b45db9663b3ab93dd155f039ed",
+			"digest": "f5841956d0b67cce4becc6ff7be82b5921425037a335227dea668d1a81518040",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-overlap@quarter": {
-			"digest": "85ad834b89dfc36be7db329b074f54d7227b9c6dd2a18dca10a6abbbdbde100f",
+			"digest": "e662ccc57d5792173bcaa950587c702df25e88f4d480178d6053867f9ea9e530",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-place": {
@@ -2260,12 +2268,20 @@
 			"digest": "4d895d77ad165b63b695d39802ffe560542cc27bd6f5242c68e2bcd7852dd082",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-linepitch": {
+			"digest": "8035a77ec47d8d878343599eb803a5c476efa77776f5f537339a32182499a5bb",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-linepitch@quarter": {
+			"digest": "f001d92bab0fe172f1845d87b04f72647546c62e0ac8e5671d00442f417507cf",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-overlap": {
-			"digest": "1d12422c07f8690543783cda321d776b364f42fbed67a08b4a9cfef1b679a7da",
+			"digest": "cacd780a74809ee403a3dbeaf079d2e4457606b3c48317ee7cf2ecd13ca821a6",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-overlap@quarter": {
-			"digest": "9d50a0543600e4504105584219c8b3ee359a28ed95a2c7820525a69430228f94",
+			"digest": "262d06060139d2aa7ce3e28e612d932c3e527ee55475b4eea0971113670ed6d6",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-place": {
@@ -3320,8 +3336,12 @@
 			"digest": "f2c61aba350303d9536b60b9050a771848fb74d8394860b8c8b98d2e8e7bae6c",
 			"status": "ok"
 		},
+		"fixtures/play/text-probe-linepitch": {
+			"digest": "c7868712bce611114804bee250fed5b96d09855ae78c23fc3917b9d964066065",
+			"status": "ok"
+		},
 		"fixtures/play/text-probe-overlap": {
-			"digest": "426357ebd274302ee2d5f6284756de86f3405853ecd09826d946772e8f549ec5",
+			"digest": "b3f97c01a1d4369a44daabc273a6ee1ce400be827932d3cb1bce1fed011fe825",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-place": {
