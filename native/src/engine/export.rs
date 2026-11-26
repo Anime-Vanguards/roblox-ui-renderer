@@ -953,6 +953,8 @@ fn text_lines(
     let mut built: Vec<CachedLine> = Vec::new();
     let subpixel = text.subpixel;
     let reveal = text_reveal(ctx, text, id, result);
+    // Quarter-pixel text under a text glow: each glyph entry's exact pen (`pens`), which its glow follows
+    let glow_pens = subpixel && !rotated && text_glow(ctx, id);
     let mut lines = Vec::with_capacity(result.lines.len());
     for (index, line) in result.lines.iter().enumerate() {
         let line_width = line.width;
@@ -1099,7 +1101,14 @@ fn text_lines(
         entry.insert("top".into(), number(round(line_top, 3)));
         entry.insert("height".into(), number(line.height));
         entry.insert("width".into(), number(line_width));
-        let (glyphs, runs) = match reveal.as_ref().and_then(|lines| lines[index]) {
+        let cut = reveal.as_ref().and_then(|lines| lines[index]);
+        // Measured (fixtures/shadow-probe-glow-pens.luau with FFlagLegacyTextSubpixelRendering on, 1.5x): a glyph's
+        // glow quad lies at the line's whole pixel `px` plus the glyph's exact 26.6 pen, not its quarter pixel
+        // (render/text.rs field_glow). (A line MaxVisibleGraphemes cuts moves its ellipsis: its glows keep the quarter.)
+        if glow_pens && cut.is_none() {
+            entry.insert("pens".into(), Json::Array(pens.iter().map(|&(exact, ..)| number(exact)).collect()));
+        }
+        let (glyphs, runs) = match cut {
             Some(cut) => reveal_line(line, cut, glyphs, runs, result.runs.as_ref().map_or(0, |runs| runs.len()) as u64, &starts, &mut entry),
             None => (glyphs, runs),
         };
@@ -1120,6 +1129,13 @@ fn text_lines(
     }
     let content = numbers(&[round(content_x, 3), round(content_y, 3), round(content_w, 3), round(content_h, 3)]);
     Some((Json::Array(lines), content))
+}
+
+/// Whether a text object glows: an enabled UIShadow child with Mode = Text.
+fn text_glow(ctx: &Ctx, id: InstanceId) -> bool {
+    ctx.children(id)
+        .iter()
+        .any(|&child| Some(ctx.class(child)) == ctx.c.ui_shadow && ctx.enabled(child) && ctx.enum_name(ctx.get(child, K::Mode as NameId)) == Some("Text"))
 }
 
 /// MaxVisibleGraphemes per line (text/reveal.rs); None when it hides nothing. Measured (fixtures/

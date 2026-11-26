@@ -50,6 +50,9 @@ struct Placement {
     /// The pen's quarter-pixel phase (a text with `subpixel`: 4), None for whole-pixel text
     quarter: Option<u8>,
     x: f64,
+    /// Quarter-pixel text under a text glow: the glyph's exact pen (the line's `pens`, export.rs), which its glow
+    /// follows (`field_glow`)
+    exact: Option<f64>,
     /// The legacy TextStroke copies left and right of a tied pen that round another way than the glyph
     /// (the line's `copies`, export.rs `tie_step`): the glyph at their x and quarter-pixel phase
     copies: Option<Box<[Placement; 2]>>,
@@ -241,13 +244,17 @@ fn placements(text: &Value, fonts: &Value, rotated: bool) -> (Vec<Placement>, Ve
                 .map(|r| n(r, "quadScale", base))
                 .filter(|r| *r > 0.0)
                 .unwrap_or(base);
+            // A glyph larger than the client rasterizes is drawn from its raster at that size, its quad scaled up
+            // (glyphs.rs raster_ppem); its line keeps the glyph's own size
+            let (raster_ppem, factor) = crate::glyphs::raster_ppem(font, ppem);
+            let (raster_size, scale) = (font_size(font, raster_ppem), scale * factor);
             let p = Placement {
                 font: fi as u32,
                 glyph: num(&glyph[1], 0.0) as u32,
-                ppem,
+                ppem: raster_ppem,
                 run,
-                bold: if requested >= 600.0 && face < 600.0 && size > 0.0 {
-                    (2.0 * size) as u32
+                bold: if requested >= 600.0 && face < 600.0 && raster_size > 0.0 {
+                    (2.0 * raster_size) as u32
                 } else {
                     0
                 },
@@ -263,6 +270,7 @@ fn placements(text: &Value, fonts: &Value, rotated: bool) -> (Vec<Placement>, Ve
                     (true, false) => (num(&glyph[2], 0.0) + 0.125).floor(),
                     (false, _) => snap(num(&glyph[2], 0.0)),
                 },
+                exact: if rotated { None } else { line["pens"].get(index).and_then(Value::as_f64).map(|pen| ox + pen) },
                 copies: None,
                 baseline: 0.0,
             };
@@ -2151,10 +2159,10 @@ fn field_glow(
         };
         // Device px a texel: the text size / 56
         let k = font_size(font, p.ppem) * p.scale / 56.0;
-        // The pen: a quarter-pixel text's at its quarter (its glyph bitmaps carry it). Studio places the glow at the
-        // exact pen, which the scene does not hold: the quarter is within 1/8 px of it (shadow-probe-glow-pens with
-        // FFlagLegacyTextSubpixelRendering on: every glyph at the exact pen plus the line's whole pixel)
-        let pen = p.x + p.quarter.map_or(0.0, |quarter| quarter as f64 / 4.0);
+        // The pen: a quarter-pixel text's glow lies at the line's whole pixel plus the glyph's exact pen, not at its
+        // quarter (shadow-probe-glow-pens with FFlagLegacyTextSubpixelRendering on); a scene without `pens` (saved
+        // before them, or a line MaxVisibleGraphemes cuts) has the quarter, within 1/8 px of it
+        let pen = p.exact.unwrap_or_else(|| p.x + p.quarter.map_or(0.0, |quarter| quarter as f64 / 4.0));
         for (bitmap, rgb, alpha) in layers {
             let [x0, y0, x1, y1] = field_quad(pen, p.baseline, &bitmap, k, p.unsnapped);
             fields.push(Field { x0, y0, x1, y1, k, rgb, alpha, bitmap });
@@ -2623,6 +2631,7 @@ mod tests {
             shown: true,
             quarter: None,
             x,
+            exact: None,
             copies: None,
             baseline,
         };
@@ -2664,6 +2673,36 @@ mod tests {
     }
 
     use super::*;
+
+    /// A glyph over 150 px is rasterized at 150 px and drawn on a quad scaled up to its size (glyphs.rs
+    /// raster_ppem; LegacyArial, Arimo at 1.5 x the TextSize, at TextSize 68 and 1.5x: 153 px), its line placed by
+    /// its own size; the atlas asks for the same capped glyph.
+    #[test]
+    fn large_glyphs_draw_from_a_capped_raster() {
+        let fonts = serde_json::json!([{"file":"Arimo-Regular.ttf","ascender":1854,"descender":-434,"lineGap":67,"sizeUnits":2355,"unitsPerEm":2048,"weight":400}]);
+        let ppem = |size: f64| ((size + 1.0) * 2048.0 / 2355.0 * 1e5).round() / 1e5;
+        let text = serde_json::json!({"size":153,"lines":[{"x":0,"px":10,"top":0,"glyphs":[[0,43,0,ppem(153.0)],[0,44,100,ppem(148.0)]]}]});
+        let (placed, _) = placements(&text, &fonts, false);
+        assert_eq!((placed[0].ppem, placed[0].scale), (ppem(150.0), 153.0 / 150.0));
+        assert_eq!((placed[1].ppem, placed[1].scale), (ppem(148.0), 1.0));
+        let node = serde_json::json!({"text": text});
+        let wanted: Vec<f64> = crate::glyphs::atlas_entries(&serde_json::json!({"fonts": fonts, "nodes": [node], "viewport": {"scale": 1.5}})).iter().map(|entry| entry.ppem).collect();
+        assert_eq!(wanted, vec![ppem(150.0), ppem(148.0)]);
+    }
+
+    /// A quarter-pixel glyph under a text glow takes its line's exact pen (`pens`, export.rs) for its glow, from the
+    /// line's whole pixel; rotated text has none (it draws at its exact pens anyway).
+    #[test]
+    fn glows_follow_the_exact_pens_of_quarter_pixel_lines() {
+        let fonts = serde_json::json!([{"file":"Arimo-Regular.ttf","ascender":1854,"descender":-434,"lineGap":67,"sizeUnits":2355,"unitsPerEm":2048,"weight":400}]);
+        let ppem = |size: f64| ((size + 1.0) * 2048.0 / 2355.0 * 1e5).round() / 1e5;
+        let quarter = serde_json::json!({"size":30,"subpixel":4,"lines":[{"x":0,"px":10,"top":0,"glyphs":[[0,43,0.25,ppem(30.0)],[0,44,14.5,ppem(30.0)]],"pens":[0.296875,14.453125]}]});
+        let (placed, _) = placements(&quarter, &fonts, false);
+        assert_eq!(placed.iter().map(|p| p.exact).collect::<Vec<_>>(), vec![Some(10.296875), Some(24.453125)]);
+        let (placed, _) = placements(&quarter, &fonts, true);
+        assert!(placed.iter().all(|p| p.exact.is_none()), "rotated text keeps its exact pens in x");
+    }
+
     #[test]
     fn intrinsic_requirements_detect_partial_atlases_even_while_transparent() {
         let fonts = serde_json::json!([{"file":"font.ttf","ascender":900,"descender":-300,"unitsPerEm":1000,"weight":400}]);
