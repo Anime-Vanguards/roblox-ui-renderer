@@ -393,7 +393,7 @@ pub fn glow_field(coverage: &GlyphBitmap) -> GlyphBitmap {
             }
         }
     }
-    let mut relax = |i: usize, j: usize, ni: i64, nj: i64, point: &mut Vec<(f64, f64)>, distance: &mut Vec<f64>| {
+    let relax = |i: usize, j: usize, ni: i64, nj: i64, point: &mut Vec<(f64, f64)>, distance: &mut Vec<f64>| {
         if ni < 0 || nj < 0 || ni >= h as i64 || nj >= w as i64 {
             return;
         }
@@ -768,10 +768,13 @@ impl Rasterizer {
             let layers = self.color_layers(file, glyph)?;
             if !layers.is_empty() {
                 let mut out = Vec::with_capacity(layers.len());
+                // A colour glyph's glow field is a field per layer (render/text.rs field_glow draws each in its colour)
+                let field = style.is_some_and(|style| style.split('+').any(|token| token == FIELD));
                 for &(layer, color, foreground) in layers.iter() {
                     // A layer is an outline (FreeType loads layers without FT_LOAD_COLOR too)
                     let quarter = style.and_then(|style| style.split('+').find(|token| token.starts_with('q') && token.len() == 2));
-                    out.push(GlyphLayer { bitmap: self.rasterize(file, ppem, layer, 0.0, quarter)?, color, foreground });
+                    let layer_style = if field { Some(FIELD) } else { quarter };
+                    out.push(GlyphLayer { bitmap: self.rasterize(file, ppem, layer, 0.0, layer_style)?, color, foreground });
                 }
                 let bitmap = Arc::new(GlyphBitmap { width: 0, rows: 0, left: 0, top: 0, coverage: Box::new([]), layers: out });
                 self.fonts.get_mut(file).unwrap().bitmaps.insert(key, bitmap.clone());

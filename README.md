@@ -102,7 +102,7 @@ Current limitations:
 - **Interactive state:** Plain `render` captures a single timestamp (`--time`); hover/click/scroll states require `--actions` or the desktop storybook.
 - **Minor pixel differences:** Small sub-pixel edge differences remain on color emoji edges, single pixels at thin `Path2D` corners, rotated image edges within 0.01 px of a pixel center, textured images clipped by `UICorner` at 1.5x, and color steps on rotated `UIGradient`s.
 - **Text rendering modes:** Roblox switches between whole-pixel and quarter-pixel text via a server flag. `rur` implements both and defaults to production's current whole-pixel mode (`--text-subpixel on` selects quarter-pixel; see [docs/text.md](docs/text.md#text-modes)).
-- **Blurred text `UIShadow`:** `UIShadow` (`Mode = Text` with `BlurRadius > 0`) uses full-resolution glyph outlines whereas Studio 0.747 uses a coarse distance field, causing 10–50/255 differences on a few pixels near glyph corners at small radii or when `BlurRadius > 0.4 * TextSize`. `Inset`, `ShowBehindParent`, and unblurred text shadows match exactly.
+- **Blurred text `UIShadow`:** `UIShadow` with `Mode = Text` and `BlurRadius > 0` glows from each glyph's distance field as Studio 0.747 does (color emoji in their own colors, underlines and strikethroughs too). Two differences remain: a rich-text `<mark>` highlight is drawn over the glow where Studio draws it under, and in quarter-pixel text mode a glyph's glow can sit a pixel off. `Inset`, `ShowBehindParent`, and unblurred text shadows match exactly.
 - **Partial story runs:** Stories relying on Studio-only instances, yielding mounts, or unemulated services run as far as they can; `rur sweep` classifies these separately from renderer bugs.
 
 ## Contributing, security, and license

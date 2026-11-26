@@ -795,6 +795,64 @@ fn run_paint(text: &Value, run: Option<&Value>) -> ([f64; 3], f64) {
         (c, a)
     }
 }
+/// A rich text run's mark (highlight), underline or strikethrough
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Decoration {
+    Mark,
+    Underline,
+    Strike,
+}
+/// A decoration's rect (device px, in the text's own space), the same with the line's exact thickness (a text
+/// shadow's glow surrounds that one), its run and the device px a glyph-field texel of its run's text size spans
+/// (field_glow's k)
+struct DecorationRect {
+    kind: Decoration,
+    rect: [f64; 4],
+    exact: [f64; 4],
+    run: usize,
+    k: f64,
+}
+/// Every line's rich-text marks, underlines and strikethroughs, run by run (a mark before the run's lines):
+/// quads_memo draws them (marks under the glyphs, the lines over them), field_glow glows around them
+fn decorations(text: &Value, fonts: &Value, lines: &[Line], scale: f64) -> Vec<DecorationRect> {
+    let mut out = Vec::new();
+    for line in lines {
+        for segment in &line.runs {
+            let ri = num(&segment[0], 0.0) as usize;
+            let run = &text["runs"][ri];
+            let rx0 = num(&segment[1], 0.0);
+            let rx1 = num(&segment[2], 0.0);
+            if rx1 <= rx0 || run.is_null() {
+                continue;
+            }
+            let p = line
+                .placements
+                .iter()
+                .find(|p| p.run == Some(ri))
+                .unwrap_or(&line.main);
+            let font = &fonts[p.font as usize];
+            let size = font_size(font, p.ppem);
+            let (face, face_ppem) = line_face(text, Some(ri), font, p.ppem);
+            let top = line.baseline - ascent(face, face_ppem);
+            let t = (size / scale / 20.0 - 1e-9).ceil() * scale;
+            let l = line.ox + rx0;
+            let r = line.ox + rx1;
+            let k = size * p.scale / 56.0;
+            let mut push = |kind, rect, exact| out.push(DecorationRect { kind, rect, exact, run: ri, k });
+            if run["mark"].is_object() && alpha(&run["mark"]) > 0.0 {
+                push(Decoration::Mark, [l, top, r, top + size], [l, top, r, top + size]);
+            }
+            if run["underline"].as_bool() == Some(true) {
+                push(Decoration::Underline, [l, top + size - t.floor().max(1.0), r, top + size], [l, top + size - t, r, top + size]);
+            }
+            if run["strike"].as_bool() == Some(true) {
+                let y = top + (size / 2.0).ceil() + 1.0;
+                push(Decoration::Strike, [l, y, r, y + t.ceil().max(1.0)], [l, y, r, y + t]);
+            }
+        }
+    }
+    out
+}
 fn quads(
     node: &Value,
     fonts: &Value,
@@ -817,59 +875,15 @@ fn quads_memo(
         std::array::from_fn(|i| ((num(&node["rect"][i], 0.0) as f32) * (scale as f32)) as f64);
     let mut marks = Vec::new();
     let mut decor = Vec::new();
-    for line in &lines {
-        for segment in &line.runs {
-            let ri = num(&segment[0], 0.0) as usize;
-            let run = &text["runs"][ri];
-            let rx0 = num(&segment[1], 0.0);
-            let rx1 = num(&segment[2], 0.0);
-            if rx1 <= rx0 || run.is_null() {
-                continue;
-            }
-            let p = line
-                .placements
-                .iter()
-                .find(|p| p.run == Some(ri))
-                .unwrap_or(&line.main);
-            let font = &fonts[p.font as usize];
-            let size = font_size(font, p.ppem);
-            let (face, face_ppem) = line_face(text, Some(ri), font, p.ppem);
-            let top = line.baseline - ascent(face, face_ppem);
-            let t = (size / scale / 20.0 - 1e-9).ceil() * scale;
-            let l = line.ox + rx0;
-            let r = line.ox + rx1;
-            if run["mark"].is_object() && alpha(&run["mark"]) > 0.0 {
-                marks.push(rect_quad(
-                    [l, top, r, top + size],
-                    color(&run["mark"]["color"], [0.0; 3]),
-                    alpha(&run["mark"]),
-                    gradient,
-                    rect,
-                ));
-            }
-            let (c, a) = run_paint(text, Some(run));
-            if a <= 0.0 {
-                continue;
-            }
-            if run["underline"].as_bool() == Some(true) {
-                decor.push(rect_quad(
-                    [l, top + size - t.floor().max(1.0), r, top + size],
-                    c,
-                    a,
-                    gradient,
-                    rect,
-                ));
-            }
-            if run["strike"].as_bool() == Some(true) {
-                let y = top + (size / 2.0).ceil() + 1.0;
-                decor.push(rect_quad(
-                    [l, y, r, y + t.ceil().max(1.0)],
-                    c,
-                    a,
-                    gradient,
-                    rect,
-                ));
-            }
+    for d in decorations(text, fonts, &lines, scale) {
+        let run = &text["runs"][d.run];
+        if d.kind == Decoration::Mark {
+            marks.push(rect_quad(d.rect, color(&run["mark"]["color"], [0.0; 3]), alpha(&run["mark"]), gradient, rect));
+            continue;
+        }
+        let (c, a) = run_paint(text, Some(run));
+        if a > 0.0 {
+            decor.push(rect_quad(d.rect, c, a, gradient, rect));
         }
     }
     let mut out = marks;
@@ -2025,14 +2039,60 @@ fn glow_strength(w: f64) -> f64 {
     let ((x0, y0), (x1, y1)) = (MEASURED[i - 1], MEASURED[i]);
     y0 + (y1 - y0) * (w - x0) / (x1 - x0)
 }
+/// A glyph field's quad (device px, [x0, y0, x1, y1]): the field bitmap at pen `x` and `baseline`, `k` device px a
+/// texel. Its corners are rounded to whole device pixels and the field is stretched over that quad
+/// (fixtures/shadow-probe-glow-pens.luau, 1.5x: a stem's glow lies 0.43 px left of the exact place at TextSize 40,
+/// 0.36 px right at 60 and exactly there at 56, and at 80 its baseline is 0.19 px lower and its top 0.09 px, the
+/// quad growing by 0.29 px); a rotated label's stay exact (`exact`), as its glyphs' do (shadow-probe-text's
+/// turned label).
+fn field_quad(x: f64, baseline: f64, bitmap: &GlyphBitmap, k: f64, exact: bool) -> [f64; 4] {
+    let (x0, y0) = (x + bitmap.left as f64 * k, baseline - bitmap.top as f64 * k);
+    let quad = [x0, y0, x0 + bitmap.w as f64 * k, y0 + bitmap.h as f64 * k];
+    if exact { quad } else { quad.map(snap) }
+}
+/// An underline's or a strikethrough's glow under a text shadow of half-width `width` (W, device px): a UIShadow of
+/// the line's exact rect (coverage.rs shadow_mesh and shadow_alpha8, the profile texture), sigma = W / 2, vertex
+/// alpha `va`, whatever the line's thinness. The alpha bytes over the rect grown by 3 sigma on whole pixels, as
+/// (x, y, w, h, bytes). Measured on fixtures/shadow-probe-glow-marks.luau, 1.5x: a 3 px underline at BlurRadius 2
+/// reads 197, 186, 133, 78, 36, 13, 3 from its middle, and a 1.5 px one (drawn 1 px thick) glows from 1.5 px.
+fn decoration_glow(exact: [f64; 4], width: f64, va: u32, scale: f64) -> (i64, i64, usize, usize, Vec<u8>) {
+    let [l, t, r, b] = exact;
+    if r <= l || b <= t || va == 0 || width <= 0.0 {
+        return (0, 0, 0, 0, Vec::new());
+    }
+    let sigma = width / 2.0;
+    let reach = 3.0 * sigma;
+    let corners = super::coverage::shadow_mesh(r - l, b - t, sigma, [0.0; 4], scale);
+    let (cx, cy) = ((l + r) / 2.0, (t + b) / 2.0);
+    let (x0, y0) = ((l - reach).floor() as i64, (t - reach).floor() as i64);
+    let (w, h) = (((r + reach).ceil() as i64 - x0) as usize, ((b + reach).ceil() as i64 - y0) as usize);
+    let mut bytes = Vec::with_capacity(w * h);
+    for py in y0..y0 + h as i64 {
+        for px in x0..x0 + w as i64 {
+            let (u, v) = (px as f64 + 0.5 - cx, py as f64 + 0.5 - cy);
+            // (quadrants split at the first pixel centre with a non-negative offset, as a frame's shadow's)
+            let quadrant = match (u < 0.0, v < 0.0) {
+                (true, true) => 0,
+                (false, true) => 1,
+                (false, false) => 2,
+                (true, false) => 3,
+            };
+            bytes.push(super::coverage::shadow_alpha8(corners[quadrant].d(u.abs(), v.abs()), va));
+        }
+    }
+    (x0, y0, w, h, bytes)
+}
 /// A text shadow's glow from each glyph's distance field (glyphs.rs glow_field), Studio 0.747: the field's
 /// texture drawn as a quad at the glyph's pen, the text size / 56 device px a texel, sampled bilinearly
 /// (8-bit weights). The texture's value f (0..1) stands for (f - 0.5) x 50 texels from the edge, inside
 /// positive (the field is stored at 5 bytes a texel, so a glow is 2 % narrower than its W); alpha is
 /// glow_strength(2 x BlurRadius / 50 texels) x the smoothstep of f over 0.5 -/+ min(w, GLOW_WINDOW_CAP), w = W / (50
 /// texels in device px).
-/// Glyphs over each other blend. None when a glyph has no field in the atlas or is a colour
-/// glyph (the coverage glow of text_shadow draws those).
+/// Each quad lies on whole device pixels (field_quad). Glyphs over each other blend. A colour glyph glows from a
+/// field per layer, each in its layer's colour (the shadow's for a foreground layer), bottom first
+/// (fixtures/shadow-probe-glow-marks.luau: 0 px on six emoji cells). Underlines and strikethroughs glow over the
+/// glyphs' glows (decoration_glow). None when a glyph has no field in the atlas (the coverage glow of text_shadow
+/// draws the label then).
 fn field_glow(
     placed: &[Placement],
     text: &Value,
@@ -2042,14 +2102,26 @@ fn field_glow(
     opacity: f64,
     width: f64,
     scale: f64,
+    decor: &[DecorationRect],
 ) -> Result<Option<Vec<TextQuad>>, TextError> {
     struct Field {
         bitmap: GlyphBitmap,
+        /// The quad's corners, on whole device pixels (exact under a rotation)
         x0: f64,
         y0: f64,
+        x1: f64,
+        y1: f64,
+        /// Device px a texel (the text size / 56)
         k: f64,
+        /// The glow's colour and opacity (a colour glyph's layer: its palette colour)
+        rgb: [f64; 3],
+        alpha: f64,
     }
     let runs = arr(&text["runs"]);
+    // The glow's strength goes by the label's text size for every glyph, a rich run's larger or smaller ones
+    // included, while its window goes by the glyph's own (shadow-probe-text: a <font size="60"> glyph of a
+    // TextSize 40 label glows 11 % weaker than at its own size at 1x, 2 % at 1.5x, within its own window)
+    let label_k = text["size"].as_f64().filter(|size| *size > 0.0).map(|size| size * n(text, "quadScale", 1.0) / 56.0);
     let mut fields = Vec::new();
     for p in placed.iter().filter(|p| p.shown) {
         let font = &fonts[p.font as usize];
@@ -2061,23 +2133,47 @@ fn field_glow(
             return Ok(None);
         };
         let Some(bitmap) = bitmap else { continue };
-        if !bitmap.layers.is_empty() {
-            return Ok(None);
-        }
+        let layers: Vec<(GlyphBitmap, [f64; 3], f64)> = if bitmap.layers.is_empty() {
+            vec![(bitmap, rgb, 1.0)]
+        } else {
+            bitmap
+                .layers
+                .into_iter()
+                .map(|layer| {
+                    let [r, g, b, a] = layer.color.map(f64::from);
+                    if layer.foreground { (layer.bitmap, rgb, 1.0) } else { (layer.bitmap, [r, g, b], a / 255.0) }
+                })
+                .collect()
+        };
         // Device px a texel: the text size / 56
         let k = font_size(font, p.ppem) * p.scale / 56.0;
-        fields.push(Field { x0: p.x + bitmap.left as f64 * k, y0: p.baseline - bitmap.top as f64 * k, k, bitmap });
+        // The pen: a quarter-pixel text's at its quarter (its glyph bitmaps carry it). Studio places the glow at the
+        // exact pen, which the scene does not hold: the quarter is within 1/8 px of it (shadow-probe-glow-pens with
+        // FFlagLegacyTextSubpixelRendering on: every glyph at the exact pen plus the line's whole pixel)
+        let pen = p.x + p.quarter.map_or(0.0, |quarter| quarter as f64 / 4.0);
+        for (bitmap, rgb, alpha) in layers {
+            let [x0, y0, x1, y1] = field_quad(pen, p.baseline, &bitmap, k, p.unsnapped);
+            fields.push(Field { x0, y0, x1, y1, k, rgb, alpha, bitmap });
+        }
     }
-    if fields.is_empty() {
+    // Underlines and strikethroughs glow (decoration_glow); a mark (highlight) does not, and Studio draws it under
+    // the glow (here it stays over it: notes/images.md)
+    let decor: Vec<&DecorationRect> = decor.iter().filter(|d| d.kind != Decoration::Mark).collect();
+    if fields.is_empty() && decor.is_empty() {
         return Ok(Some(Vec::new()));
     }
+    // (a line's glow reaches 3 sigma = 1.5 W past its rect)
+    let reach = 1.5 * width;
     let bounds = fields.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, f| {
         [
             b[0].min(f.x0),
             b[1].min(f.y0),
-            b[2].max(f.x0 + f.bitmap.w as f64 * f.k),
-            b[3].max(f.y0 + f.bitmap.h as f64 * f.k),
+            b[2].max(f.x1),
+            b[3].max(f.y1),
         ]
+    });
+    let bounds = decor.iter().fold(bounds, |b, d| {
+        [b[0].min(d.exact[0] - reach), b[1].min(d.exact[1] - reach), b[2].max(d.exact[2] + reach), b[3].max(d.exact[3] + reach)]
     });
     let (lx, ly) = (bounds[0].floor(), bounds[1].floor());
     let (lw, lh) = ((bounds[2].ceil() - lx) as usize, (bounds[3].ceil() - ly) as usize);
@@ -2088,6 +2184,26 @@ fn field_glow(
         return Err(TextError("text shadow exceeds allocation limit".into()));
     }
     let mut layer = vec![0.0f64; lw * lh * 4];
+    fn blend(layer: &mut [f64], lw: usize, lh: usize, x: i64, y: i64, rgb: [f64; 3], a: f64) {
+        if a <= 0.0 || x < 0 || y < 0 || x >= lw as i64 || y >= lh as i64 {
+            return;
+        }
+        let k = (y as usize * lw + x as usize) * 4;
+        for c in 0..3 {
+            layer[k + c] = rgb[c] * a + layer[k + c] * (1.0 - a);
+        }
+        layer[k + 3] = a + layer[k + 3] * (1.0 - a);
+    }
+    // (the vertex alpha: the glyphs' strength at the label's text size, faded by the shadow's Transparency)
+    let line_glow = |layer: &mut [f64], d: &DecorationRect| {
+        let strength = glow_strength(width * scale / 1.5 / (label_k.unwrap_or(d.k) * 50.0));
+        let va = (255.0 * strength * opacity - 0.5).ceil().max(0.0) as u32;
+        let (x0, y0, w, _, bytes) = decoration_glow(d.exact, width, va, scale);
+        for (i, a) in bytes.iter().enumerate() {
+            let (x, y) = (x0 + (i % w) as i64, y0 + (i / w) as i64);
+            blend(layer, lw, lh, x - lx as i64, y - ly as i64, rgb, *a as f64 / 255.0);
+        }
+    };
     for f in &fields {
         // The window of field values the glow ramps over, in the texture's units (0..1 for -25..25 texels):
         // w = W / (50 texels) either side of the edge (0.5), at most GLOW_WINDOW_CAP; past that the glow keeps
@@ -2097,17 +2213,18 @@ fn field_glow(
         let low = 0.5 - half;
         // (the strength goes by 2 x BlurRadius device px, which is W only at 1.5x: at 1x the window is W =
         // 3 x BlurRadius wide and the strength that of 2 x BlurRadius, shadow-probe-field-l2 to -l4 at 1x)
-        let strength = glow_strength(width * scale / 1.5 / (f.k * 50.0));
+        let strength = glow_strength(width * scale / 1.5 / (label_k.unwrap_or(f.k) * 50.0));
         let (w, h) = (f.bitmap.w as usize, f.bitmap.h as usize);
         let texel = |i: usize, j: usize| f.bitmap.coverage[j.min(h - 1) * w + i.min(w - 1)] as f64;
-        let (x1, y1) = (f.x0 + w as f64 * f.k, f.y0 + h as f64 * f.k);
+        // The texture stretched over the whole-pixel quad: device px a texel on each axis
+        let (kx, ky) = ((f.x1 - f.x0) / w as f64, (f.y1 - f.y0) / h as f64);
         // The quad's pixels: centres inside it
-        let (first_x, last_x) = ((f.x0 - 0.5).ceil() as i64, (x1 - 0.5).ceil() as i64);
-        let (first_y, last_y) = ((f.y0 - 0.5).ceil() as i64, (y1 - 0.5).ceil() as i64);
+        let (first_x, last_x) = ((f.x0 - 0.5).ceil() as i64, (f.x1 - 0.5).ceil() as i64);
+        let (first_y, last_y) = ((f.y0 - 0.5).ceil() as i64, (f.y1 - 0.5).ceil() as i64);
         for py in first_y..last_y {
             for px in first_x..last_x {
-                let u = ((px as f64 + 0.5 - f.x0) / f.k - 0.5).clamp(0.0, (w - 1) as f64);
-                let v = ((py as f64 + 0.5 - f.y0) / f.k - 0.5).clamp(0.0, (h - 1) as f64);
+                let u = ((px as f64 + 0.5 - f.x0) / kx - 0.5).clamp(0.0, (w - 1) as f64);
+                let v = ((py as f64 + 0.5 - f.y0) / ky - 0.5).clamp(0.0, (h - 1) as f64);
                 let (i, j) = (u.floor() as usize, v.floor() as usize);
                 // (a GPU's filter weights have 8 bits)
                 let (su, sv) = (((u - i as f64) * 256.0 + 0.5).floor() / 256.0, ((v - j as f64) * 256.0 + 0.5).floor() / 256.0);
@@ -2115,25 +2232,23 @@ fn field_glow(
                 let bottom = texel(i, j + 1) + (texel(i + 1, j + 1) - texel(i, j + 1)) * su;
                 let t = ((top + (bottom - top) * sv) / 255.0 - low) / (2.0 * half);
                 let t = t.clamp(0.0, 1.0);
-                let a = strength * t * t * (3.0 - 2.0 * t);
+                // (each glyph's glow is faded by the shadow's Transparency before they blend: overlaps of a
+                // half transparent shadow are up to 11 levels brighter than the faded blend, shadow-probe-text)
+                let a = strength * t * t * (3.0 - 2.0 * t) * opacity * f.alpha;
                 if a <= 0.0 {
                     continue;
                 }
-                let (x, y) = (px - lx as i64, py - ly as i64);
-                if x < 0 || y < 0 || x >= lw as i64 || y >= lh as i64 {
-                    continue;
-                }
-                let k = (y as usize * lw + x as usize) * 4;
-                for c in 0..3 {
-                    layer[k + c] = rgb[c] * a + layer[k + c] * (1.0 - a);
-                }
-                layer[k + 3] = a + layer[k + 3] * (1.0 - a);
+                blend(&mut layer, lw, lh, px - lx as i64, py - ly as i64, f.rgb, a);
             }
         }
     }
+    // (over the glyphs' glows, as quads_memo draws the lines over the glyphs)
+    for d in decor.iter().copied() {
+        line_glow(&mut layer, d);
+    }
     let mut rgba = vec![0u8; lw * lh * 4];
     for k in (0..rgba.len()).step_by(4) {
-        let a = snap(layer[k + 3] * opacity * 255.0).clamp(0.0, 255.0);
+        let a = snap(layer[k + 3] * 255.0).clamp(0.0, 255.0);
         if a > 0.0 {
             for c in 0..3 {
                 rgba[k + c] = premul(snap(layer[k + c] / layer[k + 3]).min(255.0), a);
@@ -2244,9 +2359,10 @@ fn coverage_distances(coverage: &[f64], w: usize, h: usize, pad: usize) -> Vec<f
 }
 /// A UIShadow with Mode = Text (Studio 0.747, fixtures/shadow-probe-text.luau and -text2): the label's
 /// glyphs in the shadow's colour and transparency, whatever the text's own colour, transparency, gradient
-/// and strokes. `width` 0 (BlurRadius 0) is the text's own raster; above 0 each glyph glows by its distance
-/// field (text_shadow_profile), no wider than the field reaches (TEXT_SHADOW_REACH, text_shadow_gain).
-/// The quads are placed like prep_text's; a glow is one unrotated layer.
+/// and strokes. `width` 0 (BlurRadius 0) is the text's own raster; above 0 each glyph glows from its distance
+/// field texture and each underline and strikethrough from its rect (field_glow), or, while a glyph's field is
+/// not in the atlas, from the glyphs' coverage (text_shadow_profile, no wider than TEXT_SHADOW_REACH,
+/// text_shadow_gain). The quads are placed like prep_text's; a glow is one unrotated layer.
 pub fn text_shadow(
     node: &Value,
     fonts: &Value,
@@ -2297,8 +2413,10 @@ pub fn text_shadow(
     }
     // The glow's glyphs: the unhinted outlines at the text's pens (an atlas built before they were
     // wanted: the text's own bitmaps)
-    let (placed, _) = placements(&plain["text"], fonts, node["matrix"].is_array());
-    if let Some(quads) = field_glow(&placed, &plain["text"], fonts, assets, rgb, opacity, width, scale)? {
+    let (placed, lines) = placements(&plain["text"], fonts, node["matrix"].is_array());
+    // (the decorations from the label's own runs: the shadow's copy has no marks)
+    let decor = decorations(&node["text"], fonts, &lines, scale);
+    if let Some(quads) = field_glow(&placed, &plain["text"], fonts, assets, rgb, opacity, width, scale, &decor)? {
         return Ok(quads);
     }
     let mut glyphs = Vec::new();
@@ -2883,6 +3001,62 @@ mod tests {
     }
     /// Distances to a bitmap's edge: half a pixel from the centre of a full edge pixel, less where the
     /// edge pixel is partly covered
+    /// A glyph's glow quad lies on whole device pixels with its field stretched over it; a rotated label's stays
+    /// exact (fixtures/shadow-probe-glow-pens.luau: SourceSans "I", whose field is 56 x 82 texels from (-22, 56))
+    #[test]
+    fn a_glow_field_quad_lies_on_whole_pixels() {
+        let field = GlyphBitmap { coverage: Arc::from(vec![0u8; 56 * 82]), w: 56, h: 82, left: -22, top: 56, slanted: false, layers: Vec::new() };
+        // TextSize 40 at 1.5x (60 px, 15 / 14 px a texel): 0.43 px left of the exact place, 0.14 px taller
+        let k = 60.0 / 56.0;
+        assert_eq!(field_quad(15.0, 236.0, &field, k, false), [-9.0, 176.0, 51.0, 264.0]);
+        let exact = field_quad(15.0, 236.0, &field, k, true);
+        assert!((exact[0] - (15.0 - 22.0 * k)).abs() < 1e-12 && (exact[3] - (176.0 + 82.0 * k)).abs() < 1e-12);
+        // TextSize 56 at 1.5x: 1.5 px a texel puts every corner on a whole pixel already
+        assert_eq!(field_quad(15.0, 236.0, &field, 1.5, false), field_quad(15.0, 236.0, &field, 1.5, true));
+    }
+    /// An underline glows as a UIShadow of its rect, sigma = W / 2, at full vertex alpha whatever its thinness
+    /// (fixtures/shadow-probe-glow-marks.luau, 1.5x: Studio's bytes around the 3 px underline of TextSize 40 at
+    /// BlurRadius 2 and 4, from the outside in)
+    #[test]
+    fn an_underline_glows_like_a_shadow_of_its_rect() {
+        let cases: [(f64, &[u8]); 2] = [
+            (4.0, &[3, 13, 36, 78, 133, 186, 197]),
+            (8.0, &[1, 2, 4, 8, 15, 25, 39, 57, 80, 104, 132, 158, 164]),
+        ];
+        for (width, studio) in cases {
+            let (x0, y0, w, h, bytes) = decoration_glow([0.0, 0.0, 330.0, 3.0], width, 255, 1.5);
+            assert_eq!(bytes.len(), w * h);
+            let at = |y: i64| bytes[(y - y0) as usize * w + (165 - x0) as usize];
+            let n = studio.len() as i64;
+            // row 1 is the line's middle
+            let above: Vec<u8> = (0..n).map(|i| at(1 - (n - 1) + i)).collect();
+            let below: Vec<u8> = (0..n).map(|i| at(1 + (n - 1) - i)).collect();
+            assert_eq!(above, studio, "W {width}");
+            assert_eq!(below, studio, "W {width}");
+        }
+        // Nothing for an empty line or a clear shadow
+        assert!(decoration_glow([0.0, 0.0, 0.0, 3.0], 4.0, 255, 1.5).4.is_empty());
+        assert!(decoration_glow([0.0, 0.0, 30.0, 3.0], 4.0, 0, 1.5).4.is_empty());
+    }
+    /// A line's glow takes its exact thickness: at 1.5x a 30 px text's lines are 1.5 px, the underline drawn 1 px
+    /// thick and the strikethrough 2 (fixtures/shadow-probe-glow-marks.luau, TextSize 20 and 50)
+    #[test]
+    fn a_line_glows_from_its_exact_thickness() {
+        let fonts = serde_json::json!([{"ascender":900,"descender":-300,"unitsPerEm":1000,"lineGap":0,"weight":400}]);
+        let ppem = 31.0 * 1000.0 / 1200.0;
+        let text = serde_json::json!({"runs":[{"underline":true,"strike":true,"mark":{"color":[0,1,0]}}],"lines":[{"x":10,"top":20,"glyphs":[[0,2,0,ppem,0]],"runs":[[0,0,40]]}]});
+        let (_, lines) = placements(&text, &fonts, false);
+        let found = decorations(&text, &fonts, &lines, 1.5);
+        let kinds: Vec<Decoration> = found.iter().map(|d| d.kind).collect();
+        assert_eq!(kinds, [Decoration::Mark, Decoration::Underline, Decoration::Strike]);
+        let (mark, under, strike) = (&found[0], &found[1], &found[2]);
+        assert_eq!(mark.rect, mark.exact);
+        assert_eq!((under.rect[3] - under.rect[1], under.exact[3] - under.exact[1]), (1.0, 1.5));
+        assert_eq!(under.rect[3], under.exact[3]);
+        assert_eq!((strike.rect[3] - strike.rect[1], strike.exact[3] - strike.exact[1]), (2.0, 1.5));
+        assert_eq!(strike.rect[1], strike.exact[1]);
+        assert!(found.iter().all(|d| d.run == 0 && (d.k - 30.0 / 56.0).abs() < 1e-12));
+    }
     #[test]
     fn coverage_distances_place_the_edge_within_a_pixel() {
         let d = coverage_distances(&[255.0; 16], 4, 4, 3);

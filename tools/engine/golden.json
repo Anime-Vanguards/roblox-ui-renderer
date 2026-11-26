@@ -464,6 +464,18 @@
 			"digest": "3e3919fd285821af9cbcbf33b9072fae033e5359b897c83b8ae114b3e51c88cb",
 			"status": "ok"
 		},
+		"fast/edit/shadow-probe-glow-marks": {
+			"digest": "7b8f9b7ed33a9ad954dc1c6c8d54ea1586f0699192dd5089c9328d79d01785f9",
+			"status": "ok"
+		},
+		"fast/edit/shadow-probe-glow-pens": {
+			"digest": "3855b36e0100e7a521e86d5e3c8d1e421eac5371e8dedfdb4c8da00d0934fef3",
+			"status": "ok"
+		},
+		"fast/edit/shadow-probe-glow-sizes": {
+			"digest": "cd08bd3e8aef4261b0deaf5f81bbda07457be80f8be9ab3a350d0840ec4cef14",
+			"status": "ok"
+		},
 		"fast/edit/shadow-probe-h": {
 			"digest": "4288669bf9054b757b9abd319eee3499fe0b675345ef4f0621e00b9698fdaee1",
 			"status": "ok"
@@ -1588,6 +1600,18 @@
 			"digest": "291d8ca27180e85b82e95a490fcf3d7f1a7664324deec266d5fac7831349352a",
 			"status": "ok"
 		},
+		"fixtures/edit/shadow-probe-glow-marks": {
+			"digest": "8b828673c744bdaebbfed6120740df7f73f9eb25d6dc6ef77b2f816d6ff7a209",
+			"status": "ok"
+		},
+		"fixtures/edit/shadow-probe-glow-pens": {
+			"digest": "d07ee5d763281a0545ebabf482535b4739d32803749cbf361adc070a9d920012",
+			"status": "ok"
+		},
+		"fixtures/edit/shadow-probe-glow-sizes": {
+			"digest": "cb9b4350d54bcbbf69f2f7c04ce0543d237d65c36026806ac1dd097eba5afbaf",
+			"status": "ok"
+		},
 		"fixtures/edit/shadow-probe-h": {
 			"digest": "9ea9e1a3739ad40ed322e4adbe987a23dbbaeb26fc4716794044b2ad432ff88e",
 			"status": "ok"
@@ -2664,6 +2688,18 @@
 			"digest": "33e48258e8411e8a49b26d3fcf986eae970a7d95a93d49cd4c23516c4dc51fbc",
 			"status": "ok"
 		},
+		"fixtures/play/shadow-probe-glow-marks": {
+			"digest": "f50fa9bff99774f7e77fe4f6f7d3fe621db3fc717a169db01052fb61cbadfb59",
+			"status": "ok"
+		},
+		"fixtures/play/shadow-probe-glow-pens": {
+			"digest": "864e513f199c374b100024653032c1f895cf5037c8e04118c1b5fe13449e4e3b",
+			"status": "ok"
+		},
+		"fixtures/play/shadow-probe-glow-sizes": {
+			"digest": "273b09f632ebb74d697942dd6e9c65d88d4fe9d974c00b2ecc0eaeee2965b17d",
+			"status": "ok"
+		},
 		"fixtures/play/shadow-probe-h": {
 			"digest": "bde5c5c3fe1d63d98978753ec8dd4962e27825ef6e607a5022c8a0320f13fac8",
 			"status": "ok"
@@ -3337,7 +3373,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-26T01:12:25.621Z",
+	"recorded": "2026-11-26T17:39:08.422Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

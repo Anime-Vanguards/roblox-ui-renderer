@@ -63,6 +63,8 @@ Fixtures: `corners`, `strokes`, `stroke-*`.
 
 Rendered via a blur-profile mesh honoring `BlurRadius`, `Offset`, and rounded corners on thin shapes. Sibling shadows composite sequentially like Studio. Studio-gated properties (`Inset`, `ShowBehindParent`, `Mode = Text` where disabled) follow Studio's active behavior.
 
+- **`Mode = Text`:** with `BlurRadius` 0, the text's own glyphs in the shadow's color. Above 0, each glyph glows from an 8-bit distance field of the glyph at TextSize 56 (56 texels per text size), drawn on a quad whose corners are rounded to whole device pixels and faded by the shadow's `Transparency` before the glyphs' glows blend. Color emoji glow from one field per color layer, in the layer's own color. Rich-text underlines and strikethroughs glow like a shadow of their rect (sigma = half the glow width). A `<mark>` highlight does not glow; Studio draws it under the glow, `rur` over it.
+
 Fixtures: `shadows*`, `shadow-probe-*`.
 
 ## Path2D
