@@ -1159,6 +1159,8 @@ export async function compare(args) {
 	// Players:GetNameFromUserIdAsync answers it for its own id
 	const player = studioResult.localPlayer || null;
 	const summary = await withStudioPlayer(player, () => withStudioOrder(orderFile, () => withRecordedClock(clockFile, () => render(renderArgs))));
+	// A render that drew no picture (summary.failure: a GPU limit at a high device scale, say) has nothing to compare
+	if (!summary.png) throw new Error(`rur drew no picture of ${name}: ${summary.failure || (summary.renderErrors || []).join("; ") || "no png"} (${path.join(outDir, "rur", "summary.json")})`);
 	const ours = readPng(summary.png);
 	const unstable = unstableOf(fixtureSource);
 	const pixels = comparePngs(ours, studioPng, path.join(outDir, "diff.png"), unstable, dpi);
