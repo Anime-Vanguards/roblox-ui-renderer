@@ -187,7 +187,7 @@ fn line_face<'a>(text: &'a Value, run: Option<usize>, font: &'a Value, ppem: f64
     let scaled = (size + 1.0) * n(metrics, "unitsPerEm", 1.0) / size_units(metrics);
     (metrics, (scaled * 1e5).round() / 1e5)
 }
-fn placements(text: &Value, fonts: &Value, rotated: bool) -> (Vec<Placement>, Vec<Line>) {
+fn placements(text: &Value, fonts: &Value, rotated: bool, device_scale: f64) -> (Vec<Placement>, Vec<Line>) {
     let mut out = Vec::new();
     let mut lines = Vec::new();
     for line in arr(&text["lines"]) {
@@ -246,7 +246,7 @@ fn placements(text: &Value, fonts: &Value, rotated: bool) -> (Vec<Placement>, Ve
                 .unwrap_or(base);
             // A glyph larger than the client rasterizes is drawn from its raster at that size, its quad scaled up
             // (glyphs.rs raster_ppem); its line keeps the glyph's own size
-            let (raster_ppem, factor) = crate::glyphs::raster_ppem(font, ppem);
+            let (raster_ppem, factor) = crate::glyphs::raster_ppem(font, ppem, device_scale);
             let (raster_size, scale) = (font_size(font, raster_ppem), scale * factor);
             let p = Placement {
                 font: fi as u32,
@@ -504,7 +504,7 @@ fn glyph_draws<'a>(
 /// This examines exported layout only; it never copies coverage or rasterizes a glyph.
 /// As in cli/rur.mjs atlasEntries, intrinsic requirements ignore opacity and visibility.
 pub fn glyph_requirements(node: &Value, fonts: &Value, scale: f64) -> Vec<Vec<GlyphKey>> {
-    let (placements, _) = placements(&node["text"], fonts, node["matrix"].is_array());
+    let (placements, _) = placements(&node["text"], fonts, node["matrix"].is_array(), scale);
     let mut seen = std::collections::HashSet::new();
     let mut requirements = Vec::new();
     for draw in glyph_draws(node, &placements, scale, true) {
@@ -877,7 +877,7 @@ fn quads_memo(
     mut memo: Option<&mut GlyphMemo>,
 ) -> Result<Vec<Quad>, TextError> {
     let text = &node["text"];
-    let (placements, lines) = placements(text, fonts, node["matrix"].is_array());
+    let (placements, lines) = placements(text, fonts, node["matrix"].is_array(), scale);
     let gradient = &node["gradient"];
     let rect =
         std::array::from_fn(|i| ((num(&node["rect"][i], 0.0) as f32) * (scale as f32)) as f64);
@@ -2425,7 +2425,7 @@ pub fn text_shadow(
     }
     // The glow's glyphs: the unhinted outlines at the text's pens (an atlas built before they were
     // wanted: the text's own bitmaps)
-    let (placed, lines) = placements(&plain["text"], fonts, node["matrix"].is_array());
+    let (placed, lines) = placements(&plain["text"], fonts, node["matrix"].is_array(), scale);
     // (the decorations from the label's own runs: the shadow's copy has no marks)
     let decor = decorations(&node["text"], fonts, &lines, scale);
     if let Some(quads) = field_glow(&placed, &plain["text"], fonts, assets, rgb, opacity, width, scale, &decor)? {
@@ -2674,20 +2674,30 @@ mod tests {
 
     use super::*;
 
-    /// A glyph over 150 px is rasterized at 150 px and drawn on a quad scaled up to its size (glyphs.rs
-    /// raster_ppem; LegacyArial, Arimo at 1.5 x the TextSize, at TextSize 68 and 1.5x: 153 px), its line placed by
-    /// its own size; the atlas asks for the same capped glyph.
+    /// A glyph over 100 logical px is rasterized at 100 logical px and drawn on a quad scaled up to its size
+    /// (glyphs.rs raster_ppem; LegacyArial, Arimo at 1.5 x the TextSize, at TextSize 68: 102 logical px), its line
+    /// placed by its own size; the atlas asks for the same capped glyph. The cap is in logical px: 150 device px at
+    /// 1.5x, 200 at 2x, 300 at 3x, 100 at 1x.
     #[test]
     fn large_glyphs_draw_from_a_capped_raster() {
         let fonts = serde_json::json!([{"file":"Arimo-Regular.ttf","ascender":1854,"descender":-434,"lineGap":67,"sizeUnits":2355,"unitsPerEm":2048,"weight":400}]);
         let ppem = |size: f64| ((size + 1.0) * 2048.0 / 2355.0 * 1e5).round() / 1e5;
-        let text = serde_json::json!({"size":153,"lines":[{"x":0,"px":10,"top":0,"glyphs":[[0,43,0,ppem(153.0)],[0,44,100,ppem(148.0)]]}]});
-        let (placed, _) = placements(&text, &fonts, false);
-        assert_eq!((placed[0].ppem, placed[0].scale), (ppem(150.0), 153.0 / 150.0));
-        assert_eq!((placed[1].ppem, placed[1].scale), (ppem(148.0), 1.0));
-        let node = serde_json::json!({"text": text});
-        let wanted: Vec<f64> = crate::glyphs::atlas_entries(&serde_json::json!({"fonts": fonts, "nodes": [node], "viewport": {"scale": 1.5}})).iter().map(|entry| entry.ppem).collect();
-        assert_eq!(wanted, vec![ppem(150.0), ppem(148.0)]);
+        for scale in [1.0_f64, 1.5, 2.0, 3.0] {
+            // TextSize 68 and 66 in LegacyArial: 102 and 99 logical px
+            let (over, under) = ((102.0 * scale).round(), (99.0 * scale).round());
+            let cap = 100.0 * scale;
+            let text = serde_json::json!({"size":over,"lines":[{"x":0,"px":10,"top":0,"glyphs":[[0,43,0,ppem(over)],[0,44,100,ppem(under)]]}]});
+            let (placed, _) = placements(&text, &fonts, false, scale);
+            assert_eq!((placed[0].ppem, placed[0].scale), (ppem(cap), over / cap), "{scale}x");
+            assert_eq!((placed[1].ppem, placed[1].scale), (ppem(under), 1.0), "{scale}x");
+            let node = serde_json::json!({"text": text});
+            let scene = serde_json::json!({"fonts": fonts, "nodes": [node], "viewport": {"scale": scale}});
+            let wanted: Vec<f64> = crate::glyphs::atlas_entries(&scene).iter().map(|entry| entry.ppem).collect();
+            assert_eq!(wanted, vec![ppem(cap), ppem(under)], "{scale}x");
+        }
+        // The 1.5x cap a471a83 took for every scale drew a phone's 200 and 300 px glyphs soft: they are their own
+        let text = serde_json::json!({"size":300,"lines":[{"x":0,"px":10,"top":0,"glyphs":[[0,43,0,ppem(300.0)]]}]});
+        assert_eq!(placements(&text, &fonts, false, 3.0).0[0].ppem, ppem(300.0));
     }
 
     /// A quarter-pixel glyph under a text glow takes its line's exact pen (`pens`, export.rs) for its glow, from the
@@ -2697,9 +2707,9 @@ mod tests {
         let fonts = serde_json::json!([{"file":"Arimo-Regular.ttf","ascender":1854,"descender":-434,"lineGap":67,"sizeUnits":2355,"unitsPerEm":2048,"weight":400}]);
         let ppem = |size: f64| ((size + 1.0) * 2048.0 / 2355.0 * 1e5).round() / 1e5;
         let quarter = serde_json::json!({"size":30,"subpixel":4,"lines":[{"x":0,"px":10,"top":0,"glyphs":[[0,43,0.25,ppem(30.0)],[0,44,14.5,ppem(30.0)]],"pens":[0.296875,14.453125]}]});
-        let (placed, _) = placements(&quarter, &fonts, false);
+        let (placed, _) = placements(&quarter, &fonts, false, 1.5);
         assert_eq!(placed.iter().map(|p| p.exact).collect::<Vec<_>>(), vec![Some(10.296875), Some(24.453125)]);
-        let (placed, _) = placements(&quarter, &fonts, true);
+        let (placed, _) = placements(&quarter, &fonts, true, 1.5);
         assert!(placed.iter().all(|p| p.exact.is_none()), "rotated text keeps its exact pens in x");
     }
 
@@ -2761,7 +2771,7 @@ mod tests {
         let fonts = serde_json::json!([{"ascender":900,"descender":-300,"unitsPerEm":1000,"lineGap":120,"weight":400},{"ascender":1100,"descender":-100,"unitsPerEm":1000,"lineGap":0,"weight":700}]);
         let text = serde_json::json!({"weight":700,"quadScale":1.025,"runs":[{"weight":400},{"weight":700,"quadScale":1.125}],"lines":[{"x":10.5,"top":20.5,"glyphs":[[0,2,-0.5,20],[1,3,12.6,20,0],[0,4,28.4,21,1]],"runs":[[0,12,27],[1,27,40]]}]});
         for rotated in [false, true] {
-            let (p, lines) = placements(&text, &fonts, rotated);
+            let (p, lines) = placements(&text, &fonts, rotated, 1.5);
             assert_eq!(
                 p.iter().map(|p| p.x).collect::<Vec<_>>(),
                 [11.0, 24.0, 39.0]
@@ -3088,7 +3098,7 @@ mod tests {
         let fonts = serde_json::json!([{"ascender":900,"descender":-300,"unitsPerEm":1000,"lineGap":0,"weight":400}]);
         let ppem = 31.0 * 1000.0 / 1200.0;
         let text = serde_json::json!({"runs":[{"underline":true,"strike":true,"mark":{"color":[0,1,0]}}],"lines":[{"x":10,"top":20,"glyphs":[[0,2,0,ppem,0]],"runs":[[0,0,40]]}]});
-        let (_, lines) = placements(&text, &fonts, false);
+        let (_, lines) = placements(&text, &fonts, false, 1.5);
         let found = decorations(&text, &fonts, &lines, 1.5);
         let kinds: Vec<Decoration> = found.iter().map(|d| d.kind).collect();
         assert_eq!(kinds, [Decoration::Mark, Decoration::Underline, Decoration::Strike]);

@@ -304,26 +304,29 @@ pub(crate) fn text_bold_strength(text: &Value, run: Option<&Value>, font: &Value
     if size > 0.0 { 2.0 * size } else { 0.0 }
 }
 
-/// The largest glyph the client rasterizes, in device px (S of the ppem). Measured (Roblox 0.747 client, 1.5x,
-/// fixtures/text-probe-large.luau and -large2.luau): Arimo, SourceSans and FredokaOne glyphs up to 150 px (TextSize 100)
-/// are drawn from their own hinted rasters; LegacyArial's (Arimo at 1.5 x the TextSize) from 153 px on are drawn soft
-/// on both axes, a 150 px raster resampled over the glyph's full size.
-pub const GLYPH_RASTER_CAP: f64 = 150.0;
+/// The largest glyph the client rasterizes, in logical px (S of the ppem over the device scale). Measured (Roblox
+/// 0.747 client, fixtures/text-probe-large.luau and -large2.luau): Arimo, SourceSans and FredokaOne glyphs up to 100
+/// logical px (TextSize 100: 150 device px at 1.5x, 200 at 2x, 300 at 3x) are drawn from their own hinted rasters;
+/// LegacyArial's (Arimo at 1.5 x the TextSize) from TextSize 68 on (102 logical px) are drawn soft on both axes, a
+/// raster of the cap resampled over the glyph's full size.
+pub const GLYPH_RASTER_CAP: f64 = 100.0;
 
-/// The ppem a scene glyph at `ppem` is rasterized at, and the factor its quad is scaled by: over
-/// `GLYPH_RASTER_CAP` px, the cap's ppem and size / cap (about the pen, like a fractional size's quad); else its own
-/// and 1. The atlas (`atlas_entries`) and the renderer (render/text.rs placements) both go through it.
-pub(crate) fn raster_ppem(font: &Value, ppem: f64) -> (f64, f64) {
+/// The ppem a scene glyph at `ppem` is rasterized at, and the factor its quad is scaled by, at device scale `scale`:
+/// over `GLYPH_RASTER_CAP` logical px (its whole device px), the cap's ppem and size / cap (about the pen, like a
+/// fractional size's quad); else its own and 1. The atlas (`atlas_entries`) and the renderer (render/text.rs
+/// placements) both go through it.
+pub(crate) fn raster_ppem(font: &Value, ppem: f64, scale: f64) -> (f64, f64) {
     let size_units = match font.get("sizeUnits") {
         Some(units) if units.is_number() => to_number(Some(units)),
         _ => to_number(font.get("ascender")) - to_number(font.get("descender")),
     };
     let units_per_em = to_number(font.get("unitsPerEm"));
     let size = js_round(ppem * size_units / units_per_em) - 1.0;
-    if !(size > GLYPH_RASTER_CAP) || !(size_units > 0.0) {
+    let cap = (GLYPH_RASTER_CAP * scale).round();
+    if !(size > cap) || !(size_units > 0.0) || !(cap > 0.0) {
         return (ppem, 1.0);
     }
-    (((GLYPH_RASTER_CAP + 1.0) * units_per_em / size_units * 1e5).round() / 1e5, size / GLYPH_RASTER_CAP)
+    (((cap + 1.0) * units_per_em / size_units * 1e5).round() / 1e5, size / cap)
 }
 
 /// The quarter-pixel phase of a glyph's pen in a text drawn at quarter pixels (`subpixel`: 4), None in
@@ -542,7 +545,7 @@ pub fn atlas_entries(scene: &Value) -> Vec<AtlasEntry> {
                     continue;
                 };
                 // (a glyph over the raster cap: the cap's raster, `raster_ppem`)
-                let (ppem, _) = raster_ppem(font, ppem);
+                let (ppem, _) = raster_ppem(font, ppem, scale);
                 let run = row.get(4).and_then(|position| index(runs, position)).filter(|run| truthy(Some(run)));
                 let bold = text_bold_strength(text, run, font, ppem);
                 let quarter = text_quarter(text, row.get(2), node.get("matrix").is_some_and(Value::is_array));
