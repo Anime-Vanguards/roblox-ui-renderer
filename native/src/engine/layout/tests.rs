@@ -52,7 +52,9 @@ fn run(source: &str, pixel_scale: f64, until: f64) -> Vec<String> {
 /// below the inset reads (0, 0) and the frame (10, 20)); sizes are as drawn.
 #[test]
 fn absolute_positions_are_measured_from_below_the_top_inset() {
-    let engine = crate::engine::new_engine(Options { topbar_inset: 58.0, ..crate::engine::options() }).expect("engine");
+    let mut options = crate::engine::options();
+    options.profile.device.topbar_inset = Some(58.0);
+    let engine = crate::engine::new_engine(options).expect("engine");
     let lua = Lua::new();
     engine_lua::start(&lua, &engine).expect("start");
     let script = {
@@ -80,7 +82,7 @@ fn absolute_positions_are_measured_from_below_the_top_inset() {
         panic!("test script failed: {message}");
     }
     let lines: Vec<String> = engine.state.borrow().output.entries.iter().map(|e| e.message.clone()).collect();
-    let (width, height) = (engine.options.viewport_width, engine.options.viewport_height);
+    let (width, height) = engine.options.profile.device.viewport();
     let half = |value: f64| (value / 2.0).floor();
     assert_eq!(lines[0], format!("true 0,-58 {width},{height} 10,-38 {},{}", half(width), half(height)), "{lines:?}");
     assert_eq!(lines[1], format!("false 0,0 {width},{} 10,20 {},{}", height - 58.0, half(width), half(height - 58.0)), "{lines:?}");

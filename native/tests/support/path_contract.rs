@@ -188,7 +188,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/engine/cli.rs",
         "pub fn parse(",
-        0x1d6b49aca5ebe8d7,
+        0xb3768be13cd45506,
     ),
     (
         Crate::Native,
@@ -274,7 +274,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Engine,
         "src/launch.rs",
         "pub fn accept(",
-        0xe8d2ee49813eefcc,
+        0xe96b996470a1e74f,
     ),
     (
         Crate::Engine,

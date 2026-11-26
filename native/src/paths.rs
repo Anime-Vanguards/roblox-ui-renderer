@@ -183,8 +183,8 @@ fn repo_argument(argv: &[String]) -> Option<PathBuf> {
 
 /// The options that take a path. `--profile` and `--benchmark` are not here: their value is
 /// optional, so a bare one is a complete option, and an empty profile kind is already an error.
-/// `--controls` and `--context` take a file or inline JSON: both are still accepted, but the value
-/// must be present.
+/// `--controls` and `--context` take a file or inline JSON, and the engine's `--client-profile` a preset, a file or
+/// inline JSON: all of them are still accepted, but the value must be present.
 const PATH_OPTIONS: &[&str] = &[
     "--repo",
     "--project",
@@ -207,6 +207,7 @@ const PATH_OPTIONS: &[&str] = &[
     "--server-harness",
     "--controls",
     "--context",
+    "--client-profile",
     "--actions",
     "--plugin",
     "--load",

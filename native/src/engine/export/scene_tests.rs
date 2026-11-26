@@ -313,7 +313,9 @@ assert(image() ~= beforeCameraRemoval)
 }
 
 fn options(width: f64, height: f64, pixel_scale: f64) -> Options {
-    Options { viewport_width: width, viewport_height: height, pixel_scale, ..crate::engine::options() }
+    let mut options = Options { pixel_scale, ..crate::engine::options() };
+    options.profile.device.viewport = Some((width, height));
+    options
 }
 
 /// runtime/tests/export_cache.luau: after every change the retained export (the client's view of

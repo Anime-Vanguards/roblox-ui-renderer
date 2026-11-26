@@ -2454,7 +2454,8 @@ pub fn build(engine: &Rc<Engine>, roots: &[InstanceId], _records: &Records, extr
 /// The scene header's `viewport`.
 pub(crate) fn viewport_json(engine: &Engine) -> Json {
     let options = &engine.options;
-    json!({ "width": number(options.viewport_width), "height": number(options.viewport_height), "scale": number(options.pixel_scale) })
+    let (width, height) = options.profile.device.viewport();
+    json!({ "width": number(width), "height": number(height), "scale": number(options.pixel_scale) })
 }
 
 #[cfg(test)]

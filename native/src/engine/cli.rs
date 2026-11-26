@@ -88,8 +88,9 @@ pub struct Args {
     /// `--load Service/Name=<file.rbxm>` (repeatable): models loaded into Folders before the story
     /// (story.rs load_models)
     pub loads: Vec<String>,
-    /// `--topbar-inset px`: the engine's topbar inset (Options::topbar_inset)
-    pub topbar_inset: f64,
+    /// `--topbar-inset px`: the engine's topbar inset (the client profile's device.topbarInset); unset keeps the
+    /// profile's (0 without one)
+    pub topbar_inset: Option<f64>,
     /// `--server-harness <file>` with `--run-context loopback`: the loopback harness whose `Server` runs on the pair's
     /// server (the emulator's "Loopback run context"); the story is the client's. None: the place's own server scripts
     pub server_harness: Option<String>,
@@ -200,7 +201,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             "--plugin" => result.plugin = Some(need()?),
             "--all-layers" => result.all_layers = need()? != "0",
             "--load" => result.loads.push(need()?),
-            "--topbar-inset" => result.topbar_inset = number(need()?)?.max(0.0),
+            "--topbar-inset" => result.topbar_inset = Some(number(need()?)?.max(0.0)),
             // (the Node CLI's engine arguments start with the command's name: cli/engine.mjs engineBaseArgs)
             "engine" if index == 0 => {}
             _ => {
@@ -599,7 +600,10 @@ pub fn prepare(args: &Args) -> Result<Prepared, String> {
     #[cfg(feature = "desktop")]
     select_standalone_project(args, &mut engine)?;
     let prepared = launch::prepare(&engine, &super::default_repo())?;
-    let options = Options { topbar_inset: args.topbar_inset, ..prepared.options };
+    let mut options = prepared.options;
+    if let Some(inset) = args.topbar_inset {
+        options.profile.device.topbar_inset = Some(inset);
+    }
     Ok(Prepared { options, roots: prepared.roots, snapshot_dir: prepared.snapshot_dir, target: (width, height), mounts: prepared.mounts })
 }
 
@@ -876,7 +880,7 @@ pub fn run_once_with_cost(args: &Args) -> Result<CostRunOutput, String> {
             scene,
             layout,
             dom_hidden,
-            device: engine.options.device.clone(),
+            device: engine.options.profile.device.kind().name().to_string(),
             waiting_in_loop: mounted.wait_in_loop,
         })
     })();
@@ -1453,7 +1457,7 @@ pub struct SequenceFrame {
     pub client_hz: f64,
     /// `"client"` for fixed client frames (`1 / client_hz`) or `"display"` for display-cadence steps (`1 / fps`).
     pub cadence_kind: &'static str,
-    /// Actual device the engine ran with (`Options::device`, e.g. `"desktop"`, `"touch"`, `"gamepad"`, `"phone"`).
+    /// Actual device the engine ran with (the client profile's device kind, e.g. `"desktop"`, `"touch"`, `"gamepad"`, `"phone"`).
     pub device: String,
     pub layout_churn: Vec<super::layout::LayoutChurnEntry>,
     /// Pointer position and cursor state at this frame (`rur sequence --cursor`).
@@ -1577,7 +1581,7 @@ fn run_sequence(
         client_frames: steps_0,
         client_hz: effective_hz,
         cadence_kind,
-        device: engine.options.device.clone(),
+        device: engine.options.profile.device.kind().name().to_string(),
         layout_churn: layout_churn_0,
         pointer: pointer_0,
         #[cfg(feature = "desktop")]
@@ -1636,7 +1640,7 @@ fn run_sequence(
             client_frames: steps,
             client_hz: effective_hz,
             cadence_kind,
-            device: engine.options.device.clone(),
+            device: engine.options.profile.device.kind().name().to_string(),
             layout_churn,
             pointer,
             #[cfg(feature = "desktop")]

@@ -349,7 +349,7 @@ impl Cx<'_> {
     }
 
     pub fn inset(&self) -> f64 {
-        self.engine.options.topbar_inset
+        self.engine.options.profile.device.topbar_inset()
     }
 
     /// Game:GetService(name)
@@ -446,7 +446,7 @@ impl Input {
     /// Snapshot of the current pointer position and cursor state (`rur sequence --cursor`).
     pub fn pointer_state(&self, engine: &Engine) -> PointerState {
         let mouse = self.mouse.get();
-        let device = engine.options.device.as_str();
+        let device = engine.options.profile.device.kind().name();
         let touch = matches!(device, "touch" | "phone");
         let gamepad = device == "gamepad";
         let (icon_enabled, custom_icon) = {
@@ -704,8 +704,9 @@ impl Cx<'_> {
         let inset = self.inset();
         legacy.raw_set("X", mouse.x)?;
         legacy.raw_set("Y", mouse.y - inset)?;
-        legacy.raw_set("ViewSizeX", self.engine.options.viewport_width)?;
-        legacy.raw_set("ViewSizeY", self.engine.options.viewport_height - inset)?;
+        let (width, height) = self.engine.options.profile.device.viewport();
+        legacy.raw_set("ViewSizeX", width)?;
+        legacy.raw_set("ViewSizeY", height - inset)?;
         Ok(())
     }
 
@@ -812,7 +813,7 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     }
 
     let active = cx.any_active(&list);
-    if matches!(cx.engine.options.device.as_str(), "touch" | "phone") {
+    if cx.engine.options.profile.device.kind().touch() {
         if primary {
             let finger = cx.input_object("Touch", "Touch");
             let (position, delta) = position_delta(cx, finger, x, y);
@@ -887,7 +888,7 @@ fn leave(cx: &Cx) -> LuaResult<()> {
 /// --device touch: the primary pointer is a finger. UserInputService and GuiObject input events carry
 /// one Touch InputObject from down through its moves to up; GuiButton click events stay as they are.
 fn pointer_type(cx: &Cx, button: f64) -> &'static str {
-    if button == 1.0 && matches!(cx.engine.options.device.as_str(), "touch" | "phone") { "Touch" } else { button_type(button) }
+    if button == 1.0 && cx.engine.options.profile.device.kind().touch() { "Touch" } else { button_type(button) }
 }
 
 /// A gamepad's buttons, D-pad and sticks arrive as Gamepad1, a keyboard's keys as Keyboard.
@@ -1940,7 +1941,7 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
     // The device (--device): what scripts branch on for controller and touch paths
     if let Some(uis) = c.UserInputService {
         if valid(n.PreferredInput) {
-            let item = match engine.options.device.as_str() {
+            let item = match engine.options.profile.device.kind().name() {
                 "touch" | "phone" => "Touch",
                 "gamepad" => "Gamepad",
                 _ => "KeyboardAndMouse",
@@ -1950,7 +1951,7 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
             });
             behaviors.add_getter(uis, n.PreferredInput, getter);
         }
-        let connected = engine.options.device == "gamepad";
+        let connected = engine.options.profile.device.kind().name() == "gamepad";
         // Where a connected controller's glyphs live in Studio's content (Xbox art, the default)
         behaviors.add_method(uis, n.GetImageForKeyCode, method(move |lua, engine, _, args| {
             let code = enum_arg(args.get(1)).map(|item| engine.reflection.enum_item_info(item).name.to_string()).unwrap_or_default();
@@ -2042,7 +2043,7 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
         method(move |lua, engine, id, args| {
             super::layout::update_all(engine);
             // The point is in the space of InputObject.Position and Mouse.Y: below the topbar inset
-            let (x, y) = (args.number(1).unwrap_or(f64::NAN), args.number(2).unwrap_or(f64::NAN) + engine.options.topbar_inset);
+            let (x, y) = (args.number(1).unwrap_or(f64::NAN), args.number(2).unwrap_or(f64::NAN) + engine.options.profile.device.topbar_inset());
             let order = i.draw_order(engine);
             let found: Vec<InstanceId> = {
                 let state = engine.state.borrow();

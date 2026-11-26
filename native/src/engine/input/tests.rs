@@ -18,14 +18,16 @@ use serde_json::{Value as Json, json};
 
 use super::{Cx, hit, scrolling};
 use crate::engine::{
-    Engine, InstanceId, Options,
+    Engine, InstanceId,
     lua::{self as engine_lua, globals::CallOutcome, instance_value},
     scheduler,
     session::Session,
 };
 
 fn start(width: f64, height: f64) -> (Lua, Rc<Engine>) {
-    let engine = crate::engine::new_engine(Options { viewport_width: width, viewport_height: height, ..crate::engine::options() }).expect("engine");
+    let mut options = crate::engine::options();
+    options.profile.device.viewport = Some((width, height));
+    let engine = crate::engine::new_engine(options).expect("engine");
     let lua = Lua::new();
     engine_lua::start(&lua, &engine).expect("start");
     engine.state.borrow_mut().sched.set_main_thread(&lua.current_thread());
