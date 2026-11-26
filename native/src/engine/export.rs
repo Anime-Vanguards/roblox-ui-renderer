@@ -575,7 +575,9 @@ fn uri(value: Option<&Value>) -> String {
 
 /// Measured: on a high-DPI screen Studio samples the @2x file of a built-in texture when it exists
 /// (DensityVariant; memoized per image: per build for one-shot exports, for the session in the
-/// retained cache, like scene.luau's module-level memo).
+/// retained cache, like scene.luau's module-level memo). The file is the device scale rounded, halves
+/// up, at most @3x, falling back to @2x where there is no @3x file: a Roblox 0.747 client sampled the
+/// 1x file at 1.1-1.49, @2x at 1.5-2.49 and @3x at 2.5-4 (notes/images.md "Device scales").
 #[derive(Default)]
 pub(crate) struct Variants {
     cache: FxHashMap<String, (String, f64)>,
@@ -587,7 +589,7 @@ impl Variants {
             return known.clone();
         }
         let (mut variant, mut density) = (image.to_string(), 1.0);
-        if pixel_scale > 1.0 && image.starts_with("rbxasset://") && image.len() > "rbxasset://".len() + 4 && image.ends_with(".png") {
+        if density_factor(pixel_scale) >= 2.0 && image.starts_with("rbxasset://") && image.len() > "rbxasset://".len() + 4 && image.ends_with(".png") {
             // string.match(ContentRoot, "^(.*)/content/?$")
             let version_root = content_root.and_then(|root| {
                 let trimmed = root.strip_suffix('/').unwrap_or(root);
@@ -595,7 +597,7 @@ impl Variants {
             });
             if let Some(version_root) = version_root {
                 let relative = &image["rbxasset://".len()..];
-                let mut factor = pixel_scale.ceil().min(3.0);
+                let mut factor = density_factor(pixel_scale);
                 while factor >= 2.0 {
                     let scaled = format!("{}@{}x.png", &relative[..relative.len() - 4], factor as i64);
                     for base in ["content", "ExtraContent", "PlatformContent/pc"] {
@@ -611,6 +613,11 @@ impl Variants {
         self.cache.insert(image.to_string(), (variant.clone(), density));
         (variant, density)
     }
+}
+
+/// The density file a device scale asks for: the scale rounded, halves up, from 1 to 3
+fn density_factor(pixel_scale: f64) -> f64 {
+    (pixel_scale + 0.5).floor().clamp(1.0, 3.0)
 }
 
 fn image(ctx: &Ctx, out: &mut Export, id: InstanceId) -> Option<Json> {
@@ -2461,6 +2468,29 @@ pub(crate) fn viewport_json(engine: &Engine) -> Json {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The density file of a built-in texture by device scale, as a Roblox 0.747 client samples it
+    /// (robux_small.png with @2x and @3x files, XButtonLight.png with @2x only): 1x below 1.5, @2x from 1.5,
+    /// @3x from 2.5, and @2x where there is no @3x file.
+    #[test]
+    fn density_files_follow_the_rounded_device_scale() {
+        let root = std::env::temp_dir().join(format!("rur-density-{}", std::process::id()));
+        let textures = root.join("content").join("textures");
+        std::fs::create_dir_all(&textures).unwrap();
+        for (name, suffix) in [("both", ""), ("both", "@2x"), ("both", "@3x"), ("two", ""), ("two", "@2x")] {
+            std::fs::write(textures.join(format!("{name}{suffix}.png")), b"").unwrap();
+        }
+        let content = root.join("content").display().to_string().replace('\\', "/");
+        let pick = |image: &str, scale: f64| Variants::default().variant(image, scale, Some(&content));
+        for (scale, density) in [(1.0, 1.0), (1.1, 1.0), (1.25, 1.0), (1.49, 1.0), (1.5, 2.0), (1.75, 2.0), (2.0, 2.0), (2.25, 2.0), (2.49, 2.0), (2.5, 3.0), (2.75, 3.0), (3.0, 3.0), (4.0, 3.0)] {
+            let suffix = if density == 1.0 { String::new() } else { format!("@{density}x") };
+            assert_eq!(pick("rbxasset://textures/both.png", scale), (format!("rbxasset://textures/both{suffix}.png"), density), "both at {scale}");
+            let two = density.min(2.0);
+            let suffix = if two == 1.0 { String::new() } else { "@2x".to_string() };
+            assert_eq!(pick("rbxasset://textures/two.png", scale), (format!("rbxasset://textures/two{suffix}.png"), two), "two at {scale}");
+        }
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     /// A pen halfway between two quarter pixels falls by the single-precision sum of the line's start and
     /// the pen in logical pixels (fixtures/text-probe-tie.luau, layout-text-overflow.luau and
