@@ -168,11 +168,11 @@ test("normalizeText fast path matches full normalization on plain, address, and 
 	assert.equal(normalizeText("plain label 123"), "plain label 123");
 	assert.equal(normalizeText("table: 0x00ff12AB and function: 0x1234"), "table: 0x? and function: 0x?");
 	assert.equal(
-		normalizeText("C:/Users/dev/AppData/Local/Roblox/Versions/version-0123456789abcdef/content/fonts/A.ttf"),
+		normalizeText("C:/Studio/Roblox/Versions/version-0123456789abcdef/content/fonts/A.ttf"),
 		"<studio-content>/fonts/A.ttf",
 	);
 	assert.equal(
-		normalizeText("C:\\Users\\dev\\AppData\\Local\\Roblox\\Versions\\version-0123456789abcdef\\ExtraContent\\Icons.png"),
+		normalizeText("C:\\Studio\\Roblox\\Versions\\version-0123456789abcdef\\ExtraContent\\Icons.png"),
 		"<studio>/ExtraContent\\Icons.png",
 	);
 });
