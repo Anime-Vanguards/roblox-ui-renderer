@@ -2289,11 +2289,11 @@ impl Walk<'_, '_, '_, '_> {
         if rotation != 0.0 {
             let about = rotation_about(rotation, record.x + record.w / 2.0, record.y + record.h / 2.0);
             child_matrix = Some(compose(&matrix.unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]), &about));
-            // Turns that cancel (a frame turned back by its parent's turn about the same centre) leave the identity
-            // up to rounding: a client draws such an element as an unturned one, its edges on whole pixels
-            // (fixtures/group-probe-stroke-gradient.luau: a 70 x 44 frame at x = 125 under 30 / -30 degrees is
-            // drawn from 188 px at 1.5x, not 187.5)
-            if child_matrix.is_some_and(|m| {
+            // Turns that cancel (a frame turned back by its parent's turn about the same centre: AbsoluteRotation 0)
+            // leave the identity up to rounding: a client draws such an element as an unturned one, its edges on
+            // whole pixels (fixtures/group-probe-stroke-gradient.luau: a 70 x 44 frame at x = 125 under 30 / -30
+            // degrees is drawn from 188 px at 1.5x, not 187.5). Whole turns (360 degrees) are not measured: kept.
+            if record.rotation == 0.0 && child_matrix.is_some_and(|m| {
                 (m[0] - 1.0).abs() < 1e-12 && m[1].abs() < 1e-12 && m[2].abs() < 1e-12 && (m[3] - 1.0).abs() < 1e-12 && m[4].abs() < 1e-9 && m[5].abs() < 1e-9
             }) {
                 child_matrix = None;

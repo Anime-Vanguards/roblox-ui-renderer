@@ -954,7 +954,7 @@ fn viewport_snapshot_is_logical_size_over_its_fill_with_the_places_materials() {
 
 /// Turns that cancel: a frame turned back by its parent's turn about the same centre is drawn as an unturned one
 /// (no matrix: its rect snaps to whole pixels as a client draws it, fixtures/group-probe-stroke-gradient.luau);
-/// a turn that does not cancel, or one about another centre, keeps its matrix.
+/// a turn that does not cancel, one about another centre, or a whole turn keeps its matrix.
 #[test]
 fn turns_that_cancel_leave_no_matrix() {
     run(
@@ -980,6 +980,7 @@ for _, Turn in { 30, 45, 17.5, 200 } do
 end
 Turned(30, -29, 0)
 Turned(30, -30, 6)
+Turned(180, 180, 0)
 local ByName = {}
 for _, Node in Check(Root, "cancelled").nodes do ByName[Node.name] = Node end
 for _, Turn in { 30, 45, 17.5, 200 } do
@@ -989,6 +990,7 @@ for _, Turn in { 30, 45, 17.5, 200 } do
 end
 assert(ByName["I30_-29_0"].matrix ~= nil, "a turn left over keeps its matrix")
 assert(ByName["I30_-30_6"].matrix ~= nil, "turned back about another centre: a translation, kept")
+assert(ByName["I180_180_0"].matrix ~= nil, "a whole turn (AbsoluteRotation 360) keeps its matrix")
 "#,
         &[],
     );
