@@ -111,6 +111,21 @@ impl Stroke {
         triangles
     }
 
+    /// A device box `[x0, y0, x1, y1]` that holds everything the stroke draws, without building its strip: the
+    /// box of every control point (a curve stays inside its control points' hull) grown by half the strip's width
+    /// and a pixel. The node's `rect` is not that box: it is what GetBoundingRect answers, the box of the
+    /// segments' end points, which a curve's handles can carry the stroke far past (fixtures/path2d-curves.luau's
+    /// loop, drawn although its end points are below the screen). None when a value is not finite.
+    pub fn reach(&self, scale: f64) -> Option<[f64; 4]> {
+        let mut bounds = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        for [x, y] in self.segments.iter().flatten() {
+            bounds = [bounds[0].min(*x), bounds[1].min(*y), bounds[2].max(*x), bounds[3].max(*y)];
+        }
+        let grow = (self.thickness.max(0.) + 1.) / 2. * scale + 1.;
+        let bounds = [bounds[0] * scale - grow, bounds[1] * scale - grow, bounds[2] * scale + grow, bounds[3] * scale + grow];
+        bounds.iter().all(|value| value.is_finite()).then_some(bounds)
+    }
+
     /// The device box `[x0, y0, x1, y1)` (whole pixels) the triangles cover, None when they cover nothing.
     pub fn extent(triangles: &[[Vertex; 3]]) -> Option<[i64; 4]> {
         let mut bounds = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];

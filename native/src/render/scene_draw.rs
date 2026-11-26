@@ -118,6 +118,20 @@ mod tests {
     fn uploads_fit_a_texture(packet: &RenderPacket) -> bool {
         packet.textures.iter().all(|t| t.levels.iter().all(|l| l.width <= MAX_TEXTURE_SIDE && l.height <= MAX_TEXTURE_SIDE))
     }
+    /// A Path2D's rect is GetBoundingRect's box of its end points: fixtures/path2d-curves.luau's loop has both
+    /// end points at y = 660 and its handles carry the curve up to about 465, so in a 640 px viewport the client
+    /// draws its top half (2,216 px at 1x, 8,928 at 2x) where rur culled the whole path by that rect.
+    #[test]
+    fn a_path_is_culled_by_where_its_stroke_reaches_not_by_its_rect() {
+        let path = |y: f64, handle: f64| {
+            json!({"id": 1, "rect": [477.5, y - 2.5, 145, 5], "path2d": {"origin": [477.5, y - 2.5], "segments": [[480, y, 880, handle, 220, handle, 620, y]], "thickness": 4, "color": [1, 1, 1]}})
+        };
+        for scale in [1.0, 1.5, 2.0, 3.0] {
+            let [width, height] = [960.0, 640.0].map(|value: f64| (value * scale) as u32);
+            assert!(!node_offscreen(&path(660.0, 400.0), scale, width, height), "the loop at {scale}x");
+            assert!(node_offscreen(&path(700.0, 690.0), scale, width, height), "a path wholly below at {scale}x");
+        }
+    }
     /// A rounded bar wider than a texture can be and a few pixels tall (a progress bar on a wide screen, 9255 x 5 px as
     /// reported): its layer was the whole rect, as for every rect under 65536 px, and the GPU refused it ("Invalid
     /// texture extent 9255x5"), so nothing was drawn. Its layer is the part that shows, the same pixels as a narrower
@@ -3999,6 +4013,10 @@ fn node_offscreen(node: &Value, scale: f64, width: u32, height: u32) -> bool {
 /// absolute position) grown by its border, strokes, shadows and anti-aliasing, and its text lines grown by
 /// three glyph sizes and their strokes. None when a value is not finite.
 fn node_extent(node: &Value, scale: f64) -> Option<[f64; 4]> {
+    // A Path2D draws its stroke only, which its rect (the end points' box) need not hold
+    if node["path2d"].is_object() {
+        return super::path2d::Stroke::of(node)?.reach(scale);
+    }
     let v = &node["rect"];
     let [x, y, rw, rh] = std::array::from_fn(|i| component(v, i, 0.));
     let dev = |a: f64, b: f64| {

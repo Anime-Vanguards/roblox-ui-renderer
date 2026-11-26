@@ -1500,7 +1500,8 @@ fn export_node(
     node
 }
 
-/// A Path2D's node: `rect` is the box its stroke can reach (GUI pixels), and `path2d` what draws: the curve's
+/// A Path2D's node: `rect` is what GetBoundingRect answers (GUI pixels: the box of the segments' end points
+/// grown by the stroke's reach; a curve's handles can carry the stroke past it), and `path2d` what draws: the curve's
 /// segments on the screen (a line's two points, a quadratic's three, a cubic's four, as x, y pairs; the parent's
 /// rotation is in them, so the node has no matrix), the stroke's thickness and colour (Path2D.Transparency is not
 /// drawn: Studio 0.747 keeps it and draws the path opaque whatever it is). `origin` is
