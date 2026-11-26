@@ -232,6 +232,10 @@
 			"digest": "72011676575336c7b1c87bdf6f9729eb677f43fc182383c6deef9e8ba2af8738",
 			"status": "ok"
 		},
+		"fast/edit/layout-autosize-prompt": {
+			"digest": "a21d10cf9ed33492d75f52c4879a8bd31c5fbf7891738f42406555d6f82aeb84",
+			"status": "ok"
+		},
 		"fast/edit/layout-autotext-linefit": {
 			"digest": "f7136e47f75e6f2450dbb4bf3e2ba458dbe4911208d2548df14c20e38d0ce2fe",
 			"status": "ok"
@@ -242,6 +246,10 @@
 		},
 		"fast/edit/layout-dynamic": {
 			"digest": "d276a21e0b85c5ba497f1e0533c234f11ad86943212192b150940dd0f5462405",
+			"status": "ok"
+		},
+		"fast/edit/layout-f32-lists": {
+			"digest": "1591eef5c006f5293d8201027f347f4da0603a71cf180aa39facb1f658e3dbde",
 			"status": "ok"
 		},
 		"fast/edit/layout-flex": {
@@ -1420,6 +1428,10 @@
 			"digest": "91587ed4eaeab2b7ac54a1f9ab8ec3972d90c296c686ac76324f28514a94add8",
 			"status": "ok"
 		},
+		"fixtures/edit/layout-autosize-prompt": {
+			"digest": "7a3fb294a5b96be23f4740c3c038ff93056065483b1c4da8ecc351524f468239",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-autotext-linefit": {
 			"digest": "06278360f31ab4fcc0c059c7824f645144349c06589cec380c5c026b9851aeac",
 			"status": "ok"
@@ -1430,6 +1442,10 @@
 		},
 		"fixtures/edit/layout-dynamic": {
 			"digest": "a306bb4a21dff572c2151c5b167ac06b3ac0661c2335bd7ed5ec6d4c42c1b216",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-f32-lists": {
+			"digest": "8cf8850418535b70003d0e31560bf2000a28ca1891fce4a156674f84d952ea97",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-flex": {
@@ -2596,6 +2612,10 @@
 			"digest": "9d8cd28688c6de2d20bfcd417fd6bd6dab69f3f8522eba725e99a12a11fca7a3",
 			"status": "ok"
 		},
+		"fixtures/play/layout-autosize-prompt": {
+			"digest": "cfcdbabe3a329f2ab672b72aa1512f412a7f51fbb37ae28f25bccb84235541bf",
+			"status": "ok"
+		},
 		"fixtures/play/layout-autotext-linefit": {
 			"digest": "40353685cbb5093ca4e2a16bc34f392a5d9c0d3f5b1f6d3b4b2737e156ed7c01",
 			"status": "ok"
@@ -2606,6 +2626,10 @@
 		},
 		"fixtures/play/layout-dynamic": {
 			"digest": "660fb9150a39b585291b17a7f1f08170e7138c978035c85f7b7515c43b1576a6",
+			"status": "ok"
+		},
+		"fixtures/play/layout-f32-lists": {
+			"digest": "f4d1bebc58f526c321ffe77e61c5b513ec0ce0f123bdd2b1aada0128d006accc",
 			"status": "ok"
 		},
 		"fixtures/play/layout-flex": {
