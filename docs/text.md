@@ -40,7 +40,7 @@ The default tracks production Roblox (as of 2026-11-12, whole-pixel is active on
 - Uses compiled-in **FreeType 2.14.2** (`native/build.rs`, `src/glyphs/rur_glyph.c`) producing grayscale bitmaps at whole device pixels.
 - **Glyphs over 100 logical px** (150 device px at 1.5x, 200 at 2x, 300 at 3x, 100 at 1x; `LegacyArial` at `TextSize` 68 and up: the face is sized 1.5 times the `TextSize`) are rasterized at 100 logical px and drawn on quads scaled by `size / cap` about the pen, like a fractional size, so they are soft on both axes; the line keeps the glyph's own size.
 - **Synthetic bold:** Applied when requested weight >= 600 and the resolved face is < 600 via `FT_Outline_EmboldenXY(2*S, 2*S)` in 26.6 units (advances unchanged).
-- **`UIStroke` on text:** FreeType stroker band with radius `floor(10 * t) / 10` px (`t = f32(thickness * DPI)`) and opacity `alpha8(1 - stroke_transparency)` (independent of `TextTransparency`).
+- **`UIStroke` on text:** FreeType stroker band with radius `floor(10 * t) / 10` px (`t = f32(thickness * DPI)`), at most 25.5 device px, and opacity `alpha8(1 - stroke_transparency)` (independent of `TextTransparency`).
 - **Legacy `TextStroke`:** Renders glyph fills four times at diagonal offsets `(±1, ±1)` behind the fill.
 
 ## Placement and compositing
@@ -49,7 +49,7 @@ The default tracks production Roblox (as of 2026-11-12, whole-pixel is active on
 - **Line tops:** At a `LineHeight` other than 1, line `k` starts at the text block's whole pixel plus `floor(k * height * LineHeight)`, the product taken in float32 (rotated text keeps exact tops).
 - **Glyph positions:** Placed at `line_pen + prior_advances` along the line baseline (determined by the largest pixel size on the line, shared by fallback glyphs and `<font size>` runs).
 - **Rotated & fractional text:** Rotated text skips pen/line-top rounding, rotating upright bitmaps around the label center with 8-bit bilinear resampling. Text in a rotated `CanvasGroup` is drawn the same way into the group's texture: unrounded pens and line top, glyphs resampled there (once, also in a resampled texture). Fractional text sizes (rich text under certain `UIScale`s) draw floored-size bitmaps scaled by `unfloored / floored` around each glyph's pen point.
-- **Draw order:** `<mark>` highlights → `UIStroke` → rich `<stroke>` → legacy `TextStroke` → glyph fills → `<u>` / `<s>` decorations.
+- **Draw order:** `<mark>` highlights → `UIStroke` → rich `<stroke>` → legacy `TextStroke` → glyph fills → `<u>` / `<s>` decorations. A `UIShadow` of `Mode = Text` draws between the highlights and the rest.
 - **Blending:** Straight alpha per glyph quad: `A = gpu8(g/255 * alpha8(1 - TextTransparency)/255)`, blended with `round((c * A + D * (255 - A)) / 255)` ([images.md](images.md)).
 - **`<u>` and `<s>`:** Whole-pixel rects of thickness `ceil(S / DPI / 20)` logical px; underline aligns to the bottom rows of the run box, strikethrough starts at `ceil(S / 2) + 1`.
 - **`UIGradient` on text:** Evaluates across the label's rect per texel ([images.md](images.md#uigradient)), also tinting strokes that don't have their own gradient.

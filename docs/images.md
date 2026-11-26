@@ -60,14 +60,17 @@ Fixtures: `gradients`, `gradient-edges`, `gradient-probe-*` (`gradient-probe-ell
 
 - **Rounded fills:** Alpha is `gpu8(a8 / 255 * corner_coverage)`; corner radius clamps to half of the unsnapped shorter side.
 - **Borders & strokes:** `Outline`, `Middle`, and `Inset` borders and `UIStroke` (`Center` / `Inner` / `Outer` + joins) match Studio's per-side geometry and rounded-corner coverage. Thickness under `UIScale` and fractional sizes uses Studio's rounding (`render/text.rs` `stroke_radius` for text strokes).
+- **Sharp stroke edges:** a sharp, unturned `Round` stroke reaching up to 1 + 1/sqrt(2) logical px past its frame has no outer margin: a pixel centred on its outer edge follows the top-left rule. Past that reach, and on turned frames, pixel centres up to 0.1 logical px beyond the edge are drawn (any device scale).
+- **Edges on the GPU grid:** a stroke's straight edges are snapped to 1/256 device px as a GPU snaps a quad's corners, so an edge within 1/512 px of a pixel centre lies on it.
 
-Fixtures: `corners`, `strokes`, `stroke-*`.
+Fixtures: `corners`, `strokes`, `stroke-*` (`stroke-probe-margin-scale`, `stroke-probe-snap` for the two rules above).
 
 ## UIShadow
 
 Rendered via a blur-profile mesh honoring `BlurRadius`, `Offset`, and rounded corners on thin shapes. Sibling shadows composite sequentially like Studio. Studio-gated properties (`Inset`, `ShowBehindParent`, `Mode = Text` where disabled) follow Studio's active behavior.
 
-- **`Mode = Text`:** with `BlurRadius` 0, the text's own glyphs in the shadow's color. Above 0, each glyph glows from an 8-bit distance field of the glyph at TextSize 56 (56 texels per text size), drawn on a quad whose corners are rounded to whole device pixels and faded by the shadow's `Transparency` before the glyphs' glows blend. Color emoji glow from one field per color layer, in the layer's own color. Rich-text underlines and strikethroughs glow like a shadow of their rect (sigma = half the glow width). A `<mark>` highlight does not glow; Studio draws it under the glow, `rur` over it.
+- **Hard shadows:** with `BlurRadius` 0 the shape is filled at the blur profile's top byte times the vertex alpha `round(255 * (1 - Transparency))` (halves up): `Transparency` 0 draws 254, 0.5 draws 127.
+- **`Mode = Text`:** with `BlurRadius` 0, the text's own glyphs in the shadow's color. Above 0, each glyph glows from an 8-bit distance field of the glyph at TextSize 56 (56 texels per text size), drawn on a quad whose corners are rounded to whole device pixels and faded by the shadow's `Transparency` before the glyphs' glows blend. Color emoji glow from one field per color layer, in the layer's own color. Rich-text underlines and strikethroughs glow like a shadow of their rect (sigma = half the glow width). A `<mark>` highlight does not glow and lies under the glow, which tints it.
 
 Fixtures: `shadows*`, `shadow-probe-*`.
 
@@ -79,8 +82,9 @@ Measured in Studio 0.747:
 - **Self-overlap:** Partly covered pixels double-blend at sharp inner corners and crossings.
 - **`Transparency`:** Stored on the instance, ignored during rendering (always drawn opaque, matching Studio).
 - **Ordering & clipping:** Draws above its parent's background, text, and `UIStroke`, below child `GuiObject`s of the same `ZIndex`, and in child order among equal-`ZIndex` paths. Clipped by clipping ancestors and `CanvasGroup`s, not by its parent's `UICorner`.
+- **Long paths:** a path longer than a texture is wide (8,192 device px) draws the part on the screen.
 
-Fixtures: `path2d-strokes`, `path2d-edges`, `path2d-curves`, `path2d-thick`, `path2d-order`, `path2d-zindex`, `path2d-zindex-global`, `path2d-layout`.
+Fixtures: `path2d-strokes`, `path2d-edges`, `path2d-curves`, `path2d-thick`, `path2d-order`, `path2d-zindex`, `path2d-zindex-global`, `path2d-layout`, `path2d-probe-wide`.
 
 ## Scroll bars
 
