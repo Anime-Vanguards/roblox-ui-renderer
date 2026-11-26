@@ -376,6 +376,10 @@
 			"digest": "77498154a4aa8ba5ec55f7b1c7faf3dbfef10e3b29920bae30290878d5494615",
 			"status": "ok"
 		},
+		"fast/edit/path2d-probe-legacy-clip": {
+			"digest": "d91de34c8b8c6aa2f1bf3454c1d252ce7f14a154efa5408e2b4993323994137d",
+			"status": "ok"
+		},
 		"fast/edit/path2d-probe-offscreen": {
 			"digest": "7b6f44e95428c44098c63c870056238a8903332e039ea7d07f92016eae443863",
 			"status": "ok"
@@ -1616,6 +1620,10 @@
 			"digest": "fcf39acbb289d91e33c1184b88fe90f901e94d8e2871e94a5ee88d3f682afe66",
 			"status": "ok"
 		},
+		"fixtures/edit/path2d-probe-legacy-clip": {
+			"digest": "a0634ea02e4af7607980e30e8adcf48009b579ffd51d9025e87b8971fc7fba19",
+			"status": "ok"
+		},
 		"fixtures/edit/path2d-probe-offscreen": {
 			"digest": "df93de2324583af1d5f778a1bcb6bfca714844c358d5277368df6e5d288533c3",
 			"status": "ok"
@@ -2806,6 +2814,10 @@
 		},
 		"fixtures/play/path2d-order": {
 			"digest": "18a81274e672db873a2232993b0da8babaebbca0d06d03933d8178820127892e",
+			"status": "ok"
+		},
+		"fixtures/play/path2d-probe-legacy-clip": {
+			"digest": "5ff023a31bc252df34b4058049c68f6c8e913c104930733ec57532c2ca2df52a",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-probe-offscreen": {
