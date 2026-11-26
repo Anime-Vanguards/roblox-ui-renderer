@@ -1794,6 +1794,22 @@ pub fn decode_texture(id: AssetId, file: &Path, byte_limit: usize) -> Result<Tex
     Ok(texture)
 }
 
+/// Straight RGBA8 of a decoded image. A 16-bit image keeps each sample's high byte, as a Roblox client decodes it
+/// (fixtures/image-probe-decode.luau: all 4,096 texels of a 16-bit greyscale PNG at 1.5x and 1x; rounding v / 257,
+/// the image crate's conversion, matched 78.4%)
+fn rgba8(image: image::DynamicImage) -> image::RgbaImage {
+    use image::DynamicImage as Decoded;
+    match image {
+        Decoded::ImageLuma16(_) | Decoded::ImageLumaA16(_) | Decoded::ImageRgb16(_) | Decoded::ImageRgba16(_) => {
+            let wide = image.into_rgba16();
+            let (width, height) = wide.dimensions();
+            let bytes = wide.into_raw().into_iter().map(|v| (v >> 8) as u8).collect();
+            image::RgbaImage::from_raw(width, height, bytes).expect("an RGBA16 image's samples")
+        }
+        image => image.into_rgba8(),
+    }
+}
+
 fn decode_file(id: AssetId, file: &Path, byte_limit: usize) -> Result<TextureAsset, String> {
     let bytes = std::fs::read(file).map_err(|_| format!("Cannot read image {}", id.0))?;
     let svg = file
@@ -1840,10 +1856,11 @@ fn decode_file(id: AssetId, file: &Path, byte_limit: usize) -> Result<TextureAss
         limits.max_image_width = Some(16384);
         limits.max_image_height = Some(16384);
         reader.limits(limits);
-        let image = reader
-            .decode()
-            .map_err(|error| format!("Cannot decode image {}: {error}", id.0))?
-            .into_rgba8();
+        let image = rgba8(
+            reader
+                .decode()
+                .map_err(|error| format!("Cannot decode image {}: {error}", id.0))?,
+        );
         (image.width(), image.height(), image.into_raw())
     };
     if rgba.len() > byte_limit {
@@ -2091,6 +2108,15 @@ pub(crate) mod tests {
         assert_eq!((pixels.width, pixels.height), (2, 1));
         assert_eq!(&*pixels.rgba, &[91, 43, 27, 0, 12, 24, 36, 255]);
         assert!(decode_texture(AssetId("budget".into()), &png, 1).is_err());
+        // A 16-bit PNG keeps each sample's high byte (0x12FF is 18, where rounding v / 257 gives 19)
+        let wide = directory.join("wide.png");
+        image::ImageBuffer::<image::Luma<u16>, _>::from_raw(3, 1, vec![0x12FF, 0x8080, 0xFFFF])
+            .unwrap()
+            .save(&wide)
+            .unwrap();
+        let pixels = decode_texture(AssetId("test-png16".into()), &wide, 1024).unwrap();
+        assert_eq!(&*pixels.rgba, &[18, 18, 18, 255, 128, 128, 128, 255, 255, 255, 255, 255]);
+        std::fs::remove_file(wide).unwrap();
         let svg = directory.join("pixels.svg");
         std::fs::write(&svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="1"><rect width="2" height="1" fill="red"/></svg>"#).unwrap();
         let pixels = decode_texture(AssetId("test-svg".into()), &svg, 1024).unwrap();

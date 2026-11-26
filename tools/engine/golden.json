@@ -120,6 +120,10 @@
 			"digest": "468bf1044792bfb89b4b7968b8a4ffd521d945d270a17e96c573c2875279dc1b",
 			"status": "ok"
 		},
+		"fast/edit/image-probe-decode": {
+			"digest": "73724d6620f71064fd00da3967d70d9a9844cc4d0e63f349279f2cc8ac8fa4f9",
+			"status": "ok"
+		},
 		"fast/edit/image-probe-dpi": {
 			"digest": "f16c6c3ce833ec91ac4659f76967d618c2cf8be8808c8b769d91cd5b848dda04",
 			"status": "ok"
@@ -1352,6 +1356,10 @@
 			"digest": "93c158553b3ddebffc3be3cbae7898584fa26d44933630eb326716c511f9b169",
 			"status": "ok"
 		},
+		"fixtures/edit/image-probe-decode": {
+			"digest": "d5a5b5767730977a23cec1200a94bbb6331600d2a7c8f26e3448521047b7f788",
+			"status": "ok"
+		},
 		"fixtures/edit/image-probe-dpi": {
 			"digest": "a2b12000b992727f6a4d98f57d9e9fe12e48cd6d8f57eb22ccceb0d72f06c11f",
 			"status": "ok"
@@ -2570,6 +2578,10 @@
 		},
 		"fixtures/play/group-resample": {
 			"digest": "91174ccb031c8c9d06e6efe1d71d27d7deadf7878f7090356a32d486e04500f8",
+			"status": "ok"
+		},
+		"fixtures/play/image-probe-decode": {
+			"digest": "d11d47df7abf46590289604a81741e43a2cea859f75ec43a7d520a468ff754bd",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-dpi": {
