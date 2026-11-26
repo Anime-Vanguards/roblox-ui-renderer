@@ -46,10 +46,10 @@ The default tracks production Roblox (as of 2026-11-12, whole-pixel is active on
 
 - **Line start:** Content alignment anchor snaps half-up: `Left = round(x)`, `Right = round(x + w) - width`, `Center = round(x + w/2) - floor(width/2)` (rich text shifts odd-width centered lines 1 px right).
 - **Glyph positions:** Placed at `line_pen + prior_advances` along the line baseline (determined by the largest pixel size on the line, shared by fallback glyphs and `<font size>` runs).
-- **Rotated & fractional text:** Rotated text skips pen/line-top rounding, rotating upright bitmaps around the label center with 8-bit bilinear resampling. Fractional text sizes (rich text under certain `UIScale`s) draw floored-size bitmaps scaled by `unfloored / floored` around each glyph's pen point.
+- **Rotated & fractional text:** Rotated text skips pen/line-top rounding, rotating upright bitmaps around the label center with 8-bit bilinear resampling. Text in a rotated `CanvasGroup` is drawn the same way into the group's texture: unrounded pens and line top, glyphs resampled there (once, also in a resampled texture). Fractional text sizes (rich text under certain `UIScale`s) draw floored-size bitmaps scaled by `unfloored / floored` around each glyph's pen point.
 - **Draw order:** `<mark>` highlights → `UIStroke` → rich `<stroke>` → legacy `TextStroke` → glyph fills → `<u>` / `<s>` decorations.
 - **Blending:** Straight alpha per glyph quad: `A = gpu8(g/255 * alpha8(1 - TextTransparency)/255)`, blended with `round((c * A + D * (255 - A)) / 255)` ([images.md](images.md)).
 - **`<u>` and `<s>`:** Whole-pixel rects of thickness `ceil(S / DPI / 20)` logical px; underline aligns to the bottom rows of the run box, strikethrough starts at `ceil(S / 2) + 1`.
 - **`UIGradient` on text:** Evaluates across the label's rect per texel ([images.md](images.md#uigradient)), also tinting strokes that don't have their own gradient.
 
-Fixtures: `text-raster`, `text-probe-blend`, `text-probe-rich`, `text-probe-decor*`, `text-probe-synth`, `text-probe-rotate`, `text-probe-gradient*`, `text-probe-uiscale`, `layout-textpen*`, `layout-truncate*`.
+Fixtures: `text-raster`, `text-probe-blend`, `text-probe-rich`, `text-probe-decor*`, `text-probe-synth`, `text-probe-rotate`, `text-probe-groupturned*`, `text-probe-gradient*`, `text-probe-uiscale`, `layout-textpen*`, `layout-truncate*`.

@@ -1806,10 +1806,17 @@ impl DrawPreparer {
                         .iter()
                         .map(|r| [r[0] + m[4], r[1] + m[5], r[2] + m[4], r[3] + m[5]])
                         .collect();
+                    // A layer is drawn texel for texel: only where it starts on a whole pixel. Text in a turned
+                    // CanvasGroup's texture is a rotated node under the identity (groups.rs localized), its quads at
+                    // the unrounded pens: Studio resamples them there as it does on the screen
+                    // (fixtures/text-probe-groupturned-even.luau)
+                    let at = qr.translated(m[4], m[5]);
                     if m == [1., 0., 0., 1., m[4], m[5]]
                         && q.opacity == 1.
                         && q.w == q.width as f64
                         && q.h == q.height as f64
+                        && at.x.fract() == 0.
+                        && at.y.fract() == 0.
                     {
                         let selection: Vec<_> = q
                             .selection_rects
@@ -1818,7 +1825,7 @@ impl DrawPreparer {
                             .collect();
                         self.layer(
                             ctx,
-                            qr.translated(m[4], m[5]),
+                            at,
                             id,
                             clip,
                             q.selection_mode,

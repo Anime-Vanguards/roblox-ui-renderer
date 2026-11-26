@@ -896,12 +896,28 @@
 			"digest": "8a04854c8f0da66f69b66fedcf2e42df6694f759f277acd52beb3c438d0c4f6d",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-groupturned-even": {
+			"digest": "99d9578ed43db52a6edd263d4f43b591e7b2e5c34f3912df412972671a2e835a",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-groupturned-even@quarter": {
+			"digest": "83f75ebed323a848bfebacc6995e5e18e7501ddc235030e09dbfc93151eda86f",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-groupturned-pos": {
 			"digest": "e8d3aeba38aa97e7744e9b23cd904739d9aca0160b07f6ca76d49a242fc136e1",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-groupturned-pos@quarter": {
 			"digest": "3d23c1ceae07de436eb4ac4b37a93960b7e9f88a5a8d824f7aa99eab2c28b86c",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-groupturned-quarter": {
+			"digest": "0224f0525d38effe5e66089800d02c146dd7dff2ea66d4d8d0e0e2db0d0850cd",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-groupturned-quarter@quarter": {
+			"digest": "49a75f5149515696176e13dba761bb4141ff6121a47555c4fb6365d3c95b6e4d",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-groupturned-sizes": {
@@ -922,6 +938,14 @@
 		},
 		"fast/edit/text-probe-kernoffset@quarter": {
 			"digest": "ac557d3d5f25cd7f5122e2166a6eacb5f28db4af38ded4be07bb67976aa19bac",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-large": {
+			"digest": "dde60235f0af20d9d150086bca4b08f570ac1531739da7322b8c325c5efd2165",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-large@quarter": {
+			"digest": "7356a3d24b07d945aaf7afb01aa82b0c1639db96fba4e53929fcdb1dc37d4963",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-overlap": {
@@ -2032,12 +2056,28 @@
 			"digest": "f0ca2c3265bf5757a6a11f04efaa1b9d7915ac20773ebdcb7c740c0b35808079",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-groupturned-even": {
+			"digest": "ff89b6c4ee1cea3411286c7f95147aabb0e3846a3f70f035805a8ae7addfdd3c",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-groupturned-even@quarter": {
+			"digest": "56210ec72a3351d6652bd8ed5a0ef03c245c6655f3e9e2b4fd96e8a53d2fc61e",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-groupturned-pos": {
 			"digest": "bb44ce6ec257139f4dc407f00b192531e1475c06eef3e506b251554c1b82792d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-pos@quarter": {
 			"digest": "50b60372156e15c92d9e9950fb240ef8b86d9a957b68443b4453e9c94dbe85c2",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-groupturned-quarter": {
+			"digest": "18ecd92238f1a24b221ee09cba59b7bb87d66647057956d6f471035beb9ed6e7",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-groupturned-quarter@quarter": {
+			"digest": "19580ea70d6f784ac2c1d2c27e49f3aa50c37f924c17bd727ae986f99f5e085d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-sizes": {
@@ -2058,6 +2098,14 @@
 		},
 		"fixtures/edit/text-probe-kernoffset@quarter": {
 			"digest": "3d3d43e9cbff0a8b00b117221b58fcfeb11f139370acac2a294d79180417b638",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-large": {
+			"digest": "b8c4c2d0f29aaf1a7ab45aa84e8f5f5fcacb7c9e589485a03a9240eef62936c4",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-large@quarter": {
+			"digest": "4d895d77ad165b63b695d39802ffe560542cc27bd6f5242c68e2bcd7852dd082",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-overlap": {
@@ -3012,8 +3060,16 @@
 			"digest": "9c23e02e9877aee77193a4eae68662ca7fe31fc1139d78cb943bce9fd7171066",
 			"status": "ok"
 		},
+		"fixtures/play/text-probe-groupturned-even": {
+			"digest": "31437ec2215b36b2e31bde12b5e99a50c0330a8b7968e4e58d197e4c0faf856b",
+			"status": "ok"
+		},
 		"fixtures/play/text-probe-groupturned-pos": {
 			"digest": "5556e9727a96c6ef41437c22b42c457f52c112cc7ba07fa2683c68ab502fface",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-groupturned-quarter": {
+			"digest": "b263b7502119bd8219deb1f3228ec0cc16cf264ce1c63e378179f0c5b0f98e71",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-groupturned-sizes": {
@@ -3022,6 +3078,10 @@
 		},
 		"fixtures/play/text-probe-kernoffset": {
 			"digest": "9e5f1e3058fa856abe4af9384fda1ad3d528149618fba352190389c1bda64eb4",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-large": {
+			"digest": "26ecd742e43fd0da4947ee80d816d20b4eb2f029054000f9c756b4e3d77d24ed",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-overlap": {

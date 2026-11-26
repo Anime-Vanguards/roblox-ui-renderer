@@ -29,9 +29,9 @@ Fixtures: `image-probe-*` (using built-in `rbxasset://` textures).
 ## CanvasGroup
 
 - **Offscreen allocation:** Allocated in whole logical pixels: `N = ceil(ceil(Q / DPI) * DPI)` device px for snapped quad `Q` (resampled if `N != Q`). Large groups clamp to Studio's area and side limits (`render/geometry.rs` `group_texture_dims`).
-- **Rendering & compositing:** Children snap on the screen grid and scale into the premultiplied group texture (child images sample in texture space). Compositing unpremultiplies, applies `GroupColor3`, the group's `UIGradient`, `GroupTransparency`, and `UICorner`.
+- **Rendering & compositing:** Children snap on the screen grid and scale into the premultiplied group texture (child images and text sample in texture space). Compositing unpremultiplies, applies `GroupColor3`, the group's `UIGradient`, `GroupTransparency`, and `UICorner`.
 - **Borders:** Drawn over the composite at normal `Frame` border pixels with opacity `(1 - BackgroundTransparency) * (1 - GroupTransparency)`, modulated by `UIGradient` (not `GroupColor3`). The group fill covers the entire rect in all `BorderMode`s.
-- **Rotated groups:** Render axis-aligned into their texture, then draw as a rotated quad (preserving child antialiasing unless rotated by a 90° multiple). If a rotated `CanvasGroup` has a `UIGradient`, the gradient evaluates in group coordinates and outer quad edges are not antialiased (matching rotated `Frame` + `UIGradient`).
+- **Rotated groups:** Render axis-aligned into their texture, then draw as a rotated quad (preserving child antialiasing unless rotated by a 90° multiple). Text inside is placed by the rotated-text rule (unrounded pens and line top) and resampled there ([text.md](text.md)). If a rotated `CanvasGroup` has a `UIGradient`, the gradient evaluates in group coordinates and outer quad edges are not antialiased (matching rotated `Frame` + `UIGradient`).
 
 Fixtures: `group-resample`, `group-misc`, `group-blend`, `canvasgroup*`, `group-probe-*`.
 

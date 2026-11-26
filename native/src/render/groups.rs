@@ -415,35 +415,8 @@ impl DrawPreparer {
                     self.draw_node_parts(screen, child, scene, assets, false, "under")?;
                 }
                 let strokes = array(&child["strokes"]);
-                if child["text"].is_object()
-                    || child["selection"].is_object()
-                    || child["caret"].is_object()
-                {
-                    self.flush_segment(&mut segment, texture, space, &mut empty, false);
-                    // Glyph quads sampled once, straight into the texture (text.rs texture_text_layers);
-                    // glyphs still loading take the screen path
-                    let layers = super::text::texture_text_layers(
-                        child,
-                        scene.fonts(),
-                        assets,
-                        self.scale,
-                        [space.l, space.t],
-                        [space.nw, space.nh],
-                        [space.nw as f64 / space.w as f64, space.nh as f64 / space.h as f64],
-                        super::geometry::text_clip_rect(child, [0.0, 0.0], self.scale),
-                    )
-                    .ok()
-                    .flatten();
-                    if let Some(layers) = layers {
-                        for layer in layers {
-                            self.texture_layer(texture, layer.x, layer.y, layer.w, layer.h, layer.rgba);
-                            empty = false;
-                        }
-                    } else {
-                        let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                        self.draw_node_parts(screen, child, scene, assets, false, "over")?;
-                        self.flush_segment(&mut segment, texture, space, &mut empty, true);
-                    }
+                if has_text(child) {
+                    self.texture_text(texture, &mut segment, child, scene, assets, space, &mut empty)?;
                 } else if !strokes.is_empty() && !strokes.iter().any(|s| s["gradient"].is_object())
                 {
                     self.flush_segment(&mut segment, texture, space, &mut empty, false);
@@ -467,6 +440,22 @@ impl DrawPreparer {
                     let screen = self.screen_segment(&mut segment, texture, space, empty)?;
                     self.draw_node_parts(screen, child, scene, assets, false, "over")?;
                 }
+            } else if resampled
+                && !in_group
+                && child["fringe"].is_boolean()
+                && identity(&child["matrix"])
+                && !child["image"].is_object()
+                && has_text(child)
+            {
+                // A turned group's text child that is not turned again in it (localized): its background on the
+                // screen's grid like any child's, its glyph quads at the rotated rule's unrounded pens sampled once
+                // into the texture, as in an unturned group (a 225 px group whose float32 width is 150.00002
+                // logical gets 227 texels: text-probe-groupturned-pos, its second column 2,310 px > 2 -> 0)
+                if has_part(child, false, false) {
+                    let screen = self.screen_segment(&mut segment, texture, space, empty)?;
+                    self.draw_node_parts(screen, child, scene, assets, false, "under")?;
+                }
+                self.texture_text(texture, &mut segment, child, scene, assets, space, &mut empty)?;
             } else if resampled
                 && child["matrix"].is_array()
                 && super::images::translated_image_node(child).is_none()
@@ -512,6 +501,45 @@ impl DrawPreparer {
             }
         }
         self.flush_segment(&mut segment, texture, space, &mut empty, false);
+        Ok(())
+    }
+
+    /// A text node's glyphs in a resampled group texture: the quads sampled once, straight into the texture
+    /// (text.rs texture_text_layers); glyphs still loading, a selection or a caret take the screen path.
+    #[allow(clippy::too_many_arguments)]
+    fn texture_text(
+        &mut self,
+        texture: &mut BuildContext,
+        segment: &mut Option<ScreenSegment>,
+        child: &Value,
+        scene: &SceneStore,
+        assets: &AssetStore,
+        space: GroupSpace,
+        empty: &mut bool,
+    ) -> Result<(), DrawError> {
+        self.flush_segment(segment, texture, space, empty, false);
+        let layers = super::text::texture_text_layers(
+            child,
+            scene.fonts(),
+            assets,
+            self.scale,
+            [space.l, space.t],
+            [space.nw, space.nh],
+            [space.nw as f64 / space.w as f64, space.nh as f64 / space.h as f64],
+            super::geometry::text_clip_rect(child, [0.0, 0.0], self.scale),
+        )
+        .ok()
+        .flatten();
+        if let Some(layers) = layers {
+            for layer in layers {
+                self.texture_layer(texture, layer.x, layer.y, layer.w, layer.h, layer.rgba);
+                *empty = false;
+            }
+        } else {
+            let screen = self.screen_segment(segment, texture, space, *empty)?;
+            self.draw_node_parts(screen, child, scene, assets, false, "over")?;
+            self.flush_segment(segment, texture, space, empty, true);
+        }
         Ok(())
     }
 
@@ -1075,6 +1103,15 @@ fn texture_space_node(node: &Value, space: GroupSpace, scale: f64) -> Value {
     moved
 }
 
+fn has_text(node: &Value) -> bool {
+    node["text"].is_object() || node["selection"].is_object() || node["caret"].is_object()
+}
+
+/// Whether a node's matrix is exactly the identity (a turned group's child not turned again, localized)
+fn identity(matrix: &Value) -> bool {
+    matrix.as_array().is_some_and(|m| m.len() == 6 && m.iter().zip(IDENTITY).all(|(v, i)| v.as_f64() == Some(i)))
+}
+
 fn has_part(node: &Value, in_group: bool, over: bool) -> bool {
     if over {
         node["text"].is_object()
@@ -1363,6 +1400,87 @@ mod tests {
         );
         assert_eq!(group_taps(1, 2), vec![[0.0, 1.0, 128.0]]);
     }
+    /// The packet of `nodes` drawn through `draw` at device scale 1.5, glyphs of the test font rasterized first
+    fn prepared(nodes: serde_json::Value, draw: serde_json::Value, font: Option<&str>) -> crate::render::packet::RenderPacket {
+        use std::time::{Duration, Instant};
+        let fonts = match font {
+            Some(file) => serde_json::json!([{"file":file,"weight":400,"style":"normal","ascender":1854,"descender":-434,"lineGap":67,"sizeUnits":2355,"unitsPerEm":2048}]),
+            None => serde_json::json!([]),
+        };
+        let mut scene = SceneStore::default();
+        scene.apply(&serde_json::json!({"viewport":{"width":1200,"height":900,"scale":1.5},"nodes":nodes,"layers":[{"draw":draw}],"fonts":fonts,"images":[]})).unwrap();
+        let mut assets = AssetStore::new(std::env::temp_dir().join("rur-no-node-helper-here"), true);
+        if font.is_some() {
+            assets.begin_scene(&scene);
+            assets.request_missing(&scene);
+            assets.wait_for_glyphs(Duration::from_secs(10));
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while assets.pending_count() > 0 && Instant::now() < deadline {
+                assets.poll();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        DrawPreparer::new().prepare(&scene, &assets).unwrap()
+    }
+
+    /// A pass's records as (kind, bounds, blend)
+    fn records(packet: &crate::render::packet::RenderPacket, pass: usize) -> Vec<(u32, [f32; 4], BlendMode)> {
+        packet.passes[pass]
+            .batches
+            .iter()
+            .flat_map(|batch| batch.record_offsets.iter().map(move |at| (*at as usize, batch.blend)))
+            .map(|(at, blend)| (packet.texels[at + 2][0] as u32, packet.texels[at], blend))
+            .collect()
+    }
+
+    /// The pass drawing into a target of this size
+    fn pass_of(packet: &crate::render::packet::RenderPacket, width: u32, height: u32) -> usize {
+        packet.passes.iter().position(|pass| (pass.width, pass.height) == (width, height)).expect("the group's pass")
+    }
+
+    /// fixtures/text-probe-groupturned-even.luau: "Hg" at TextSize 16 (24 px, whole quads) in a CanvasGroup turned
+    /// 180 degrees, its line top on a half pixel. In the group's texture it is a rotated node under the identity
+    /// (localized), drawn at the unrounded top: its quads are resampled there (text quad records), not copied texel
+    /// for texel onto whole pixels (layer records), as Studio draws them (2,864 px > 2 -> 0 on that fixture)
+    #[test]
+    fn text_in_a_turned_group_is_resampled_at_its_unrounded_place() {
+        let Some(font) = crate::assets::tests::test_font() else {
+            return;
+        };
+        let turn = serde_json::json!([-1, 0, 0, -1, 236, 264]);
+        let nodes = serde_json::json!([
+            {"id":1,"rect":[4,4,228,256],"matrix":turn,"rotation":180,"group":{"color":[1,1,1],"transparency":0},"bg":{"color":[0.1,0.2,0.4],"transparency":0}},
+            {"id":2,"rect":[12,45,80,20],"matrix":turn,"bg":{"color":[1,1,1],"transparency":1},"text":{"color":[1,1,1],"weight":400,"textSize":16,"lines":[{"glyphs":[[0,43,0,32.17665],[0,74,23,32.17665]],"px":18,"x":18,"top":70.5}]}}
+        ]);
+        let packet = prepared(nodes, serde_json::json!([{"group":1,"draw":[1,2]}]), Some(&font));
+        let texture = records(&packet, pass_of(&packet, 342, 384));
+        let quads = texture.iter().filter(|r| r.0 == 15).count();
+        assert!(quads > 0, "{texture:?}");
+        assert!(texture.iter().all(|r| r.0 != 18), "no whole-pixel layer: {texture:?}");
+    }
+
+    /// fixtures/text-probe-groupturned-pos.luau's second column: a group at 337.5 device px whose float32 width is
+    /// 150.00002 logical px gets a 227-texel texture for its 225 px. Its text child, not turned again in it, is
+    /// sampled once into the texture (texture_text_layers: layer records under the image blend), as an unturned
+    /// group's is, not drawn on the screen's grid and resampled again (2,310 px > 2 -> 0 per group)
+    #[test]
+    fn text_in_a_resampled_turned_group_is_sampled_once() {
+        let Some(font) = crate::assets::tests::test_font() else {
+            return;
+        };
+        let turn = serde_json::json!([0.93969262078591, 0.34202014332567, -0.34202014332567, 0.93969262078591, 52.29422809679436, -96.57530507629146]);
+        let nodes = serde_json::json!([
+            {"id":1,"rect":[225,40,150,120],"matrix":turn,"rotation":20,"group":{"color":[1,1,1],"transparency":0},"bg":{"color":[0.1,0.2,0.4],"transparency":0}},
+            {"id":2,"rect":[235,42,130,66],"matrix":turn,"bg":{"color":[1,1,1],"transparency":1},"text":{"color":[1,1,1],"weight":400,"textSize":16,"lines":[{"glyphs":[[0,43,0,32.17665],[0,74,23,32.17665]],"px":353,"x":352.5,"ux":352.5,"top":60}]}}
+        ]);
+        let packet = prepared(nodes, serde_json::json!([{"group":1,"draw":[1,2]}]), Some(&font));
+        let texture = records(&packet, pass_of(&packet, 227, 180));
+        assert!(texture.iter().any(|r| r.0 == LAYER && r.2 == BlendMode::Image), "{texture:?}");
+        // The scratch target holds the group's own background only
+        let scratch = records(&packet, pass_of(&packet, 225, 180));
+        assert!(scratch.iter().all(|r| r.0 != 15 && r.0 != LAYER), "{scratch:?}");
+    }
+
     #[test]
     fn masks_keep_unsnapped_size_and_device_parity() {
         let a = super::super::coverage::corner_coverage_raw(13, 11, [4.0; 4], 0, 0, 12.6, 10.7);

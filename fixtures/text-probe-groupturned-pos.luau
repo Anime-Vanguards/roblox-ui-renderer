@@ -1,7 +1,9 @@
 -- Text in turned CanvasGroups by the group's position (notes/text.md "Text in a turned CanvasGroup"): the same
 -- group (turned 20 degrees: "AB" at 60, "AB" at 17, a white bar) at sixteen positions a quarter of a device pixel
 -- apart in x and in y. If the glyphs' offset in the texture follows the fraction of the group's position, it
--- changes along the rows; if it belongs to the text, it does not.
+-- changes along the rows; if it belongs to the text, it does not. (UDim offsets are integers, so the fractions are
+-- dropped and the groups sit on the same half pixels; the second column's 225 px groups have a float32 width of
+-- 150.00002 logical px and so a resampled 227-texel texture: notes/text.md "Text in a turned CanvasGroup: the rule".)
 -- rur compare --fixture fixtures/text-probe-groupturned-pos.luau --viewport 1200x900 --time 0.2 --background 0,0,0
 return function(Target)
 	for I = 0, 15 do

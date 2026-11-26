@@ -1264,7 +1264,8 @@ pub struct TextureTextLayer {
     pub rgba: Vec<u8>,
 }
 
-/// An unrotated text node's glyph quads drawn straight into a resampled CanvasGroup
+/// An unrotated text node's glyph quads (or a turned group's child under the identity, at the rotated rule's pens)
+/// drawn straight into a resampled CanvasGroup
 /// texture (`l`, `t`: the group's device origin, `n`: texture size, `s`: texels per device px), one layer per quad
 /// in draw order: the quad's screen box scaled into the texture covers the texels whose centre is inside, and the
 /// padded glyph bitmap is sampled once, bilinearly with 8-bit weights, at the texel centre mapped back over the box
@@ -1282,7 +1283,10 @@ pub fn texture_text_layers(
     s: [f64; 2],
     clip: Option<[f64; 4]>,
 ) -> Result<Option<Vec<TextureTextLayer>>, TextError> {
-    if node["matrix"].is_array()
+    let turned = node["matrix"]
+        .as_array()
+        .is_some_and(|m| m.iter().zip([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]).any(|(v, i)| v.as_f64() != Some(i)));
+    if turned
         || node["selection"].is_object()
         || node["caret"].is_object()
         || arr(&node["strokes"]).iter().any(|st| st["mode"].as_str() != Some("Contextual"))
