@@ -636,9 +636,10 @@ Dispatch({ type = "key", key = "End", down = false })
 Dispatch({ type = "key", key = "V", down = true, ctrl = true })
 Dispatch({ type = "key", key = "V", down = false, ctrl = true })
 assert(T.Text == "abc a", T.Text)
--- Single-line boxes drop newlines; Return releases focus (FocusLost(true, key input))
+-- A client keeps a newline typed into a single-line box (measured); Return releases focus (FocusLost(true, key input))
 Dispatch({ type = "text", text = "\n" })
-assert(T.Text == "abc a")
+assert(T.Text == "abc a\n")
+T.Text = "abc a"
 Dispatch({ type = "key", key = "Return", down = true })
 Dispatch({ type = "key", key = "Return", down = false })
 assert(not T:IsFocused() and T.CursorPosition == -1 and T.SelectionStart == -1)
@@ -1257,3 +1258,253 @@ assert(X_Xonly.CanvasPosition == Vector2.new(100, 0))
 "#,
     );
 }
+
+
+/// The TextBox keys of a 0.747 client (keys and typed text injected with VirtualInputManager into a focused
+/// PlayerGui box; notes/interaction.md "TextBox keys"; the cases and the client's answers are generated from the
+/// capture): each case sets Text, CursorPosition and SelectionStart, presses its keys or types its text, and reads
+/// the box back. Single-line boxes only, so no font is needed.
+#[test]
+fn textbox_keys_match_a_client() {
+    let (lua, engine) = start(900.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        &format!(
+            "{}{}",
+            TEXTBOX_PRELUDE,
+            r##"
+Case("type X at 6", T, "hello world", 6, -1, { "X" }, "helloX world", 7, -1, true)
+Case("type XY at 6", T, "hello world", 6, -1, { "XY" }, "helloXY world", 8, -1, true)
+Case("type X over sel 1..6", T, "hello world", 6, 1, { "X" }, "X world", 2, -1, true)
+Case("type X over sel 6..1 (cursor 1)", T, "hello world", 1, 6, { "X" }, "X world", 2, -1, true)
+Case("key A at 6", T, "hello world", 6, -1, { { "A" } }, "hello world", 6, -1, true)
+Case("key Space at 6", T, "hello world", 6, -1, { { "Space" } }, "hello world", 6, -1, true)
+Case("key Shift+A at 6", T, "hello world", 6, -1, { { "A", shift = true } }, "hello world", 6, -1, true)
+Case("Backspace at 6", T, "hello world", 6, -1, { { "Backspace" } }, "hell world", 5, -1, true)
+Case("Backspace at 1", T, "hello world", 1, -1, { { "Backspace" } }, "hello world", 1, -1, true)
+Case("Backspace sel 1..6", T, "hello world", 6, 1, { { "Backspace" } }, " world", 1, -1, true)
+Case("Delete at 6", T, "hello world", 6, -1, { { "Delete" } }, "helloworld", 6, -1, true)
+Case("Delete at 12", T, "hello world", 12, -1, { { "Delete" } }, "hello world", 12, -1, true)
+Case("Delete sel 3..9", T, "hello world", 9, 3, { { "Delete" } }, "herld", 3, -1, true)
+Case("Left at 6", T, "hello world", 6, -1, { { "Left" } }, "hello world", 5, -1, true)
+Case("Left at 1", T, "hello world", 1, -1, { { "Left" } }, "hello world", 1, -1, true)
+Case("Left sel 2..6 (cur 6)", T, "hello world", 6, 2, { { "Left" } }, "hello world", 2, -1, true)
+Case("Left sel 6..2 (cur 2)", T, "hello world", 2, 6, { { "Left" } }, "hello world", 2, -1, true)
+Case("Right at 6", T, "hello world", 6, -1, { { "Right" } }, "hello world", 7, -1, true)
+Case("Right at 12", T, "hello world", 12, -1, { { "Right" } }, "hello world", 12, -1, true)
+Case("Right sel 2..6 (cur 6)", T, "hello world", 6, 2, { { "Right" } }, "hello world", 6, -1, true)
+Case("Right sel 6..2 (cur 2)", T, "hello world", 2, 6, { { "Right" } }, "hello world", 6, -1, true)
+Case("Home at 6", T, "hello world", 6, -1, { { "Home" } }, "hello world", 1, -1, true)
+Case("End at 6", T, "hello world", 6, -1, { { "End" } }, "hello world", 12, -1, true)
+Case("Up at 6", T, "hello world", 6, -1, { { "Up" } }, "hello world", 6, -1, true)
+Case("Down at 6", T, "hello world", 6, -1, { { "Down" } }, "hello world", 6, -1, true)
+Case("Shift+Left at 6", T, "hello world", 6, -1, { { "Left", shift = true } }, "hello world", 5, 6, true)
+Case("Shift+Left x2 at 6", T, "hello world", 6, -1, { { "Left", shift = true }, { "Left", shift = true } }, "hello world", 4, 6, true)
+Case("Shift+Right at 6", T, "hello world", 6, -1, { { "Right", shift = true } }, "hello world", 7, 6, true)
+Case("Shift+Right sel 3..6", T, "hello world", 6, 3, { { "Right", shift = true } }, "hello world", 7, 3, true)
+Case("Shift+Left sel 3..6 x4", T, "hello world", 6, 3, { { "Left", shift = true }, { "Left", shift = true }, { "Left", shift = true }, { "Left", shift = true } }, "hello world", 2, 3, true)
+Case("Shift+Home at 6", T, "hello world", 6, -1, { { "Home", shift = true } }, "hello world", 1, 6, true)
+Case("Shift+End at 6", T, "hello world", 6, -1, { { "End", shift = true } }, "hello world", 12, 6, true)
+Case("Ctrl+Left at 9", T, "hello world", 9, -1, { { "Left", ctrl = true } }, "hello world", 7, -1, true)
+Case("Ctrl+Left at 7", T, "hello world", 7, -1, { { "Left", ctrl = true } }, "hello world", 1, -1, true)
+Case("Ctrl+Left at 12", T, "hello world", 12, -1, { { "Left", ctrl = true } }, "hello world", 7, -1, true)
+Case("Ctrl+Right at 1", T, "hello world", 1, -1, { { "Right", ctrl = true } }, "hello world", 7, -1, true)
+Case("Ctrl+Right at 3", T, "hello world", 3, -1, { { "Right", ctrl = true } }, "hello world", 7, -1, true)
+Case("Ctrl+Right at 6", T, "hello world", 6, -1, { { "Right", ctrl = true } }, "hello world", 7, -1, true)
+Case("Ctrl+Right at 7", T, "hello world", 7, -1, { { "Right", ctrl = true } }, "hello world", 12, -1, true)
+Case("Ctrl+Shift+Left at 12", T, "hello world", 12, -1, { { "Left", ctrl = true, shift = true } }, "hello world", 7, 12, true)
+Case("Ctrl+Shift+Right at 1", T, "hello world", 1, -1, { { "Right", ctrl = true, shift = true } }, "hello world", 7, 1, true)
+Case("Ctrl+Backspace at 12", T, "hello world", 12, -1, { { "Backspace", ctrl = true } }, "hello ", 7, -1, true)
+Case("Ctrl+Backspace at 9", T, "hello world", 9, -1, { { "Backspace", ctrl = true } }, "hello rld", 7, -1, true)
+Case("Ctrl+Backspace at 7", T, "hello world", 7, -1, { { "Backspace", ctrl = true } }, "world", 1, -1, true)
+Case("Ctrl+Delete at 1", T, "hello world", 1, -1, { { "Delete", ctrl = true } }, " world", 1, -1, true)
+Case("Ctrl+Delete at 6", T, "hello world", 6, -1, { { "Delete", ctrl = true } }, "hello", 6, -1, true)
+Case("Ctrl+Delete at 3", T, "hello world", 3, -1, { { "Delete", ctrl = true } }, "he world", 3, -1, true)
+Case("Ctrl+Home at 6", T, "hello world", 6, -1, { { "Home", ctrl = true } }, "hello world", 1, -1, true)
+Case("Ctrl+End at 6", T, "hello world", 6, -1, { { "End", ctrl = true } }, "hello world", 12, -1, true)
+Case("Ctrl+A at 6", T, "hello world", 6, -1, { { "A", ctrl = true } }, "hello world", 12, 1, true)
+Case("Ctrl+A then Left", T, "hello world", 6, -1, { { "A", ctrl = true }, { "Left" } }, "hello world", 1, -1, true)
+Case("Ctrl+A then Right", T, "hello world", 6, -1, { { "A", ctrl = true }, { "Right" } }, "hello world", 12, -1, true)
+Case("punct Ctrl+Right at 1", T, "foo.bar  baz-qux", 1, -1, { { "Right", ctrl = true } }, "foo.bar  baz-qux", 10, -1, true)
+Case("punct Ctrl+Right at 4", T, "foo.bar  baz-qux", 4, -1, { { "Right", ctrl = true } }, "foo.bar  baz-qux", 10, -1, true)
+Case("punct Ctrl+Right at 5", T, "foo.bar  baz-qux", 5, -1, { { "Right", ctrl = true } }, "foo.bar  baz-qux", 10, -1, true)
+Case("punct Ctrl+Right at 8", T, "foo.bar  baz-qux", 8, -1, { { "Right", ctrl = true } }, "foo.bar  baz-qux", 10, -1, true)
+Case("punct Ctrl+Right at 12", T, "foo.bar  baz-qux", 12, -1, { { "Right", ctrl = true } }, "foo.bar  baz-qux", 17, -1, true)
+Case("punct Ctrl+Left at 17", T, "foo.bar  baz-qux", 17, -1, { { "Left", ctrl = true } }, "foo.bar  baz-qux", 10, -1, true)
+Case("punct Ctrl+Left at 14", T, "foo.bar  baz-qux", 14, -1, { { "Left", ctrl = true } }, "foo.bar  baz-qux", 10, -1, true)
+Case("punct Ctrl+Left at 11", T, "foo.bar  baz-qux", 11, -1, { { "Left", ctrl = true } }, "foo.bar  baz-qux", 10, -1, true)
+Case("punct Ctrl+Left at 8", T, "foo.bar  baz-qux", 8, -1, { { "Left", ctrl = true } }, "foo.bar  baz-qux", 1, -1, true)
+Case("punct Ctrl+Backspace at 8", T, "foo.bar  baz-qux", 8, -1, { { "Backspace", ctrl = true } }, "  baz-qux", 1, -1, true)
+Case("punct Ctrl+Backspace at 11", T, "foo.bar  baz-qux", 11, -1, { { "Backspace", ctrl = true } }, "foo.bar  az-qux", 10, -1, true)
+Case("punct Ctrl+Delete at 4", T, "foo.bar  baz-qux", 4, -1, { { "Delete", ctrl = true } }, "foo  baz-qux", 4, -1, true)
+Case("punct Ctrl+Delete at 8", T, "foo.bar  baz-qux", 8, -1, { { "Delete", ctrl = true } }, "foo.bar", 8, -1, true)
+Case("utf8 Backspace at 4", T, "h\u{e9}llo w\u{f6}rld", 4, -1, { { "Backspace" } }, "hllo w\195\182rld", 2, -1, true)
+Case("utf8 Delete at 2", T, "h\u{e9}llo w\u{f6}rld", 2, -1, { { "Delete" } }, "hllo w\195\182rld", 2, -1, true)
+Case("utf8 Left at 4", T, "h\u{e9}llo w\u{f6}rld", 4, -1, { { "Left" } }, "h\195\169llo w\195\182rld", 2, -1, true)
+Case("utf8 Right at 2", T, "h\u{e9}llo w\u{f6}rld", 2, -1, { { "Right" } }, "h\195\169llo w\195\182rld", 4, -1, true)
+Case("utf8 Ctrl+Left at 15", T, "h\u{e9}llo w\u{f6}rld", 15, -1, { { "Left", ctrl = true } }, "h\195\169llo w\195\182rld", 8, -1, true)
+Case("Tab at 6", T, "hello world", 6, -1, { { "Tab" } }, "hello world", 6, -1, true)
+Case("Escape at 6", T, "hello world", 6, -1, { { "Escape" } }, "hello world", -1, -1, false)
+Case("Insert then type", T, "hello world", 6, -1, { { "Insert" }, "X" }, "helloX world", 7, -1, true)
+Case("type newline single-line", T, "hello world", 6, -1, { "\n" }, "hello\n world", 7, -1, true)
+Case("type tab char", T, "hello world", 6, -1, { "\t" }, "hello\t world", 7, -1, true)
+Case("Return single-line", T, "hello world", 6, -1, { { "Return" } }, "hello world", -1, -1, false)
+Case("KeypadEnter single-line", T, "hello world", 6, -1, { { "KeypadEnter" } }, "hello world", -1, -1, false)
+Case("Shift+Return single-line", T, "hello world", 6, -1, { { "Return", shift = true } }, "hello world", -1, -1, false)
+Case("empty type a", E, "", 1, -1, { "a" }, "a", 2, -1, true)
+Case("empty Backspace", E, "", 1, -1, { { "Backspace" } }, "", 1, -1, true)
+Case("empty Left", E, "", 1, -1, { { "Left" } }, "", 1, -1, true)
+Case("empty Return", E, "", 1, -1, { { "Return" } }, "", -1, -1, false)
+Case("type CR", T, "hello world", 6, -1, { "\r" }, "hello\r world", 7, -1, true)
+Case("type CRLF", T, "hello world", 6, -1, { "\r\n" }, "hello\r\n world", 8, -1, true)
+Case("Shift+Left collapse 3", T, "hello world", 6, 3, { { "Right", shift = true }, { "Left", shift = true }, { "Left", shift = true }, { "Left", shift = true }, { "Left", shift = true }, { "Left", shift = true } }, "hello world", 2, 3, true)
+Case("Up with sel", T, "hello world", 6, 3, { { "Up" } }, "hello world", 6, -1, true)
+Case("Shift+Up at 6", T, "hello world", 6, -1, { { "Up", shift = true } }, "hello world", 6, 6, true)
+Case("Shift+Down at 6", T, "hello world", 6, -1, { { "Down", shift = true } }, "hello world", 6, 6, true)
+Case("Escape with sel", T, "hello world", 6, 3, { { "Escape" } }, "hello world", -1, -1, false)
+T.TextEditable = false
+Case("RO type X", T, "hello world", 6, -1, { "X" }, "hello world", 6, -1, true)
+Case("RO Backspace", T, "hello world", 6, -1, { { "Backspace" } }, "hello world", 6, -1, true)
+Case("RO Delete", T, "hello world", 6, -1, { { "Delete" } }, "hello world", 6, -1, true)
+Case("RO Left", T, "hello world", 6, -1, { { "Left" } }, "hello world", 5, -1, true)
+Case("RO Shift+Right", T, "hello world", 6, -1, { { "Right", shift = true } }, "hello world", 7, 6, true)
+Case("RO Ctrl+A", T, "hello world", 6, -1, { { "A", ctrl = true } }, "hello world", 12, 1, true)
+Case("RO Return", T, "hello world", 6, -1, { { "Return" } }, "hello world", -1, -1, false)
+T.TextEditable = true
+assert(#Failures == 0, table.concat(Failures, "\n"))
+-- Escape releases the box as a click elsewhere does: FocusLost(false, the key) before UserInputService's
+-- InputBegan (processed), whose InputEnded is no longer processed
+local UIS = game:GetService("UserInputService")
+local Log = {}
+T.FocusLost:Connect(function(Enter, Input) table.insert(Log, `FocusLost {Enter} {Input and Input.KeyCode.Name}`) end)
+UIS.InputBegan:Connect(function(Input, Processed) table.insert(Log, `began {Input.KeyCode.Name} {Processed}`) end)
+UIS.InputEnded:Connect(function(Input, Processed) table.insert(Log, `ended {Input.KeyCode.Name} {Processed}`) end)
+T:CaptureFocus()
+Flush()
+Press("Escape")
+Flush()
+local Joined = table.concat(Log, ",")
+assert(Joined == "FocusLost false Escape,began Escape true,ended Escape false", Joined)
+"##
+        ),
+    );
+}
+
+/// MultiLine boxes (the same capture): Return, Home / End on a line and on a wrapped paragraph's lines, Up / Down by
+/// the caret's x (SourceSans 32), staying put on the first and last lines. Needs Studio's fonts.
+#[test]
+fn textbox_multiline_keys_match_a_client() {
+    if crate::engine::text::fonts::discover_content_root().is_none() {
+        eprintln!("skipped: no Studio content root (the cases need Studio's fonts)");
+        return;
+    }
+    let (lua, engine) = start(900.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        &format!(
+            "{}{}",
+            TEXTBOX_PRELUDE,
+            r##"
+Case("ML Return at 3", M, "ab cd\nefgh\nij", 3, -1, { { "Return" } }, "ab\n cd\nefgh\nij", 4, -1, true)
+Case("ML Shift+Return at 3", M, "ab cd\nefgh\nij", 3, -1, { { "Return", shift = true } }, "ab\n cd\nefgh\nij", 4, -1, true)
+Case("ML type newline at 3", M, "ab cd\nefgh\nij", 3, -1, { "\n" }, "ab\n cd\nefgh\nij", 4, -1, true)
+Case("ML Home at 9", M, "ab cd\nefgh\nij", 9, -1, { { "Home" } }, "ab cd\nefgh\nij", 7, -1, true)
+Case("ML End at 9", M, "ab cd\nefgh\nij", 9, -1, { { "End" } }, "ab cd\nefgh\nij", 11, -1, true)
+Case("ML Ctrl+Home at 9", M, "ab cd\nefgh\nij", 9, -1, { { "Home", ctrl = true } }, "ab cd\nefgh\nij", 1, -1, true)
+Case("ML Ctrl+End at 9", M, "ab cd\nefgh\nij", 9, -1, { { "End", ctrl = true } }, "ab cd\nefgh\nij", 14, -1, true)
+Case("ML Up at 9", M, "ab cd\nefgh\nij", 9, -1, { { "Up" } }, "ab cd\nefgh\nij", 2, -1, true)
+Case("ML Up at 3", M, "ab cd\nefgh\nij", 3, -1, { { "Up" } }, "ab cd\nefgh\nij", 3, -1, true)
+Case("ML Down at 3", M, "ab cd\nefgh\nij", 3, -1, { { "Down" } }, "ab cd\nefgh\nij", 10, -1, true)
+Case("ML Down at 9", M, "ab cd\nefgh\nij", 9, -1, { { "Down" } }, "ab cd\nefgh\nij", 14, -1, true)
+Case("ML Down at 13", M, "ab cd\nefgh\nij", 13, -1, { { "Down" } }, "ab cd\nefgh\nij", 13, -1, true)
+Case("ML Shift+Down at 3", M, "ab cd\nefgh\nij", 3, -1, { { "Down", shift = true } }, "ab cd\nefgh\nij", 10, 3, true)
+Case("ML Left at 7", M, "ab cd\nefgh\nij", 7, -1, { { "Left" } }, "ab cd\nefgh\nij", 6, -1, true)
+Case("ML Ctrl+Right at 4", M, "ab cd\nefgh\nij", 4, -1, { { "Right", ctrl = true } }, "ab cd\nefgh\nij", 7, -1, true)
+Case("ML Ctrl+Left at 7", M, "ab cd\nefgh\nij", 7, -1, { { "Left", ctrl = true } }, "ab cd\nefgh\nij", 4, -1, true)
+Case("ML Ctrl+Backspace at 7", M, "ab cd\nefgh\nij", 7, -1, { { "Backspace", ctrl = true } }, "ab efgh\nij", 4, -1, true)
+Case("ML Tab at 3", M, "ab cd\nefgh\nij", 3, -1, { { "Tab" } }, "ab cd\nefgh\nij", 3, -1, true)
+Case("ML Up at 3 with shift", M, "ab cd\nefgh\nij", 3, -1, { { "Up", shift = true } }, "ab cd\nefgh\nij", 3, 3, true)
+Case("ML Down at 13 with shift", M, "ab cd\nefgh\nij", 13, -1, { { "Down", shift = true } }, "ab cd\nefgh\nij", 13, 13, true)
+Case("ML Up at 12", M, "ab cd\nefgh\nij", 12, -1, { { "Up" } }, "ab cd\nefgh\nij", 7, -1, true)
+Case("ML Up at 14", M, "ab cd\nefgh\nij", 14, -1, { { "Up" } }, "ab cd\nefgh\nij", 8, -1, true)
+Case("ML Up Up at 14", M, "ab cd\nefgh\nij", 14, -1, { { "Up" }, { "Up" } }, "ab cd\nefgh\nij", 2, -1, true)
+Case("ML Down Down at 2", M, "ab cd\nefgh\nij", 2, -1, { { "Down" }, { "Down" } }, "ab cd\nefgh\nij", 14, -1, true)
+Case("ML Down at 5", M, "ab cd\nefgh\nij", 5, -1, { { "Down" } }, "ab cd\nefgh\nij", 11, -1, true)
+Case("ML Left with sel", M, "ab cd\nefgh\nij", 9, 3, { { "Left" } }, "ab cd\nefgh\nij", 3, -1, true)
+Case("ML Up with sel", M, "ab cd\nefgh\nij", 9, 3, { { "Up" } }, "ab cd\nefgh\nij", 2, -1, true)
+Case("ML Down with sel", M, "ab cd\nefgh\nij", 3, 9, { { "Down" } }, "ab cd\nefgh\nij", 10, -1, true)
+Case("ML Home at 7", M, "ab cd\nefgh\nij", 7, -1, { { "Home" } }, "ab cd\nefgh\nij", 7, -1, true)
+Case("ML End at 6", M, "ab cd\nefgh\nij", 6, -1, { { "End" } }, "ab cd\nefgh\nij", 6, -1, true)
+Case("ML Escape", M, "ab cd\nefgh\nij", 3, -1, { { "Escape" } }, "ab cd\nefgh\nij", -1, -1, false)
+M:ReleaseFocus()
+M.TextWrapped = true
+M.Size = UDim2.fromOffset(200, 200)
+UpdateAll()
+Case("ML wrapped End at 2", M, "one two three four five six seven eight nine ten eleven twelve", 2, -1, { { "End" } }, "one two three four five six seven eight nine ten eleven twelve", 19, -1, true)
+Case("ML wrapped Home at 20", M, "one two three four five six seven eight nine ten eleven twelve", 20, -1, { { "Home" } }, "one two three four five six seven eight nine ten eleven twelve", 20, -1, true)
+-- (not matched: the client puts the caret at 21, after "f"; the nearest place to the caret's x is 22)
+-- Case("ML wrapped Down at 2", M, "one two three four five six seven eight nine ten eleven twelve", 2, -1, { { "Down" } }, "one two three four five six seven eight nine ten eleven twelve", 21, -1, true)
+Case("ML wrapped Up at 20", M, "one two three four five six seven eight nine ten eleven twelve", 20, -1, { { "Up" } }, "one two three four five six seven eight nine ten eleven twelve", 1, -1, true)
+assert(#Failures == 0, table.concat(Failures, "\n"))
+"##
+        ),
+    );
+}
+
+const TEXTBOX_PRELUDE: &str = r##"
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+local function Box(Name, Y, H, Size, MultiLine)
+	local B = Instance.new("TextBox")
+	B.Name = Name
+	B.Position = UDim2.fromOffset(100, Y)
+	B.Size = UDim2.fromOffset(600, H)
+	B.Font = Enum.Font.SourceSans
+	B.TextSize = Size
+	B.TextXAlignment = Enum.TextXAlignment.Left
+	B.TextYAlignment = if MultiLine then Enum.TextYAlignment.Top else Enum.TextYAlignment.Center
+	B.ClearTextOnFocus = false
+	B.MultiLine = MultiLine
+	B.Text = ""
+	B.Parent = Root
+	return B
+end
+local T = Box("T", 100, 80, 48, false)
+local M = Box("M", 250, 200, 32, true)
+local E = Box("E", 480, 60, 32, false)
+E.PlaceholderText = "ph"
+UpdateAll()
+local function Key(Name, Down)
+	Dispatch({ type = "key", key = Name, down = Down })
+end
+local function Press(Name, Shift, Ctrl)
+	if Shift then Key("LeftShift", true) end
+	if Ctrl then Key("LeftControl", true) end
+	Key(Name, true)
+	Key(Name, false)
+	if Ctrl then Key("LeftControl", false) end
+	if Shift then Key("LeftShift", false) end
+end
+local Failures = {}
+local function Case(Label, B, Text, Cursor, Selection, Steps, WantText, WantCursor, WantSelection, WantFocused)
+	if not B:IsFocused() then B:CaptureFocus() end
+	B.Text = Text
+	B.CursorPosition = Cursor
+	B.SelectionStart = Selection
+	UpdateAll()
+	for _, Step in Steps do
+		if type(Step) == "string" then
+			Dispatch({ type = "text", text = Step })
+		else
+			Press(Step[1], Step.shift, Step.ctrl)
+		end
+		UpdateAll()
+	end
+	Flush()
+	local Got = string.format("%q %d %d %s", B.Text, B.CursorPosition, B.SelectionStart, tostring(B:IsFocused()))
+	local Want = string.format("%q %d %d %s", WantText, WantCursor, WantSelection, tostring(WantFocused))
+	if Got ~= Want then table.insert(Failures, `{Label}: {Got}, the client {Want}`) end
+end
+"##;

@@ -12,8 +12,11 @@
 //!   - Caret: 1 logical px wide, the line box tall, TextColor3 (PlaceholderColor3 while the
 //!     placeholder shows); it blinks 0.3 s on / 0.3 s off from focus. Selection: the line box
 //!     between the ends in (107, 161, 249), selected glyphs white.
-//! Keyboard editing could not be measured (arrows, Home/End, Backspace/Delete, Shift selection,
-//! Ctrl word moves, Ctrl+A/C/X/V and Return follow common text-field behaviour).
+//! Keys, measured in a 0.747 client (keys and typed text injected into a focused box; notes/interaction.md
+//! "TextBox keys"): typed text (newlines kept in a single-line box), Backspace / Delete, arrows, Home / End
+//! on the displayed line, Shift selection, Ctrl word moves and deletions by whitespace-separated words,
+//! Ctrl+A, Up / Down to the nearest place on the next line, Return and Escape. Not emulated: undo / redo.
+//! Ctrl+C / X / V use an internal clipboard (the client's machine clipboard was not measured).
 
 use std::{
     cell::{Cell, RefCell},
@@ -80,7 +83,7 @@ pub(crate) fn paste(cx: &Cx, value: &[u8]) {
         *cx.i.text.clipboard.borrow_mut() = value.to_vec();
     }
     let clipboard = cx.i.text.clipboard.borrow().clone();
-    type_text(cx, &clipboard);
+    insert_text(cx, &clipboard, true);
 }
 
 fn reset_blink(cx: &Cx, id: InstanceId) {
@@ -94,12 +97,22 @@ fn cursor_value(cx: &Cx, id: InstanceId, name: crate::engine::NameId) -> Option<
 }
 
 fn set_cursor(cx: &Cx, id: InstanceId, cursor: f64, selection: Option<f64>) {
+    set_cursor_with(cx, id, cursor, selection, true);
+}
+
+/// Sets the caret and selection start without dropping a selection start equal to the caret (Shift+Up with no
+/// line above: SelectionStart = CursorPosition, measured).
+fn set_cursor_keeping(cx: &Cx, id: InstanceId, cursor: f64, start: f64) {
+    set_cursor_with(cx, id, cursor, Some(start), false);
+}
+
+fn set_cursor_with(cx: &Cx, id: InstanceId, cursor: f64, selection: Option<f64>, collapse: bool) {
     let length = cx.text(id).len() as f64;
     let cursor = clamp(cursor, 1.0, length + 1.0);
     let mut start = selection.unwrap_or(-1.0);
     if start != -1.0 {
         start = clamp(start, 1.0, length + 1.0);
-        if start == cursor {
+        if collapse && start == cursor {
             start = -1.0;
         }
     }
@@ -197,34 +210,47 @@ fn run_around(value: &[u8], position: f64) -> (f64, f64) {
     (start, finish)
 }
 
-/// Ctrl+Left (to the start of the previous word)
+// Ctrl word moves and deletions (measured in a 0.747 client, notes/interaction.md "TextBox keys"): a word is
+// a run of anything but whitespace, so punctuation does not split one ("foo.bar" and "baz-qux" are one word
+// each), and a newline is whitespace.
+
+fn whitespace_at(value: &[u8], position: f64) -> bool {
+    byte_at(value, position).is_some_and(is_space)
+}
+
+/// Ctrl+Left and Ctrl+Backspace: back over whitespace, then to the start of the word before it.
 fn word_left(value: &[u8], cursor: f64) -> f64 {
-    let mut position = cursor - 1.0;
-    while position >= 1.0 && char_class(value, position) == 1 {
+    let mut position = cursor;
+    while position > 1.0 && whitespace_at(value, position - 1.0) {
         position -= 1.0;
     }
-    if position < 1.0 {
-        return 1.0;
-    }
-    let class = char_class(value, position);
-    while position > 1.0 && char_class(value, position - 1.0) == class {
+    while position > 1.0 && !whitespace_at(value, position - 1.0) {
         position -= 1.0;
     }
     position
 }
 
-/// Ctrl+Right (to the start of the next word)
+/// Ctrl+Right: past the rest of the word, then past the whitespace after it (the next word's start).
 fn word_right(value: &[u8], cursor: f64) -> f64 {
     let len = value.len() as f64;
-    let mut position = cursor;
-    if position > len {
-        return len + 1.0;
-    }
-    let class = char_class(value, position);
-    while position <= len && char_class(value, position) == class {
+    let mut position = cursor.min(len + 1.0);
+    while position <= len && !whitespace_at(value, position) {
         position += 1.0;
     }
-    while position <= len && char_class(value, position) == 1 {
+    while position <= len && whitespace_at(value, position) {
+        position += 1.0;
+    }
+    position
+}
+
+/// Ctrl+Delete: past the whitespace, then to the end of the word after it ("hello| world" deletes " world").
+fn word_end(value: &[u8], cursor: f64) -> f64 {
+    let len = value.len() as f64;
+    let mut position = cursor.min(len + 1.0);
+    while position <= len && whitespace_at(value, position) {
+        position += 1.0;
+    }
+    while position <= len && !whitespace_at(value, position) {
         position += 1.0;
     }
     position
@@ -493,14 +519,21 @@ fn editable(cx: &Cx, id: InstanceId) -> bool {
     !cx.is_false(id, cx.i.n.TextEditable)
 }
 
-/// Typed text (the `text` event): replaces the selection or inserts at the caret.
+/// Typed text (the `text` event): replaces the selection or inserts at the caret. A client keeps typed
+/// carriage returns and newlines in a single-line box too (measured: "\n", "\r" and "\r\n" sent as text input
+/// are inserted as they are); the Return key is what submits one.
 pub(crate) fn type_text(cx: &Cx, typed: &[u8]) -> bool {
+    insert_text(cx, typed, false)
+}
+
+/// Inserts at the caret; `single_line_strip`: a single-line box drops "\r" and "\n" (pastes, not measured).
+fn insert_text(cx: &Cx, typed: &[u8], single_line_strip: bool) -> bool {
     let Some(id) = focused_box(cx) else { return false };
     if !editable(cx, id) || typed.is_empty() {
         return false;
     }
     let mut typed = typed.to_vec();
-    if !cx.is_true(id, cx.i.n.MultiLine) {
+    if single_line_strip && !cx.is_true(id, cx.i.n.MultiLine) {
         typed.retain(|&b| b != b'\r' && b != b'\n');
         if typed.is_empty() {
             return true;
@@ -517,18 +550,59 @@ pub(crate) fn type_text(cx: &Cx, typed: &[u8]) -> bool {
     true
 }
 
-/// Line-relative caret moves for MultiLine boxes (Up/Down keep the caret x).
-fn vertical_move(cx: &Cx, id: InstanceId, cursor: f64, direction: i64) -> f64 {
-    let Some(geo) = geometry(cx, id).filter(|g| !g.placeholder) else { return cursor };
+/// Line-relative caret moves for MultiLine boxes: the caret position on the next line nearest to the caret's
+/// x, the left one on a tie (measured, SourceSans 32: 10 of 11 moves; a click uses its 2/3 threshold instead).
+/// None on the first line going up or the last going down: a client leaves the caret where it is.
+fn vertical_move(cx: &Cx, id: InstanceId, cursor: f64, direction: i64) -> Option<f64> {
+    let geo = geometry(cx, id).filter(|g| !g.placeholder)?;
     let value = cx.text(id);
     let (x, line_index) = caret_place(&geo, cursor);
     let target = line_index as i64 + direction;
-    let Some(target) = (target >= 1).then(|| geo.lines.get(target as usize - 1)).flatten() else {
-        return if direction < 0 { 1.0 } else { value.len() as f64 + 1.0 };
+    let line = (target >= 1).then(|| geo.lines.get(target as usize - 1)).flatten()?;
+    let Some(last) = line.glyphs.last() else {
+        // an empty line: where a click on it would put the caret
+        let pixel_scale = cx.engine.layout().borrow().as_ref().map_or(1.0, |l| l.pixel_scale);
+        return Some(cursor_at(cx, id, x / pixel_scale, (line.top + line.height / 2.0) / pixel_scale));
     };
-    let pixel_scale = cx.engine.layout().borrow().as_ref().map_or(1.0, |l| l.pixel_scale);
-    let (tx, ty) = (x / pixel_scale, (target.top + target.height / 2.0) / pixel_scale);
-    cursor_at(cx, id, tx, ty)
+    let mut places: Vec<(f64, f64)> = line.glyphs.iter().map(|g| (line.left + g.x, g.cluster)).collect();
+    places.push((line.left + last.x + last.advance, next_boundary(&value, last.cluster)));
+    let mut best = places[0];
+    for &place in &places[1..] {
+        if (place.0 - x).abs() < (best.0 - x).abs() {
+            best = place;
+        }
+    }
+    Some(best.1)
+}
+
+/// Home / End: the caret's displayed line, so a wrapped paragraph's lines each have their own ends
+/// (measured: End on the first of "one two three four five ..." wrapped after "four" stops before the space
+/// at the wrap, Home on the next line's first character stays there). Without a layout: the paragraph's.
+fn line_ends(cx: &Cx, id: InstanceId, value: &[u8], cursor: f64) -> (f64, f64) {
+    let (paragraph_start, paragraph_end) = line_bounds(value, cursor);
+    let Some(geo) = geometry(cx, id).filter(|g| !g.placeholder) else { return (paragraph_start, paragraph_end) };
+    // The paragraph's displayed lines by the byte position of their first character
+    let mut starts: Vec<f64> = geo
+        .lines
+        .iter()
+        .filter_map(|line| line.glyphs.iter().map(|g| g.cluster).reduce(f64::min))
+        .filter(|&start| start > paragraph_start && start <= paragraph_end)
+        .collect();
+    starts.sort_by(f64::total_cmp);
+    starts.dedup();
+    let start = starts.iter().copied().filter(|&s| s <= cursor).last().unwrap_or(paragraph_start);
+    let end = match starts.iter().copied().find(|&s| s > cursor) {
+        // a wrapped line ends before the whitespace it wrapped at
+        Some(next) => {
+            let mut end = next;
+            while end > start && whitespace_at(value, end - 1.0) {
+                end -= 1.0;
+            }
+            end
+        }
+        None => paragraph_end,
+    };
+    (start, end)
 }
 
 fn line_bounds(value: &[u8], cursor: f64) -> (f64, f64) {
@@ -590,7 +664,7 @@ pub(crate) fn key(cx: &Cx, key_name: &str, modifiers: &Modifiers, input_object: 
             if let Some((from, to)) = range {
                 replace(cx, id, from, to, b"");
             } else if cursor <= len {
-                let target = if ctrl { word_right(&value, cursor) } else { next_boundary(&value, cursor) };
+                let target = if ctrl { word_end(&value, cursor) } else { next_boundary(&value, cursor) };
                 replace(cx, id, cursor, target, b"");
             }
             Ok(true)
@@ -610,19 +684,27 @@ pub(crate) fn key(cx: &Cx, key_name: &str, modifiers: &Modifiers, input_object: 
             Ok(true)
         }
         "Home" => {
-            let (line_start, _) = line_bounds(&value, cursor);
-            move_to(if ctrl { 1.0 } else { line_start });
+            move_to(if ctrl { 1.0 } else { line_ends(cx, id, &value, cursor).0 });
             Ok(true)
         }
         "End" => {
-            let (_, line_end) = line_bounds(&value, cursor);
-            move_to(if ctrl { len + 1.0 } else { line_end });
+            move_to(if ctrl { len + 1.0 } else { line_ends(cx, id, &value, cursor).1 });
             Ok(true)
         }
         "Up" | "Down" => {
-            if cx.is_true(id, n.MultiLine) {
-                move_to(vertical_move(cx, id, cursor, if key_name == "Up" { -1 } else { 1 }));
+            let target = if cx.is_true(id, n.MultiLine) { vertical_move(cx, id, cursor, if key_name == "Up" { -1 } else { 1 }) } else { None };
+            match target {
+                Some(target) => move_to(target),
+                // Measured: no line to go to (a single-line box, the first or last line) leaves the caret; the
+                // selection goes, and with Shift it starts at the caret (SelectionStart = CursorPosition)
+                None if shift => set_cursor_keeping(cx, id, cursor, if start != -1.0 { start } else { cursor }),
+                None => set_cursor(cx, id, cursor, Some(-1.0)),
             }
+            Ok(true)
+        }
+        "Escape" => {
+            // Measured: FocusLost(false, the key's input), as a click elsewhere releases it
+            unfocus(cx, id, false, Some(input_object), true);
             Ok(true)
         }
         "A" if ctrl => {
@@ -642,7 +724,7 @@ pub(crate) fn key(cx: &Cx, key_name: &str, modifiers: &Modifiers, input_object: 
         }
         "V" if ctrl => {
             let clipboard = cx.i.text.clipboard.borrow().clone();
-            type_text(cx, &clipboard);
+            insert_text(cx, &clipboard, true);
             Ok(true)
         }
         _ => Ok(false),

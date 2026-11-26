@@ -1,6 +1,6 @@
 # Input and interaction rules
 
-How `rur`'s input layer (`native/src/engine/input/`) dispatches pointer, wheel, keyboard, and text events—calibrated by injecting real window messages into Roblox Studio (`tools/interaction/`) and comparing event streams.
+How `rur`'s input layer (`native/src/engine/input/`) dispatches pointer, wheel, keyboard, and text events—calibrated by injecting real window messages into Roblox Studio (`tools/interaction/`), and input into a 0.747 Roblox client, and comparing event streams.
 
 ## Per-frame event ordering
 
@@ -52,7 +52,9 @@ How `rur`'s input layer (`native/src/engine/input/`) dispatches pointer, wheel, 
 
 ## TextBox and dragging
 
-- Clicking a `TextBox` focuses it (`Focused`, `TextBoxFocused`, `InputBegan`). Typing, pasting, caret movement, selection, copy, and cut match Studio (`fixtures/interaction-textbox.luau`).
+- Clicking a `TextBox` focuses it (`Focused`, `TextBoxFocused`, `InputBegan`); clicks, double and triple clicks and drag selection match Studio (`fixtures/interaction-textbox.luau`).
+- Typing and editing keys match a 0.747 client (measured key by key): typed text replaces the selection; Backspace / Delete; Left / Right; Home / End on the caret's displayed line (Ctrl: the text); Shift extends the selection; Ctrl+Left / Right / Backspace / Delete move or delete by words separated only by whitespace (Ctrl+Delete to the end of the next word); Ctrl+A selects everything; Up / Down move to the nearest place on the next line in a `MultiLine` box and otherwise keep the caret and drop the selection; Return submits a single-line box (`FocusLost(true)`) and adds a newline in a `MultiLine` one; Escape releases the box (`FocusLost(false)`).
+- Not emulated: undo and redo (Ctrl+Z, Ctrl+Y). Copy, cut and paste use rur's own clipboard (the session's in the storybook); the client's were not measured.
 - `UIDragDetector` is active in play mode and inert in edit mode, matching Studio.
 
 ## Driving input
