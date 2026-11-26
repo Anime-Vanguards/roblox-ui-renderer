@@ -2272,26 +2272,35 @@ pub(crate) mod tests {
     /// scene's request starts a new worker, which draws the frame
     #[test]
     fn failed_or_hung_worker_restarts_after_scene_reload() {
+        // The store's timeout counts from the worker's start, so it leaves room for a cold Node on a
+        // loaded runner: the worker that draws has to answer within it as well
+        let timeout = Duration::from_secs(10);
         for hang in [false, true] {
             let directory = unique_directory("worker-restart");
             let png = directory.join("image.png");
             image::RgbaImage::from_raw(1, 1, vec![1, 2, 3, 255]).unwrap().save(&png).unwrap();
-            let attempted = directory.join("attempted");
+            // Workers draw once the test creates `draw`, after the first request has failed. When each
+            // worker went by a mark of its own, a first worker that the store stopped before it read its
+            // request (a slow Node start on CI) left no mark, and the second one failed in its place.
+            let draw = directory.join("draw");
             let script = format!(
                 "const fs=require('fs');require('readline').createInterface({{input:process.stdin}}).on('line',line=>{{const r=JSON.parse(line);\
-                 if(!fs.existsSync({attempted})){{fs.writeFileSync({attempted},'yes');if({hang})setInterval(()=>{{}},1000);else process.exit(3);}}\
+                 if(!fs.existsSync({draw})){{if({hang})setInterval(()=>{{}},1000);else process.exit(3);}}\
                  else{{fs.copyFileSync({png},r.out);process.stdout.write(JSON.stringify({{file:r.out,background:true}})+'\\n');}}}});",
-                attempted = serde_json::to_string(&attempted).unwrap(),
+                draw = serde_json::to_string(&draw).unwrap(),
                 png = serde_json::to_string(&png).unwrap()
             );
             let registered = stand_in_worker(&directory, script);
             let mut scene = SceneStore::default();
             scene.apply(&json!({"viewport":{},"nodes":[{"id":1,"image":{"uri":VIEWPORT},"viewport":{"version":1}}],"fonts":[],"images":[VIEWPORT],"layers":[]})).unwrap();
-            let mut assets = AssetStore::with_timeout(&directory, true, 1024 * 1024, Duration::from_secs(2));
+            let mut assets = AssetStore::with_timeout(&directory, true, 1024 * 1024, timeout);
             for attempt in 0..2 {
+                if attempt == 1 {
+                    std::fs::write(&draw, "yes").unwrap();
+                }
                 assets.begin_scene(&scene);
                 assert_eq!(assets.request_missing(&scene), 1);
-                let deadline = Instant::now() + Duration::from_secs(5);
+                let deadline = Instant::now() + timeout * 3;
                 while assets.pending_count() > 0 && Instant::now() < deadline {
                     assets.poll();
                     std::thread::sleep(Duration::from_millis(2));
