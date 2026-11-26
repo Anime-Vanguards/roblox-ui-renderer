@@ -8,7 +8,8 @@
 //! (tools/studio/measure-text.luau, measure-sweep.luau, measure-wrap.luau, layout-probe-ellipsis3.luau):
 //! text-bounds-1.5x.json 3570/3570, sweep-1.5x.json 4785/4785, wrap-1.5x.json 538/540. The faces with a line
 //! gap were measured on 2026-11-10 (tools/studio/measure-linegap.luau): text-bounds-linegap-1.5x.json
-//! 3059/3060 and text-bounds-linegap-1x.json 3047/3060.
+//! 3059/3060 and text-bounds-linegap-1x.json 3047/3060. data/studio/whole holds the flag-off sets, at 1.5x and (measured
+//! in a client on 2026-11-26) at 1x, 2x and 3x.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -95,33 +96,46 @@ fn text_truncate() {
 /// Every sample of a layout-probe-ellipsis3 dataset: "Ab", the ellipsis and "Ab…" as ordinary text, and
 /// the truncated label's width. Returns the sample count.
 fn truncate_samples(engine: &mut TextEngine, file: &str) -> usize {
+    let (hits, total, misses) = truncate_samples_at(engine, file, 1.5);
+    assert_eq!(hits, total, "{file} misses: {misses:#?}");
+    total
+}
+
+/// The samples of an ellipsis dataset taken at device scale `scale` (its widths are device pixels) that rur
+/// lays out as the client did, all four widths and the truncation: (hits, total, first 25 misses).
+fn truncate_samples_at(engine: &mut TextEngine, file: &str, scale: f64) -> (usize, usize, Vec<String>) {
     let data = read_json(file);
     let faces: BTreeMap<&str, (&str, f64)> =
         [("SSP", ("SourceSansPro", 400.0)), ("MB", ("Montserrat", 700.0)), ("Fre", ("FredokaOne", 400.0))].into_iter().collect();
-    let mut count = 0;
+    let (mut hits, mut total) = (0, 0);
+    let mut misses = Vec::new();
     for (key, expected) in data["samples"].as_object().unwrap() {
         let (name, size) = key.split_once('_').unwrap();
         let (face_name, weight) = faces[name];
         let size: f64 = size.parse().unwrap();
-        // (Studio's widths are logical pixels in single precision: times 1.5 they are a whole pixel but for that)
+        // (the client's widths are logical pixels in single precision: times the scale they are a whole pixel but for that)
         let expected: Vec<f64> = expected.as_array().unwrap().iter().map(|value| value.as_f64().unwrap()).collect();
         let expected: Vec<f64> = expected.iter().enumerate().map(|(index, &value)| if index < 4 { round(value) } else { value }).collect();
         let family = family(face_name);
+        let mut ours = Vec::new();
         // Plain ellipses retain normal shaping; only TextTruncate uses the hinted advance.
-        for (index, text) in ["Ab", "\u{2026}", "Ab\u{2026}"].iter().enumerate() {
-            let params = LayoutParams::new(text.as_bytes(), &family, weight, "normal", size, 1.5);
-            let result = engine.layout(&params, false);
-            assert_eq!(result.width, expected[index], "{key}: ordinary text {text}");
+        for text in ["Ab", "\u{2026}", "Ab\u{2026}"] {
+            let params = LayoutParams::new(text.as_bytes(), &family, weight, "normal", size, scale);
+            ours.push(engine.layout(&params, false).width);
         }
-        let mut params = LayoutParams::new(b"Ab Cdefghijklmnopqrstuvw", &family, weight, "normal", size, 1.5);
+        let mut params = LayoutParams::new(b"Ab Cdefghijklmnopqrstuvw", &family, weight, "normal", size, scale);
         params.max_width = Some(expected[4]);
         params.truncate = Truncate::AtEnd;
         let result = engine.layout(&params, false);
-        assert_eq!(result.width, expected[3], "{key}: expected {}, got {}", expected[3], result.width);
-        assert!(!result.fits && result.lines[0].truncated, "{key}: expected truncated line");
-        count += 1;
+        ours.push(result.width);
+        total += 1;
+        if ours[..] == expected[..4] && !result.fits && result.lines[0].truncated {
+            hits += 1;
+        } else if misses.len() < 25 {
+            misses.push(format!("{key} at {scale}x: client {:?}, ours {ours:?} (truncated {})", &expected[..4], result.lines[0].truncated));
+        }
     }
-    count
+    (hits, total, misses)
 }
 
 /// runtime/tests/text_bounds.luau over one dataset: (hits, total, per-font hits/total, first 25 misses).
@@ -260,8 +274,12 @@ fn text_wrap() {
 
 /// The wrapped layouts of a wrap dataset that have Studio's TextBounds, and the first misses.
 fn wrap_hits(file: &str, subpixel: bool) -> (usize, usize, Vec<String>) {
+    wrap_hits_at(file, subpixel, 1.5)
+}
+
+/// wrap_hits for a dataset taken at device scale `scale`.
+fn wrap_hits_at(file: &str, subpixel: bool, scale: f64) -> (usize, usize, Vec<String>) {
     let data = read_json(file);
-    let scale = 1.5;
     let texts = data["texts"].as_array().unwrap();
     let mut engine = engine_with_cloud_fonts(texts);
     engine.set_subpixel(subpixel);
@@ -366,6 +384,35 @@ fn whole_pixel_datasets() {
     let (hits, total, misses) = wrap_hits("data/studio/whole/wrap-1.5x.json", false);
     assert_eq!((hits, total), (540, 540), "whole/wrap-1.5x.json misses: {misses:#?}");
     assert_eq!(truncate_samples(&mut whole_engine(), "data/studio/whole/ellipsis.json"), 159);
+}
+
+/// The whole-pixel datasets measured again at device scales 1, 2 and 3 (phones run at 2 to 3) in a Roblox
+/// 0.747.0.7471481 client, 2026-11-26: the same probes with the client's PlayerGui for CoreGui and the scale for the
+/// sweep's and the ellipsis probe's 1.5, FFlagTextBoundsRoundUpToLogicalPixels off so the bounds are the exact device
+/// pixels over the scale (production has it on and rounds every TextBounds up to a whole logical pixel; the layout is
+/// the same). The client's 1.5x run of the same probes equals data/studio/whole/*-1.5x.json to the last value.
+/// 2x and 3x match everywhere. Known misses, all at 1x: two trailing spaces ("Hello  ") measured 2 to 14 px narrower
+/// by the client in 6 text-bounds cells and 9 line-gap cells (SourceSansPro, Roboto, Arimo, Guru, Ubuntu), and a
+/// lone space in SourceSansPro at 7 and 8 px, 2 px in the client and 1 here.
+#[test]
+fn whole_pixel_datasets_at_device_scales() {
+    for (scale, text_bounds, sweep, linegap) in [(1.0, 3564, 4783, 3051), (2.0, 3570, 4785, 3060), (3.0, 3570, 4785, 3060)] {
+        let mut engine = whole_engine();
+        for (name, expected) in [("text-bounds", (text_bounds, 3570)), ("sweep", (sweep, 4785)), ("text-bounds-linegap", (linegap, 3060))] {
+            let file = format!("data/studio/whole/{name}-{scale}x.json");
+            let (hits, total, _, misses) = text_bounds_at(&mut engine, &file, scale);
+            assert_eq!((hits, total), expected, "{file} misses: {misses:#?}");
+            if scale == 1.0 {
+                assert!(misses.iter().all(|miss| miss.contains("\"Hello  \"") || miss.contains("\" \"")), "{file}: {misses:#?}");
+            }
+        }
+        let file = format!("data/studio/whole/wrap-{scale}x.json");
+        let (hits, total, misses) = wrap_hits_at(&file, false, scale);
+        assert_eq!((hits, total), (540, 540), "{file} misses: {misses:#?}");
+        let file = format!("data/studio/whole/ellipsis-{scale}x.json");
+        let (hits, total, misses) = truncate_samples_at(&mut whole_engine(), &file, scale);
+        assert_eq!((hits, total), (159, 159), "{file} misses: {misses:#?}");
+    }
 }
 
 /// The two modes differ in the measure, not only in the drawing: "iiiii" in SourceSansPro at TextSize 8 is
