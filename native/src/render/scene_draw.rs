@@ -200,6 +200,30 @@ mod tests {
         assert_eq!(layer(&prepared([400, 200], json!([clipped]))).0, 300);
         assert!(prepared([400, 200], json!([path(-1000.0, 8100.0, 400.0)])).textures.is_empty());
     }
+    /// A label with a text glow draws its rich-text marks before the glow and the rest of its text after it
+    /// (fixtures/shadow-probe-glow-marks.luau's mark cell: Studio's glow tints the mark): the marks alone (every fill,
+    /// stroke and line clear, no selection) and the text without them; a label without a glow, or without marks,
+    /// draws them with its glyphs
+    #[test]
+    fn marks_lie_under_a_text_glow() {
+        let label = |shadows: serde_json::Value, mark: serde_json::Value| {
+            json!({"id":1,"rect":[0,0,100,40],"shadows":shadows,"strokes":[{"mode":"Contextual","thickness":2}],"selection":{"rects":[[0,0,4,4]]},
+                "text":{"transparency":0,"runs":[{"mark":mark,"stroke":{"thickness":1},"underline":true},{}],"lines":[]}})
+        };
+        let glow = json!([{"mode":"Text","blur":8}]);
+        let (marks, rest) = marks_under_glow(&label(glow.clone(), json!({"color":[0,1,0]}))).expect("split");
+        assert_eq!(marks["text"]["transparency"], 1.0);
+        assert_eq!(marks["strokes"], json!([]));
+        assert!(marks["text"]["runs"][0].get("stroke").is_none() && marks["text"]["runs"][0]["mark"].is_object());
+        assert!(marks.get("selection").is_none());
+        assert!(rest["text"]["runs"][0].get("mark").is_none() && rest["text"]["runs"][0]["stroke"].is_object());
+        assert_eq!(rest["selection"], json!({"rects":[[0,0,4,4]]}));
+        assert!(marks_under_glow(&label(json!([]), json!({"color":[0,1,0]}))).is_none(), "no glow");
+        assert!(marks_under_glow(&label(json!([{"mode":"Outer","blur":8}]), json!({"color":[0,1,0]}))).is_none(), "an outer shadow");
+        assert!(marks_under_glow(&label(json!([{"mode":"Text","blur":8,"transparency":1}]), json!({"color":[0,1,0]}))).is_none(), "a clear glow");
+        assert!(marks_under_glow(&label(glow.clone(), json!(null))).is_none(), "no mark");
+        assert!(marks_under_glow(&label(glow, json!({"color":[0,1,0],"transparency":1}))).is_none(), "a clear mark");
+    }
     /// The other layers made the size of an element: a UIGradient's border, a UIShadow and one its frame cuts, each
     /// on a frame wider than a texture can be, keep only the part that shows
     #[test]
@@ -1804,95 +1828,17 @@ impl DrawPreparer {
                 let text_started = Instant::now();
                 let _text_scope = crate::microprofile::scope("Text");
                 self.stats.texts += 1;
-                self.text_shadows(ctx, node, scene, assets)?;
-                let (hits, node_hits, misses) =
-                    (self.text_cache.hits, self.text_cache.node_hits, self.text_cache.misses);
-                use super::text::TextPlan;
-                let plan = match self.text_cache.plan(node, scene.fonts(), assets, self.scale) {
-                    Ok(plan) => plan,
-                    Err(_) if assets.pending_count() > 0 => TextPlan::Layers(Vec::new()),
-                    Err(e) => return Err(e.into()),
-                };
-                self.stats.text_cache_hits += self.text_cache.hits - hits;
-                self.stats.text_node_hits += self.text_cache.node_hits - node_hits;
-                self.stats.text_cache_misses += self.text_cache.misses - misses;
-                let layers: Vec<(super::text::TextQuad, TextureId)> = match plan {
-                    TextPlan::Layers(quads) => quads
-                        .into_iter()
-                        .map(|q| {
-                            // A cached layer is one shared allocation: its texture is found without hashing it
-                            let id = self.upload_shared(q.width, q.height, &q.rgba);
-                            (q, id)
-                        })
-                        .collect(),
-                    TextPlan::Composite { layout, pixels, store } => {
-                        // Drawn as layer() below (an unrotated text layer): not composited when that record
-                        // would be dropped (the cache keeps its quads for when it is drawn)
-                        let m = node_transform(node, ctx.origin, self.scale);
-                        let at = Rect::new(layout.x, layout.y, layout.w, layout.h).translated(m[4], m[5]);
-                        if m[..4] == [1., 0., 0., 1.]
-                            && layout.w == layout.width as f64
-                            && layout.h == layout.height as f64
-                            && Self::culled(ctx, at.bounds(), text_clip_rect(node, ctx.origin, self.scale))
-                        {
-                            self.text_cache.defer(store, pixels);
-                            Vec::new()
-                        } else {
-                            let id = self.queue_text(layout, pixels, store);
-                            vec![(super::text::layer_quad(layout, NO_SOURCE.with(|s| s.clone())), id)]
-                        }
+                // A rich-text <mark> lies under the text's glow (UIShadow Mode = Text): the glow tints it and gives it
+                // none (fixtures/shadow-probe-glow-marks.luau's mark cell, Studio 0.747): the marks are drawn first
+                match marks_under_glow(node) {
+                    Some((marks, rest)) => {
+                        self.text_layers(ctx, &marks, scene, assets)?;
+                        self.text_shadows(ctx, node, scene, assets)?;
+                        self.text_layers(ctx, &rest, scene, assets)?;
                     }
-                };
-                for (q, id) in layers {
-                    let mut m = node_transform(node, ctx.origin, self.scale);
-                    if q.translation_only {
-                        m = [1., 0., 0., 1., m[4], m[5]];
-                    }
-                    let clip = text_clip_rect(node, ctx.origin, self.scale);
-                    let qr = Rect::new(q.x, q.y, q.w, q.h);
-                    let selection: Vec<_> = q
-                        .selection_rects
-                        .iter()
-                        .map(|r| [r[0] + m[4], r[1] + m[5], r[2] + m[4], r[3] + m[5]])
-                        .collect();
-                    // A layer is drawn texel for texel: only where it starts on a whole pixel. Text in a turned
-                    // CanvasGroup's texture is a rotated node under the identity (groups.rs localized), its quads at
-                    // the unrounded pens: Studio resamples them there as it does on the screen
-                    // (fixtures/text-probe-groupturned-even.luau)
-                    let at = qr.translated(m[4], m[5]);
-                    if m == [1., 0., 0., 1., m[4], m[5]]
-                        && q.opacity == 1.
-                        && q.w == q.width as f64
-                        && q.h == q.height as f64
-                        && at.x.fract() == 0.
-                        && at.y.fract() == 0.
-                    {
-                        let selection: Vec<_> = q
-                            .selection_rects
-                            .iter()
-                            .map(|r| [r[0] + m[4], r[1] + m[5], r[2] + m[4], r[3] + m[5]])
-                            .collect();
-                        self.layer(
-                            ctx,
-                            at,
-                            id,
-                            clip,
-                            q.selection_mode,
-                            &selection,
-                        );
-                    } else {
-                        self.text_quad(
-                            ctx,
-                            qr,
-                            q.width,
-                            q.height,
-                            id,
-                            m,
-                            clip,
-                            q.opacity,
-                            q.selection_mode,
-                            &selection,
-                        );
+                    None => {
+                        self.text_shadows(ctx, node, scene, assets)?;
+                        self.text_layers(ctx, node, scene, assets)?;
                     }
                 }
                 self.stats.text_ms += text_started.elapsed().as_secs_f64() * 1000.;
@@ -2811,6 +2757,100 @@ impl DrawPreparer {
     /// (fixtures/shadow-probe-text.luau). BlurRadius and Offset are whole pixels of the target, whatever the
     /// device scale and UIScale: a glow spans 2 x BlurRadius px each side of a glyph's edge
     /// (shadow-probe-text2.luau: 16.07 px for BlurRadius 8 at 1.5x, and under UIScale 2).
+    /// A text node's layers (glyphs, strokes, marks, underlines; its selection and caret), drawn from its text plan
+    fn text_layers(&mut self, ctx: &mut BuildContext, node: &Value, scene: &SceneStore, assets: &AssetStore) -> Result<(), DrawError> {
+        let (hits, node_hits, misses) =
+            (self.text_cache.hits, self.text_cache.node_hits, self.text_cache.misses);
+        use super::text::TextPlan;
+        let plan = match self.text_cache.plan(node, scene.fonts(), assets, self.scale) {
+            Ok(plan) => plan,
+            Err(_) if assets.pending_count() > 0 => TextPlan::Layers(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        self.stats.text_cache_hits += self.text_cache.hits - hits;
+        self.stats.text_node_hits += self.text_cache.node_hits - node_hits;
+        self.stats.text_cache_misses += self.text_cache.misses - misses;
+        let layers: Vec<(super::text::TextQuad, TextureId)> = match plan {
+            TextPlan::Layers(quads) => quads
+                .into_iter()
+                .map(|q| {
+                    // A cached layer is one shared allocation: its texture is found without hashing it
+                    let id = self.upload_shared(q.width, q.height, &q.rgba);
+                    (q, id)
+                })
+                .collect(),
+            TextPlan::Composite { layout, pixels, store } => {
+                // Drawn as layer() below (an unrotated text layer): not composited when that record
+                // would be dropped (the cache keeps its quads for when it is drawn)
+                let m = node_transform(node, ctx.origin, self.scale);
+                let at = Rect::new(layout.x, layout.y, layout.w, layout.h).translated(m[4], m[5]);
+                if m[..4] == [1., 0., 0., 1.]
+                    && layout.w == layout.width as f64
+                    && layout.h == layout.height as f64
+                    && Self::culled(ctx, at.bounds(), text_clip_rect(node, ctx.origin, self.scale))
+                {
+                    self.text_cache.defer(store, pixels);
+                    Vec::new()
+                } else {
+                    let id = self.queue_text(layout, pixels, store);
+                    vec![(super::text::layer_quad(layout, NO_SOURCE.with(|s| s.clone())), id)]
+                }
+            }
+        };
+        for (q, id) in layers {
+            let mut m = node_transform(node, ctx.origin, self.scale);
+            if q.translation_only {
+                m = [1., 0., 0., 1., m[4], m[5]];
+            }
+            let clip = text_clip_rect(node, ctx.origin, self.scale);
+            let qr = Rect::new(q.x, q.y, q.w, q.h);
+            let selection: Vec<_> = q
+                .selection_rects
+                .iter()
+                .map(|r| [r[0] + m[4], r[1] + m[5], r[2] + m[4], r[3] + m[5]])
+                .collect();
+            // A layer is drawn texel for texel: only where it starts on a whole pixel. Text in a turned
+            // CanvasGroup's texture is a rotated node under the identity (groups.rs localized), its quads at
+            // the unrounded pens: Studio resamples them there as it does on the screen
+            // (fixtures/text-probe-groupturned-even.luau)
+            let at = qr.translated(m[4], m[5]);
+            if m == [1., 0., 0., 1., m[4], m[5]]
+                && q.opacity == 1.
+                && q.w == q.width as f64
+                && q.h == q.height as f64
+                && at.x.fract() == 0.
+                && at.y.fract() == 0.
+            {
+                let selection: Vec<_> = q
+                    .selection_rects
+                    .iter()
+                    .map(|r| [r[0] + m[4], r[1] + m[5], r[2] + m[4], r[3] + m[5]])
+                    .collect();
+                self.layer(
+                    ctx,
+                    at,
+                    id,
+                    clip,
+                    q.selection_mode,
+                    &selection,
+                );
+            } else {
+                self.text_quad(
+                    ctx,
+                    qr,
+                    q.width,
+                    q.height,
+                    id,
+                    m,
+                    clip,
+                    q.opacity,
+                    q.selection_mode,
+                    &selection,
+                );
+            }
+        }
+        Ok(())
+    }
     fn text_shadows(&mut self, ctx: &mut BuildContext, node: &Value, scene: &SceneStore, assets: &AssetStore) -> Result<(), DrawError> {
         let mut shadows: Vec<&Value> = array(&node["shadows"])
             .iter()
@@ -3923,6 +3963,40 @@ impl DrawPreparer {
 
 /// No clip (the shaders' NO_CLIP rect)
 const NO_CLIP_RECT: [f64; 4] = [-1e9, -1e9, 1e9, 1e9];
+
+/// A text node with a glow (a UIShadow of Mode = Text that shows) and rich-text marks: the node with only its marks
+/// (fills, strokes, underlines and strikethroughs clear) and the node without them, drawn under and over the glow.
+/// None for any other node, which draws its marks with its glyphs.
+fn marks_under_glow(node: &Value) -> Option<(Value, Value)> {
+    let text = &node["text"];
+    let shows = |v: &Value| number(&v["transparency"], 0.) < 1.;
+    let glows = array(&node["shadows"]).iter().any(|s| s["mode"] == "Text" && shows(s));
+    let marked = array(&text["runs"]).iter().any(|run| run["mark"].is_object() && shows(&run["mark"]));
+    if !glows || !marked {
+        return None;
+    }
+    let (mut marks, mut rest) = (node.clone(), node.clone());
+    // (a fill's and a legacy stroke's opacity are the text's times their own; underlines and strikethroughs are
+    // the fill's; a Contextual UIStroke and a run's <stroke> have their own)
+    marks["text"]["transparency"] = Value::from(1.);
+    marks["strokes"] = Value::Array(Vec::new());
+    // (a TextBox's selection and caret are drawn once, with the text)
+    if let Some(marks) = marks.as_object_mut() {
+        marks.remove("selection");
+        marks.remove("caret");
+    }
+    for run in marks["text"]["runs"].as_array_mut().into_iter().flatten() {
+        if let Some(run) = run.as_object_mut() {
+            run.remove("stroke");
+        }
+    }
+    for run in rest["text"]["runs"].as_array_mut().into_iter().flatten() {
+        if let Some(run) = run.as_object_mut() {
+            run.remove("mark");
+        }
+    }
+    Some((marks, rest))
+}
 
 /// Whether a layer the size of `r` would be wider or taller than a texture can be (MAX_TEXTURE_SIDE)
 pub(crate) fn over_texture_limit(r: Rect) -> bool {
