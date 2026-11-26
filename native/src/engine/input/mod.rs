@@ -23,6 +23,7 @@ pub mod actions;
 mod context_actions;
 pub mod drag;
 pub mod hit;
+pub mod navigation;
 pub mod scrolling;
 pub mod textbox;
 
@@ -84,6 +85,7 @@ names!(
     GetBoundActionInfo, GetAllBoundActionInfo, Select, Selectable, SelectionOrder, PreferredInput,
     IsGamepadButtonDown, GetGamepadConnected, GetImageForKeyCode, MouseIcon, MouseIconEnabled,
     MinDragAngle, MaxDragAngle, DragRotation, TouchStarted, TouchMoved, TouchEnded, AutomaticSize,
+    SelectionChanged, GuiNavigationEnabled, AutoSelectGuiEnabled,
 );
 
 macro_rules! classes {
@@ -198,6 +200,9 @@ pub struct Input {
     /// GuiService.SelectedObject and a selected button held by Return
     selected: Cell<Option<InstanceId>>,
     key_pressed: Cell<Option<InstanceId>>,
+    /// GuiService.GuiNavigationEnabled and AutoSelectGuiEnabled (true in a client until a script writes them)
+    navigation_enabled: Cell<bool>,
+    auto_select_enabled: Cell<bool>,
     /// Objects that "have" the wheel input
     wheel_set: RefCell<FxHashSet<InstanceId>>,
     wheel_list: RefCell<Vec<InstanceId>>,
@@ -430,6 +435,8 @@ impl Input {
             touched: RefCell::default(),
             selected: Cell::new(None),
             key_pressed: Cell::new(None),
+            navigation_enabled: Cell::new(true),
+            auto_select_enabled: Cell::new(true),
             wheel_set: RefCell::default(),
             wheel_list: RefCell::default(),
             hit_dirty: Cell::new(true),
@@ -549,6 +556,11 @@ impl Input {
     pub fn mouse_location(&self) -> (f64, f64) {
         let mouse = self.mouse.get();
         (mouse.x, mouse.y)
+    }
+
+    /// GuiService.SelectedObject as the input holds it (the exporter draws its highlight)
+    pub fn selected_object(&self) -> Option<InstanceId> {
+        self.selected.get()
     }
 
     pub fn hovered(&self) -> Vec<InstanceId> {
@@ -1495,6 +1507,9 @@ fn key(cx: &Cx, event: &Json) -> LuaResult<()> {
         }
         let sunk = context_actions::run(cx, code, input_type, "Begin", object)?;
         used = used || sunk;
+        if !sunk && !typing {
+            used = navigate_key(cx, &code_name) || used;
+        }
         let activation = can_activate && !sunk;
         let mut receivers = Vec::new();
         // Measured: Return on a selected button fires MouseButton1Down at the button's centre and
@@ -1537,7 +1552,7 @@ fn key(cx: &Cx, event: &Json) -> LuaResult<()> {
             cx.set_input(object, "End", position, Some(vector3(0.0, 0.0, 0.0)));
         }
         let sunk = context_actions::run(cx, code, input_type, "End", object)?;
-        let mut processed = textbox::focused_box(cx).is_some() || sunk;
+        let mut processed = textbox::focused_box(cx).is_some() || sunk || navigation_release_processed(cx, &code_name);
         let pressed = if activation_key { cx.i.key_pressed.get() } else { None };
         if let Some(button) = pressed {
             // Measured order: MouseButton1Up (centre), InputEnded, MouseButton1Click, Activated
@@ -1569,6 +1584,57 @@ fn key(cx: &Cx, event: &Json) -> LuaResult<()> {
         }
     }
     Ok(())
+}
+
+/// A key press going down with a selection (or ButtonSelect), as a 0.747 client takes it (measured: notes/interaction.md
+/// "Gamepad selection"); returns whether UserInputService gets it as processed.
+/// - The D-pad, the arrow keys and WASD move the selection (navigation.rs), connected gamepad or not, and are
+///   processed whenever something is selected, even when nothing is there to move to. Holding one does not repeat.
+/// - ButtonSelect clears a selection, or with none selects GuiService's pick (navigation.rs auto_select);
+///   processed going down when it did either. With AutoSelectGuiEnabled false it does neither.
+/// - ButtonA on a selected object that is not a button does nothing and is processed (a button: the activation).
+/// - GuiNavigationEnabled false stops the moves, which are then not processed.
+fn navigate_key(cx: &Cx, code_name: &str) -> bool {
+    let Some(gui_service) = cx.service("GuiService") else { return false };
+    let selected = cx.i.selected.get().filter(|&s| cx.alive(s));
+    if code_name == "ButtonSelect" {
+        if !cx.i.auto_select_enabled.get() {
+            return false;
+        }
+        if selected.is_some() {
+            set_selected(cx, gui_service, None, "None");
+            return true;
+        }
+        let pick = cx.auto_select();
+        if pick.is_some() {
+            set_selected(cx, gui_service, pick, "None");
+        }
+        return pick.is_some();
+    }
+    let Some(from) = selected else { return false };
+    if code_name == "ButtonA" {
+        return !cx.is(from, cx.i.c.GuiButton);
+    }
+    let Some(dir) = navigation::Dir::of_key(code_name) else { return false };
+    if !cx.i.navigation_enabled.get() {
+        return false;
+    }
+    if let Some(target) = cx.navigate(from, dir) {
+        set_selected(cx, gui_service, Some(target), dir.item());
+    }
+    true
+}
+
+/// gameProcessed of a key's release with something selected (measured per key): true for the D-pad, the Left
+/// and Right arrows and ButtonA, false for the Up and Down arrows, WASD and ButtonSelect.
+fn navigation_release_processed(cx: &Cx, code_name: &str) -> bool {
+    let selected = cx.i.selected.get().is_some_and(|s| cx.alive(s));
+    let navigating = cx.i.navigation_enabled.get();
+    match code_name {
+        "DPadUp" | "DPadDown" | "DPadLeft" | "DPadRight" | "Left" | "Right" => selected && navigating,
+        "ButtonA" => selected,
+        _ => false,
+    }
 }
 
 // Dispatch
@@ -1659,11 +1725,10 @@ impl Input {
     /// caret blink, hidden hovered objects.
     fn step(self: &Rc<Self>, lua: &Lua, engine: &Rc<Engine>, delta: f64) -> LuaResult<()> {
         let cx = Cx { lua, engine, i: self };
-        // A selected object that left the tree stops being selected
+        // A selected object that left the tree, or can no longer be selected, stops being selected
         if let (Some(selected), Some(gui_service)) = (self.selected.get(), cx.service("GuiService")) {
-            let attached = cx.alive(selected) && engine.state.borrow().dom.at(selected).parent.is_some();
-            if !attached {
-                set_selected(&cx, gui_service, None);
+            if !cx.selection_holds(selected) {
+                set_selected(&cx, gui_service, None, "None");
             }
         }
         // Profile buckets: presentationApply, pointer, scrolling, hover (Input Step)
@@ -1944,7 +2009,11 @@ fn interactable_changed(engine: &Engine, input: &Input, state: &mut State, id: I
     }
 }
 
-fn set_selected(cx: &Cx, gui_service: InstanceId, target: Option<InstanceId>) {
+/// Moves GuiService.SelectedObject to `target`. Measured (a 0.747 client): SelectionLost on the old object and
+/// SelectionGained on the new one carry the GuiNavigationDirection that moved it (`direction`: None for a script
+/// or ButtonSelect); then SelectionChanged(amISelected, previous, new) fires on the old object and each of its
+/// GuiBase2d ancestors upward, then on the new object and those of its ancestors not reached yet.
+fn set_selected(cx: &Cx, gui_service: InstanceId, target: Option<InstanceId>, direction: &str) {
     let i = cx.i;
     let old = cx.get(gui_service, i.n.SelectedObject).and_then(|v| v.as_instance());
     if old == target {
@@ -1955,12 +2024,35 @@ fn set_selected(cx: &Cx, gui_service: InstanceId, target: Option<InstanceId>) {
     if i.key_pressed.get().is_some() && i.key_pressed.get() != target {
         i.key_pressed.set(None);
     }
-    if let Some(old) = old.filter(|&o| cx.alive(o)) {
-        cx.fire(old, i.n.SelectionLost, Vec::new());
-        cx.update_state(old);
+    let old = old.filter(|&o| cx.alive(o));
+    let way = cx.item("GuiNavigationDirection", direction);
+    if let Some(old) = old {
+        cx.fire(old, i.n.SelectionLost, vec![way.clone()]);
     }
     if let Some(target) = target {
-        cx.fire(target, i.n.SelectionGained, Vec::new());
+        cx.fire(target, i.n.SelectionGained, vec![way]);
+    }
+    if let Some(old) = old {
+        cx.update_state(old);
+    }
+    let as_value = |id: Option<InstanceId>| id.map_or(Value::Nil, Value::Instance);
+    let mut reached = Vec::new();
+    for start in [old, target].into_iter().flatten() {
+        let chain: Vec<InstanceId> = {
+            let state = cx.engine.state.borrow();
+            std::iter::successors(Some(start), |&id| state.dom.at(id).parent)
+                .take_while(|&id| i.class_is(state.dom.at(id).class, i.c.GuiBase2d))
+                .collect()
+        };
+        for id in chain {
+            if reached.contains(&id) {
+                continue;
+            }
+            reached.push(id);
+            cx.fire(id, i.n.SelectionChanged, vec![Value::Bool(Some(id) == target), as_value(old), as_value(target)]);
+        }
+    }
+    if let Some(target) = target {
         cx.update_state(target);
     }
     i.sync_pins(cx.engine);
@@ -2238,7 +2330,7 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
             let Some(parent) = super::lua::instance_id(args.get(1)) else { return Ok(none()) };
             let cx = Cx { lua, engine, i: &i };
             if let Some(target) = lowest_selectable(&cx, parent) {
-                set_selected(&cx, id, Some(target));
+                set_selected(&cx, id, Some(target), "None");
             }
             Ok(none())
         }));
@@ -2258,10 +2350,35 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
                 return raise("Unable to assign property SelectedObject. GuiObject expected");
             }
             let cx = Cx { lua, engine, i: &i };
-            set_selected(&cx, id, target);
+            set_selected(&cx, id, target, "None");
             Ok(())
         });
         behaviors.add_setter(gui_service, n.SelectedObject, setter);
+    }
+
+    // GuiService.GuiNavigationEnabled / AutoSelectGuiEnabled: a 0.747 client reads both true (the engine's
+    // GuiService starts with false); a script's write switches navigation / ButtonSelect's toggle off and on
+    if let Some(gui_service) = c.GuiService {
+        for (name, label, which) in [(n.GuiNavigationEnabled, "GuiNavigationEnabled", true), (n.AutoSelectGuiEnabled, "AutoSelectGuiEnabled", false)] {
+            if !valid(name) {
+                continue;
+            }
+            let i = input.clone();
+            let getter: GetterFn = Rc::new(move |_, _, _| {
+                Ok(LuaValue::Boolean(if which { i.navigation_enabled.get() } else { i.auto_select_enabled.get() }))
+            });
+            behaviors.add_getter(gui_service, name, getter);
+            let i = input.clone();
+            let setter: SetterFn = Rc::new(move |_, engine, id, value| {
+                let LuaValue::Boolean(on) = value else {
+                    return raise(&format!("Unable to assign property {label}. bool expected, got {}", value.type_name()));
+                };
+                if which { i.navigation_enabled.set(on) } else { i.auto_select_enabled.set(on) }
+                super::lua::instance::set_property(engine, id, name, Value::Bool(on));
+                Ok(())
+            });
+            behaviors.add_setter(gui_service, name, setter);
+        }
     }
 
     // GuiState: stored (RawSet by the state machine); measured: an Interactable = false object and

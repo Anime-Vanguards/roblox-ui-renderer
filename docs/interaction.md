@@ -30,10 +30,22 @@ How `rur`'s input layer (`native/src/engine/input/`) dispatches pointer, wheel, 
 ## Keyboard, selection, and InputActions
 
 - Key events (`InputBegan` / `InputEnded`) fire on every object under the pointer with the cursor's current coordinates (one `InputObject` per `KeyCode`).
-- `GuiService.SelectedObject`: pressing `Return` clicks the selected button at its center. Arrow-key and gamepad UI navigation are not emulated.
+- `GuiService.SelectedObject`: pressing `Return` (or `ButtonA`) clicks the selected button at its center. Moving the selection: "Gamepad selection" below.
 - `--device gamepad` and `--device touch` update `UserInputService` device state. `ContextActionService` bindings fire in descending priority, newest first.
 - **Gamepad buttons** arrive as `Gamepad1` input with `Position` (0, 0, 1) going down and (0, 0, 0) coming up, as a connected pad's do in a client.
 - **Input Action System:** Key and mouse button replays also drive bound `InputAction`s (`InputBinding.KeyCode`, including `MouseLeftButton`, `MouseRightButton`, `MouseMiddleButton`) after `UserInputService` events, updating `Pressed`, `Released`, and `GetState()`. Only input the GUI did not process reaches them (measured in a 0.747 client): keys a focused `TextBox` or a sinking `ContextActionService` bind takes, `Return` on the selected button, and clicks a `GuiButton`, `TextBox` or `Active` element takes do not. A release always reaches what its press holds. The wheel does not drive `MouseWheel` bindings yet.
+
+## Gamepad selection
+
+Measured in a 0.747 client with a gamepad connected (each rule below is the client's):
+- **Keys:** the D-pad, the arrow keys and WASD move `GuiService.SelectedObject`, with or without a gamepad, and holding one does not repeat. With something selected the press is processed (also when nothing is there to move to); with nothing selected nothing moves. `GuiNavigationEnabled = false` stops the moves.
+- **Where it goes:** a selectable object overlapping the selection's column (Up / Down) or row (Left / Right) wins over any other, nearest facing edge first, then the one nearer the centre line, then the left or top one. Otherwise an object within 45 degrees of the direction wins, by lateral offset; then the rest, by distance and angle. Over 300 random scenes the rule picks the client's button in 7,187 of 7,201 presses (`data/studio/navigation-random-scenes.json`).
+- **Skipped:** objects that are hidden, `Selectable = false` (text labels and frames by default), `Interactable = false`, in a disabled `ScreenGui`, with their centre off the screen or outside a clipping frame, or with their centre under a button drawn above them. A `ScrollingFrame`'s buttons past its window are reachable, and moving to them does not scroll it.
+- **Overrides:** `NextSelectionUp` / `Down` / `Left` / `Right` win when they name a selectable object. Inside a `SelectionGroup` a press looks inside the group first and leaves it only with `SelectionBehavior` `Escape`.
+- **Signals:** `SelectionLost` and `SelectionGained` carry the `GuiNavigationDirection` (None for a script's selection); `SelectionChanged` fires on the old object and its ancestors, then on the new one and the ancestors not reached yet. A selection that becomes hidden, unselectable or moves off the screen is dropped.
+- **Buttons:** `ButtonA` activates the selected button like `Return`; on another selected object it does nothing. `ButtonSelect` clears the selection, or with none selects the object with the lowest `SelectionOrder`, then the highest layer, then the topmost and leftmost (`AutoSelectGuiEnabled = false` disables it).
+- **Highlight:** `rbxasset://textures/ui/SelectionBox.png` as a 9-slice (slice center 20, 20, 42, 42) over the selected object grown by 14 px, drawn last in its `ScreenGui`, unclipped and turned with the object; a `SelectionImageObject` on the object or on its `PlayerGui` replaces it (its background, border, corners and image).
+- Not emulated: the thumbstick, the analog selection cursor, and selection in `SurfaceGui` / `BillboardGui`.
 
 ## Touch
 

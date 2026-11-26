@@ -2460,7 +2460,121 @@ fn traverse(ctx: &Ctx, out: &mut Export, roots: &[InstanceId], mut cache: Option
         });
         layers.push(Layer { root: serial, display_order, draw, global, player_gui });
     }
+    if let Some((index, node)) = selection_highlight(ctx, out, &layers) {
+        nodes.push(node);
+        layers[index].draw.push(Draw::Id(SELECTION_NODE as i64));
+    }
     (nodes, layers)
+}
+
+/// The scene node id of GuiService.SelectedObject's highlight (no instance has it).
+pub(crate) const SELECTION_NODE: u32 = u32::MAX;
+
+/// The selection highlight a 0.747 client draws around GuiService.SelectedObject (measured in sim captures,
+/// notes/interaction.md "Gamepad selection"): last in the selected object's ScreenGui (over its siblings,
+/// children and every higher ZIndex there, under ScreenGuis with a higher DisplayOrder), clipped by nothing,
+/// faded by no CanvasGroup, turned with the object. By default rbxasset://textures/ui/SelectionBox.png as a
+/// 9-slice (SliceCenter 20, 20, 42, 42) over the object's rect grown by 14 px on every side, in GUI px whatever
+/// a UIScale does; with SelectionImageObject set on the object (else on its PlayerGui), that object's own
+/// background, border, corners and image, placed by its Position and Size inside the object's rect (not its
+/// AnchorPoint; its children and text are not drawn).
+fn selection_highlight(ctx: &Ctx, out: &mut Export, layers: &[Layer]) -> Option<(usize, Json)> {
+    let input = super::input::get(ctx.engine)?;
+    let selected = input.selected_object()?;
+    if ctx.state.dom.get(selected).is_none() || !ctx.is(selected, ctx.c.gui_object) {
+        return None;
+    }
+    let record = ctx.record(selected)?;
+    if !record.visible {
+        return None;
+    }
+    let mut index = None;
+    let mut player_gui = None;
+    let mut current = ctx.state.dom.at(selected).parent;
+    while let Some(id) = current {
+        if index.is_none() {
+            let serial = ctx.state.dom.at(id).serial;
+            index = layers.iter().position(|layer| layer.root == serial);
+        }
+        if ctx.c.player_gui.is_some_and(|class| ctx.class(id) == class) {
+            player_gui = Some(id);
+            break;
+        }
+        current = ctx.state.dom.at(id).parent;
+    }
+    let index = index.filter(|&i| !layers[i].draw.is_empty())?;
+    let custom = ctx.reflection.name_id("SelectionImageObject").and_then(|name| {
+        ctx.get(selected, name)
+            .and_then(Value::as_instance)
+            .or_else(|| player_gui.and_then(|gui| ctx.get(gui, name).and_then(Value::as_instance)))
+            .filter(|&id| ctx.state.dom.get(id).is_some() && ctx.is(id, ctx.c.gui_object))
+    });
+    let mut node = match custom {
+        Some(image) => {
+            let size = ctx.get(image, K::Size as NameId).and_then(Value::as_udim2).unwrap_or_default_udim2();
+            let position = ctx.get(image, K::Position as NameId).and_then(Value::as_udim2).unwrap_or_default_udim2();
+            // (its AnchorPoint is not applied: measured, an AnchorPoint of (0.5, 0) left the image's left edge at
+            // Position)
+            let w = size.x.scale as f64 * record.w + size.x.offset as f64;
+            let h = size.y.scale as f64 * record.h + size.y.offset as f64;
+            let x = record.x + position.x.scale as f64 * record.w + position.x.offset as f64;
+            let y = record.y + position.y.scale as f64 * record.h + position.y.offset as f64;
+            let placed = Record { x, y, w, h, scale: 1.0, visible: true, ..Record::default() };
+            let mut node = appearance(ctx, out, image, &placed, Some("SelectionImageObject".into()));
+            node.remove("props");
+            node.insert("rect".into(), numbers(&[float32(x), float32(y), float32(w), float32(h)]));
+            node
+        }
+        None => {
+            const IMAGE: &str = "rbxasset://textures/ui/SelectionBox.png";
+            let (variant, density) = out.variants.variant(IMAGE, out.pixel_scale, out.content_root.as_deref());
+            let mut image = Map::new();
+            if variant != IMAGE {
+                image.insert("source".into(), Json::String(IMAGE.into()));
+            }
+            if density != 1.0 {
+                image.insert("density".into(), number(density));
+            }
+            image.insert("uri".into(), Json::String(variant));
+            image.insert("color".into(), numbers(&[1.0, 1.0, 1.0]));
+            image.insert("transparency".into(), number(0.0));
+            image.insert("rectOffset".into(), numbers(&[0.0, 0.0]));
+            image.insert("rectSize".into(), numbers(&[0.0, 0.0]));
+            image.insert("scaleType".into(), Json::String("Slice".into()));
+            image.insert("sliceCenter".into(), numbers(&[20.0, 20.0, 42.0, 42.0]));
+            image.insert("sliceScale".into(), number(1.0));
+            image.insert("tileSize".into(), numbers(&[1.0, 0.0, 1.0, 0.0]));
+            image.insert("resample".into(), Json::String("Default".into()));
+            let mut node = Map::new();
+            node.insert("class".into(), Json::String("ImageLabel".into()));
+            node.insert("name".into(), Json::String("SelectionImage".into()));
+            node.insert("path".into(), Json::String("SelectionImage".into()));
+            node.insert("zIndex".into(), number(1.0));
+            node.insert("bg".into(), json!({ "color": numbers(&[1.0, 1.0, 1.0]), "transparency": number(1.0) }));
+            node.insert("image".into(), Json::Object(image));
+            let grow = 14.0;
+            node.insert("rect".into(), numbers(&[float32(record.x - grow), float32(record.y - grow), float32(record.w + 2.0 * grow), float32(record.h + 2.0 * grow)]));
+            node
+        }
+    };
+    node.insert("id".into(), Json::from(SELECTION_NODE));
+    node.insert("parent".into(), Json::from(layers[index].root));
+    node.insert("rotation".into(), number(record.rotation));
+    // (turns that cancel draw unturned, as the walk's nodes do)
+    let cancelled = |m: &Transform| {
+        record.rotation == 0.0
+            && (m[0] - 1.0).abs() < 1e-12
+            && m[1].abs() < 1e-12
+            && m[2].abs() < 1e-12
+            && (m[3] - 1.0).abs() < 1e-12
+            && m[4].abs() < 1e-9
+            && m[5].abs() < 1e-9
+    };
+    if let Some(m) = record.transform.filter(|m| !cancelled(m)) {
+        node.insert("matrix".into(), numbers(&[round(m[0], 14), round(m[1], 14), round(m[2], 14), round(m[3], 14), m[4], m[5]]));
+    }
+    node.insert("visible".into(), Json::Bool(true));
+    Some((index, Json::Object(node)))
 }
 
 /// The text engine of `engine` (created on first use).

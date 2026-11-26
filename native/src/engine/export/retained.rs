@@ -27,7 +27,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::{Map, Value as Json};
 
 use crate::engine::GuiEngine;
-use super::{Cached, Classes, Ctx, Export, Layer, LineCache, Names, Registry, Subtree, Variants, ZInfo, layers_json, traverse};
+use super::{Cached, Classes, Ctx, Export, Layer, LineCache, Names, Registry, SELECTION_NODE, Subtree, Variants, ZInfo, layers_json, traverse};
 use crate::engine::{
     ClassId, Engine, InstanceId, K, NameId, Reflection, State,
     layout::{BoxSlots, Slots, Transform},
@@ -316,6 +316,8 @@ pub struct Retained {
     layers: Option<Vec<Layer>>,
     fonts: usize,
     presentation: bool,
+    /// The selection highlight's node the client holds (it has no instance: sent when it changes)
+    selection: Option<Json>,
 }
 
 impl Retained {
@@ -364,6 +366,7 @@ impl Retained {
             layers: None,
             fonts: 0,
             presentation: false,
+            selection: None,
         }
     }
 
@@ -457,7 +460,11 @@ impl Retained {
             content_root,
             pixel_scale: engine.options.pixel_scale,
         };
-        let (nodes, layers) = traverse(&ctx, &mut out, roots, Some(&mut cached));
+        let (mut nodes, layers) = traverse(&ctx, &mut out, roots, Some(&mut cached));
+        let highlight = nodes
+            .iter()
+            .position(|node| node.get("id").and_then(Json::as_u64) == Some(SELECTION_NODE as u64))
+            .map(|index| nodes.remove(index));
         let Cached { exported, mut new_images, misses, .. } = cached;
         versions.camera_users.clear();
         if let Some(property) = engine.reflection.name_id("CurrentCamera") {
@@ -484,6 +491,19 @@ impl Retained {
                     removed.push(serial);
                 }
                 None => removed.push(serial),
+            }
+        }
+        match highlight {
+            Some(node) => {
+                if self.selection.as_ref() != Some(&node) {
+                    nodes.push(node.clone());
+                }
+                self.selection = Some(node);
+            }
+            None => {
+                if self.selection.take().is_some() {
+                    removed.push(SELECTION_NODE);
+                }
             }
         }
         let count = exported.len();

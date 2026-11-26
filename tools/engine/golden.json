@@ -205,7 +205,7 @@
 			"status": "ok"
 		},
 		"fast/edit/input-device-flow": {
-			"digest": "cc095765eee5a1f64d7c49ed489f0bb94035978705fec0a1b02f06be9d46a88b",
+			"digest": "73ceb91e1c21f71030293160ceef71bf438baaf11aa3b003e060f6eb61b56945",
 			"status": "ok"
 		},
 		"fast/edit/interaction-autobuttoncolor": {
@@ -214,6 +214,18 @@
 		},
 		"fast/edit/interaction-scroll": {
 			"digest": "26bd0929abca083d44a0379ed4ffb0a961aa0cf28745de14c6c9e865b1d79f22",
+			"status": "ok"
+		},
+		"fast/edit/interaction-selection": {
+			"digest": "002349bbc67bd5f797e60aba7f00de4544e2d69075470a21358c9d2541f2b97a",
+			"status": "ok"
+		},
+		"fast/edit/interaction-selection-custom": {
+			"digest": "29c10b0fcdf2ad4892b064d40137e1298957843e13bb28ee27ffdebf21be6c2d",
+			"status": "ok"
+		},
+		"fast/edit/interaction-selection-turned": {
+			"digest": "f149c6da7bb150ae33273c2cc43b0b244daa70169abfa1fcadc69407b81617b8",
 			"status": "ok"
 		},
 		"fast/edit/interaction-textbox": {
@@ -425,7 +437,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-input": {
-			"digest": "fc4719f34beccdbff4c2b17ab11c45a0d6f1efce5cfdab711901c60628b3b3ca",
+			"digest": "e22bd842d7bb3e48d82cda62a5949f33e951dbd4b4dcba1da44184b405144084",
 			"status": "ok"
 		},
 		"fast/edit/probe-scheduler": {
@@ -1277,7 +1289,7 @@
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
-			"digest": "cbbb18a44c1e945068d222aac77d2af33588cf22c3f00f90356736ba67176b96",
+			"digest": "1c38de269c8687f5a3fab1038ff036b2c2044a6deff4635a2aacb16b0291d0e4",
 			"status": "live"
 		},
 		"fast/live/interaction-textbox/120hz-click": {
@@ -1493,7 +1505,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/input-device-flow": {
-			"digest": "d78b1529d46372bbf60aecc062a1b6b52cf562ec38d8881da1e47b6f3c6d1bba",
+			"digest": "1d86b2087d544653d0fa4973e1e318f85349bad62707d41fca43b64210942ba5",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-autobuttoncolor": {
@@ -1502,6 +1514,18 @@
 		},
 		"fixtures/edit/interaction-scroll": {
 			"digest": "102130bf9d9a88f7010cb03ae48798d4fe07af95e0b2e2c8206168e8668d5eb6",
+			"status": "ok"
+		},
+		"fixtures/edit/interaction-selection": {
+			"digest": "cc23cd2e00592a66289afdb9ffc1f9b5f13b5e8897069b8dfa82ea461cb20622",
+			"status": "ok"
+		},
+		"fixtures/edit/interaction-selection-custom": {
+			"digest": "9b89c6310d9bcf4561d4ccadd762b6cf684d0e95c5876ae787d120c8f98df868",
+			"status": "ok"
+		},
+		"fixtures/edit/interaction-selection-turned": {
+			"digest": "9fec7b729cadfd7d8f94ac4a5615287f053d3bcf1185d0f6539e932ba22b0827",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-textbox": {
@@ -1713,7 +1737,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-input": {
-			"digest": "3e0277a57885e0e8443b22b47d61e967f27bccd36c8c8066f5fe23c02a0f927a",
+			"digest": "0acf1fab96a3e090cd0378e5759b7a76c801355fb566845b93765e8dbadbfb47",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-scheduler": {
@@ -2769,7 +2793,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/input-device-flow": {
-			"digest": "b4e8d0adbc5f94f6c6e82d821b7a973baead0b26c11cfe6e3a89cf492617935b",
+			"digest": "12738b3bb325e735c01fd4ce6f8c8dd92193c525e11dbbe10791d82c20fcd087",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-autobuttoncolor": {
@@ -2778,6 +2802,18 @@
 		},
 		"fixtures/play/interaction-scroll": {
 			"digest": "8de6c703c9f6543eb116dde5b6b60a568c30aa69a2afaed81be2fbd204f0b53c",
+			"status": "ok"
+		},
+		"fixtures/play/interaction-selection": {
+			"digest": "6d7f0eee40ffad1059a0aae907cdfbfc6232c032635f4c74e787c40d91296317",
+			"status": "ok"
+		},
+		"fixtures/play/interaction-selection-custom": {
+			"digest": "0da0c49e8b8d2aa0b2f9c2575e43bb7355db5bf787ccb4212a75e1df87964cf4",
+			"status": "ok"
+		},
+		"fixtures/play/interaction-selection-turned": {
+			"digest": "dec13980f2e5f6ea034c31956f64291dbe0d716dfde2a48a55ae20db35a83b85",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-textbox": {
@@ -2953,7 +2989,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-input": {
-			"digest": "0eb61d151743afe63bb409061ee2e86dc8db1fb4d39c1a4b9d47027e32a763df",
+			"digest": "168c3ffc8b7d6bc4bfb25e03a4339f2f079a2b35c0b4a9b3d2db72e7aa85d38e",
 			"status": "ok"
 		},
 		"fixtures/play/probe-scheduler": {
@@ -3553,15 +3589,15 @@
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
-			"digest": "f735540f0ebfae06dcd9ede4acd544dc4d734f92d256833f0f68954c634f81a6",
+			"digest": "411cdfc328f6acf530b2d93f1b8068e315b19d4c2b3b54678cb724ea1f74bcd1",
 			"status": "live"
 		},
 		"live/input/144hz-input-probe": {
-			"digest": "527a769f5a2c28897c8420c5ac05bf4d31e5ad2dd4dfdde98842a2164d7bc1a9",
+			"digest": "f56e7dba1bf9e95b6c0177ed7b887a36f24e9c502a98a9fbd5af7bac8c7e456b",
 			"status": "live"
 		},
 		"live/input/60hz-input-probe": {
-			"digest": "e593b97e79c6b956e05c5355906dc53a8bbb74639f8b9e2e1df3cb20af08b9fb",
+			"digest": "df57b13a4a378f553a35957585c798892af29c7dc8b02a7a3d285bed9a58d660",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-click": {
@@ -3793,7 +3829,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-26T22:49:55.887Z",
+	"recorded": "2026-11-26T23:27:44.278Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

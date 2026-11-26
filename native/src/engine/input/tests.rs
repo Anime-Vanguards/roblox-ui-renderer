@@ -1983,3 +1983,327 @@ assert(string.find(Joined, "Gamepad1 ButtonA Begin 0, 0, 1 0, 0, 1; Gamepad1 But
 "##,
     );
 }
+
+/// Gamepad navigation as a 0.747 client moves the selection (a keyboard-and-mouse client with a gamepad connected
+/// by VirtualInputManager; notes/interaction.md "Gamepad selection"): the D-pad, arrow keys and WASD walk a 3 x 3
+/// grid of buttons, a press with nothing beyond stays, SelectionLost / SelectionGained carry the direction,
+/// SelectionChanged reaches the ScreenGui, ButtonSelect clears the selection and then selects the top-left button,
+/// and each press's gameProcessed going down and up is the client's.
+#[test]
+fn gamepad_navigation_walks_a_grid_like_a_client() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r##"
+local GuiService = game:GetService("GuiService")
+local UIS = game:GetService("UserInputService")
+local Log = {}
+local Gui = Instance.new("ScreenGui")
+Gui.IgnoreGuiInset = true
+local B = {}
+for Row = 0, 2 do
+	for Col = 0, 2 do
+		local Button = Instance.new("TextButton")
+		Button.Name = "B" .. Row .. Col
+		Button.Position = UDim2.fromOffset(100 + Col * 200, 100 + Row * 120)
+		Button.Size = UDim2.fromOffset(150, 60)
+		Button.Parent = Gui
+		B[Button.Name] = Button
+		Button.SelectionGained:Connect(function(Way) table.insert(Log, Button.Name .. ".Gained " .. Way.Name) end)
+		Button.SelectionLost:Connect(function(Way) table.insert(Log, Button.Name .. ".Lost " .. Way.Name) end)
+	end
+end
+Gui.SelectionChanged:Connect(function(Me, Previous, New)
+	table.insert(Log, `Gui.Changed {Me} {Previous and Previous.Name or "nil"} {New and New.Name or "nil"}`)
+end)
+UIS.InputBegan:Connect(function(Input, Processed) table.insert(Log, `+{Input.KeyCode.Name} {Processed}`) end)
+UIS.InputEnded:Connect(function(Input, Processed) table.insert(Log, `-{Input.KeyCode.Name} {Processed}`) end)
+Gui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+UpdateAll()
+local Steps = {}
+local function Key(Name)
+	table.clear(Log)
+	Dispatch({ type = "key", key = Name, down = true })
+	Flush()
+	Dispatch({ type = "key", key = Name, down = false })
+	Flush()
+	local Selected = GuiService.SelectedObject
+	table.insert(Steps, `{Name}>{Selected and Selected.Name or "nil"}`)
+	return table.concat(Log, ", ")
+end
+local Before = Key("DPadDown")
+assert(Before == "+DPadDown false, -DPadDown false", Before)
+GuiService.SelectedObject = B.B11
+Flush()
+local Moved = Key("DPadDown")
+assert(Moved == "B11.Lost Down, B21.Gained Down, Gui.Changed false B11 B21, +DPadDown true, -DPadDown true", Moved)
+for _, Name in { "DPadRight", "DPadUp", "DPadUp", "DPadUp", "DPadLeft", "DPadLeft", "DPadLeft" } do
+	Key(Name)
+end
+local Arrow = Key("Down")
+assert(Arrow == "B00.Lost Down, B10.Gained Down, Gui.Changed false B00 B10, +Down true, -Down false", Arrow)
+local Right = Key("Right")
+assert(Right == "B10.Lost Right, B11.Gained Right, Gui.Changed false B10 B11, +Right true, -Right true", Right)
+Key("W")
+Key("A")
+local Cleared = Key("ButtonSelect")
+assert(Cleared == "B00.Lost None, Gui.Changed false B00 nil, +ButtonSelect true, -ButtonSelect false", Cleared)
+local Picked = Key("ButtonSelect")
+assert(Picked == "B00.Gained None, Gui.Changed false nil B00, +ButtonSelect true, -ButtonSelect false", Picked)
+local Client = "DPadDown>nil,DPadDown>B21,DPadRight>B22,DPadUp>B12,DPadUp>B02,DPadUp>B02,DPadLeft>B01,DPadLeft>B00,DPadLeft>B00,Down>B10,Right>B11,W>B01,A>B00,ButtonSelect>nil,ButtonSelect>B00"
+assert(table.concat(Steps, ",") == Client, table.concat(Steps, ","))
+-- holding a key does not repeat
+GuiService.SelectedObject = B.B00
+Flush()
+Dispatch({ type = "key", key = "DPadDown", down = true })
+Dispatch({ type = "key", key = "DPadDown", down = true })
+Dispatch({ type = "key", key = "DPadDown", down = false })
+Flush()
+assert(GuiService.SelectedObject == B.B10, GuiService.SelectedObject.Name)
+-- GuiNavigationEnabled false: no move, nothing processed; AutoSelectGuiEnabled false: ButtonSelect does nothing
+GuiService.GuiNavigationEnabled = false
+local Off = Key("DPadDown")
+assert(Off == "+DPadDown false, -DPadDown false" and GuiService.SelectedObject == B.B10, Off)
+GuiService.GuiNavigationEnabled = true
+GuiService.AutoSelectGuiEnabled = false
+local NoAuto = Key("ButtonSelect")
+assert(NoAuto == "+ButtonSelect false, -ButtonSelect false" and GuiService.SelectedObject == B.B10, NoAuto)
+"##,
+    );
+}
+
+/// What a press can reach and which object wins, as a 0.747 client decides (notes/interaction.md "Gamepad
+/// selection"; each check is the client's answer): equal gaps (nearer the centre line, then left or top),
+/// NextSelection overrides (only to something selectable), SelectionGroup Escape / Stop, the objects a press skips,
+/// the selection a frame drops, ButtonSelect's pick and ButtonA on a selected Frame.
+#[test]
+fn gamepad_navigation_rules_match_a_client() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r##"
+local GuiService = game:GetService("GuiService")
+local UIS = game:GetService("UserInputService")
+local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+local Gui = Instance.new("ScreenGui")
+Gui.IgnoreGuiInset = true
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.Parent = PlayerGui
+local function Make(Class, Name, X, Y, W, H, Parent, Props)
+	local O = Instance.new(Class)
+	O.Name = Name
+	O.Position = UDim2.fromOffset(X, Y)
+	O.Size = UDim2.fromOffset(W, H)
+	for K, V in Props or {} do
+		O[K] = V
+	end
+	O.Parent = Parent or Gui
+	return O
+end
+local function Btn(Name, X, Y, W, H, Parent, Props) return Make("TextButton", Name, X, Y, W, H, Parent, Props) end
+local function Clear()
+	GuiService.SelectedObject = nil
+	for _, Child in Gui:GetChildren() do
+		Child:Destroy()
+	end
+	Flush()
+end
+local function Nav(From, Key)
+	UpdateAll()
+	GuiService.SelectedObject = From
+	Flush()
+	Dispatch({ type = "key", key = Key, down = true })
+	Dispatch({ type = "key", key = Key, down = false })
+	Flush()
+	local Selected = GuiService.SelectedObject
+	return Selected and Selected.Name or "nil"
+end
+local function Check(Label, Answer, Client)
+	assert(Answer == Client, `{Label}: {Answer}, client {Client}`)
+end
+-- ties in the band
+local A = Btn("A", 300, 100, 200, 40)
+Btn("P", 300, 200, 60, 40)
+Btn("Q", 440, 200, 60, 40)
+Check("tie", Nav(A, "DPadDown"), "P")
+Clear()
+A = Btn("A", 300, 100, 200, 40)
+Btn("Q", 440, 200, 60, 40)
+Btn("P", 300, 200, 60, 40)
+Check("tie made the other way", Nav(A, "DPadDown"), "P")
+Clear()
+A = Btn("A", 300, 100, 200, 40)
+Btn("P", 300, 200, 60, 40)
+Btn("Q", 380, 200, 60, 40)
+Check("tie nearer the centre", Nav(A, "DPadDown"), "Q")
+Clear()
+A = Btn("A", 300, 300, 40, 200)
+Btn("P", 100, 300, 40, 60)
+Btn("Q", 100, 440, 40, 60)
+Check("horizontal tie", Nav(A, "DPadLeft"), "P")
+Clear()
+-- overrides
+A = Btn("A", 300, 250, 100, 40)
+local Near = Btn("Near", 300, 320, 100, 40)
+local Far = Btn("Far", 600, 20, 60, 30)
+local Hidden = Btn("Hidden", 50, 500, 60, 30, nil, { Visible = false })
+local Label = Make("TextLabel", "Lbl", 50, 400, 60, 30)
+local Unselectable = Btn("Unsel", 600, 500, 60, 30, nil, { Selectable = false })
+A.NextSelectionDown = Far
+Check("NextSelectionDown far", Nav(A, "DPadDown"), "Far")
+A.NextSelectionDown = Hidden
+Check("NextSelectionDown hidden", Nav(A, "DPadDown"), "Near")
+A.NextSelectionDown = Label
+Check("NextSelectionDown label", Nav(A, "DPadDown"), "Near")
+A.NextSelectionDown = Unselectable
+Check("NextSelectionDown unselectable", Nav(A, "DPadDown"), "Near")
+A.NextSelectionDown = nil
+A.NextSelectionUp = Near
+Check("NextSelectionUp below", Nav(A, "DPadUp"), "Near")
+A.NextSelectionLeft = A
+Check("NextSelectionLeft itself", Nav(A, "DPadLeft"), "A")
+Clear()
+-- groups
+local Box = Make("Frame", "Box", 200, 100, 300, 400, nil, { SelectionGroup = true })
+A = Btn("A", 10, 10, 100, 40, Box)
+Btn("In", 10, 340, 100, 40, Box)
+Btn("Out", 200, 170, 100, 40)
+Btn("OutR", 520, 110, 60, 40)
+Check("group escape down", Nav(A, "DPadDown"), "In")
+Check("group escape right", Nav(A, "DPadRight"), "OutR")
+Box.SelectionBehaviorDown = Enum.SelectionBehavior.Stop
+Box.SelectionBehaviorRight = Enum.SelectionBehavior.Stop
+Check("group stop down", Nav(A, "DPadDown"), "In")
+Check("group stop right", Nav(A, "DPadRight"), "A")
+Box.SelectionGroup = false
+Check("no group", Nav(A, "DPadDown"), "Out")
+Clear()
+-- what a press skips
+A = Btn("A", 350, 50, 100, 40)
+local function Only(Label, Client, Build)
+	local Built = Build()
+	Check(Label, Nav(A, "DPadDown"), Client)
+	Built:Destroy()
+end
+Only("plain", "X", function() return Btn("X", 350, 300, 100, 40) end)
+Only("Visible false", "A", function() return Btn("X", 350, 300, 100, 40, nil, { Visible = false }) end)
+Only("Selectable false", "A", function() return Btn("X", 350, 300, 100, 40, nil, { Selectable = false }) end)
+Only("Active false", "X", function() return Btn("X", 350, 300, 100, 40, nil, { Active = false }) end)
+Only("Interactable false", "A", function() return Btn("X", 350, 300, 100, 40, nil, { Interactable = false }) end)
+Only("Selectable Frame", "X", function() return Make("Frame", "X", 350, 300, 100, 40, nil, { Selectable = true }) end)
+Only("partly off screen", "X", function() return Btn("X", 350, 580, 100, 40) end)
+Only("off screen", "A", function() return Btn("X", 350, 620, 100, 40) end)
+Only("clipped out", "A", function()
+	local F = Make("Frame", "F", 350, 300, 100, 40, nil, { ClipsDescendants = true })
+	Btn("X", 0, 60, 100, 40, F)
+	return F
+end)
+Only("half clipped", "X", function()
+	local F = Make("Frame", "F", 350, 300, 100, 40, nil, { ClipsDescendants = true })
+	Btn("X", 0, 20, 100, 40, F)
+	return F
+end)
+-- a ScrollingFrame's buttons past its window stay reachable, and nothing scrolls
+local SF = Make("ScrollingFrame", "SF", 100, 100, 200, 200, nil, { CanvasSize = UDim2.fromOffset(200, 1000), ScrollBarThickness = 8 })
+local Items = {}
+for Index = 1, 20 do
+	Items[Index] = Btn("I" .. Index, 10, (Index - 1) * 50, 150, 40, SF)
+end
+UpdateAll()
+GuiService.SelectedObject = Items[1]
+Flush()
+local Trace = {}
+for _ = 1, 8 do
+	Dispatch({ type = "key", key = "DPadDown", down = true })
+	Dispatch({ type = "key", key = "DPadDown", down = false })
+	Flush()
+	UpdateAll()
+	StepDisplay(1 / 60)
+	table.insert(Trace, GuiService.SelectedObject.Name .. ":" .. SF.CanvasPosition.Y)
+end
+Check("scrolling frame walk", table.concat(Trace, " "), "I2:0 I3:0 I4:0 I5:0 I6:0 I7:0 I8:0 I9:0")
+SF:Destroy()
+local function Covered(Label, Client, Cover)
+	local X = Btn("X", 350, 300, 100, 40)
+	local C = Cover()
+	Check(Label, Nav(A, "DPadDown"), Client)
+	X:Destroy()
+	C:Destroy()
+end
+Covered("under a button", "A", function() return Btn("Cv", 340, 290, 120, 60, nil, { ZIndex = 5, Selectable = false }) end)
+Covered("centre under a button", "A", function() return Btn("Cv", 395, 315, 10, 10, nil, { ZIndex = 5, Selectable = false }) end)
+Covered("button beside the centre", "X", function() return Btn("Cv", 340, 290, 50, 60, nil, { ZIndex = 5, Selectable = false }) end)
+Covered("button below it", "X", function() return Btn("Cv", 340, 290, 120, 60, nil, { ZIndex = 0, Selectable = false }) end)
+Covered("under an Active Frame", "X", function() return Make("Frame", "Cv", 340, 290, 120, 60, nil, { ZIndex = 5, Active = true }) end)
+-- the selection a frame drops
+local function Dropped(Change, Undo)
+	GuiService.SelectedObject = A
+	Flush()
+	Change()
+	UpdateAll()
+	StepDisplay(1 / 60)
+	Flush()
+	local Selected = GuiService.SelectedObject
+	Undo()
+	UpdateAll()
+	return Selected and Selected.Name or "nil"
+end
+Check("made invisible", Dropped(function() A.Visible = false end, function() A.Visible = true end), "nil")
+Check("made unselectable", Dropped(function() A.Selectable = false end, function() A.Selectable = true end), "nil")
+Check("moved off screen", Dropped(function() A.Position = UDim2.fromOffset(350, 700) end, function() A.Position = UDim2.fromOffset(350, 50) end), "nil")
+Check("made inactive", Dropped(function() A.Active = false end, function() A.Active = true end), "A")
+local L = Make("TextLabel", "L", 10, 10, 50, 20)
+Check("a TextLabel", Dropped(function() GuiService.SelectedObject = L end, function() end), "nil")
+L:Destroy()
+Clear()
+-- ButtonSelect's pick
+local function Auto(Label, Client, Build)
+	Clear()
+	Build()
+	UpdateAll()
+	Dispatch({ type = "key", key = "ButtonSelect", down = true })
+	Dispatch({ type = "key", key = "ButtonSelect", down = false })
+	Flush()
+	local Selected = GuiService.SelectedObject
+	Check(Label, Selected and Selected.Name or "nil", Client)
+end
+Auto("grid", "B00", function()
+	for Row = 2, 0, -1 do
+		for Col = 2, 0, -1 do
+			Btn("B" .. Row .. Col, 100 + Col * 200, 100 + Row * 120, 150, 60)
+		end
+	end
+end)
+Auto("top first", "Rr", function() Btn("L", 20, 500, 60, 30) Btn("Rr", 700, 20, 60, 30) end)
+Auto("ZIndex", "Z", function() Btn("T", 20, 20, 60, 30) Btn("Z", 600, 500, 60, 30, nil, { ZIndex = 3 }) end)
+Auto("SelectionOrder over ZIndex", "S", function() Btn("S", 600, 500, 60, 30, nil, { SelectionOrder = -1 }) Btn("Z", 20, 20, 60, 30, nil, { ZIndex = 5 }) end)
+Auto("ZIndex path", "Plain", function()
+	local F = Make("Frame", "F", 500, 400, 200, 100)
+	Btn("Zc", 0, 0, 60, 30, F, { ZIndex = 5 })
+	Btn("Plain", 20, 20, 60, 30, nil, { ZIndex = 2 })
+end)
+Auto("left first", "Left", function() Btn("Right", 600, 100, 60, 30) Btn("Left", 100, 100, 60, 30) end)
+Auto("nothing selectable", "nil", function() Make("TextLabel", "L", 10, 10, 50, 20) end)
+-- ButtonA on a selected Frame: nothing happens, both processed
+Clear()
+local F = Make("Frame", "F", 600, 100, 100, 40, nil, { Selectable = true })
+local Flags = {}
+local Began = UIS.InputBegan:Connect(function(Input, Processed) table.insert(Flags, `+{Input.KeyCode.Name} {Processed}`) end)
+local Ended = UIS.InputEnded:Connect(function(Input, Processed) table.insert(Flags, `-{Input.KeyCode.Name} {Processed}`) end)
+UpdateAll()
+GuiService.SelectedObject = F
+Flush()
+for _, Key in { "ButtonA", "Return", "ButtonB" } do
+	Dispatch({ type = "key", key = Key, down = true })
+	Dispatch({ type = "key", key = Key, down = false })
+	Flush()
+end
+Began:Disconnect()
+Ended:Disconnect()
+local Joined = table.concat(Flags, ", ")
+assert(Joined == "+ButtonA true, -ButtonA true, +Return false, -Return false, +ButtonB false, -ButtonB false", Joined)
+"##,
+    );
+}

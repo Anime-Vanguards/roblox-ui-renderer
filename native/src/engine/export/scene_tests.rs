@@ -318,6 +318,59 @@ fn options(width: f64, height: f64, pixel_scale: f64) -> Options {
     options
 }
 
+/// The selection highlight (measured in sim captures of a 0.747 client, notes/interaction.md "Gamepad selection"):
+/// SelectionBox.png as a 9-slice over GuiService.SelectedObject's rect grown by 14 px, last in its ScreenGui's draw
+/// list, clipped by nothing and turned with the object; a SelectionImageObject replaces it, placed in the object's
+/// rect; it leaves with the selection. The retained export agrees with a one-shot one at every step.
+#[test]
+fn selection_highlight_follows_the_selected_object() {
+    run(
+        options(800.0, 600.0, 1.0),
+        r##"
+local GuiService = game:GetService("GuiService")
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+local Clip = Instance.new("Frame", Root)
+Clip.Position = UDim2.fromOffset(60, 60)
+Clip.Size = UDim2.fromOffset(240, 120)
+Clip.ClipsDescendants = true
+local A = Instance.new("TextButton", Clip)
+A.Position = UDim2.fromOffset(3, 3)
+A.Size = UDim2.fromOffset(120, 50)
+local Over = Instance.new("Frame", Root)
+Over.ZIndex = 5
+Over.Size = UDim2.fromOffset(100, 100)
+local HL = 4294967295
+assert(Check(Root, "nothing selected").nodes[HL] == nil, "a highlight without a selection")
+GuiService.SelectedObject = A
+local S = Check(Root, "selected")
+local Node = S.nodes[HL]
+assert(Node, "no highlight")
+assert(Same(Node.rect, { 49, 49, 148, 78 }), "rect " .. table.concat(Node.rect, ","))
+assert(Node.clip == nil, "clipped")
+assert(Node.image.uri == "rbxasset://textures/ui/SelectionBox.png" and Node.image.scaleType == "Slice", Node.image.uri)
+assert(Same(Node.image.sliceCenter, { 20, 20, 42, 42 }), "slice")
+local Draw = S.layers[1].draw
+assert(Draw[#Draw] == HL, "not drawn last in its ScreenGui")
+assert(#Check(Root, "unchanged").rebuilt == 0, "an unchanged highlight was sent again")
+A.Rotation = 30
+assert(Check(Root, "turned").nodes[HL].matrix, "the highlight does not turn with the object")
+A.Rotation = 0
+local Custom = Instance.new("Frame")
+Custom.Size = UDim2.new(1, 20, 0.5, 10)
+Custom.Position = UDim2.new(0, -10, 0.5, 0)
+Custom.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+A.SelectionImageObject = Custom
+Node = Check(Root, "custom").nodes[HL]
+assert(Same(Node.rect, { 53, 88, 140, 35 }), "custom rect " .. table.concat(Node.rect, ","))
+assert(Node.image == nil and Node.bg.transparency == 0, "custom appearance")
+GuiService.SelectedObject = nil
+assert(Check(Root, "deselected").nodes[HL] == nil, "the highlight stayed")
+"##,
+        &[],
+    );
+}
+
 /// runtime/tests/export_cache.luau: after every change the retained export (the client's view of
 /// its updates) equals a one-shot export, and unchanged / unrelated nodes are not rebuilt.
 #[test]
