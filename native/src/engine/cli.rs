@@ -287,15 +287,15 @@ pub const BATCH_JOB_COMMAND: &str = "engine-batch-job";
 /// `rur-native engine-batch`: engine runs one after another in this process, each exactly as a
 /// `rur-native engine <arguments>` process of its own would make it (the golden check sends its scene
 /// entries so: a process start, its exit and the reflection load were most of a small run). A job is a
-/// line on stdin, `{"argv": [engine arguments], "env": {"RUR_…": value}}`; its variables replace every
+/// line on stdin, `{"argv": [engine arguments], "env": {"RUR_…": value}, "id"?: n}`; its variables replace every
 /// RUR_* variable of the job before. Each run has an engine and a VM of its own, freed after it; what
 /// the next run reads unchanged is kept, as in the render service: module sources and their bytecode,
 /// mounted model files and the project's listings. Its answer is a line on stdout, `@@RUR-BATCH {"code": exit code, "error":
-/// message}`, after whatever the run itself printed; a run that panics answers code 101 and the next
-/// job runs. Live sessions (`--session`) are not batched unless sent via `commands`. Passing
-/// `--frozen` marks mounted project and script files as immutable for the life of the worker,
-/// skipping per-file stat checks between jobs. A release build shares this process only with
-/// jobs whose environment matches its own; other jobs use `batch_job_process`.
+/// message, "id"?: n}`, after whatever the run itself printed; a run that panics answers code 101 and the next
+/// job runs. Live sessions (`--session`) are not batched unless sent via `commands`. Internal golden-only
+/// flag `--frozen` marks mounted project and script files as immutable for the life of the worker, skipping
+/// per-file stat checks between jobs (never pass `--frozen` when files can change on disk). A release build
+/// shares this process only with jobs whose environment matches its own; other jobs use `batch_job_process`.
 pub fn batch() -> i32 {
     batch_with_options(false)
 }
@@ -354,7 +354,15 @@ fn batch_with_options(frozen: bool) -> i32 {
     0
 }
 
+fn attach_job_id(mut answer: Json, job_id: Option<u64>) -> Json {
+    if let (Some(id), Some(obj)) = (job_id, answer.as_object_mut()) {
+        obj.insert("id".into(), Json::from(id));
+    }
+    answer
+}
+
 fn batch_job(job: &Json) -> Json {
+    let job_id = job.get("id").and_then(Json::as_u64);
     let mut argv: Vec<String> = job["argv"].as_array().into_iter().flatten().filter_map(|arg| arg.as_str().map(str::to_string)).collect();
     if argv.first().is_some_and(|arg| arg == "engine") {
         argv.remove(0);
@@ -366,7 +374,7 @@ fn batch_job(job: &Json) -> Json {
         // Refused before the job picks this process or a child: neither may start work (or choose
         // a default location) for an unusable path.
         if let Err(error) = crate::paths::validate_arguments(&argv) {
-            return json!({"code": 2, "error": error});
+            return attach_job_id(json!({"code": 2, "error": error}), job_id);
         }
         // A release build never changes its environment once threads exist (see the `paths` module
         // comment), and a finished run can leave threads behind (workers, GPU drivers). So a job
@@ -374,12 +382,12 @@ fn batch_job(job: &Json) -> Json {
         // warm caches and saves a process start. Any other job gets a child that starts with them.
         let variables = job_variables(job);
         if crate::paths::batch_environment_matches(&variables, &argv) {
-            return run_batch_job(&argv, inline, commands, dedup_scenes);
+            return attach_job_id(run_batch_job(&argv, inline, commands, dedup_scenes, job_id), job_id);
         }
         if inline || commands.is_some() {
-            return json!({"code": 2, "error": "inline and session batch jobs require matching process environment"});
+            return attach_job_id(json!({"code": 2, "error": "inline and session batch jobs require matching process environment"}), job_id);
         }
-        return batch_job_process(&variables, &argv);
+        return attach_job_id(batch_job_process(&variables, &argv), job_id);
     }
     // The job's environment as a process of its own would have it: the runs read RUR_CLOCK, RUR_ORDER,
     // RUR_PLAYER*, RUR_EPOCH, RUR_FONT_ROOT... when they start
@@ -396,12 +404,12 @@ fn batch_job(job: &Json) -> Json {
             }
         }
     }
-    run_batch_job(&argv, inline, commands, dedup_scenes)
+    attach_job_id(run_batch_job(&argv, inline, commands, dedup_scenes, job_id), job_id)
 }
 
 enum BatchMode<'a> {
     Standard,
-    InlineScene,
+    InlineScene(Option<u64>),
     SessionCommands(&'a [Json], bool),
 }
 
@@ -428,7 +436,7 @@ impl Drop for CaptureGuard {
 }
 
 /// The structured result is identical for checkout jobs, warm release jobs and child jobs.
-fn run_batch_job(argv: &[String], inline: bool, commands: Option<&[Json]>, dedup_scenes: bool) -> Json {
+fn run_batch_job(argv: &[String], inline: bool, commands: Option<&[Json]>, dedup_scenes: bool, job_id: Option<u64>) -> Json {
     let args = match parse(argv) {
         Ok(args) if !args.session || commands.is_some() => args,
         Ok(_) => return json!({"code": 2, "error": "live sessions are not batched"}),
@@ -453,7 +461,7 @@ fn run_batch_job(argv: &[String], inline: bool, commands: Option<&[Json]>, dedup
             Err(_) => json!({"code": 101, "error": "the run panicked", "stderr": captured}),
         };
     }
-    let mode = if inline { BatchMode::InlineScene } else { BatchMode::Standard };
+    let mode = if inline { BatchMode::InlineScene(job_id) } else { BatchMode::Standard };
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_with_mode(args, true, mode))) {
         Ok(Ok(code)) => json!({"code": code}),
         Ok(Err(error)) => {
@@ -551,7 +559,7 @@ fn batch_job_child(argv: &[String]) -> i32 {
         let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
         std::process::exit(1);
     });
-    let answer = run_batch_job(argv, false, None, false);
+    let answer = run_batch_job(argv, false, None, false, None);
     println!("{BATCH_ANSWER}{answer}");
     answer["code"].as_i64().unwrap_or(1) as i32
 }
@@ -882,13 +890,16 @@ fn render(
         return Ok(0);
     }
     let output = run_scene(lua, engine, args, &project, target)?;
-    if let BatchMode::InlineScene = mode {
+    if let BatchMode::InlineScene(job_id) = mode {
         if args.dependencies.is_some() {
             output.save(args)?;
         }
         use std::io::Write;
         let mut out = std::io::stdout().lock();
-        writeln!(out, "{BATCH_SCENE}{}", output.text).map_err(|e| e.to_string())?;
+        match job_id {
+            Some(id) => writeln!(out, "{BATCH_SCENE}{id} {}", output.text).map_err(|e| e.to_string())?,
+            None => writeln!(out, "{BATCH_SCENE}{}", output.text).map_err(|e| e.to_string())?,
+        }
         out.flush().map_err(|e| e.to_string())?;
     } else {
         output.write(args, started)?;
@@ -1871,6 +1882,94 @@ mod lifetime_tests {
         assert_eq!(output.status, "ok");
         assert!(weak_lua.try_upgrade().is_none(), "the Luau VM outlived its run");
         assert!(weak.upgrade().is_none(), "the engine outlived its VM ({} strong references)", weak.strong_count());
+    }
+
+    /// `scene_output` relies on `serde_json::Map` using `BTreeMap` (no `preserve_order` feature)
+    /// so JSON keys serialize in sorted lexicographical order without a separate sort pass.
+    #[test]
+    fn serde_json_serializes_object_keys_in_sorted_order() {
+        let mut inner = Map::new();
+        inner.insert("z".into(), json!(1));
+        inner.insert("a".into(), json!(2));
+        inner.insert("m".into(), json!(3));
+        let mut outer = Map::new();
+        outer.insert("zeta".into(), Json::Object(inner));
+        outer.insert("alpha".into(), json!(true));
+        outer.insert("beta".into(), json!([1, 2]));
+        assert_eq!(
+            serde_json::to_string(&Json::Object(outer)).unwrap(),
+            r#"{"alpha":true,"beta":[1,2],"zeta":{"a":2,"m":3,"z":1}}"#,
+            "serde_json must serialize object keys in sorted order (do not enable preserve_order)"
+        );
+    }
+
+    /// `--frozen` keeps the first-read cached module source across jobs in a batch worker, while
+    /// default `engine-batch` observes edits between jobs.
+    #[test]
+    fn frozen_batch_mode_keeps_first_read_while_default_reloads_edits() {
+        if let Some(mode) = std::env::var_os("RUR_TEST_FROZEN_CHILD") {
+            let frozen = mode == "frozen";
+            let dir = std::path::PathBuf::from(std::env::var_os("RUR_TEST_FROZEN_DIR").unwrap());
+            let root = dir.join("root");
+            let mod_file = root.join("ReplicatedStorage/Val.luau");
+            let fixture = dir.join("fix.luau");
+            let run_one = || {
+                let repo = crate::engine::default_repo();
+                let args = parse(&[
+                    "--repo".into(), repo.to_string_lossy().into_owned(),
+                    "--roots".into(), root.to_string_lossy().into_owned(),
+                    "--fixture".into(), fixture.to_string_lossy().into_owned(),
+                    "--viewport".into(), "200x100".into(), "--time".into(), "0.05".into(), "--no-snapshots".into(),
+                ]).unwrap();
+                let out = run_once(&args).unwrap();
+                out.scene["nodes"].as_array().unwrap().iter()
+                    .find_map(|n| n["props"]["text"].as_str().map(str::to_string))
+                    .unwrap_or_default()
+            };
+            super::super::lua::modules::reuse_compiled_modules();
+            super::super::lua::modules::set_batch_frozen(frozen);
+            let first = run_one();
+            std::fs::write(&mod_file, "return \"edited-v2-longer\"").unwrap();
+            let second = run_one();
+            super::super::lua::modules::set_batch_frozen(false);
+            if frozen {
+                assert_eq!(first, "initial-v1");
+                assert_eq!(second, "initial-v1", "--frozen must keep the first-read cached module");
+            } else {
+                assert_eq!(first, "initial-v1");
+                assert_eq!(second, "edited-v2-longer", "default mode must reload edited modules");
+            }
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "rur-frozen-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let root = dir.join("root");
+        std::fs::create_dir_all(root.join("ReplicatedStorage")).unwrap();
+        let fixture = dir.join("fix.luau");
+        std::fs::write(
+            &fixture,
+            "return function(Target)\n\tlocal L = Instance.new('TextLabel')\n\tL.Size = UDim2.fromOffset(100, 30)\n\tL.Text = require(game:GetService('ReplicatedStorage').Val)\n\tL.Parent = Target\nend\n",
+        ).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        for mode in ["default", "frozen"] {
+            std::fs::write(root.join("ReplicatedStorage/Val.luau"), "return \"initial-v1\"").unwrap();
+            let output = std::process::Command::new(&exe)
+                .args(["engine::cli::lifetime_tests::frozen_batch_mode_keeps_first_read_while_default_reloads_edits", "--exact", "--nocapture", "--test-threads=1"])
+                .env("RUR_TEST_FROZEN_CHILD", mode)
+                .env("RUR_TEST_FROZEN_DIR", &dir)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "frozen child ({mode}) failed:\n{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Closing a story and opening it again (the desktop app's story switch, Reload and Restart:

@@ -14,23 +14,27 @@ struct Allocator;
 mod heap {
     use std::ffi::c_void;
 
-    unsafe extern "C" {
-        pub fn mi_malloc(size: usize) -> *mut c_void;
-        pub fn mi_zalloc(size: usize) -> *mut c_void;
-        pub fn mi_realloc(p: *mut c_void, size: usize) -> *mut c_void;
-        pub fn mi_malloc_aligned(size: usize, alignment: usize) -> *mut c_void;
-        pub fn mi_zalloc_aligned(size: usize, alignment: usize) -> *mut c_void;
-        pub fn mi_realloc_aligned(p: *mut c_void, size: usize, alignment: usize) -> *mut c_void;
-        pub fn mi_free(p: *mut c_void);
-        fn mi_heap_new() -> *mut c_void;
-        pub fn mi_heap_malloc_aligned(heap: *mut c_void, size: usize, alignment: usize) -> *mut c_void;
-        pub fn mi_heap_zalloc_aligned(heap: *mut c_void, size: usize, alignment: usize) -> *mut c_void;
-        pub fn mi_heap_realloc_aligned(heap: *mut c_void, p: *mut c_void, size: usize, alignment: usize) -> *mut c_void;
-        pub fn mi_option_set_enabled_default(option: i32, enable: bool);
-        pub fn mi_option_set_default(option: i32, value: std::ffi::c_long);
-        pub fn mi_option_set(option: i32, value: std::ffi::c_long);
-        pub fn mi_collect(force: bool);
-    }
+    pub use libmimalloc_sys::{
+        mi_collect, mi_free, mi_heap_malloc_aligned, mi_heap_realloc_aligned, mi_heap_zalloc_aligned,
+        mi_malloc, mi_malloc_aligned, mi_option_set, mi_option_set_default,
+        mi_option_set_enabled_default, mi_realloc, mi_realloc_aligned, mi_zalloc,
+        mi_zalloc_aligned,
+    };
+
+    /// `libmimalloc-sys` 0.1.49 omits `mi_option_eager_commit` (3) and `mi_option_purge_delay` (15)
+    /// from its `extended.rs` bindings, though both occupy the same enum positions in mimalloc v2
+    /// and v3 (`mimalloc.h`): right after `mi_option_verbose` (2) and right before
+    /// `mi_option_use_numa_nodes` (16). Anchor them to the crate's named constants so an upstream
+    /// enum shift fails compilation.
+    const _: () = {
+        assert!(libmimalloc_sys::mi_option_verbose == 2);
+        assert!(libmimalloc_sys::mi_option_large_os_pages == 6);
+        assert!(libmimalloc_sys::mi_option_use_numa_nodes == 16);
+    };
+    pub const MI_OPTION_EAGER_COMMIT: libmimalloc_sys::mi_option_t =
+        libmimalloc_sys::mi_option_verbose + 1;
+    pub const MI_OPTION_PURGE_DELAY: libmimalloc_sys::mi_option_t =
+        libmimalloc_sys::mi_option_use_numa_nodes - 1;
 
     /// What the engine's idle collection asks of the allocator, done by mimalloc
     pub fn controls() -> roblox_engine_emulator::alloc::Controls {
@@ -40,21 +44,16 @@ mod heap {
         }
     }
 
-    /// mimalloc v2's `mi_option_eager_commit`
-    pub const MI_OPTION_EAGER_COMMIT: i32 = 3;
-    /// mimalloc v2's `mi_option_purge_delay`
-    pub const MI_OPTION_PURGE_DELAY: i32 = 15;
-
     thread_local! {
-        static HEAP: std::cell::Cell<*mut c_void> = const { std::cell::Cell::new(std::ptr::null_mut()) };
+        static HEAP: std::cell::Cell<*mut libmimalloc_sys::mi_heap_t> = const { std::cell::Cell::new(std::ptr::null_mut()) };
     }
 
     /// This thread's long-lived heap (mimalloc's heaps belong to the thread that made them; any
     /// thread frees their blocks), made on first use
-    pub fn long_lived() -> *mut c_void {
+    pub fn long_lived() -> *mut libmimalloc_sys::mi_heap_t {
         HEAP.with(|heap| {
             if heap.get().is_null() {
-                heap.set(unsafe { mi_heap_new() });
+                heap.set(unsafe { libmimalloc_sys::mi_heap_new() });
             }
             heap.get()
         })
@@ -65,6 +64,9 @@ mod heap {
     pub fn plain(size: usize, align: usize) -> bool {
         align <= 16 && align <= size
     }
+
+    #[allow(dead_code)]
+    const _KEEP_VOID: *mut c_void = std::ptr::null_mut();
 }
 
 #[cfg(not(feature = "memtrace"))]

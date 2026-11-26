@@ -797,3 +797,173 @@ pub fn run_stdio(lua: &Lua, session: &mut Session) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod dedup_tests {
+    use super::*;
+
+    fn apply_patch(last: &mut Option<Json>, reply: &Json) -> Json {
+        if reply.get("same").and_then(Json::as_bool) == Some(true) {
+            return last.clone().expect("same without prior scene");
+        }
+        if let Some(patch) = reply.get("patch").and_then(Json::as_object) {
+            let cur = last.as_mut().expect("patch without prior scene").as_object_mut().unwrap();
+            if let Some(dels) = patch.get("del").and_then(Json::as_array) {
+                for key in dels {
+                    if let Some(k) = key.as_str() {
+                        cur.remove(k);
+                    }
+                }
+            }
+            if let Some(sets) = patch.get("set").and_then(Json::as_object) {
+                for (k, v) in sets {
+                    cur.insert(k.clone(), v.clone());
+                }
+            }
+            if let Some(np) = patch.get("nodesPatch").and_then(Json::as_object) {
+                let len = np["len"].as_u64().unwrap() as usize;
+                let nodes = cur.get_mut("nodes").and_then(Json::as_array_mut).unwrap();
+                nodes.resize(len, Json::Null);
+                for pair in np["set"].as_array().unwrap() {
+                    let idx = pair[0].as_u64().unwrap() as usize;
+                    nodes[idx] = pair[1].clone();
+                }
+            }
+            return last.clone().unwrap();
+        }
+        let scene = reply["scene"].clone();
+        *last = Some(scene.clone());
+        scene
+    }
+
+    /// Rebuilding every scene emitted by `write_dedup_scene` (initial full scene, `"same":true`,
+    /// `nodesPatch`, key additions/deletions, full `nodes` replacement, and editable-image fallback)
+    /// must reproduce exact byte-for-byte JSON identical to the unpatched full scene.
+    #[test]
+    fn dedup_scene_patches_reconstruct_exact_full_scenes() {
+        let frames = vec![
+            json!({
+                "type": "scene",
+                "scene": {
+                    "version": 1,
+                    "nodes": [
+                        {"id": 1, "x": 0},
+                        {"id": 2, "x": 10},
+                        {"id": 3, "x": 20},
+                        {"id": 4, "x": 30}
+                    ],
+                    "extra": "initial",
+                    "diagnostics": {"output": [], "timings": {"total": 0.1}, "hint": "ignore"}
+                }
+            }),
+            // Identical except volatile timings/hint -> must emit "same": true
+            json!({
+                "type": "scene",
+                "scene": {
+                    "version": 1,
+                    "nodes": [
+                        {"id": 1, "x": 0},
+                        {"id": 2, "x": 10},
+                        {"id": 3, "x": 20},
+                        {"id": 4, "x": 30}
+                    ],
+                    "extra": "initial",
+                    "diagnostics": {"output": [], "timings": {"total": 0.9}, "hint": "different"}
+                }
+            }),
+            // Small node change + key delete + key add -> nodesPatch + del + set
+            json!({
+                "type": "scene",
+                "scene": {
+                    "version": 1,
+                    "nodes": [
+                        {"id": 1, "x": 0},
+                        {"id": 2, "x": 15},
+                        {"id": 3, "x": 20},
+                        {"id": 4, "x": 30}
+                    ],
+                    "added": true,
+                    "diagnostics": {"output": []}
+                }
+            }),
+            // Nodes shrink
+            json!({
+                "type": "scene",
+                "scene": {
+                    "version": 1,
+                    "nodes": [
+                        {"id": 1, "x": 0},
+                        {"id": 2, "x": 15}
+                    ],
+                    "added": true,
+                    "diagnostics": {"output": []}
+                }
+            }),
+            // >50% nodes changed -> full nodes replacement in patch.set
+            json!({
+                "type": "scene",
+                "scene": {
+                    "version": 1,
+                    "nodes": [
+                        {"id": 10, "x": 100},
+                        {"id": 20, "x": 200}
+                    ],
+                    "added": true,
+                    "diagnostics": {"output": []}
+                }
+            }),
+            // Editable image scene -> must emit full scene and reset prev_scene
+            json!({
+                "type": "scene",
+                "scene": {
+                    "version": 1,
+                    "images": ["editable-images/123-0.png"],
+                    "nodes": [{"id": 10, "x": 100}],
+                    "diagnostics": {"output": []}
+                }
+            }),
+            // Next frame after editable image -> full scene again
+            json!({
+                "type": "scene",
+                "scene": {
+                    "version": 1,
+                    "nodes": [{"id": 10, "x": 100}],
+                    "diagnostics": {"output": []}
+                }
+            }),
+        ];
+
+        let mut wire = Vec::new();
+        let mut buf = Vec::new();
+        let mut prev_scene = None;
+        let mut expected_scenes = Vec::new();
+        for frame in &frames {
+            let mut expected = frame.clone();
+            empty_arrays_as_objects(&mut expected);
+            let mut scene = expected["scene"].clone();
+            strip_scene_volatile(&mut scene);
+            expected_scenes.push(scene);
+            write_dedup_scene(&mut wire, &mut buf, &mut prev_scene, frame.clone()).unwrap();
+        }
+        let text = String::from_utf8(wire).unwrap();
+        let replies: Vec<Json> = text
+            .lines()
+            .map(|line| serde_json::from_str(line.strip_prefix(PREFIX).expect("@@RUR prefix")).unwrap())
+            .collect();
+        assert_eq!(replies.len(), frames.len());
+        assert_eq!(replies[1]["same"], json!(true), "identical frame should emit same:true");
+        assert!(replies[2]["patch"]["nodesPatch"].is_object(), "small node edit should emit nodesPatch");
+        assert!(replies[5]["scene"].is_object(), "editable-images scene must emit full scene");
+        assert!(replies[6]["scene"].is_object(), "frame after editable-images must emit full scene");
+
+        let mut reconstructed_state = None;
+        for (idx, (reply, expected)) in replies.iter().zip(expected_scenes.iter()).enumerate() {
+            let actual = apply_patch(&mut reconstructed_state, reply);
+            assert_eq!(
+                serde_json::to_string(&actual).unwrap(),
+                serde_json::to_string(expected).unwrap(),
+                "frame {idx} reconstructed scene diverged from full scene"
+            );
+        }
+    }
+}

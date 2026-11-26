@@ -17,6 +17,7 @@ export async function selftest() {
 	const checks = [
 		// The engine against its golden output (fixtures, probes and live sessions; tools/engine/golden.mjs)
 		[process.execPath, ["tools/engine/golden.mjs", "--fast"]],
+		[process.execPath, ["--test", "tools/engine/golden-batch.test.mjs"]],
 		[process.execPath, ["tools/tests/cli.mjs"]],
 		[process.execPath, ["tools/tests/packages.mjs"]],
 		[process.execPath, ["tools/tests/kept-runs.mjs"]],

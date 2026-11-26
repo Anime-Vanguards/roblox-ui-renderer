@@ -487,19 +487,52 @@ for (const [key, value] of Object.entries(process.env)) {
 	if (KEEP_RUR_ENV.has(key) && key !== "RUR_NATIVE_ENGINE") BASE_RUR_ENV[key] = value;
 }
 
+function killChildTree(child) {
+	if (!child) return;
+	if (process.platform === "win32" && child.pid) {
+		spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+	}
+	try {
+		child.kill("SIGKILL");
+	} catch {}
+}
+
+function parseBatchSceneLine(line, expectedId) {
+	const body = line.slice(BATCH_SCENE.length);
+	if (expectedId !== null && expectedId !== undefined) {
+		const space = body.indexOf(" ");
+		if (space > 0) {
+			const idText = body.slice(0, space);
+			if (/^\d+$/.test(idText)) {
+				if (Number(idText) !== expectedId) return { mismatch: true, json: null };
+				return { mismatch: false, json: body.slice(space + 1) };
+			}
+		}
+		return { mismatch: true, json: null };
+	}
+	return { mismatch: false, json: body };
+}
+
 class BatchWorker {
-	constructor() {
+	constructor({ spawnCommand = null, timeoutMs = null } = {}) {
 		this.child = null;
 		this.waiting = null;
 		this.onLine = null;
+		this.nextId = 0;
+		this.currentId = null;
+		this.spawnCommand = spawnCommand;
+		this.timeoutMs = timeoutMs;
 	}
 
 	start() {
-		const child = spawn(ENGINE, ["engine-batch", "--frozen"], { cwd: ROOT, env: BASE_ENV, windowsHide: true });
+		const child = this.spawnCommand
+			? this.spawnCommand()
+			: spawn(ENGINE, ["engine-batch", "--frozen"], { cwd: ROOT, env: BASE_ENV, windowsHide: true });
 		this.child = child;
 		let pending = "";
 		child.stdout.setEncoding("utf8");
 		child.stdout.on("data", chunk => {
+			if (this.child !== child) return;
 			let start = 0;
 			let newline = chunk.indexOf("\n");
 			if (newline < 0) {
@@ -507,11 +540,39 @@ class BatchWorker {
 				return;
 			}
 			while (newline >= 0) {
+				if (this.child !== child) return;
 				const raw = start === 0 && pending ? pending + chunk.slice(0, newline) : chunk.slice(start, newline);
 				pending = "";
 				const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-				if (line.startsWith(BATCH_ANSWER)) this.answer(JSON.parse(line.slice(BATCH_ANSWER.length)));
-				else if (this.onLine) this.onLine(line);
+				if (line.startsWith(BATCH_ANSWER)) {
+					let parsed;
+					try {
+						parsed = JSON.parse(line.slice(BATCH_ANSWER.length));
+					} catch {
+						const waiting = this.waiting;
+						this.stop();
+						if (waiting) waiting(null);
+						return;
+					}
+					if (this.currentId !== null && parsed.id !== this.currentId) {
+						const waiting = this.waiting;
+						this.stop();
+						if (waiting) waiting(null);
+						return;
+					}
+					this.answer(parsed);
+				} else if (line.startsWith(BATCH_SCENE)) {
+					const parsed = parseBatchSceneLine(line, this.currentId);
+					if (parsed.mismatch) {
+						const waiting = this.waiting;
+						this.stop();
+						if (waiting) waiting(null);
+						return;
+					}
+					if (this.onLine) this.onLine(BATCH_SCENE + parsed.json);
+				} else if (this.onLine) {
+					this.onLine(line);
+				}
 				start = newline + 1;
 				newline = chunk.indexOf("\n", start);
 			}
@@ -521,7 +582,9 @@ class BatchWorker {
 		child.stdin.on("error", () => {});
 		child.on("error", () => {});
 		child.on("close", () => {
-			if (this.child === child) this.child = null;
+			// Ignore close events from a stale child that was already stopped/replaced after a timeout.
+			if (this.child !== child) return;
+			this.child = null;
 			this.answer(null);
 		});
 	}
@@ -530,6 +593,7 @@ class BatchWorker {
 		const waiting = this.waiting;
 		this.waiting = null;
 		this.onLine = null;
+		this.currentId = null;
 		if (waiting) waiting(value);
 	}
 
@@ -537,17 +601,20 @@ class BatchWorker {
 	run(argv, env, { inline = false, commands = null, dedupScenes = false, onLine = null } = {}) {
 		if (!this.child) this.start();
 		const child = this.child;
+		const id = ++this.nextId;
 		return new Promise(resolve => {
+			const limitMs = this.timeoutMs ?? TIMEOUT * 1000;
 			const timer = setTimeout(() => {
 				this.stop();
 				resolve("timeout");
-			}, TIMEOUT * 1000);
+			}, limitMs);
+			this.currentId = id;
 			this.onLine = onLine;
 			this.waiting = value => {
 				clearTimeout(timer);
 				resolve(value);
 			};
-			const payload = { argv, env };
+			const payload = { id, argv, env };
 			if (inline) payload.inline = true;
 			if (commands) payload.commands = commands;
 			if (dedupScenes) payload.dedupScenes = true;
@@ -558,27 +625,44 @@ class BatchWorker {
 	stop() {
 		const child = this.child;
 		this.child = null;
+		this.waiting = null;
 		this.onLine = null;
+		this.currentId = null;
 		if (!child) return;
-		child.stdin.end();
-		spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-		child.kill();
+		try {
+			child.stdin.end();
+		} catch {}
+		killChildTree(child);
 	}
 
-	close() {
+	close(timeoutMs = 10_000) {
 		const child = this.child;
 		this.child = null;
+		this.waiting = null;
 		this.onLine = null;
+		this.currentId = null;
 		if (!child) return Promise.resolve();
 		return new Promise(resolve => {
 			if (child.exitCode !== null || child.signalCode !== null) {
 				resolve();
 				return;
 			}
-			const done = () => resolve();
+			let finished = false;
+			const done = () => {
+				if (finished) return;
+				finished = true;
+				clearTimeout(timer);
+				resolve();
+			};
+			const timer = setTimeout(() => {
+				killChildTree(child);
+				done();
+			}, timeoutMs);
 			child.once("close", done);
 			child.once("error", done);
-			child.stdin.end();
+			try {
+				child.stdin.end();
+			} catch {}
 		});
 	}
 }
@@ -672,8 +756,9 @@ function normalizeValue(value) {
 	if (value && typeof value === "object") {
 		const keys = Object.keys(value);
 		let sorted = true;
-		for (let i = 1; i < keys.length; i++) {
-			if (keys[i - 1] > keys[i]) {
+		for (let i = 0; i < keys.length; i++) {
+			// Match the slow path's behavior for own `__proto__` keys (result["__proto__"] = ...).
+			if (keys[i] === "__proto__" || (i > 0 && keys[i - 1] > keys[i])) {
 				sorted = false;
 				break;
 			}
@@ -1265,7 +1350,22 @@ async function main() {
 	process.exit(differ || missing ? 1 : 0);
 }
 
-main().catch(error => {
-	console.error(error?.stack || error);
-	process.exit(1);
-});
+export {
+	BATCH_ANSWER,
+	BATCH_SCENE,
+	BatchWorker,
+	digest,
+	digestSceneWithNodeCache,
+	makeLiveTracker,
+	normalizeScene,
+	normalizeText,
+	normalizeValue,
+	parseBatchSceneLine,
+};
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	main().catch(error => {
+		console.error(error?.stack || error);
+		process.exit(1);
+	});
+}

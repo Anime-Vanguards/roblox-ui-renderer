@@ -37,7 +37,7 @@ fn host_bytecode() -> &'static [u8] {
     static BYTECODE: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
     BYTECODE.get_or_init(|| {
         super::alloc::long_lived(|| {
-            mlua::chunk::Compiler::new()
+            engine_lua::modules::compiler()
                 .compile(HOST)
                 .expect("story host bytecode")
                 .into_boxed_slice()
@@ -49,7 +49,7 @@ fn plugin_bytecode() -> &'static [u8] {
     static BYTECODE: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
     BYTECODE.get_or_init(|| {
         super::alloc::long_lived(|| {
-            mlua::chunk::Compiler::new()
+            engine_lua::modules::compiler()
                 .compile(PLUGIN)
                 .expect("story plugin bytecode")
                 .into_boxed_slice()
@@ -61,7 +61,7 @@ fn fixture_folder_bytecode() -> &'static [u8] {
     static BYTECODE: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
     BYTECODE.get_or_init(|| {
         super::alloc::long_lived(|| {
-            mlua::chunk::Compiler::new()
+            engine_lua::modules::compiler()
                 .compile(FIXTURE_FOLDER)
                 .expect("fixture folder bytecode")
                 .into_boxed_slice()
@@ -73,7 +73,7 @@ fn actions_sort_bytecode() -> &'static [u8] {
     static BYTECODE: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
     BYTECODE.get_or_init(|| {
         super::alloc::long_lived(|| {
-            mlua::chunk::Compiler::new()
+            engine_lua::modules::compiler()
                 .compile(ACTIONS_SORT)
                 .expect("actions sort bytecode")
                 .into_boxed_slice()
@@ -741,43 +741,78 @@ pub fn mount(
     Ok(story)
 }
 
-fn normalize_dir_prefix(dir: &Path) -> String {
-    let mut out = dir.to_string_lossy().replace('\\', "/").to_lowercase();
-    while out.ends_with('/') {
-        out.pop();
-    }
-    out.push('/');
-    out
+fn path_segments(path: &str) -> Vec<&str> {
+    path.split(['/', '\\']).filter(|s| !s.is_empty()).collect()
 }
 
-fn strip_dir_prefix<'a>(orig: &'a str, lower: &str, dir_lower: &str) -> Option<&'a str> {
-    if !lower.starts_with(dir_lower) {
+fn segment_matches(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        if a.is_ascii() && b.is_ascii() {
+            return a.eq_ignore_ascii_case(b);
+        }
+        a.to_lowercase() == b.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Strips `dir_segments` from `orig_segments` component-by-component (safe for non-ASCII case
+/// folding whose lowercase length can differ from the original character count) and returns the
+/// remaining relative segments in their original disk case.
+fn strip_dir_prefix<'a>(orig_segments: &[&'a str], dir_segments: &[String]) -> Option<Vec<&'a str>> {
+    if orig_segments.len() <= dir_segments.len() {
         return None;
     }
-    if orig.is_ascii() && dir_lower.is_ascii() {
-        return orig.get(dir_lower.len()..);
+    for (orig, dir) in orig_segments.iter().zip(dir_segments.iter()) {
+        if !segment_matches(orig, dir) {
+            return None;
+        }
     }
-    let skip_chars = dir_lower.chars().count();
-    orig.char_indices().nth(skip_chars).map(|(byte_idx, _)| &orig[byte_idx..])
+    Some(orig_segments[dir_segments.len()..].to_vec())
+}
+
+/// Returns true if every directory along `root / parents[0] / ... / parents[k]` is a real
+/// directory (not a symlink or Windows NTFS junction), matching `DirEntry::file_type().is_dir()`.
+fn all_real_dirs(root: &Path, parents: &[&str], cache: &mut rustc_hash::FxHashMap<PathBuf, bool>) -> bool {
+    let mut cur = root.to_path_buf();
+    for seg in parents {
+        cur.push(seg);
+        let real_dir = *cache.entry(cur.clone()).or_insert_with(|| {
+            std::fs::symlink_metadata(&cur).map(|meta| meta.file_type().is_dir()).unwrap_or(false)
+        });
+        if !real_dir {
+            return false;
+        }
+    }
+    true
 }
 
 /// The storybook ModuleScripts (`*.storybook.luau` / `.lua`) among the files of the run's roots and mounted folders,
 /// listed when a Flipbook story asks (story/host.luau FindStorybook), by path; Wally's `_Index`, `node_modules` and
-/// dot folders are skipped. Walking the already-mounted DOM finds the exact same ModuleScripts without touching the
-/// filesystem or loading any instance the project imports lazily.
+/// dot folders are skipped. Walking the already-mounted DOM finds the exact same ModuleScripts without walking the
+/// filesystem or loading any instance the project imports lazily, while verifying parent directories of matched
+/// storybooks are not symlinks/junctions and sorting by exact on-disk segment case.
 fn storybook_finder(lua: &Lua, engine: &Rc<Engine>, project: &Project) -> LuaResult<LuaFunction> {
-    let mut dirs: Vec<String> = Vec::with_capacity(project.sources.roots.len() + project.sources.mounts.len());
+    let mut dirs: Vec<(PathBuf, Vec<String>)> = Vec::with_capacity(project.sources.roots.len() + project.sources.mounts.len());
     for dir in &project.sources.roots {
-        dirs.push(normalize_dir_prefix(dir));
+        let segs = path_segments(&dir.to_string_lossy()).into_iter().map(str::to_string).collect();
+        dirs.push((dir.clone(), segs));
     }
     for (_, path) in &project.sources.mounts {
         if path.is_dir() {
-            dirs.push(normalize_dir_prefix(path));
+            let segs = path_segments(&path.to_string_lossy()).into_iter().map(str::to_string).collect();
+            dirs.push((path.clone(), segs));
         }
     }
     let e = engine.clone();
     lua.create_function(move |lua, ()| {
-        let candidates: Vec<(String, String, InstanceId)> = {
+        let candidates: Vec<(String, InstanceId)> = {
             let state = e.state.borrow();
             let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
             let mut found = Vec::new();
@@ -787,9 +822,12 @@ fn storybook_finder(lua: &Lua, engine: &Rc<Engine>, project: &Project) -> LuaRes
                 if let Some(source) = instance.source_path() {
                     if source.ends_with(".storybook.luau") || source.ends_with(".storybook.lua") {
                         let normalized = source.replace('\\', "/");
-                        let lower = normalized.to_lowercase();
-                        if seen.insert(lower.clone()) {
-                            found.push((normalized, lower, node));
+                        #[cfg(windows)]
+                        let dedup_key = normalized.to_lowercase();
+                        #[cfg(not(windows))]
+                        let dedup_key = normalized.clone();
+                        if seen.insert(dedup_key) {
+                            found.push((normalized, node));
                         }
                     }
                 }
@@ -799,15 +837,16 @@ fn storybook_finder(lua: &Lua, engine: &Rc<Engine>, project: &Project) -> LuaRes
             }
             found
         };
+        let mut dir_cache: rustc_hash::FxHashMap<PathBuf, bool> = rustc_hash::FxHashMap::default();
         let mut ids: Vec<InstanceId> = Vec::new();
-        for dir_lower in &dirs {
+        for (dir_root, dir_segs) in &dirs {
             if ids.len() >= 256 {
                 break;
             }
             let mut in_dir: Vec<(Vec<&str>, InstanceId)> = Vec::new();
-            for (orig, lower, id) in &candidates {
-                let Some(rel) = strip_dir_prefix(orig, lower, dir_lower) else { continue };
-                let segments: Vec<&str> = rel.split('/').filter(|s| !s.is_empty()).collect();
+            for (orig, id) in &candidates {
+                let orig_segs = path_segments(orig);
+                let Some(segments) = strip_dir_prefix(&orig_segs, dir_segs) else { continue };
                 let Some((_, parents)) = segments.split_last() else { continue };
                 if parents.len() > 16 {
                     continue;
@@ -815,8 +854,12 @@ fn storybook_finder(lua: &Lua, engine: &Rc<Engine>, project: &Project) -> LuaRes
                 if parents.iter().any(|&seg| seg.starts_with('.') || seg == "_Index" || seg == "node_modules") {
                     continue;
                 }
+                if !all_real_dirs(dir_root, parents, &mut dir_cache) {
+                    continue;
+                }
                 in_dir.push((segments, *id));
             }
+            // Match `find_storybooks` DFS sorted by exact on-disk `file_name()` case.
             in_dir.sort_by(|a, b| a.0.cmp(&b.0));
             for (_, id) in in_dir {
                 if ids.len() >= 256 {
@@ -1115,4 +1158,95 @@ pub fn layout(engine: &Rc<Engine>, roots: &[InstanceId]) -> export::Records {
 pub fn build_scene(engine: &Rc<Engine>, roots: &[InstanceId], extra: Map<String, Json>) -> Json {
     let records = layout(engine, roots);
     export::build(engine, roots, &records, extra)
+}
+
+#[cfg(test)]
+mod storybook_finder_tests {
+    use super::*;
+
+    #[test]
+    fn strip_dir_prefix_handles_non_ascii_case_folding() {
+        // Turkish capital dotted I (`İ`, U+0130, 1 char) lowercases to `i\u{0307}` (2 chars).
+        // Component-based matching must never slice mid-character or lose original disk case.
+        let dir = path_segments("C:/Projects/İstanbul/Stories")
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let exact = path_segments("C:/Projects/İstanbul/Stories/Alpha/Main.storybook.luau");
+        assert_eq!(strip_dir_prefix(&exact, &dir), Some(vec!["Alpha", "Main.storybook.luau"]));
+        #[cfg(windows)]
+        {
+            let folded = path_segments("c:/projects/i\u{0307}stanbul/stories/Beta/Sub.storybook.luau");
+            assert_eq!(strip_dir_prefix(&folded, &dir), Some(vec!["Beta", "Sub.storybook.luau"]));
+        }
+        let outside = path_segments("C:/Projects/Other/Main.storybook.luau");
+        assert_eq!(strip_dir_prefix(&outside, &dir), None);
+    }
+
+    #[test]
+    fn storybook_finder_matches_disk_case_order_and_skips_links_and_ignored_dirs() {
+        let dir = std::env::temp_dir().join(format!(
+            "rur-storybook-finder-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let root = dir.join("root");
+        let rs = root.join("ReplicatedStorage");
+        std::fs::create_dir_all(rs.join("B")).unwrap();
+        std::fs::create_dir_all(rs.join("a")).unwrap();
+        std::fs::create_dir_all(rs.join(".hidden")).unwrap();
+        std::fs::create_dir_all(rs.join("_Index")).unwrap();
+        std::fs::create_dir_all(rs.join("node_modules")).unwrap();
+        std::fs::write(rs.join("B.storybook.luau"), "return { name = 'BFile' }").unwrap();
+        std::fs::write(rs.join("B/x.storybook.luau"), "return { name = 'BDir' }").unwrap();
+        std::fs::write(rs.join("A.storybook.luau"), "return { name = 'AFile' }").unwrap();
+        std::fs::write(rs.join("a/y.storybook.luau"), "return { name = 'aDir' }").unwrap();
+        std::fs::write(rs.join(".hidden/h.storybook.luau"), "return {}").unwrap();
+        std::fs::write(rs.join("_Index/i.storybook.luau"), "return {}").unwrap();
+        std::fs::write(rs.join("node_modules/n.storybook.luau"), "return {}").unwrap();
+
+        // Also create a real symlink/junction directory pointing outside `root` containing a storybook
+        // and verify `all_real_dirs` rejects descending through it (matching `DirEntry::file_type().is_dir()`).
+        let target = dir.join("linked-target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("Linked.storybook.luau"), "return {}").unwrap();
+        let link_dir = rs.join("Linked");
+        #[cfg(windows)]
+        let linked_ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J", &link_dir.to_string_lossy(), &target.to_string_lossy()])
+            .output()
+            .is_ok_and(|out| out.status.success());
+        #[cfg(unix)]
+        let linked_ok = std::os::unix::fs::symlink(&target, &link_dir).is_ok();
+
+        let spec = ProjectSpec {
+            roots: vec![root.to_string_lossy().replace('\\', "/")],
+            ..ProjectSpec::default()
+        };
+        let engine = super::super::new_engine(super::super::Options::default()).unwrap();
+        let lua = Lua::new();
+        let project = mount_project(&lua, &engine, &spec, Instant::now()).unwrap();
+        let finder = storybook_finder(&lua, &engine, &project).unwrap();
+        let list: LuaTable = finder.call(()).unwrap();
+        let mut names = Vec::new();
+        for item in list.sequence_values::<LuaValue>() {
+            let id = engine_lua::instance_id(&item.unwrap()).unwrap();
+            names.push(engine.state.borrow().dom.full_name(&engine.reflection, id));
+        }
+        // Disk-case DFS order: "A.storybook.luau" < "B" (dir containing x) < "B.storybook.luau" < "a" (dir containing y).
+        assert_eq!(
+            names,
+            vec![
+                "ReplicatedStorage.A.storybook",
+                "ReplicatedStorage.B.x.storybook",
+                "ReplicatedStorage.B.storybook",
+                "ReplicatedStorage.a.y.storybook",
+            ]
+        );
+        if linked_ok {
+            let mut cache = rustc_hash::FxHashMap::default();
+            assert!(!all_real_dirs(&root, &["ReplicatedStorage", "Linked"], &mut cache), "junction/symlink dir must be skipped");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

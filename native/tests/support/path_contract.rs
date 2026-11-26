@@ -673,7 +673,7 @@ const FIELD_READS: &[FieldReads] = &[
     FieldReads {
         file: "engine/cli.rs",
         readers: &["job[\"", "job.get(\""],
-        non_paths: &["argv", "env", "inline", "commands", "dedupScenes"],
+        non_paths: &["argv", "env", "id", "inline", "commands", "dedupScenes"],
     },
     FieldReads {
         file: "headless.rs",

@@ -87,16 +87,35 @@ fn entry_kind(entry: &std::fs::DirEntry, path: &str) -> (bool, bool) {
 
 /// `Fonts.ContentRoot`: RUR_ROBLOX_CONTENT, then the Studio install (roblox_install, as Lune's
 /// `roblox.studioContentPath`), then the newest `%LOCALAPPDATA%/Roblox/Versions/*` with Studio fonts.
+/// Re-checks `is_dir` on the cached path so a Studio auto-update that removes an old `version-*`
+/// directory triggers rediscovery without restarting the process.
 pub fn discover_content_root() -> Option<String> {
     if let Ok(path) = std::env::var("RUR_ROBLOX_CONTENT") {
         if is_dir(&path) {
             return Some(normalize(&path));
         }
     }
-    static DISCOVERED: OnceLock<Option<String>> = OnceLock::new();
-    DISCOVERED
-        .get_or_init(|| roblox_engine_emulator::alloc::long_lived(discover_installed_content_root))
-        .clone()
+    static DISCOVERED: OnceLock<std::sync::Mutex<Option<String>>> = OnceLock::new();
+    let cache = DISCOVERED.get_or_init(|| roblox_engine_emulator::alloc::long_lived(|| std::sync::Mutex::new(None)));
+    discover_content_root_with(cache, discover_installed_content_root)
+}
+
+fn discover_content_root_with(
+    cache: &std::sync::Mutex<Option<String>>,
+    discover: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if let Ok(guard) = cache.lock() {
+        if let Some(ref cached) = *guard {
+            if is_dir(cached) {
+                return Some(cached.clone());
+            }
+        }
+    }
+    let found = roblox_engine_emulator::alloc::long_lived(discover);
+    if let Ok(mut guard) = cache.lock() {
+        *guard = found.clone();
+    }
+    found
 }
 
 fn discover_installed_content_root() -> Option<String> {
@@ -325,9 +344,13 @@ fn load_family_file(path: &str) -> Option<Arc<Family>> {
         }
     }
     let family = roblox_engine_emulator::alloc::long_lived(|| parse_family_file(path));
-    roblox_engine_emulator::alloc::long_lived(|| {
-        families_cache().write().unwrap().insert(path.to_string(), (stamp, family.clone()));
-    });
+    if family.is_some() && roblox_engine_emulator::files::stamp(Path::new(path)) == Some(stamp) {
+        roblox_engine_emulator::alloc::long_lived(|| {
+            families_cache().write().unwrap().insert(path.to_string(), (stamp, family.clone()));
+        });
+    } else {
+        families_cache().write().unwrap().remove(path);
+    }
     family
 }
 
@@ -351,9 +374,13 @@ fn load_parsed_font(path: &str) -> Result<Arc<Font>, String> {
         }
     }
     let result = roblox_engine_emulator::alloc::long_lived(read_and_parse);
-    roblox_engine_emulator::alloc::long_lived(|| {
-        parsed_fonts_cache().write().unwrap().insert(path.to_string(), (stamp, result.clone()));
-    });
+    if result.is_ok() && roblox_engine_emulator::files::stamp(Path::new(path)) == Some(stamp) {
+        roblox_engine_emulator::alloc::long_lived(|| {
+            parsed_fonts_cache().write().unwrap().insert(path.to_string(), (stamp, result.clone()));
+        });
+    } else {
+        parsed_fonts_cache().write().unwrap().remove(path);
+    }
     result
 }
 
@@ -735,5 +762,78 @@ mod tests {
         assert_eq!(fonts.resolve_uri("5"), None, "a bare id is no font");
         assert_eq!(fonts.missing_assets.iter().map(String::as_str).collect::<Vec<_>>(), ["6", "rbxassetid://5&version=4"]);
         let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn discover_content_root_rediscovers_after_cached_dir_disappears() {
+        let base = std::env::temp_dir().join(format!(
+            "rur-studio-update-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let v1 = base.join("version-aaa/content");
+        let v2 = base.join("version-bbb/content");
+        std::fs::create_dir_all(&v1).unwrap();
+        let v1_str = normalize(&v1.to_string_lossy());
+        let v2_str = normalize(&v2.to_string_lossy());
+        let cache = std::sync::Mutex::new(None);
+
+        let calls = std::cell::Cell::new(0usize);
+        let first = discover_content_root_with(&cache, || {
+            calls.set(calls.get() + 1);
+            Some(v1_str.clone())
+        });
+        assert_eq!(first.as_deref(), Some(v1_str.as_str()));
+        assert_eq!(calls.get(), 1);
+
+        // While v1 still exists on disk, the cached path is reused without rediscovering.
+        let cached = discover_content_root_with(&cache, || {
+            calls.set(calls.get() + 1);
+            Some(v2_str.clone())
+        });
+        assert_eq!(cached.as_deref(), Some(v1_str.as_str()));
+        assert_eq!(calls.get(), 1);
+
+        // Studio auto-update removes v1 and installs v2: cache must detect !is_dir and rediscover.
+        std::fs::remove_dir_all(base.join("version-aaa")).unwrap();
+        std::fs::create_dir_all(&v2).unwrap();
+        let updated = discover_content_root_with(&cache, || {
+            calls.set(calls.get() + 1);
+            Some(v2_str.clone())
+        });
+        assert_eq!(updated.as_deref(), Some(v2_str.as_str()));
+        assert_eq!(calls.get(), 2);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn font_caches_invalidate_when_files_change_and_do_not_cache_bad_family_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "rur-font-cache-inv-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir_str = normalize(&dir.to_string_lossy());
+        let fam = dir.join("Custom.json");
+        let fam_str = normalize(&fam.to_string_lossy());
+
+        let before = preload_font_dir(&dir_str, false, false);
+        assert!(before.is_empty());
+
+        // Write invalid family JSON of length 11, then replace with valid JSON immediately.
+        std::fs::write(&fam, "{not json!}").unwrap();
+        assert!(load_family_file(&fam_str).is_none());
+        std::fs::write(&fam, r#"{"faces":[{"name":"Regular","weight":400,"style":"Normal","assetId":"rbxasset://fonts/A.ttf"}]}"#).unwrap();
+        let loaded = load_family_file(&fam_str).expect("valid family JSON after failed parse must load");
+        assert_eq!(loaded.faces.len(), 1);
+        assert_eq!(loaded.faces[0].name, "Regular");
+
+        // Directory cache notices the added file on stamp change.
+        let after = preload_font_dir(&dir_str, false, false);
+        assert!(after.contains(&fam_str), "directory listing must include newly added font file");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
