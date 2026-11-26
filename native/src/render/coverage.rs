@@ -667,6 +667,17 @@ pub fn shadow_alpha8(d: f64, va: u32) -> u8 {
     ((255 * t12 + 2048) >> 12) as u8
 }
 
+/// A hard UIShadow's (BlurRadius 0) alpha byte inside its shape: the profile's plateau (D = 3) times the vertex alpha
+/// round(255 x (1 - Transparency)), halves up (a blurred shadow's rounds them down: shadow_vertex_alpha). Measured
+/// on fixtures/shadow-probe-hard-transparency.luau at 1.5x and 1x (51 transparencies, behind and cut by the frame,
+/// all equal): Transparency 0 reads 254, 0.5 reads 127, 0.5 + 1/512 126, 0.002 253, 0.6 102 and 0.95 13, where
+/// floor(255 a) gave 255, 127, 127, 254, 101 and 12. The halves are those of the Transparency as set: the scene holds
+/// it in single precision (0.1 gives 255 a = 229.4999996, which the client takes up to 230), so the rounding allows
+/// what single precision moves (255 x 2^-25 < 1e-5).
+pub fn hard_shadow_alpha8(alpha: f64) -> u8 {
+    shadow_alpha8(3.0, (255.0 * alpha + 0.5 + 1e-5).floor().clamp(0.0, 255.0) as u32)
+}
+
 /// The alpha byte of a UIShadow the frame's mask cuts (an Inset one, or one without ShowBehindParent) at the
 /// profile coordinate `d` where the mask keeps `keep` of it: the profile times the vertex alpha and what is
 /// kept, cut as shadow_alpha8 cuts it. An inner shadow passes -D of its hole (fixtures/shadow-probe-inset.luau:
@@ -996,6 +1007,21 @@ mod tests {
         assert_eq!(f.at(0.0, 4.0), 0.0);
     }
     /// A hard shadow's arc is the mesh's 8 chords: a pixel centre between a chord and the circle is outside
+    /// fixtures/shadow-probe-hard-transparency.luau, 1.5x and 1x: a hard shadow's bytes are the profile's plateau
+    /// times its vertex alpha (Transparency stored in single precision)
+    #[test]
+    fn hard_shadows_take_the_profiles_plateau() {
+        let byte = |transparency: f64| hard_shadow_alpha8(1.0 - (transparency as f32) as f64);
+        for (transparency, studio) in [
+            (0.6, 102), (0.625, 96), (0.7, 77), (0.75, 64), (0.8, 51), (0.825, 45), (0.95, 13), (0.001, 254),
+            (0.002, 253), (0.004, 253), (0.998, 1), (0.5 - 1.0 / 512.0, 127), (0.5 + 1.0 / 512.0, 126),
+            (1.0 / 3.0, 169), (2.0 / 3.0, 85), (0.55, 114), (0.575, 108), (0.0, 254), (0.1, 229), (0.3, 178),
+            (0.5, 127), (0.7, 77), (0.9995, 0),
+        ] {
+            assert_eq!(byte(transparency), studio, "Transparency {transparency}");
+        }
+    }
+
     #[test]
     fn hard_shadow_arcs_are_chords() {
         let angle = std::f64::consts::FRAC_PI_2 / 16.0;

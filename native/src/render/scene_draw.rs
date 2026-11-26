@@ -2979,7 +2979,7 @@ impl DrawPreparer {
             };
             let rgb = color(&shadow["color"], [0.; 3]).map(stop_byte);
             // Blurred shadows through Studio's mesh + profile texture (coverage::shadow_mesh / shadow_alpha8,
-            // measured), hard ones the rounded rect at floor(255 alpha) (coverage::ShadowField)
+            // measured), hard ones the rounded rect at the profile's plateau (coverage::ShadowField, hard_alpha8)
             let va = if sigma > 0. {
                 super::coverage::shadow_vertex_alpha(w / 2., h / 2., sigma, alpha)
             } else {
@@ -2988,7 +2988,7 @@ impl DrawPreparer {
             if sigma > 0. && va == 0 {
                 continue;
             }
-            let hard = (255. * alpha).floor().clamp(0., 255.) as u8;
+            let hard = super::coverage::hard_shadow_alpha8(alpha);
             let scale = self.scale;
             // The layer's pixels depend on exactly these inputs; misses are rasterized with the
             // frame's other queued layers
@@ -3150,7 +3150,7 @@ impl DrawPreparer {
         if va == 0 {
             return;
         }
-        let hard = (255. * alpha).floor().clamp(0., 255.) as u8;
+        let hard = super::coverage::hard_shadow_alpha8(alpha);
         // What is drawn, in the node's space: the frame and a pixel around it, or the shadow's reach
         let pad = 3. * sigma;
         let local = if inset {
