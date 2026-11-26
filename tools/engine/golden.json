@@ -148,6 +148,10 @@
 			"digest": "284556cea8f9875e2b27524c55ec507e9384e7581c378c64d5fea07bdc3635cc",
 			"status": "ok"
 		},
+		"fast/edit/image-probe-minnpot": {
+			"digest": "599d0f37eefb21b8e1c46ae7d283fab693b30967498d38856e435cb83938956f",
+			"status": "ok"
+		},
 		"fast/edit/image-probe-pixgroup": {
 			"digest": "bc8392b3bf98b4c749cee6475acc42b4b854e92f54303a840d38195544da70d6",
 			"status": "ok"
@@ -1384,6 +1388,10 @@
 			"digest": "4e5f562003bddccae63cc57ef0902254c68ae666146ef20dd3085843e2fd51ec",
 			"status": "ok"
 		},
+		"fixtures/edit/image-probe-minnpot": {
+			"digest": "6fded277969554989fd391ba1642d12e33bf066bbc78ded42915e3e268a2523d",
+			"status": "ok"
+		},
 		"fixtures/edit/image-probe-pixgroup": {
 			"digest": "38d84a5e381549fbeaef17c07e74ee1c1e6f7f953ea82d8e320920b5e91e4fd6",
 			"status": "ok"
@@ -2606,6 +2614,10 @@
 		},
 		"fixtures/play/image-probe-min": {
 			"digest": "d123c5b65e8a1405cf92aa3c8811f0b9efc4d3a76351155c2ebf749a0d73d22e",
+			"status": "ok"
+		},
+		"fixtures/play/image-probe-minnpot": {
+			"digest": "2069c8a1ea79330ed31666039e84ffa13cefcb669554bb9849732178eb3af408",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-pixgroup": {
