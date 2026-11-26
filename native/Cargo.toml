@@ -53,10 +53,10 @@ image = { version = "=0.25.8", default-features = false, features = ["png", "jpe
 # 3D world, the recorder) with its patched Luau VM: roblox-engine-emulator at a pinned commit. Its
 # features follow ours (desktop: Luau native code, manifest bundles). Building against a local checkout
 # instead: `node tools/emulator.mjs link` (docs/how-it-works.md "The engine: roblox-engine-emulator").
-roblox-engine-emulator = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "ef2964c8ffc18238dff8f167e7e0463b53d2f725", default-features = false }
+roblox-engine-emulator = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "a92507d36952c0aff715ad8f93420363c4271404", default-features = false }
 # The emulator's profile viewer (`rur-native profile view|render`, the desktop build): its crate in the same
 # repository, at the same commit (tools/emulator.mjs pins and links both)
-ree-profile-view = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "ef2964c8ffc18238dff8f167e7e0463b53d2f725", optional = true }
+ree-profile-view = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "a92507d36952c0aff715ad8f93420363c4271404", optional = true }
 rbx_binary = "=2.0.1"
 rbx_dom_weak = "=4.2.0"
 # Roblox archives (.rbx) among downloaded assets: a decal model's texture read from the model an archive holds
@@ -116,8 +116,8 @@ flate2 = "=1.1.10"
 # (vendor/mlua-sys), at the same commit as the dependency above (only the workspace root's [patch] applies;
 # tools/emulator.mjs pin moves them all)
 [patch.crates-io]
-luau0-src = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "ef2964c8ffc18238dff8f167e7e0463b53d2f725" }
-mlua-sys = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "ef2964c8ffc18238dff8f167e7e0463b53d2f725" }
+luau0-src = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "a92507d36952c0aff715ad8f93420363c4271404" }
+mlua-sys = { git = "https://github.com/Anime-Vanguards/roblox-engine-emulator", rev = "a92507d36952c0aff715ad8f93420363c4271404" }
 
 # `--release` is the everyday build (the app, agents, tests): full optimisation, incremental, many codegen
 # units, so an edit rebuilds in seconds. `lto = false` keeps cargo's ThinLTO across each crate's own codegen
