@@ -100,6 +100,10 @@
 			"digest": "3fa395f770fe11bbc9abc73c6e05bfc405d46870142891d548d9d277642f6330",
 			"status": "ok"
 		},
+		"fast/edit/group-probe-bigtex3x": {
+			"digest": "c3a998230696b0ef6cec1604d268649f25729d3f122032f55f7432457ef831d5",
+			"status": "ok"
+		},
 		"fast/edit/group-probe-border": {
 			"digest": "d3e6c76da5733b0cfa32818544e0a9425483f34aaba065f018a687b7791c8f08",
 			"status": "ok"
@@ -1344,6 +1348,10 @@
 			"digest": "1d02c1337595305f6538295158c528798c9c0c1dbe1fbfd9301466b5a6f0df72",
 			"status": "ok"
 		},
+		"fixtures/edit/group-probe-bigtex3x": {
+			"digest": "8cb331fe1f64b82b523215856413f92c86ac54cc7109887c55fe8a4f70a40907",
+			"status": "ok"
+		},
 		"fixtures/edit/group-probe-border": {
 			"digest": "949c30a51c6ca2901b812bf06d06e0ba5b582ecf1b6760e7a577b78369d1a618",
 			"status": "ok"
@@ -2576,6 +2584,10 @@
 			"digest": "2c4cc9c500c29cfbc238cd63c02fd932f7e82dbf0460c23b70e40f6fdbb6229a",
 			"status": "ok"
 		},
+		"fixtures/play/group-probe-bigtex3x": {
+			"digest": "04c2d76ee9586281caf5bc6215d10da5a68d0dc8f6a727ec6b705085843a5f3b",
+			"status": "ok"
+		},
 		"fixtures/play/group-probe-border": {
 			"digest": "e4ee832494934092af8d84c8719586a25c153832a17f02f71349b78d1a3c2448",
 			"status": "ok"
@@ -3669,7 +3681,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-26T21:10:02.169Z",
+	"recorded": "2026-11-26T21:29:18.654Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

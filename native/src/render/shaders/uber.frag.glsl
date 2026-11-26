@@ -1280,7 +1280,8 @@ vec4 kindGroup(ivec2 P, vec2 X) {
 		c8 = conv12(vec4(c, 0.0)).rgb;
 	}
 	if ((flags & 2) != 0) {
-		alpha *= imageTexel(int(rec(6).x), g, 0).r;
+		// (rec(6).yz: the mask's first column and row in the rect when it covers a window of it)
+		alpha *= imageTexel(int(rec(6).x), g - ivec2(rec(6).yz), 0).r;
 	}
 	int A = conv12(alpha);
 	if (A <= 0) {
@@ -1373,13 +1374,15 @@ ivec2 segmentFloor(ivec2 num, ivec2 den) {
 vec4 kindSegment(ivec2 P, vec2 X) {
 	vec4 h = rec(3);
 	ivec2 W = ivec2(h.xy), N = ivec2(h.zw);
+	// The scratch's first column and row in the segment (a tile of a segment too large for one texture)
+	ivec2 o = ivec2(rec(4).yz);
 	if (rec(4).x > 0.5) {
 		ivec2 num = (2 * P + 1) * W - N, den = 2 * N;
 		ivec2 f = segmentFloor(num, den);
 		ivec2 w = ((num - f * den) * 256 + N) / den;
 		if (w.x == 256) { f.x += 1; w.x = 0; }
 		if (w.y == 256) { f.y += 1; w.y = 0; }
-		ivec2 a = clamp(f, ivec2(0), W - 1), b = clamp(f + 1, ivec2(0), W - 1);
+		ivec2 a = clamp(f, ivec2(0), W - 1) - o, b = clamp(f + 1, ivec2(0), W - 1) - o;
 		ivec4 t00 = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), a, 0));
 		ivec4 t10 = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), ivec2(b.x, a.y), 0));
 		ivec4 t01 = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), ivec2(a.x, b.y), 0));
@@ -1399,7 +1402,7 @@ vec4 kindSegment(ivec2 P, vec2 X) {
 	// (component by component: WebGL2's GLSL has no mix() of integer vectors, which a vector cast becomes there)
 	ivec2 edge = 1024 * N - 2 * W;
 	at += ivec2(rest.x * 512 >= edge.x ? 1 : 0, rest.y * 512 >= edge.y ? 1 : 0);
-	ivec4 texel = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), min(at, W - 1), 0));
+	ivec4 texel = toBytes(texelFetch(sampler2D(uLayer, uPointSampler), min(at, W - 1) - o, 0));
 	if (texel.a == 0) {
 		DISCARD
 	}

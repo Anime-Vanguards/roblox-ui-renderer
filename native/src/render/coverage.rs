@@ -112,7 +112,25 @@ pub fn corner_coverage_raw(
     rw: f64,
     rh: f64,
 ) -> Vec<f64> {
-    if w == 0 || h == 0 {
+    corner_coverage_window(w, h, radii, ox, oy, rw, rh, [0, 0, w, h])
+}
+
+/// corner_coverage_raw's values over the columns and rows [x0, x1) x [y0, y1) of the w x h field only (a group
+/// wider or taller than a texture can be keeps the part it draws)
+#[allow(clippy::too_many_arguments)]
+pub fn corner_coverage_window(
+    w: u32,
+    h: u32,
+    radii: [f64; 4],
+    ox: i32,
+    oy: i32,
+    rw: f64,
+    rh: f64,
+    window: [u32; 4],
+) -> Vec<f64> {
+    let [wx0, wy0] = [window[0].min(w), window[1].min(h)];
+    let [wx1, wy1] = [window[2].clamp(wx0, w), window[3].clamp(wy0, h)];
+    if wx1 == wx0 || wy1 == wy0 {
         return Vec::new();
     }
     let hw = rw / 2.0;
@@ -168,7 +186,8 @@ pub fn corner_coverage_raw(
         };
         t * t * (3.0 - 2.0 * t)
     };
-    let mut data = vec![1.0; (w * h) as usize];
+    let ww = wx1 - wx0;
+    let mut data = vec![1.0; (ww * (wy1 - wy0)) as usize];
     for (index, (right, bottom)) in [(false, false), (true, false), (true, true), (false, true)]
         .into_iter()
         .enumerate()
@@ -177,9 +196,9 @@ pub fn corner_coverage_raw(
         let ch = h.min((radii[index] / ky).ceil() as u32 + 3);
         let x0 = if right { w - cw } else { 0 };
         let y0 = if bottom { h - ch } else { 0 };
-        for y in y0..y0 + ch {
-            for x in x0..x0 + cw {
-                data[(y * w + x) as usize] = at(x as i32, y as i32);
+        for y in y0.max(wy0)..(y0 + ch).min(wy1) {
+            for x in x0.max(wx0)..(x0 + cw).min(wx1) {
+                data[((y - wy0) * ww + x - wx0) as usize] = at(x as i32, y as i32);
             }
         }
     }

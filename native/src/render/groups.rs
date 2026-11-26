@@ -9,7 +9,7 @@ use super::{
     geometry::*,
     gradients::gradient_mesh,
     images::{ImageRect, ImageSpace, plan_texture_image},
-    packet::{BlendMode, DrawBatch, TextureFormat, TextureId, TextureLevel, TextureUpload},
+    packet::{BlendMode, DrawBatch, MAX_TEXTURE_SIDE, TextureFormat, TextureId, TextureLevel, TextureUpload},
     scene_draw::{BuildContext, DrawError, DrawPreparer},
 };
 use crate::{
@@ -20,6 +20,10 @@ use crate::{
 const GROUP: u32 = 11;
 const SEGMENT: u32 = 17;
 const LAYER: u32 = 18;
+/// The largest side of one tile of a segment that does not fit a scratch (scratch_fits)
+const SCRATCH_TILE: u32 = 4096;
+/// The most pixels a group pass may have (a malformed scene must not allocate an unbounded target)
+const SCRATCH_PIXELS: u64 = 64 * 1024 * 1024;
 
 struct CachedField {
     id: TextureId,
@@ -79,6 +83,14 @@ struct GroupSpace {
 enum ScreenSegment {
     Direct,
     Scratch(BuildContext),
+    Tiles(Vec<SegmentTile>),
+}
+
+/// One window of a segment drawn in tiles: its scratch, and the segment's columns and rows [x0, x1) x [y0, y1)
+/// whose texels it gives the texture
+struct SegmentTile {
+    pass: BuildContext,
+    own: [u32; 4],
 }
 
 impl DrawPreparer {
@@ -247,12 +259,8 @@ impl DrawPreparer {
     ) -> Result<BuildContext, DrawError> {
         // A malformed scene must not allocate an unbounded offscreen target.
         ensure!(
-            width > 0
-                && height > 0
-                && width <= 16384
-                && height <= 16384
-                && u64::from(width) * u64::from(height) <= 64 * 1024 * 1024,
-            "CanvasGroup target exceeds the 64-megapixel/16384-pixel limit: {width}x{height}"
+            width > 0 && height > 0 && scratch_fits(width, height),
+            "CanvasGroup target exceeds the 64-megapixel/{MAX_TEXTURE_SIDE}-pixel limit: {width}x{height}"
         );
         let target = if let Some(target) = self.group_cache.targets.iter_mut().find(|target| {
             target.width == width && target.height == height && target.used < self.group_cache.frame
@@ -279,24 +287,50 @@ impl DrawPreparer {
         })
     }
 
-    fn screen_segment<'a>(
+    /// Draws on the part of a group texture that is drawn on the screen's grid, starting one when none is
+    /// open: the texture itself when nothing is resampled, else a scratch at the screen's size that
+    /// flush_segment resamples into the texture. A segment wider or taller than a texture can be (a 2,800
+    /// logical px group is 8,400 px wide at device scale 3, its texture at most 2,049) is drawn in tiles, each
+    /// a window onto the same screen grid that draws the whole segment (segment_tiles).
+    fn on_screen(
         &mut self,
-        segment: &'a mut Option<ScreenSegment>,
-        texture: &'a mut BuildContext,
+        segment: &mut Option<ScreenSegment>,
+        texture: &mut BuildContext,
         space: GroupSpace,
         empty: bool,
-    ) -> Result<&'a mut BuildContext, DrawError> {
+        mut draw: impl FnMut(&mut Self, &mut BuildContext) -> Result<(), DrawError>,
+    ) -> Result<(), DrawError> {
         if segment.is_none() {
             *segment = Some(if empty && space.w == space.nw && space.h == space.nh {
                 ScreenSegment::Direct
-            } else {
+            } else if scratch_fits(space.w, space.h) {
                 ScreenSegment::Scratch(self.group_pass(space.w, space.h, [space.l, space.t])?)
+            } else {
+                ScreenSegment::Tiles(self.segment_tiles(space)?)
             });
         }
-        Ok(match segment.as_mut().unwrap() {
-            ScreenSegment::Direct => texture,
-            ScreenSegment::Scratch(pass) => pass,
-        })
+        match segment.as_mut().unwrap() {
+            ScreenSegment::Direct => draw(self, texture),
+            ScreenSegment::Scratch(pass) => draw(self, pass),
+            ScreenSegment::Tiles(tiles) => tiles.iter_mut().try_for_each(|tile| draw(self, &mut tile.pass)),
+        }
+    }
+
+    /// The tiles of a segment too large for one scratch: each owns up to SCRATCH_TILE - 1 columns and rows (the
+    /// texels whose sample falls there are drawn from it) and holds one more of each, which the smooth path's
+    /// second tap reads.
+    fn segment_tiles(&mut self, space: GroupSpace) -> Result<Vec<SegmentTile>, DrawError> {
+        let step = SCRATCH_TILE - 1;
+        let mut tiles = Vec::new();
+        for y in (0..space.h).step_by(step as usize) {
+            for x in (0..space.w).step_by(step as usize) {
+                let own = [x, y, (x + step).min(space.w), (y + step).min(space.h)];
+                let (w, h) = ((own[2] + 1).min(space.w) - x, (own[3] + 1).min(space.h) - y);
+                let pass = self.group_pass(w, h, [space.l + x as f64, space.t + y as f64])?;
+                tiles.push(SegmentTile { pass, own });
+            }
+        }
+        Ok(tiles)
     }
 
     /// `smooth`: the scratch is sampled bilinearly at the texel centres with 8-bit weights (anti-aliased
@@ -312,32 +346,52 @@ impl DrawPreparer {
         let Some(segment) = segment.take() else {
             return;
         };
-        if let ScreenSegment::Scratch(scratch) = segment {
-            let target = scratch.target;
-            self.finish_pass(scratch);
-            let start = self.begin(
-                texture,
-                [0.0, 0.0, space.nw as f64, space.nh as f64],
-                None,
-                SEGMENT,
-            );
-            self.push([
-                space.w as f64,
-                space.h as f64,
-                space.nw as f64,
-                space.nh as f64,
-            ]);
-            self.push([if smooth { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
-            self.emit(
-                texture,
-                start,
-                DrawBatch {
-                    layer: Some(target),
-                    ..Default::default()
-                },
-            );
+        match segment {
+            ScreenSegment::Direct => {}
+            ScreenSegment::Scratch(scratch) => {
+                let target = scratch.target;
+                self.finish_pass(scratch);
+                let texels = [0.0, 0.0, space.nw as f64, space.nh as f64];
+                self.segment_record(texture, space, texels, [0, 0], target, smooth);
+            }
+            ScreenSegment::Tiles(tiles) => {
+                for tile in tiles {
+                    let target = tile.pass.target;
+                    self.finish_pass(tile.pass);
+                    let columns = owned_texels(space.w, space.nw, [tile.own[0], tile.own[2]], smooth);
+                    let rows = owned_texels(space.h, space.nh, [tile.own[1], tile.own[3]], smooth);
+                    if let (Some(columns), Some(rows)) = (columns, rows) {
+                        let texels = [columns[0] as f64, rows[0] as f64, columns[1] as f64, rows[1] as f64];
+                        self.segment_record(texture, space, texels, [tile.own[0], tile.own[1]], target, smooth);
+                    }
+                }
+            }
         }
         *empty = false;
+    }
+
+    /// A SEGMENT record resampling `scratch` (the screen grid from column and row `at` of the segment on) into
+    /// the texels `texels` of the group texture
+    fn segment_record(
+        &mut self,
+        texture: &mut BuildContext,
+        space: GroupSpace,
+        texels: [f64; 4],
+        at: [u32; 2],
+        scratch: TextureId,
+        smooth: bool,
+    ) {
+        let start = self.begin(texture, texels, None, SEGMENT);
+        self.push([space.w as f64, space.h as f64, space.nw as f64, space.nh as f64]);
+        self.push([if smooth { 1.0 } else { 0.0 }, at[0] as f64, at[1] as f64, 0.0]);
+        self.emit(
+            texture,
+            start,
+            DrawBatch {
+                layer: Some(scratch),
+                ..Default::default()
+            },
+        );
     }
 
     fn build_group_texture(
@@ -373,8 +427,7 @@ impl DrawPreparer {
                     empty = false;
                     continue;
                 }
-                let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                self.draw_group(screen, item, scene, assets)?;
+                self.on_screen(&mut segment, texture, space, empty, |this, screen| this.draw_group(screen, item, scene, assets))?;
                 continue;
             }
             let Some(id) = item.as_i64() else {
@@ -395,8 +448,7 @@ impl DrawPreparer {
                 continue;
             }
             if id < 0 {
-                let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                self.draw_post(screen, child, assets)?;
+                self.on_screen(&mut segment, texture, space, empty, |this, screen| this.draw_post(screen, child, assets))?;
             } else if resampled
                 && !child["image"].is_object()
                 && !child["matrix"].is_array()
@@ -414,8 +466,7 @@ impl DrawPreparer {
                     self.texture_fill(texture, child, space);
                     empty = false;
                 } else if has_part(child, false, false) {
-                    let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                    self.draw_node_parts(screen, child, scene, assets, false, "under")?;
+                    self.on_screen(&mut segment, texture, space, empty, |this, screen| this.draw_node_parts(screen, child, scene, assets, false, "under"))?;
                 }
                 let strokes = array(&child["strokes"]);
                 if has_text(child) {
@@ -440,8 +491,7 @@ impl DrawPreparer {
                     self.texture_strokes(texture, child, scene, assets, transform, clip)?;
                     empty = false;
                 } else if has_part(child, false, true) {
-                    let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                    self.draw_node_parts(screen, child, scene, assets, false, "over")?;
+                    self.on_screen(&mut segment, texture, space, empty, |this, screen| this.draw_node_parts(screen, child, scene, assets, false, "over"))?;
                 }
             } else if resampled
                 && !in_group
@@ -455,8 +505,7 @@ impl DrawPreparer {
                 // into the texture, as in an unturned group (a 225 px group whose float32 width is 150.00002
                 // logical gets 227 texels: text-probe-groupturned-pos, its second column 2,310 px > 2 -> 0)
                 if has_part(child, false, false) {
-                    let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                    self.draw_node_parts(screen, child, scene, assets, false, "under")?;
+                    self.on_screen(&mut segment, texture, space, empty, |this, screen| this.draw_node_parts(screen, child, scene, assets, false, "under"))?;
                 }
                 self.texture_text(texture, &mut segment, child, scene, assets, space, &mut empty)?;
             } else if resampled
@@ -474,13 +523,11 @@ impl DrawPreparer {
                 self.draw_node(texture, &moved, scene, assets, false)?;
                 empty = false;
             } else if !child["image"].is_object() || child["matrix"].is_array() {
-                let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                self.draw_node(screen, child, scene, assets, in_group)?;
+                self.on_screen(&mut segment, texture, space, empty, |this, screen| this.draw_node(screen, child, scene, assets, in_group))?;
             } else {
                 // Background and shadows precede the direct image, text and border strokes follow it.
                 if has_part(child, in_group, false) {
-                    let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                    self.draw_node_parts(screen, child, scene, assets, in_group, "under")?;
+                    self.on_screen(&mut segment, texture, space, empty, |this, screen| this.draw_node_parts(screen, child, scene, assets, in_group, "under"))?;
                 }
                 self.flush_segment(&mut segment, texture, space, &mut empty, false);
                 // A Pixelated image in a texture on the screen's grid is the screen's quad, drawn on its own
@@ -498,8 +545,7 @@ impl DrawPreparer {
                 }
                 empty = false;
                 if has_part(child, in_group, true) {
-                    let screen = self.screen_segment(&mut segment, texture, space, empty)?;
-                    self.draw_node_parts(screen, child, scene, assets, in_group, "over")?;
+                    self.on_screen(&mut segment, texture, space, empty, |this, screen| this.draw_node_parts(screen, child, scene, assets, in_group, "over"))?;
                 }
             }
         }
@@ -539,8 +585,7 @@ impl DrawPreparer {
                 *empty = false;
             }
         } else {
-            let screen = self.screen_segment(segment, texture, space, *empty)?;
-            self.draw_node_parts(screen, child, scene, assets, false, "over")?;
+            self.on_screen(segment, texture, space, *empty, |this, screen| this.draw_node_parts(screen, child, scene, assets, false, "over"))?;
             self.flush_segment(segment, texture, space, empty, true);
         }
         Ok(())
@@ -862,7 +907,15 @@ impl DrawPreparer {
         self.push([flags as f64, opacity as f64, 0.0, 0.0]);
         let tint_at = self.packet.texels.len();
         self.push([tint[0] as f64, tint[1] as f64, tint[2] as f64, 0.0]);
-        self.push([0.0; 4]);
+        // The corner mask over the whole rect, or over the region drawn when the rect is larger than a texture
+        // can be (its first column and row in the rect follow the mask's slot)
+        let window = if masked && !scratch_fits(space.w, space.h) {
+            let [x0, y0] = [(region[0] - rx).floor().max(0.0) as u32, (region[1] - ry).floor().max(0.0) as u32];
+            [x0, y0, (region[2] - rx).ceil() as u32, (region[3] - ry).ceil() as u32]
+        } else {
+            [0, 0, space.w, space.h]
+        };
+        self.push([0.0, window[0] as f64, window[1] as f64, 0.0]);
         self.push([0.0; 4]);
         if space.nw != space.w {
             self.packet.texels[info_at][2] = (self.packet.texels.len() - start) as f32;
@@ -884,18 +937,21 @@ impl DrawPreparer {
             ..Default::default()
         };
         if masked {
+            let whole = window == [0, 0, space.w, space.h];
             let key = format!(
-                "mask:{}:{}:{:?}:{:?}:{:?}",
+                "mask:{}:{}:{:?}:{:?}:{:?}{}",
                 space.w,
                 space.h,
                 radii,
                 [physical.raw.w, physical.raw.h],
-                [(rx as i32).rem_euclid(2), (ry as i32).rem_euclid(2)]
+                [(rx as i32).rem_euclid(2), (ry as i32).rem_euclid(2)],
+                if whole { String::new() } else { format!(":{window:?}") }
             );
+            let (mw, mh) = (window[2] - window[0], window[3] - window[1]);
             batch.image_slots[0] =
                 Some(
-                    self.group_texture(key, space.w, space.h, TextureFormat::R32Float, || {
-                        super::coverage::corner_coverage_raw(
+                    self.group_texture(key, mw, mh, TextureFormat::R32Float, || {
+                        super::coverage::corner_coverage_window(
                             space.w,
                             space.h,
                             radii,
@@ -903,6 +959,7 @@ impl DrawPreparer {
                             ry as i32,
                             physical.raw.w,
                             physical.raw.h,
+                            window,
                         )
                         .into_iter()
                         .flat_map(|value| (value as f32).to_le_bytes())
@@ -1283,6 +1340,35 @@ fn texture_group_placement(
     })
 }
 
+/// Whether a group pass of this size can be one texture
+fn scratch_fits(width: u32, height: u32) -> bool {
+    width <= MAX_TEXTURE_SIDE && height <= MAX_TEXTURE_SIDE && u64::from(width) * u64::from(height) <= SCRATCH_PIXELS
+}
+
+/// The screen column (row) of a segment `w` px long that texel `p` of `n` reads (uber.frag.glsl kindSegment): the
+/// nearest, its tie on the 1/512 texel grid going to the next, or the first of the two the smooth path blends
+fn segment_source(p: u32, w: u32, n: u32, smooth: bool) -> u32 {
+    let (p, w, n) = (i64::from(p), i64::from(w), i64::from(n));
+    let den = 2 * n;
+    let at = if smooth {
+        let num = (2 * p + 1) * w - n;
+        let f = num.div_euclid(den);
+        f + i64::from(((num - f * den) * 256 + n) / den == 256)
+    } else {
+        let num = (2 * p + 1) * w;
+        num / den + i64::from((num % den) * 512 >= 1024 * n - 2 * w)
+    };
+    at.clamp(0, w - 1) as u32
+}
+
+/// The texels [p0, p1) of `n` whose source column (segment_source) lies in `own`; None when there is none
+fn owned_texels(w: u32, n: u32, own: [u32; 2], smooth: bool) -> Option<[u32; 2]> {
+    let inside = |p: u32| (own[0]..own[1]).contains(&segment_source(p, w, n, smooth));
+    let p0 = (0..n).find(|p| inside(*p))?;
+    let p1 = (p0..n).find(|p| !inside(*p)).unwrap_or(n);
+    Some([p0, p1])
+}
+
 fn group_taps(q: u32, n: u32) -> Vec<[f64; 3]> {
     (0..q)
         .map(|i| {
@@ -1380,11 +1466,15 @@ mod tests {
             .unwrap();
         let mut segment = None;
         let mut empty = true;
-        let screen = builder
-            .screen_segment(&mut segment, &mut texture, space, empty)
+        let mut scratch = None;
+        builder
+            .on_screen(&mut segment, &mut texture, space, empty, |_, screen| {
+                scratch = Some((screen.target, screen.width, screen.height));
+                Ok(())
+            })
             .unwrap();
-        let scratch_id = screen.target;
-        assert_eq!((screen.width, screen.height), (13, 11));
+        let (scratch_id, width, height) = scratch.unwrap();
+        assert_eq!((width, height), (13, 11));
         builder.flush_segment(&mut segment, &mut texture, space, &mut empty, false);
         assert!(!empty);
         assert_eq!(builder.packet.passes[0].target, scratch_id);
@@ -1409,13 +1499,22 @@ mod tests {
     }
     /// The packet of `nodes` drawn through `draw` at device scale 1.5, glyphs of the test font rasterized first
     fn prepared(nodes: serde_json::Value, draw: serde_json::Value, font: Option<&str>) -> crate::render::packet::RenderPacket {
+        prepared_at(1.5, nodes, draw, font)
+    }
+    /// `prepared` at another device scale
+    fn prepared_at(
+        scale: f64,
+        nodes: serde_json::Value,
+        draw: serde_json::Value,
+        font: Option<&str>,
+    ) -> crate::render::packet::RenderPacket {
         use std::time::{Duration, Instant};
         let fonts = match font {
             Some(file) => serde_json::json!([{"file":file,"weight":400,"style":"normal","ascender":1854,"descender":-434,"lineGap":67,"sizeUnits":2355,"unitsPerEm":2048}]),
             None => serde_json::json!([]),
         };
         let mut scene = SceneStore::default();
-        scene.apply(&serde_json::json!({"viewport":{"width":1200,"height":900,"scale":1.5},"nodes":nodes,"layers":[{"draw":draw}],"fonts":fonts,"images":[]})).unwrap();
+        scene.apply(&serde_json::json!({"viewport":{"width":1200,"height":900,"scale":scale},"nodes":nodes,"layers":[{"draw":draw}],"fonts":fonts,"images":[]})).unwrap();
         let mut assets = AssetStore::new(std::env::temp_dir().join("rur-no-node-helper-here"), true);
         if font.is_some() {
             assets.begin_scene(&scene);
@@ -1513,6 +1612,77 @@ mod tests {
         let group: Vec<_> = screen.iter().filter(|r| r.0 == GROUP).collect();
         assert_eq!(group.len(), 1, "{screen:?}");
         assert_eq!(group[0].2, BlendMode::Image);
+    }
+
+    /// fixtures/group-probe-bigtex3x.luau: a CanvasGroup 2,800 logical px wide is 8,400 px at device scale 3, wider
+    /// than a texture can be; its texture is 2,049 texels (group_texture_fit), and what it draws on the screen's grid
+    /// goes through scratches of at most SCRATCH_TILE px, not one 8,400 px target (the draw failed: "Invalid texture
+    /// extent 8400x150")
+    #[test]
+    fn a_group_wider_than_a_texture_is_drawn_in_tiles() {
+        let nodes = serde_json::json!([
+            {"id":1,"rect":[0,2,2800,50],"group":{"color":[1,1,1],"transparency":0},"bg":{"color":[1,1,1],"transparency":1}},
+            {"id":2,"rect":[20,10,2,30],"bg":{"color":[1,1,1],"transparency":0}},
+            {"id":3,"rect":[2000,10,3,30],"bg":{"color":[1,1,1],"transparency":0}}
+        ]);
+        let packet = prepared_at(3.0, nodes, serde_json::json!([{"group":1,"draw":[1,2,3]}]), None);
+        assert!(packet.passes.iter().all(|pass| pass.width <= SCRATCH_TILE && pass.height <= SCRATCH_TILE));
+        assert!(packet.textures.iter().all(|t| t.levels.iter().all(|l| l.width <= MAX_TEXTURE_SIDE && l.height <= MAX_TEXTURE_SIDE)));
+        let tiles: Vec<_> = packet.passes.iter().filter(|pass| pass.height == 150).map(|pass| pass.width).collect();
+        assert_eq!(tiles, vec![4096, 4096, 210]);
+        // The texture's SEGMENT records: one per tile, side by side over all 2,049 texel columns
+        let (nw, nh) = group_texture_dims(0.0, 6.0, 8400.0, 150.0, 3.0);
+        assert_eq!(nw, 2049);
+        let texture = pass_of(&packet, nw, nh);
+        let mut columns: Vec<_> = records(&packet, texture).into_iter().filter(|r| r.0 == SEGMENT).map(|r| [r.1[0], r.1[2]]).collect();
+        columns.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        assert_eq!(columns.len(), 3, "{columns:?}");
+        assert_eq!((columns[0][0], columns[2][1]), (0.0, 2049.0));
+        assert!(columns.windows(2).all(|pair| pair[0][1] == pair[1][0]), "{columns:?}");
+    }
+
+    /// A rounded group larger than a texture keeps its corner mask for the part of it on the screen
+    #[test]
+    fn a_rounded_group_wider_than_a_texture_masks_what_it_draws() {
+        let nodes = serde_json::json!([
+            {"id":1,"rect":[-40,2,2800,50],"corner":8,"group":{"color":[1,1,1],"transparency":0},"bg":{"color":[0.2,0.4,0.8],"transparency":0}}
+        ]);
+        let packet = prepared_at(3.0, nodes, serde_json::json!([{"group":1,"draw":[1]}]), None);
+        assert!(packet.textures.iter().all(|t| t.levels.iter().all(|l| l.width <= MAX_TEXTURE_SIDE && l.height <= MAX_TEXTURE_SIDE)));
+        let screen = records(&packet, packet.passes.len() - 1);
+        let group: Vec<_> = screen.iter().filter(|r| r.0 == GROUP).collect();
+        assert_eq!(group.len(), 1, "{screen:?}");
+        // The mask's window starts where the screen does, 120 px into the rect
+        let at = packet.passes.last().unwrap().batches.iter().flat_map(|b| b.record_offsets.iter()).map(|at| *at as usize).find(|at| packet.texels[at + 2][0] as u32 == GROUP).unwrap();
+        assert_eq!(packet.texels[at + 6][1], 120.0);
+        // Its values are those of the whole field there
+        let whole = super::super::coverage::corner_coverage_raw(300, 150, [24.0; 4], -120, 6, 300.0, 150.0);
+        let window = super::super::coverage::corner_coverage_window(300, 150, [24.0; 4], -120, 6, 300.0, 150.0, [270, 140, 300, 150]);
+        let expected: Vec<f64> = (140..150).flat_map(|y| (270..300).map(move |x| (y, x))).map(|(y, x)| whole[y * 300 + x]).collect();
+        assert_eq!(window, expected);
+    }
+
+    /// Each texel of a segment drawn in tiles samples the tile that owns its screen column: the tiles' texel ranges
+    /// cover the texture once, in both sampling modes
+    #[test]
+    fn segment_tiles_split_the_texels_between_them() {
+        for (w, n) in [(8400u32, 2049u32), (12000, 2049), (9000, 1100), (4095, 4095), (4097, 4097)] {
+            for smooth in [false, true] {
+                let step = SCRATCH_TILE - 1;
+                let mut next = 0;
+                for x in (0..w).step_by(step as usize) {
+                    let own = [x, (x + step).min(w)];
+                    let Some([p0, p1]) = owned_texels(w, n, own, smooth) else {
+                        continue;
+                    };
+                    assert_eq!(p0, next, "{w} {n} {smooth}");
+                    next = p1;
+                }
+                assert_eq!(next, n, "{w} {n} {smooth}");
+            }
+        }
+        // unresampled, each texel reads its own column
+        assert!((0..4097).all(|p| segment_source(p, 4097, 4097, false) == p && segment_source(p, 4097, 4097, true) == p));
     }
 
     #[test]

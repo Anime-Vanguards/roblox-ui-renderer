@@ -2732,6 +2732,8 @@ mod tests {
                 [0., 0., 2., 2.],
                 [17., 0., 0., 0.],
                 [2., 2., 2., 2.],
+                // nearest texels, the scratch's first column and row 0 (groups.rs segment_record)
+                [0., 0., 0., 0.],
             ],
             2,
             2,
