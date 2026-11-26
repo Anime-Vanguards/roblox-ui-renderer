@@ -137,7 +137,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/main.rs",
         "fn main()",
-        0xb96250d73c063ee1,
+        0x1829f179cac7ff32,
     ),
     // `rur-native cost`: its positionals are `compare <before> <after>`, the two reports it reads, which
     // startup checks (`cost::validate_arguments`); any other word is collected and never read. Its other
@@ -182,7 +182,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/engine/cli.rs",
         "pub fn dispatch()",
-        0x9dc3703058e1b15d,
+        0x873b8db159771ecd,
     ),
     (
         Crate::Native,
@@ -200,7 +200,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/story_render.rs",
         "pub fn cli(",
-        0x8f4b3471c6402caf,
+        0x015d794319e4b2eb,
     ),
     (
         Crate::Native,
@@ -540,6 +540,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--frame-hashes",
     "--frames",
     "--from",
+    "--frozen",
     "--git-ref",
     "--headless",
     "--help",
@@ -672,7 +673,7 @@ const FIELD_READS: &[FieldReads] = &[
     FieldReads {
         file: "engine/cli.rs",
         readers: &["job[\"", "job.get(\""],
-        non_paths: &["argv", "env"],
+        non_paths: &["argv", "env", "inline", "commands", "dedupScenes"],
     },
     FieldReads {
         file: "headless.rs",
