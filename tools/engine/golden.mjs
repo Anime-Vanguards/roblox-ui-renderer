@@ -495,7 +495,7 @@ class BatchWorker {
 	}
 
 	start() {
-		const child = spawn(ENGINE, ["engine-batch"], { cwd: ROOT, env: BASE_ENV, windowsHide: true });
+		const child = spawn(ENGINE, ["engine-batch", "--frozen"], { cwd: ROOT, env: BASE_ENV, windowsHide: true });
 		this.child = child;
 		let pending = "";
 		child.stdout.setEncoding("utf8");

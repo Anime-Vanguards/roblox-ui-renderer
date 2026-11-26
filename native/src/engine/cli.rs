@@ -121,7 +121,8 @@ impl DerefMut for Args {
 pub fn dispatch() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("engine-batch") {
-        return Some(batch());
+        let frozen = args[2..].iter().any(|arg| arg == "--frozen");
+        return Some(batch_with_options(frozen));
     }
     if crate::paths::is_standalone() && args.get(1).map(String::as_str) == Some(BATCH_JOB_COMMAND) {
         return Some(batch_job_child(&args[2..]));
@@ -291,20 +292,34 @@ pub const BATCH_JOB_COMMAND: &str = "engine-batch-job";
 /// the next run reads unchanged is kept, as in the render service: module sources and their bytecode,
 /// mounted model files and the project's listings. Its answer is a line on stdout, `@@RUR-BATCH {"code": exit code, "error":
 /// message}`, after whatever the run itself printed; a run that panics answers code 101 and the next
-/// job runs. Live sessions (`--session`) are not batched. A release build shares this process only with
+/// job runs. Live sessions (`--session`) are not batched unless sent via `commands`. Passing
+/// `--frozen` marks mounted project and script files as immutable for the life of the worker,
+/// skipping per-file stat checks between jobs. A release build shares this process only with
 /// jobs whose environment matches its own; other jobs use `batch_job_process`.
 pub fn batch() -> i32 {
+    batch_with_options(false)
+}
+
+fn batch_with_options(frozen: bool) -> i32 {
     use std::io::{BufRead, Write};
     super::lua::modules::reuse_compiled_modules();
     super::lua::modules::set_deferred_store_flush(true);
-    struct FlushOnExit;
+    if frozen {
+        super::lua::modules::set_batch_frozen(true);
+    }
+    struct FlushOnExit {
+        frozen: bool,
+    }
     impl Drop for FlushOnExit {
         fn drop(&mut self) {
+            if self.frozen {
+                super::lua::modules::set_batch_frozen(false);
+            }
             super::lua::modules::flush_module_store();
             super::lua::modules::set_deferred_store_flush(false);
         }
     }
-    let _flush_on_exit = FlushOnExit;
+    let _flush_on_exit = FlushOnExit { frozen };
     #[cfg(not(target_os = "emscripten"))]
     let mut jobs_since_full_collect: u32 = 0;
     let stdin = std::io::stdin();
