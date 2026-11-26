@@ -3535,12 +3535,16 @@ impl DrawPreparer {
             let joins = stroke["joins"].as_str().unwrap_or("Round").to_string();
             let gradient = (stroke["gradient"].is_object() && !rotated).then(|| stroke["gradient"].clone());
             let scale = self.scale;
+            // Under a scale (a resampled CanvasGroup's texture) the gradient spans the stroke in the node's own
+            // space and each texel takes it where the texel lies there (fixtures/group-probe-stroke-gradient.luau)
+            let scaled = m[0] != 1. || m[3] != 1.;
+            let shift = if scaled { [0., 0.] } else { [m[4], m[5]] };
             let mesh = gradient.as_ref().map(|gradient| {
                 let outer = [
-                    rect.x - outward + m[4],
-                    rect.y - outward + m[5],
-                    rect.x + rect.w + outward + m[4],
-                    rect.y + rect.h + outward + m[5],
+                    rect.x - outward + shift[0],
+                    rect.y - outward + shift[1],
+                    rect.x + rect.w + outward + shift[0],
+                    rect.y + rect.h + outward + shift[1],
                 ];
                 super::gradients::gradient_mesh(
                     gradient,
@@ -3726,7 +3730,20 @@ impl DrawPreparer {
                     }
                 };
                 let StrokeCoverage { coverage, ring } = &*computed;
-                let field = mesh.field_where([x, y, x + w as f64, y + h as f64], |k| coverage[k] > 0.);
+                let field = if scaled {
+                    // (dithered by the texel, the pixel of the texture it is drawn into)
+                    let to_node = invert(m);
+                    let mut field = vec![0.; w as usize * h as usize * 4];
+                    for (k, texel) in field.chunks_exact_mut(4).enumerate() {
+                        if coverage[k] > 0. {
+                            let (tx, ty) = (x + (k % w as usize) as f64, y + (k / w as usize) as f64);
+                            texel.copy_from_slice(&mesh.at_turned(apply(to_node, tx + 0.5, ty + 0.5), tx as i64, ty as i64));
+                        }
+                    }
+                    field
+                } else {
+                    mesh.field_where([x, y, x + w as f64, y + h as f64], |k| coverage[k] > 0.)
+                };
                 let mut bytes = vec![0; w as usize * h as usize * 4];
                 let shade = |k: usize, p: &mut [u8]| {
                     // No coverage: alpha byte 0, transparent black once premultiplied (left zero)

@@ -471,8 +471,7 @@ impl DrawPreparer {
                 let strokes = array(&child["strokes"]);
                 if has_text(child) {
                     self.texture_text(texture, &mut segment, child, scene, assets, space, &mut empty)?;
-                } else if !strokes.is_empty() && !strokes.iter().any(|s| s["gradient"].is_object())
-                {
+                } else if !strokes.is_empty() {
                     self.flush_segment(&mut segment, texture, space, &mut empty, false);
                     let sx = space.nw as f64 / space.w as f64;
                     let sy = space.nh as f64 / space.h as f64;

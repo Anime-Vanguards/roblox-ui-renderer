@@ -951,3 +951,45 @@ fn viewport_snapshot_is_logical_size_over_its_fill_with_the_places_materials() {
     let service = snapshots[0]["instances"].as_array().unwrap().iter().find(|i| i["class"] == "MaterialService").unwrap().clone();
     assert_eq!(service["properties"]["Use2022MaterialsXml"], serde_json::json!({ "Bool": true }), "rur.json use2022Materials");
 }
+
+/// Turns that cancel: a frame turned back by its parent's turn about the same centre is drawn as an unturned one
+/// (no matrix: its rect snaps to whole pixels as a client draws it, fixtures/group-probe-stroke-gradient.luau);
+/// a turn that does not cancel, or one about another centre, keeps its matrix.
+#[test]
+fn turns_that_cancel_leave_no_matrix() {
+    run(
+        options(800.0, 600.0, 1.5),
+        r#"
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+local function Turned(Turn, Back, Offset)
+	local Outer = Instance.new("Frame", Root)
+	Outer.AnchorPoint = Vector2.new(0.5, 0.5)
+	Outer.Position = UDim2.fromOffset(160, 50)
+	Outer.Size = UDim2.fromOffset(90, 64)
+	Outer.Rotation = Turn
+	local Inner = Instance.new("Frame", Outer)
+	Inner.Name = `I{Turn}_{Back}_{Offset}`
+	Inner.AnchorPoint = Vector2.new(0.5, 0.5)
+	Inner.Position = UDim2.fromOffset(45 + Offset, 32)
+	Inner.Size = UDim2.fromOffset(70, 44)
+	Inner.Rotation = Back
+end
+for _, Turn in { 30, 45, 17.5, 200 } do
+	Turned(Turn, -Turn, 0)
+end
+Turned(30, -29, 0)
+Turned(30, -30, 6)
+local ByName = {}
+for _, Node in Check(Root, "cancelled").nodes do ByName[Node.name] = Node end
+for _, Turn in { 30, 45, 17.5, 200 } do
+	local Node = ByName[`I{Turn}_{-Turn}_0`]
+	assert(Node.matrix == nil, `{Turn} / {-Turn}: no matrix`)
+	assert(math.abs(Node.rect[1] - 125) < 1e-6 and math.abs(Node.rect[2] - 28) < 1e-6, `{Turn}: {Node.rect[1]} {Node.rect[2]}`)
+end
+assert(ByName["I30_-29_0"].matrix ~= nil, "a turn left over keeps its matrix")
+assert(ByName["I30_-30_6"].matrix ~= nil, "turned back about another centre: a translation, kept")
+"#,
+        &[],
+    );
+}
