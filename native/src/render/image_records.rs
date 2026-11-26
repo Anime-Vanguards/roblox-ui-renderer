@@ -16,6 +16,8 @@ const MASK_BUDGET: usize = 16 * 1024 * 1024;
 struct MaskKey {
     width: u32,
     height: u32,
+    /// The quad's unsnapped size (quad_corner_mask's span)
+    span: [u64; 2],
     radii: [u64; 4],
     /// The target position's parity: quad_corner_mask's coarse derivative quads
     parity: [u8; 2],
@@ -123,11 +125,21 @@ impl GpuImageCache {
 impl DrawPreparer {
     /// The corner mask of a `width` x `height` quad whose top left pixel is at target (ox, oy), its `region`
     /// alone (x, y, width, height in the quad; the shader reads it at the quad pixel less the region's corner)
-    fn image_mask_texture(&mut self, width: u32, height: u32, radii: [f64; 4], ox: f64, oy: f64, region: [u32; 4]) -> TextureId {
+    fn image_mask_texture(
+        &mut self,
+        width: u32,
+        height: u32,
+        span: [f64; 2],
+        radii: [f64; 4],
+        ox: f64,
+        oy: f64,
+        region: [u32; 4],
+    ) -> TextureId {
         let parity = [ox, oy].map(|v| (v.round() as i64).rem_euclid(2) as u8);
         let key = MaskKey {
             width,
             height,
+            span: span.map(f64::to_bits),
             radii: radii.map(f64::to_bits),
             parity,
             region,
@@ -140,6 +152,7 @@ impl DrawPreparer {
         let coverage = quad_corner_mask_region(
             width as usize,
             height as usize,
+            span,
             radii,
             parity[0] as i64,
             parity[1] as i64,
@@ -315,7 +328,9 @@ impl DrawPreparer {
             } else {
                 [0, 0, width as u32, height as u32]
             };
-            let mask = rounded.then(|| self.image_mask_texture(width as u32, height as u32, radii, x0 + tx, y0 + ty, region));
+            // The mask's rounded rect over the snapped quad (ImageQuad::mask_span)
+            let span = q.mask_span([width, height]);
+            let mask = rounded.then(|| self.image_mask_texture(width as u32, height as u32, span, radii, x0 + tx, y0 + ty, region));
             let start = self.begin(
                 ctx,
                 [
@@ -764,6 +779,19 @@ mod tests {
                     .flat_map(|b| b.record_offsets.iter().map(|offset| *offset as u32 - 64))
                     .collect();
                 writeln!(file, "i{index} {}", serde_json::to_string(&starts).unwrap()).unwrap();
+                // and each record's corner mask as it is now ("k<case>/<mask> bits")
+                let records = ctx.batches.iter().flat_map(|b| b.record_offsets.iter().map(move |_| b));
+                for (batch, expected) in records.zip(c["instances"].as_array().unwrap()) {
+                    let Some(mask) = expected["images"].as_array().unwrap().get(1) else { continue };
+                    let upload = draw.packet.textures.iter().find(|u| Some(u.id) == batch.image_slots[1]).unwrap();
+                    let bits: Vec<u32> = upload.levels[0]
+                        .bytes
+                        .chunks_exact(4)
+                        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+                        .collect();
+                    let at = mask["texture"].as_u64().unwrap();
+                    writeln!(file, "k{index}/{at} {}", serde_json::to_string(&bits).unwrap()).unwrap();
+                }
                 continue;
             }
             assert_eq!(actual, expected, "snapped record case {index}");
@@ -958,13 +986,13 @@ mod tests {
     fn mask_cache_lifetime_is_validated_for_retained_records() {
         let mut draw = DrawPreparer::new();
         draw.frame = 1;
-        let first = draw.image_mask_texture(4, 5, [2.; 4], 0., 0., [0, 0, 4, 5]);
-        assert_eq!(first, draw.image_mask_texture(4, 5, [2.; 4], 0., 0., [0, 0, 4, 5]));
+        let first = draw.image_mask_texture(4, 5, [4., 5.], [2.; 4], 0., 0., [0, 0, 4, 5]);
+        assert_eq!(first, draw.image_mask_texture(4, 5, [4., 5.], [2.; 4], 0., 0., [0, 0, 4, 5]));
         assert_eq!(draw.packet.textures.len(), 1);
         assert!(draw.gpu_image_cache.touch(first, 2));
         let mut masks = Vec::new();
         for index in 0..512 {
-            masks.push(draw.image_mask_texture(4, 5, [index as f64 / 1000.; 4], 0., 0., [0, 0, 4, 5]));
+            masks.push(draw.image_mask_texture(4, 5, [4., 5.], [index as f64 / 1000.; 4], 0., 0., [0, 0, 4, 5]));
         }
         assert_eq!(draw.gpu_image_cache.mask_bytes, 513 * 4 * 5 * 4);
         // Eviction preserves a retained node's current-frame reference.
@@ -975,12 +1003,50 @@ mod tests {
         assert_eq!(draw.gpu_image_cache.mask_bytes, 512 * 4 * 5 * 4);
         draw.frame = 3;
         let index = masks.iter().position(|id| *id == evicted[0]).unwrap();
-        let second = draw.image_mask_texture(4, 5, [index as f64 / 1000.; 4], 0., 0., [0, 0, 4, 5]);
+        let second = draw.image_mask_texture(4, 5, [4., 5.], [index as f64 / 1000.; 4], 0., 0., [0, 0, 4, 5]);
         assert_ne!(evicted[0], second);
         draw.reset_resources();
         assert!(draw.retired.contains(&first));
         assert!(draw.retired.contains(&second));
         assert!(!draw.gpu_image_cache.touch(second, 4));
+    }
+    /// The corner mask of a rounded image (the R32Float upload of one record): a Fit image's mask is its unsnapped
+    /// quad's rounded rect stretched over the snapped quad, a Stretch image's its snapped quad's. Measured on a
+    /// client (fixtures/image-corner.luau FitRound, 1.5x: a 541 x 261 texture fitted to 225 x 108.55 px, snapped to
+    /// 225 x 109, radius 36 px): the arc pixels' coverage read from the capture, against 0.58 / 0.49 from the
+    /// snapped rect
+    #[test]
+    fn a_fit_images_corner_mask_is_its_unsnapped_quads() {
+        let mask = |scale_type: &str, rect: [f64; 4], texture: [u32; 2], radius: f64| {
+            let asset = TextureAsset {
+                id: AssetId("white".into()),
+                width: texture[0],
+                height: texture[1],
+                rgba: vec![255; (texture[0] * texture[1] * 4) as usize].into(),
+            };
+            let mut draw = DrawPreparer::new();
+            draw.scale = 1.5;
+            draw.frame = 1;
+            let mut ctx = BuildContext::new(FRAME_TARGET, 1600, 1000, [0., 0.]);
+            let node = serde_json::json!({"id":1,"rect":rect,"image":{"uri":"white","scaleType":scale_type}});
+            draw.snapped_image_records(&mut ctx, &node, &asset, physical_rect(&node, 1.5), [radius; 4]).unwrap();
+            let upload = draw.packet.textures.iter().find(|t| t.format == TextureFormat::R32Float).expect("a mask");
+            let level = &upload.levels[0];
+            let values: Vec<f32> = bytemuck::cast_slice(&level.bytes).to_vec();
+            (level.width as usize, values)
+        };
+        let (width, fit) = mask("Fit", [10., 280., 150., 150.], [541, 261], 36.);
+        assert_eq!(width, 225);
+        // (quad x, quad y, the client's coverage)
+        for (i, j, client) in [(6, 93, 0.543), (218, 93, 0.538), (3, 88, 0.443), (221, 88, 0.451), (6, 15, 0.535), (218, 15, 0.544)] {
+            let value = fit[j * width + i] as f64;
+            assert!((value - client).abs() < 0.012, "Fit ({i}, {j}): {value} for the client's {client}");
+        }
+        // A Stretch image of 181.5 x 181.5 px (snapped 182 x 181) keeps its snapped quad's mask
+        let (width, stretch) = mask("Stretch", [830., 11., 121., 121.], [8, 8], 90.75);
+        assert_eq!(width, 182);
+        let snapped = super::super::images::quad_corner_mask(182, 181, [182., 181.], [90.75; 4], 1245, 17);
+        assert_eq!(stretch, snapped);
     }
     /// A rounded image quad wider than a texture can be (a 9255 x 5 px bar under a UICorner) keeps the corner mask
     /// of the part that shows, which the record reads at its offset; one that fits keeps the whole quad's
@@ -1012,8 +1078,8 @@ mod tests {
     #[test]
     fn a_mask_region_is_that_part_of_the_whole_mask() {
         for (ox, oy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            let whole = super::super::images::quad_corner_mask(13, 7, [3.5, 2., 0., 4.], ox, oy);
-            let part = quad_corner_mask_region(13, 7, [3.5, 2., 0., 4.], ox, oy, [3, 2, 9, 4]);
+            let whole = super::super::images::quad_corner_mask(13, 7, [12.6, 7.3], [3.5, 2., 0., 4.], ox, oy);
+            let part = quad_corner_mask_region(13, 7, [12.6, 7.3], [3.5, 2., 0., 4.], ox, oy, [3, 2, 9, 4]);
             let expected: Vec<f32> = (0..4).flat_map(|j| whole[(2 + j) * 13 + 3..(2 + j) * 13 + 12].to_vec()).collect();
             assert_eq!(part, expected, "parity {ox}, {oy}");
         }

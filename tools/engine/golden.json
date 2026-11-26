@@ -104,6 +104,10 @@
 			"digest": "d3e6c76da5733b0cfa32818544e0a9425483f34aaba065f018a687b7791c8f08",
 			"status": "ok"
 		},
+		"fast/edit/group-probe-corner": {
+			"digest": "667ff9ba1cc6d6db63f1515de299186885ba628748d15f8fade65e6cb9c8e3e9",
+			"status": "ok"
+		},
 		"fast/edit/group-probe-orbits": {
 			"digest": "78308be5e04bd08999c2d095aca1bf79217132271e66b126f21f4fcdcaeaa1dd",
 			"status": "ok"
@@ -1332,6 +1336,10 @@
 			"digest": "949c30a51c6ca2901b812bf06d06e0ba5b582ecf1b6760e7a577b78369d1a618",
 			"status": "ok"
 		},
+		"fixtures/edit/group-probe-corner": {
+			"digest": "da79059b18debdaf56111a89be049a8a3151ab807e3f04545e3bbbe48331b7b1",
+			"status": "ok"
+		},
 		"fixtures/edit/group-probe-orbits": {
 			"digest": "ce444b090ff7a455561aa23d2c07077bcf2c2c9415d5e948e4029ab324597a43",
 			"status": "ok"
@@ -2548,6 +2556,10 @@
 			"digest": "e4ee832494934092af8d84c8719586a25c153832a17f02f71349b78d1a3c2448",
 			"status": "ok"
 		},
+		"fixtures/play/group-probe-corner": {
+			"digest": "7c5d91b21101d29cfff84541f72d717c952ab5157851d429dbb73e468774d75e",
+			"status": "ok"
+		},
 		"fixtures/play/group-probe-orbits": {
 			"digest": "2d7bcada9de2c4cd2702d1c86983bf424bc3a8f2543b800dbcea0b13373eabc5",
 			"status": "ok"
@@ -3621,7 +3633,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-26T19:50:10.200Z",
+	"recorded": "2026-11-26T20:52:59.978Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

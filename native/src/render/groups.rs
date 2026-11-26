@@ -1009,6 +1009,7 @@ impl DrawPreparer {
             v1: 1.0,
             wrap: false,
             unrounded: false,
+            mask: None,
         };
         self.turned_quads_record(
             pass,

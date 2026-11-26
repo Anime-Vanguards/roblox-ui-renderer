@@ -48,6 +48,21 @@ pub struct ImageQuad {
     /// (fixtures/image-probe-slicecorner.luau, notes/images.md round 10)
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub unrounded: bool,
+    /// A Fit, Crop, Tile or Slice quad's unsnapped size (its float32 far edges aside, so it does not change as
+    /// the quad moves): its UICorner mask is that rect stretched over the snapped quad; None for a Stretch image,
+    /// whose mask is the snapped quad's own (mask_span)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask: Option<[f64; 2]>,
+}
+impl ImageQuad {
+    /// The size of the rounded rect a UICorner masks this quad with, in device px, for its snapped size `snapped`
+    /// (quad_corner_mask's span). Measured on a client (fixtures/image-corner.luau, mean error of the arc
+    /// pixels' coverage, snapped -> unsnapped): FitRound 0.0190 -> 0.0045, CropRound 0.0171 -> 0.0054; the
+    /// Stretch images PhotoHalf and PhotoRound (151.5 and 181.5 px snapped to 152 and 181 / 182) 0.0013 and
+    /// 0.0011 with the snapped size, 0.0345 and 0.0289 with the unsnapped one
+    pub fn mask_span(&self, snapped: [f64; 2]) -> [f64; 2] {
+        self.mask.unwrap_or(snapped)
+    }
 }
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct ImageRect {
@@ -449,6 +464,7 @@ fn q(rect: [f64; 4], uv: [f64; 4], wrap: bool) -> ImageQuad {
         v1: uv[3],
         wrap,
         unrounded: false,
+        mask: None,
     }
 }
 
@@ -496,11 +512,13 @@ pub fn image_quads(
                 (w, w / ratio)
             };
             let (fx, fy) = (x + (w - fw) / 2.0, y + (h - fh) / 2.0);
-            vec![q(
+            let mut quad = q(
                 [fx, fy, (fx + fw) as f32 as f64, (fy + fh) as f32 as f64],
                 [u0, v0, u1, v1],
                 false,
-            )]
+            );
+            quad.mask = Some([fw, fh]);
+            vec![quad]
         }
         "Crop" if rw > 0.0 && rh > 0.0 => {
             let ratio = rw / rh;
@@ -514,7 +532,9 @@ pub fn image_quads(
                 uv[0] += (u1 - u0) * (1.0 - keep) / 2.0;
                 uv[2] -= (u1 - u0) * (1.0 - keep) / 2.0;
             }
-            vec![q([x, y, x1, y1], uv, false)]
+            let mut quad = q([x, y, x1, y1], uv, false);
+            quad.mask = Some([w, h]);
+            vec![quad]
         }
         "Tile" if size == [0.0; 2] => {
             let ts = a(&image["tileSize"], [1.0, 0.0, 1.0, 0.0]);
@@ -526,7 +546,9 @@ pub fn image_quads(
             if tile_h <= 0.0 {
                 tile_h = h;
             }
-            vec![q([x, y, x1, y1], [0.0, 0.0, w / tile_w, h / tile_h], true)]
+            let mut quad = q([x, y, x1, y1], [0.0, 0.0, w / tile_w, h / tile_h], true);
+            quad.mask = Some([w, h]);
+            vec![quad]
         }
         "Slice" => {
             let [cx0, cy0, cx1, cy1] = a(&image["sliceCenter"], [0.0; 4]);
@@ -546,6 +568,9 @@ pub fn image_quads(
             }
             let xs = [x, x + left * k * shrink, x1 - right * k * shrink, x1];
             let ys = [y, y + top * k * shrink, y1 - bottom * k * shrink, y1];
+            // The parts' unsnapped sizes, as the quad moves (their corner masks: ImageQuad::mask)
+            let widths = [left * k * shrink, w - (left + right) * k * shrink, right * k * shrink];
+            let heights = [top * k * shrink, h - (top + bottom) * k * shrink, bottom * k * shrink];
             // At most one texel per logical px of the unsnapped centre; a smaller centre shows only its first
             // texels (1.5x: 19.5 device px show 13 texels, not the snapped 20 px's 13.33;
             // fixtures/image-probe-slicecorner.luau 3712 -> 80 px > 2)
@@ -575,6 +600,7 @@ pub fn image_quads(
                             false,
                         );
                         part.unrounded = us[i][0] == us[i][1] || vs[j][0] == vs[j][1];
+                        part.mask = Some([widths[i], heights[j]]);
                         out.push(part);
                     }
                 }
@@ -585,29 +611,6 @@ pub fn image_quads(
     }
 }
 
-/// UICorner coverage of an image quad scaled into a resampled CanvasGroup texture, at a texel centre (px, py)
-/// from the quad's centre in screen px (half size hw x hh): smoothstep(0, 1, 0.5 - d / fw) with the analytic
-/// derivative of the quad's screen units per texel (1 / s across the nearest edge); callers round it to 1/255.
-/// Not measured (notes/images.md round 10: the texture masks were left unchanged).
-fn corner(px: f64, py: f64, hw: f64, hh: f64, radii: [f64; 4], sx: f64, sy: f64) -> f64 {
-    let r = if py < 0.0 {
-        if px < 0.0 { radii[0] } else { radii[1] }
-    } else if px < 0.0 {
-        radii[3]
-    } else {
-        radii[2]
-    }
-    .max(0.0);
-    let (qx, qy) = (px.abs() - hw + r, py.abs() - hh + r);
-    let (d, fw) = if qx > 0.0 && qy > 0.0 {
-        let len = qx.hypot(qy);
-        (len - r, (qx / sx + qy / sy) / len)
-    } else {
-        (qx.max(qy) - r, if qx >= qy { 1.0 / sx } else { 1.0 / sy })
-    };
-    let t = (0.5 - d / fw).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
 /// The target parity of a rounded image's layer origin (its corner masks depend on it), None unrounded
 fn rounded_parity(radius: [f64; 4], rect: ImageRect, transform: [f64; 6]) -> Option<[i64; 2]> {
     radius.iter().any(|r| *r > 0.0).then(|| {
@@ -620,18 +623,60 @@ fn rounded_parity(radius: [f64; 4], rect: ImageRect, transform: [f64; 6]) -> Opt
 /// limited to the quad: 9-slice corner parts smaller than the radius vanish, edge parts get lens-shaped ends.
 /// Measured at 1x (fixtures/image-probe-slicecorner.luau + image-corner.luau): the analytic per-pixel fwidth
 /// left 3-6 level fringes on small radii, 172 + 30 px > 2 -> 19 + 0.
-pub fn quad_corner_mask(w: usize, h: usize, radii: [f64; 4], ox: i64, oy: i64) -> Vec<f32> {
-    quad_corner_mask_region(w, h, radii, ox, oy, [0, 0, w, h])
+///
+/// `span` is the size of the rounded rect in device px (ImageQuad::mask_span): the mask's local coordinate runs
+/// from 0 to it across the snapped quad (pixel centre i + 0.5 is local (i + 0.5) span / w). A Stretch image's
+/// span is its snapped size; a Fit, Crop, Tile or Slice quad's its unsnapped size (a Fit image's 225 x 108.55 px
+/// quad snapped to 225 x 109: image-corner FitRound's arc pixels 0.018 coverage too high with the snapped rect)
+pub fn quad_corner_mask(w: usize, h: usize, span: [f64; 2], radii: [f64; 4], ox: i64, oy: i64) -> Vec<f32> {
+    quad_corner_mask_region(w, h, span, radii, ox, oy, [0, 0, w, h])
+}
+
+/// Where a mask's pixels lie in its rounded rect's local units: pixel (i, j)'s centre is at
+/// (first[0] + i step[0], first[1] + j step[1]) in a span[0] x span[1] rect
+#[derive(Clone, Copy, Debug)]
+pub struct MaskGrid {
+    pub span: [f64; 2],
+    pub first: [f64; 2],
+    pub step: [f64; 2],
+}
+impl MaskGrid {
+    /// A w x h quad on the screen: the rect stretched over its pixels
+    pub fn screen(w: usize, h: usize, span: [f64; 2]) -> Self {
+        let step = [span[0] / w as f64, span[1] / h as f64];
+        Self {
+            span,
+            first: [0.5 * step[0], 0.5 * step[1]],
+            step,
+        }
+    }
 }
 
 /// quad_corner_mask's pixels in `region` (x, y, width, height within the quad) alone: each the same as the whole
 /// mask's (a quad wider or taller than a texture can be keeps a mask of the part that shows)
-pub fn quad_corner_mask_region(w: usize, h: usize, radii: [f64; 4], ox: i64, oy: i64, region: [usize; 4]) -> Vec<f32> {
+pub fn quad_corner_mask_region(
+    w: usize,
+    h: usize,
+    span: [f64; 2],
+    radii: [f64; 4],
+    ox: i64,
+    oy: i64,
+    region: [usize; 4],
+) -> Vec<f32> {
+    corner_mask_region(MaskGrid::screen(w, h, span), radii, ox, oy, region)
+}
+
+/// The corner mask's pixels in `region` (x, y, width, height of the grid's pixels), the pixel at grid index (0, 0)
+/// at target (ox, oy): coarse derivative quads on the target's even coordinates (quad_corner_mask)
+pub fn corner_mask_region(grid: MaskGrid, radii: [f64; 4], ox: i64, oy: i64, region: [usize; 4]) -> Vec<f32> {
     let (px2, py2) = (ox.rem_euclid(2), oy.rem_euclid(2));
-    let (hw, hh) = (w as f64 / 2.0, h as f64 / 2.0);
+    let [sw, sh] = grid.span;
+    let (hw, hh) = (sw / 2.0, sh / 2.0);
+    let [kx, ky] = grid.step;
+    let [fx, fy] = grid.first;
     let [tl, tr, br, bl] = radii.map(|r| r.max(0.0));
     let sd = |i: i64, j: i64| {
-        let (px, py) = (i as f64 + 0.5 - hw, j as f64 + 0.5 - hh);
+        let (px, py) = (fx + i as f64 * kx - hw, fy + j as f64 * ky - hh);
         let r = if py < 0.0 {
             if px < 0.0 { tl } else { tr }
         } else if px < 0.0 {
@@ -858,6 +903,8 @@ pub fn prepare_image(
                     q.v0,
                     q.v1,
                     q.wrap,
+                    // The corner mask's rounded rect (ImageQuad::mask_span)
+                    q.mask_span([0.0; 2]),
                 )
             })
             .collect();
@@ -941,7 +988,14 @@ pub fn prepare_image(
         let values: Arc<[f32]> = cache.quad_samples(texture, &levels, qw, qh, sample);
         // Target position of the quad (the layer sits at rect.x, rect.y; transform's translation to the target)
         let mask = (rounded && !quad.unrounded).then(|| {
-            quad_corner_mask(qw, qh, radius, (x0 + transform[4]).round() as i64, (y0 + transform[5]).round() as i64)
+            quad_corner_mask(
+                qw,
+                qh,
+                quad.mask_span([qw as f64, qh as f64]),
+                radius,
+                (x0 + transform[4]).round() as i64,
+                (y0 + transform[5]).round() as i64,
+            )
         });
         let mesh = gradient.map(|g| gradient_mesh(g, rect.raw, color.map(|v| v as f64), alpha as f64, [x0, y0, x1, y1]));
         // A transparent sample shades to alpha 0 whatever the gradient (a 9-slice frame's empty centre), and to
@@ -1348,7 +1402,8 @@ pub fn plan_texture_image(
                 uv: [q.u0, q.v0, q.u1, q.v1],
                 wrap: q.wrap,
                 unrounded: q.unrounded,
-                quad: [qw, qh],
+                span: q.mask_span([qw, qh]),
+                origin: [tx0, ty0],
                 // Only a UIGradient reads group texture positions
                 at: gradient.map(|_| [tx0, ty0]),
             })
@@ -1386,7 +1441,23 @@ pub fn plan_texture_image(
         for job in jobs {
             let [cw, ch] = job.size;
             let [ix0, iy0, ix1, iy1] = job.region;
-            let [qw, qh] = job.quad;
+            // The UICorner mask drawn into the texture as on the screen (quad_corner_mask): its rounded rect
+            // (ImageQuad::mask_span, device px) stretched over the quad's place in texels, each texel centre where
+            // it lies in it, derivative quads on the texture's even texels
+            let mask = (rounded && !job.unrounded).then(|| {
+                let step = [job.span[0] / job.grid[2], job.span[1] / job.grid[3]];
+                corner_mask_region(
+                    MaskGrid {
+                        span: job.span,
+                        first: [job.grid[0] * step[0], job.grid[1] * step[1]],
+                        step,
+                    },
+                    radius,
+                    job.origin[0] as i64,
+                    job.origin[1] as i64,
+                    [ix0, iy0, ix1 - ix0, iy1 - iy0],
+                )
+            });
             let grid = SamplingGrid {
                 off_x: job.grid[0],
                 off_y: job.grid[1],
@@ -1423,21 +1494,9 @@ pub fn plan_texture_image(
                     if lx < 0 || lx >= w as i64 {
                         continue;
                     }
-                    let coverage = if rounded && !job.unrounded {
-                        let c = corner(
-                            (i as f64 + grid.off_x) / space.sx - qw / 2.0,
-                            (j as f64 + grid.off_y) / space.sy - qh / 2.0,
-                            qw / 2.0,
-                            qh / 2.0,
-                            radius,
-                            space.sx,
-                            space.sy,
-                        );
-                        (((c * 255.0 + 0.5).floor() / 255.0) as f32) as f64
-                    } else {
-                        1.0
-                    };
-                    let k = ((j - iy0) * (ix1 - ix0) + i - ix0) * 4;
+                    let k = (j - iy0) * (ix1 - ix0) + i - ix0;
+                    let coverage = mask.as_ref().map_or(1.0, |m| m[k] as f64);
+                    let k = k * 4;
                     let dest = lx as usize * 4;
                     let shaded = shade(
                         values[k..k + 4].try_into().unwrap(),
@@ -1499,7 +1558,9 @@ struct QuadJob {
     uv: [f64; 4],
     wrap: bool,
     unrounded: bool,
-    quad: [f64; 2],
+    /// The UICorner mask's rounded rect in device px (ImageQuad::mask_span) and the quad's first texel
+    span: [f64; 2],
+    origin: [f64; 2],
     at: Option<[f64; 2]>,
 }
 
@@ -1517,6 +1578,34 @@ pub fn prepare_texture_image(
         PlannedLayer::Ready(layer) => layer,
         PlannedLayer::Pending(pending) => pending.finish(cache),
     })
+}
+
+#[cfg(test)]
+mod texture_mask_tests {
+    use super::*;
+    /// A rounded image in a CanvasGroup texture is masked as on the screen (quad_corner_mask: coarse derivative
+    /// quads, here on the texture's even texels). Measured on a client (fixtures/group-probe-corner.luau and
+    /// group-slash.luau: 506 / 29 px over 2 levels at 1.5x, 526 / 26 at 1x, with the analytic derivative before)
+    #[test]
+    fn a_group_textures_rounded_image_is_masked_as_on_the_screen() {
+        let texture = TextureAsset {
+            id: crate::assets::AssetId("white".into()),
+            width: 4,
+            height: 4,
+            rgba: vec![255; 64].into(),
+        };
+        let node = serde_json::json!({"image":{"uri":"white","scaleType":"Stretch"}});
+        // A 55 x 42 px image at (31, 17) in a texture on the screen's grid (one texel a pixel), radius 13.5 px
+        let rect = ImageRect { x: 31., y: 17., w: 55., h: 42., raw: [31., 17., 55., 42.], snapped: true };
+        let space = ImageSpace { l: 0., t: 0., sx: 1., sy: 1., nw: 120, nh: 90 };
+        let mut cache = ImageCache::default();
+        let layer = prepare_texture_image(&node, &texture, rect, [13.5; 4], space, 1.5, &mut cache).unwrap();
+        assert_eq!((layer.x, layer.y, layer.width, layer.height), (31, 17, 55, 42));
+        let mask = quad_corner_mask(55, 42, [55., 42.], [13.5; 4], 31, 17);
+        let alpha: Vec<u8> = layer.rgba.chunks_exact(4).map(|p| p[3]).collect();
+        let expected: Vec<u8> = mask.iter().map(|v| gpu8(*v as f64)).collect();
+        assert_eq!(alpha, expected);
+    }
 }
 
 #[cfg(test)]

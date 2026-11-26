@@ -913,31 +913,10 @@ vec4 shadeImage(vec4 value, vec2 X, float coverage, int tintAt, int gradientAt) 
 	return fromBytes(q);
 }
 
-// The UICorner mask of a QW x QH screen quad at the texels of a resampled CanvasGroup texture (images.rs
-// corner): texel i's centre (i + off) / s screen px from the quad's corner, derivatives 1 / s (not measured)
-float textureCornerMask(vec2 ij, vec4 quad, vec2 s, vec4 radii) {
-	vec2 halfSize = quad.xy * 0.5;
-	vec2 p = (ij + quad.zw) / s - halfSize;
-	float r = quadrantRadius(p, radii);
-	vec2 q = abs(p) - halfSize + r;
-	float d, fw;
-	if (q.x > 0.0 && q.y > 0.0) {
-		float len = length(q);
-		d = len - r;
-		fw = (q.x / s.x + q.y / s.y) / len;
-	} else {
-		d = max(q.x, q.y) - r;
-		fw = q.x >= q.y ? 1.0 / s.x : 1.0 / s.y;
-	}
-	float t = clamp(0.5 - d / fw, 0.0, 1.0);
-	return floor(t * t * (3.0 - 2.0 * t) * 255.0 + 0.5) / 255.0;
-}
-
-// IMAGE (snapped quad): quad (X0, Y0, W, H), node rect (L, T, R, B), (slot, l0, f, flags: 1 pixelated,
-// 4 corner mask, 8 in a CanvasGroup texture, 16 texture corner mask), tap offsets, tint + fade, corner (mask
-// slot, the mask's x and y in the quad, 0) or texture corner radii, gradient (flag, offset), texture corner (QW, QH, offX, offY),
-// (sx, sy). In a texture (a resampled CanvasGroup's image, groups.rs group_image) the quad and node rect are
-// in texels. The output is the straight colour and alpha
+// IMAGE (snapped quad, image_records.rs snapped_image_records): quad (X0, Y0, W, H), node rect (L, T, R, B),
+// (slot, l0, f, flags: 1 pixelated, 4 corner mask), tap offsets, tint + fade, corner (mask slot, the mask's x and y
+// in the quad, 0), gradient (flag, offset). A resampled CanvasGroup's images are drawn into its texture on the CPU
+// (images.rs plan_texture_image). The output is the straight colour and alpha
 // converted like the GPU; the "image" batch blend mixes it like Studio (on the screen too)
 vec4 kindImage(ivec2 P, vec2 X) {
 	vec4 nodeRect = rec(4);
@@ -951,8 +930,6 @@ vec4 kindImage(ivec2 P, vec2 X) {
 	float coverage = 1.0;
 	if ((flags & 4) != 0) {
 		coverage = imageTexel(int(rec(8).x), P - ivec2(quad.xy) - ivec2(rec(8).yz), 0).r;
-	} else if ((flags & 16) != 0) {
-		coverage = textureCornerMask(vec2(P) - quad.xy, rec(10), rec(11).xy, rec(8));
 	}
 	return shadeImage(value, X, coverage, 7, 9);
 }

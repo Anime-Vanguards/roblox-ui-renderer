@@ -20,6 +20,7 @@ Fixtures: `image-probe-ties`, `snap-probe-ties1x`.
 
 - **Axis-aligned quads:** Snapped edges sampled bilinearly with 8-bit weights at texel centers. Minified textures use mipmaps, rounding odd dimensions down on the even axis.
 - **Scale types:** `Slice` (9-slice), `Tile`, `Fit`, and `Crop` match Studio's quad layout; `ImageRectOffset` / `ImageRectSize` crop the source texture.
+- **`UICorner` on images:** Each image quad is rounded on its own with coarse 2 x 2 derivatives on even device pixels. A `Stretch` image's rounded rect is its snapped quad; a `Fit`, `Crop` or `Tile` image's and each 9-slice part's is the unsnapped quad stretched over the snapped one. In a `CanvasGroup`'s texture the same mask covers the quad's texels, each texel centre at its place in the quad.
 - **Rotated images:** Corners snap to the 1/256 px rasterizer grid with UVs interpolated across two triangles. Mip selection considers texel span horizontally, vertically, and along both diagonals; anti-aliased fringes sample along the edge line at their strip's mip level. If ancestor/self rotations cancel to 0°, fills and images fall back to axis-aligned edge snapping.
 - **`EditableImage`:** Rendered without mipmaps (aliases on minification, matching Studio).
 - **Thumbnails (`rbxthumb://`):** Fetched as WebP matching Studio.
