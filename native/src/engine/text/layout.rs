@@ -221,36 +221,47 @@ pub fn snap_pixel(value: f64) -> f64 {
 }
 
 /// `TextLayout.LinePen`: Left = round(x), Right = round(x + w) - width, Center = round(x + w / 2) -
-/// floor(width / 2). Rich text halves its width in logical px and floors it back in device px, so a
-/// line whose width / DPI is inexact comes out just under and centres one pixel further right: its
-/// half width is floor((width - 1) / 2). Measured: fixtures/layout-textpen2.luau 128/128 rich lines at
-/// 1.5x (widths not a multiple of 3 px) and at 1x (never: every width is exact). A right-aligned rich
-/// line of such a width starts one pixel further right the same way: round(x + w) - (width - 1)
-/// (fixtures/text-probe-tie-size.luau: 16 of 16 such lines, and the truncated lines of
-/// fixtures/text-probe-richtrunc.luau: 50, 77, 139, 175 and 232 px wide but not 120 or 255). `exact`: the anchor
-/// left unsnapped, as rotated text places its quads before resampling them (text-probe-rotation-size:
-/// 0 differing pixels).
+/// floor(width / 2). Rich text aligns its width floored to whole logical px and scaled back to device px
+/// (`rich_align_width`, L = floor(width / DPI) x DPI): Right = round(x + w) - floor(L), Center = round(x + w / 2) -
+/// floor(L / 2). At 1.5x that is width - 1 (right) and floor((width - 1) / 2) (centred) for every width not a
+/// multiple of 3 px: fixtures/layout-textpen2.luau 128/128 rich lines, text-probe-tie-size 16 of 16 right-aligned
+/// ones, the truncated lines of text-probe-richtrunc (50, 77, 139, 175 and 232 px wide but not 120 or 255). At 1x
+/// every width is whole. At 2x and 3x (sim client 0.747, 2026-11-26): an odd right-aligned rich line starts one
+/// device px further right at 2x, and one or two (width mod 3) at 3x; centred lines at 3x take floor(L / 2):
+/// layout-textpen2 128/128 at 3x (88 before), text-probe-tie-size 36/36 at 3x and 35/35 at 2x, text-probe-richtrunc
+/// 80/80 at 3x. A truncated rich line floors its kept text and its ellipsis apart (`line_pen_cut`).
+/// `exact`: the anchor left unsnapped, as rotated text places its quads before resampling them
+/// (text-probe-rotation-size: 0 differing pixels).
 pub fn line_pen(alignment: XAlign, content_x: f64, content_w: f64, line_width: f64, rich: bool, exact: bool, pixel_scale: f64) -> f64 {
+    line_pen_cut(alignment, content_x, content_w, line_width, 0.0, rich, exact, pixel_scale)
+}
+
+/// `line_pen` for a line that ends in a truncation's ellipsis `ellipsis` px wide (part of `line_width`). Rich text
+/// floors the kept text's width and the ellipsis' to whole logical px apart: "Relax. This is not…" at 2x, 277 + 27
+/// px, aligns 138 + 13 logical px, 2 px less than its 152 (sim client, fixtures/text-probe-richtrunc.luau: 137 of
+/// 137 truncated rich lines at 2x and 3x, 101 with the width floored whole).
+#[allow(clippy::too_many_arguments)]
+pub fn line_pen_cut(alignment: XAlign, content_x: f64, content_w: f64, line_width: f64, ellipsis: f64, rich: bool, exact: bool, pixel_scale: f64) -> f64 {
     let snap = |value: f64| if exact { value } else { snap_pixel(value) };
+    let aligned = || rich_align_width(line_width - ellipsis, pixel_scale) + rich_align_width(ellipsis, pixel_scale);
     match alignment {
         XAlign::Left => snap(content_x),
-        XAlign::Right if rich && !divides_exactly(line_width, pixel_scale) => snap(content_x + content_w) - (line_width - 1.0),
+        XAlign::Right if rich => snap(content_x + content_w) - aligned().floor(),
         XAlign::Right => snap(content_x + content_w) - line_width,
-        XAlign::Center => {
-            let mut half = idiv(line_width, 2.0);
-            if rich && !divides_exactly(line_width, pixel_scale) {
-                half = idiv(line_width - 1.0, 2.0);
-            }
-            snap(content_x + content_w / 2.0) - half
-        }
+        XAlign::Center if rich => snap(content_x + content_w / 2.0) - idiv(aligned(), 2.0),
+        XAlign::Center => snap(content_x + content_w / 2.0) - idiv(line_width, 2.0),
     }
 }
 
-/// Whether `width / scale` is exact in binary floating point (a multiple of 1/1024 px, as every
-/// width / DPI is at 1x and 2x, and at 1.5x only for multiples of 3 px).
-pub(crate) fn divides_exactly(width: f64, scale: f64) -> bool {
-    let logical = width / scale * 1024.0;
-    (logical - logical.round()).abs() < 1e-6
+/// The device width a rich line (or the part of it before or after a truncation's cut) is aligned by: its width
+/// floored to whole logical px at device scale `scale`, scaled back (to 1/1024 px, so a scale that is not a binary
+/// fraction keeps whole widths whole). `line_pen_cut`.
+pub(crate) fn rich_align_width(width: f64, scale: f64) -> f64 {
+    if !(scale > 0.0 && scale.is_finite()) {
+        return width;
+    }
+    let logical = (width / scale + 1e-9).floor();
+    (logical * scale * 1024.0).round() / 1024.0
 }
 
 /// Families Roblox draws larger than their TextSize (measured: Legacy text is 1.5x).
@@ -1413,5 +1424,47 @@ mod truncation_tests {
         assert_eq!(shown(&truncate_rich_drawn(&line, 80.0, Truncate::SplitWord, &at)), "abcde\u{2026}");
         assert_eq!(shown(&truncate_rich_drawn(&line, 88.0, Truncate::SplitWord, &at)), "abcde\u{2026}");
         assert_eq!(shown(&truncate_rich_drawn(&line, 92.0, Truncate::SplitWord, &at)), "abcdef\u{2026}");
+    }
+}
+
+#[cfg(test)]
+mod line_pen_tests {
+    use super::*;
+
+    /// Rich lines align their width floored to whole logical px (sim client 0.747 captures of
+    /// fixtures/text-probe-tie-size.luau at 2x and 3x; content boxes and widths in device px): an odd right-aligned
+    /// line at 2x starts one px further right, at 3x width mod 3 px further; a centred one at 3x halves the floored
+    /// width. Plain text keeps the exact width; 1x and 1.5x keep their rules.
+    #[test]
+    fn rich_lines_align_a_width_floored_to_logical_px() {
+        let right = |x: f64, w: f64, width: f64, rich: bool, scale: f64| line_pen(XAlign::Right, x, w, width, rich, false, scale);
+        let center = |x: f64, w: f64, width: f64, rich: bool, scale: f64| line_pen(XAlign::Center, x, w, width, rich, false, scale);
+        // 2x: "Review craft" 143 px wide in a 274 px box at 306 (client 438); an even width is exact
+        assert_eq!(right(306.0, 274.0, 143.0, true, 2.0), 438.0);
+        assert_eq!(right(306.0, 274.0, 143.0, false, 2.0), 437.0);
+        assert_eq!(right(1796.0, 290.0, 164.0, true, 2.0), 1922.0);
+        assert_eq!(center(306.0, 274.0, 143.0, true, 2.0), center(306.0, 274.0, 143.0, false, 2.0));
+        // 3x: width mod 3 = 2, 2, 1 and 0 (clients 3372, 1521, 126, 660); a centred 185 px line (client 1000)
+        assert_eq!(right(3141.0, 408.0, 179.0, true, 3.0), 3372.0);
+        assert_eq!(right(1353.0, 396.0, 230.0, true, 3.0), 1521.0);
+        assert_eq!(right(12.0, 399.0, 286.0, true, 3.0), 126.0);
+        assert_eq!(right(459.0, 411.0, 210.0, true, 3.0), 660.0);
+        assert_eq!(center(906.0, 369.0, 185.0, true, 3.0), 1000.0);
+        assert_eq!(center(906.0, 369.0, 185.0, false, 3.0), 999.0);
+        // 1.5x: width - 1 and floor((width - 1) / 2) for widths that are not a multiple of 3 px, as before
+        for width in [100.0, 101.0, 102.0] {
+            let exact = width % 3.0 == 0.0;
+            assert_eq!(right(0.0, 300.0, width, true, 1.5), 300.0 - if exact { width } else { width - 1.0 });
+            assert_eq!(center(0.0, 300.0, width, true, 1.5), 150.0 - if exact { (width / 2.0f64).floor() } else { ((width - 1.0) / 2.0f64).floor() });
+        }
+        // A truncated rich line floors its kept text and its ellipsis apart: "Relax. This is not…" at 2x, 277 + 27 px
+        // in a 304 px box at 856 (right-aligned, client 858) and at 432 (centred, client 433); 3x keeps the rule
+        let cut = |alignment: XAlign, x: f64, width: f64, ellipsis: f64, scale: f64| line_pen_cut(alignment, x, 304.0, width, ellipsis, true, false, scale);
+        assert_eq!(cut(XAlign::Right, 856.0, 304.0, 27.0, 2.0), 858.0);
+        assert_eq!(cut(XAlign::Center, 432.0, 304.0, 27.0, 2.0), 433.0);
+        assert_eq!(cut(XAlign::Right, 856.0, 304.0, 0.0, 2.0), right(856.0, 304.0, 304.0, true, 2.0));
+        // 1x: every width is whole
+        assert_eq!(center(0.0, 300.0, 101.0, true, 1.0), 100.0);
+        assert_eq!(rich_align_width(11.0, 1.1), 11.0);
     }
 }

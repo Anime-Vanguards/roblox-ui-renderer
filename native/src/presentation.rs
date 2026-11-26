@@ -203,32 +203,28 @@ fn move_rect(node: &mut Value, key: &str, dx: f64, dy: f64) {
         r[1] = json!(f32_round(number(r.get(1), 0.0) + dy));
     }
 }
-fn move_text(text: &mut Value, dx: f64, dy: f64, scale: f64) {
-    let Some(content) = rect(text.get("content")).map(|r| shift(r, dx, dy)) else {
+fn move_text(text: &mut Value, dx: f64, dy: f64) {
+    let Some(before) = rect(text.get("content")) else {
         return;
     };
-    let rich = text["rich"].as_bool().unwrap_or(false);
+    let content = shift(before, dx, dy);
     let align = text["xAlign"].as_str().unwrap_or("").to_owned();
     let round3 = |v: f64| (v * 1000.0 + 0.5).floor() / 1000.0;
-    let snap = |v: f64| (round3(v) + 0.5).floor();
+    // The engine's pen rule (engine/text/layout.rs line_pen_cut) is the alignment anchor snapped, less a whole
+    // offset of the line's own (its width, floored to logical px for rich text, the ellipsis apart): the offset is
+    // read back from the pen the line has, so a moved line keeps it
+    let anchor = |c: [f64; 4]| match align.as_str() {
+        "Left" => c[0],
+        "Right" => c[0] + c[2],
+        _ => c[0] + c[2] / 2.0,
+    };
+    let snap = crate::engine::text::snap_pixel;
     text["content"] = json!(content);
     if let Some(lines) = text.get_mut("lines").and_then(Value::as_array_mut) {
         for line in lines {
-            let width = number(line.get("width"), 0.0);
-            // The engine's pen rule (engine/text/layout.rs line_pen): a rich centred line whose width
-            // / DPI is inexact takes floor((w - 1) / 2)
-            let half = if rich && !crate::engine::text::layout::divides_exactly(width, scale) {
-                ((width - 1.0) / 2.0).floor()
-            } else {
-                (width / 2.0).floor()
-            };
-            let pen = |snap: &dyn Fn(f64) -> f64| match align.as_str() {
-                "Left" => snap(content[0]),
-                "Right" => snap(content[0] + content[2]) - width,
-                _ => snap(content[0] + content[2] / 2.0) - half,
-            };
-            let px = pen(&snap);
-            let ux = round3(pen(&|v| v));
+            let offset = snap(anchor(before)) - number(line.get("px"), snap(anchor(before)));
+            let px = snap(anchor(content)) - offset;
+            let ux = round3(anchor(content) - offset);
             line["x"] = json!(round3(number(line.get("x"), 0.0) + dx));
             line["top"] = json!(round3(number(line.get("top"), 0.0) + dy));
             line["px"] = json!(px);
@@ -355,7 +351,7 @@ fn project_node(
             ]);
         }
         if let Some(text) = next.get_mut("text") {
-            move_text(text, dx * scale, dy * scale, scale);
+            move_text(text, dx * scale, dy * scale);
         }
         if let Some(rects) = next
             .pointer_mut("/selection/rects")
@@ -1382,14 +1378,28 @@ impl ScrollPresentation {
 mod tests {
     use super::*;
 
+    /// A moved line keeps the offset the engine's pen rule gave it (engine/text/layout.rs line_pen_cut): rich
+    /// widths floored to logical px at every scale, and a truncated rich line's ellipsis floored apart, which the
+    /// scene does not hold.
     #[test]
-    fn moved_rich_centred_lines_follow_the_engine_pen_at_every_scale() {
-        // Width 8 (not a multiple of 3): inexact over 1.5 (half 3), exact over 1 and 2 (half 4)
-        for (scale, px) in [(1.0, 46.0), (2.0, 46.0), (1.5, 47.0)] {
-            let mut text = json!({"rich": true, "xAlign": "Center", "content": [0.0, 0.0, 100.0, 20.0],
-                "lines": [{"x": 46.0, "top": 0.0, "width": 8.0, "px": 46.0}]});
-            move_text(&mut text, 0.0, 0.0, scale);
-            assert_eq!(text["lines"][0]["px"], json!(px), "scale {scale}");
+    fn moved_lines_keep_the_engine_pen_at_every_scale() {
+        use crate::engine::text::{XAlign, line_pen_cut};
+        for scale in [1.0, 1.5, 2.0, 3.0] {
+            for (align, alignment) in [("Left", XAlign::Left), ("Right", XAlign::Right), ("Center", XAlign::Center)] {
+                // width 304 with a 27 px ellipsis (text-probe-richtrunc at 2x), 143, and 8
+                for (width, cut) in [(304.0, 27.0), (143.0, 0.0), (8.0, 0.0)] {
+                    for rich in [true, false] {
+                        let pen = |x: f64, exact: bool| line_pen_cut(alignment, x, 400.0, width, cut, rich, exact, scale);
+                        let mut text = json!({"rich": rich, "xAlign": align, "content": [10.25, 0.0, 400.0, 20.0],
+                            "lines": [{"x": pen(10.25, true), "top": 0.0, "width": width, "px": pen(10.25, false)}]});
+                        move_text(&mut text, 3.5, 1.0);
+                        let line = &text["lines"][0];
+                        assert_eq!(line["px"], json!(pen(13.75, false)), "{scale}x {align} {width} rich {rich}");
+                        let ux = line.get("ux").and_then(Value::as_f64).unwrap_or(pen(13.75, false));
+                        assert!((ux - pen(13.75, true)).abs() < 1e-9, "{scale}x {align} {width} rich {rich}: ux {ux}");
+                    }
+                }
+            }
         }
     }
 

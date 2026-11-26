@@ -32,7 +32,7 @@ use super::{
     layout::{BoxSlots, Layout, Record, absolute_position, record::{Transform, compose, rotation_about}},
     path2d::{self, Segment},
     path2d_layout,
-    text::{FaceId, Line, TextEngine, TextLayout, XAlign, is_space, line_pen, ppem, reveal::LineReveal},
+    text::{FaceId, Line, TextEngine, TextLayout, XAlign, is_space, line_pen_cut, ppem, reveal::LineReveal},
     value::{ContentValue, Value},
 };
 
@@ -1056,9 +1056,11 @@ fn text_lines(
                 (glyphs, runs, pens, starts)
             }
         };
-        // px: the whole device pixel Studio starts the pen at; ux: the unsnapped pen (only when not whole)
-        let pen = line_pen(alignment, content_x, content_w, line_width, rich, false, pixel_scale);
-        let exact_pen = round(line_pen(alignment, content_x, content_w, line_width, rich, true, pixel_scale), 3);
+        // px: the whole device pixel Studio starts the pen at; ux: the unsnapped pen (only when not whole). A
+        // truncated rich line aligns its kept text and its ellipsis apart (line_pen_cut)
+        let cut: f64 = line.glyphs.iter().filter(|glyph| glyph.is_ellipsis()).map(|glyph| glyph.advance).sum();
+        let pen = line_pen_cut(alignment, content_x, content_w, line_width, cut, rich, false, pixel_scale);
+        let exact_pen = round(line_pen_cut(alignment, content_x, content_w, line_width, cut, rich, true, pixel_scale), 3);
         // `copies`: [entry index, pen of the left copies' bitmap, pen of the right copies'] of the glyphs whose
         // legacy TextStroke copies round another way than the glyph (`tie_step`)
         let mut copies: Vec<Json> = Vec::new();

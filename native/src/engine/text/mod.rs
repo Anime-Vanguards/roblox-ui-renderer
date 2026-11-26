@@ -25,8 +25,8 @@ use std::sync::Arc;
 
 pub use fonts::{Face, FaceId, FontPaths, FontRegistry};
 pub use layout::{
-    Glyph, LayoutParams, Line, TextLayout, Truncate, XAlign, glyph_advance, is_space, line_pen, ppem, quad_size_for, rich_scaled_pixels, rich_size_for,
-    scales, size_for, snap_pixel,
+    Glyph, LayoutParams, Line, TextLayout, Truncate, XAlign, glyph_advance, is_space, line_pen, line_pen_cut, ppem, quad_size_for, rich_scaled_pixels,
+    rich_size_for, scales, size_for, snap_pixel,
 };
 pub use opentype::Font;
 pub use measure::{SizeConstraint, TextMeasure, TextObject};
