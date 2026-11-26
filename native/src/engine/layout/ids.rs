@@ -214,7 +214,7 @@ names!(
     GrowRatio, ShrinkRatio, CellSize, CellPadding, FillDirectionMaxCells, StartCorner, CurrentPage,
     MajorAxis, FillEmptySpaceColumns, FillEmptySpaceRows, ScrollBarThickness, CanvasSize,
     ScrollingDirection, AutomaticCanvasSize, VerticalScrollBarInset, HorizontalScrollBarInset,
-    VerticalScrollBarPosition, CanvasPosition, ScreenInsets, Enabled, DisplayOrder,
+    VerticalScrollBarPosition, CanvasPosition, ScreenInsets, Enabled, DisplayOrder, ClipsDescendants,
     AbsolutePosition, AbsoluteSize, AbsoluteRotation, TextBounds, TextFits, AbsoluteContentSize,
     AbsoluteCellSize, AbsoluteCellCount, AbsoluteCanvasSize, AbsoluteWindowSize, Circular,
 );

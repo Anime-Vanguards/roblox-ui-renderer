@@ -204,6 +204,14 @@
 			"digest": "2e97a68feb46ef5b756b51c0860c10ef1b101e1372c6ff7c74d814c2dcd18f9f",
 			"status": "ok"
 		},
+		"fast/edit/layout-autolist-scalepad": {
+			"digest": "a88014a46d60a1e1fab10edd9f8b7905eb6d428f298c6c4bef0c464022621b22",
+			"status": "ok"
+		},
+		"fast/edit/layout-autonested-scalepos": {
+			"digest": "07a3258ac8f17f1bd84365fead7692786097467dc524cd1bd29e3837abfea9b7",
+			"status": "ok"
+		},
 		"fast/edit/layout-autosize": {
 			"digest": "8de257ecafc43cdf477c5462fd8cef26512bd176663151ead03f9f4ad7fe31fd",
 			"status": "ok"
@@ -213,7 +221,23 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-constraint2": {
-			"digest": "0947f7b2c007b53a6d9f0358b15f56c85c3d8195095c2b18b7b66bff2c734047",
+			"digest": "2f75e35d485ef0e66a3f7415836da3410b5f5cb9c183295566803ea6e9ad16b0",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-constraint3": {
+			"digest": "952172554eb92dab23266fec8d71b3512330957c6111656bf6898c771e2861a3",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-offscreen": {
+			"digest": "72011676575336c7b1c87bdf6f9729eb677f43fc182383c6deef9e8ba2af8738",
+			"status": "ok"
+		},
+		"fast/edit/layout-autotext-linefit": {
+			"digest": "f7136e47f75e6f2450dbb4bf3e2ba458dbe4911208d2548df14c20e38d0ce2fe",
+			"status": "ok"
+		},
+		"fast/edit/layout-autotext-matrix": {
+			"digest": "44a65ec445db398c6d8bd98926ffe518117dbbb015ee8dccc08bf26e36871d8b",
 			"status": "ok"
 		},
 		"fast/edit/layout-dynamic": {
@@ -1368,6 +1392,14 @@
 			"digest": "205fe3e50d58fadfd5f24ccde4e403c6b5f055f543f807eb8c59b63d58af2ff7",
 			"status": "ok"
 		},
+		"fixtures/edit/layout-autolist-scalepad": {
+			"digest": "f682fd6f1fe4f4de16b6bd6649312881ecb55f86e29575ab6cb28eef055ab69a",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autonested-scalepos": {
+			"digest": "54dbfe56300fbad4671d232aefefcd3557757b6a6f761bd0f9b997c11a4ad8c4",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-autosize": {
 			"digest": "c6dac60801d116cff325de900bef623171afaf825df1f8324c92e44c107d2284",
 			"status": "ok"
@@ -1377,7 +1409,23 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint2": {
-			"digest": "9331218959eeb27ed26805f72fa49b8d00b4a9a2c6e749058acbf0b7b3551618",
+			"digest": "c237cf07c3f3656eee877987621bfacb18b302ddb72bc0a451f6f5d446f10c9a",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-constraint3": {
+			"digest": "ac23bfc264ea42df9f81472892665c4c6ec9e39a3b03591f326921cc006b8d24",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-offscreen": {
+			"digest": "91587ed4eaeab2b7ac54a1f9ab8ec3972d90c296c686ac76324f28514a94add8",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autotext-linefit": {
+			"digest": "06278360f31ab4fcc0c059c7824f645144349c06589cec380c5c026b9851aeac",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autotext-matrix": {
+			"digest": "dcebd9aea100d9e1e5e1a5bda045a3518530b4cce1d75bed5a775d13faa5ed25",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-dynamic": {
@@ -2520,6 +2568,14 @@
 			"digest": "836a52ed00d23aa530bbf27e37a103864dc1734dab57d2fb5147d7a470640cb8",
 			"status": "ok"
 		},
+		"fixtures/play/layout-autolist-scalepad": {
+			"digest": "1c918d5765b195f7317e6f04982ad5068d6ee91b2301d1ad0c433cc1851638f4",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autonested-scalepos": {
+			"digest": "442323177fc67c634aec4312d1c352208d83c21b9a36f80a5ef1930db478ed31",
+			"status": "ok"
+		},
 		"fixtures/play/layout-autosize": {
 			"digest": "dafd7ed12710f99a43ded1b8889e60a3675a75074465c09cd44c4778c23ba15d",
 			"status": "ok"
@@ -2529,7 +2585,23 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint2": {
-			"digest": "37d7a7879b19aa6c73a0afa684ce9856d5f188add45a6598d47c047c206f8c61",
+			"digest": "f2a414e7fe2414642a5ca65f1d2e7ed6f40d5362f7afa455fe37508eb9fd7b3b",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-constraint3": {
+			"digest": "2f988a6e87fe253b39feb664b09700dbd1397056b9af85267abdb31a377af3a5",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-offscreen": {
+			"digest": "9d8cd28688c6de2d20bfcd417fd6bd6dab69f3f8522eba725e99a12a11fca7a3",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autotext-linefit": {
+			"digest": "40353685cbb5093ca4e2a16bc34f392a5d9c0d3f5b1f6d3b4b2737e156ed7c01",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autotext-matrix": {
+			"digest": "68f1d8236b89d5a2d2659fd6ef33d49460cc22261fe01701da2f5837d9e1cb71",
 			"status": "ok"
 		},
 		"fixtures/play/layout-dynamic": {

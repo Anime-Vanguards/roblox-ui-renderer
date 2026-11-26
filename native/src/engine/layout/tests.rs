@@ -432,9 +432,6 @@ fn automatic_canvas_size_applies_size_and_aspect_constraints() {
 #[test]
 fn automatic_size_constraints_bound_the_content_inside_the_padding() {
     let studio: serde_json::Value = serde_json::from_str(include_str!("../../../../data/studio/whole/autosize-constraint.json")).expect("measurements");
-    // Not reproduced: a scale child of an automatic frame whose Size (50) is above its MaxSize (30) is 12.5 wide in
-    // Studio (0.5 of 25), 9 here (0.5 of the 18 px content box).
-    let known = ["/fx_size50_max30_scale/E/S"];
     let fixtures = [
         ("layout-autosize-constraint", include_str!("../../../../fixtures/layout-autosize-constraint.luau")),
         ("layout-autosize-constraint2", include_str!("../../../../fixtures/layout-autosize-constraint2.luau")),
@@ -489,7 +486,7 @@ fn automatic_size_constraints_bound_the_content_inside_the_padding() {
             let (want, got) = (values(want), values(&ours[path]));
             compared += 1;
             let same = got.len() >= 4 && (0..4).all(|k| (want[k] - got[k]).abs() < 0.01);
-            if same || known.contains(&path.as_str()) {
+            if same {
                 continue;
             }
             if text_differs.contains(&cell_of(path)) {
@@ -502,6 +499,116 @@ fn automatic_size_constraints_bound_the_content_inside_the_padding() {
     eprintln!("compared {compared}, {text_cells} differing only through their text's width");
     assert!(misses.is_empty(), "{} of {compared} rects differ from Studio's:\n{}", misses.len(), misses.join("\n"));
     assert!(compared > 260, "only {compared} rects compared");
+}
+
+/// Every GuiObject below each cell (a child of the target) of the fixture `source` as path -> [x, y, w, h] relative
+/// to its cell, text objects with [.., tbx, tby], read through the script API after the layout settled.
+fn cell_rects(source: &str, pixel_scale: f64) -> serde_json::Value {
+    let script = format!(
+        r#"
+        local Fixture = (function() {source} end)()
+        return function(Target)
+            Fixture(Target)
+            task.spawn(function()
+                task.wait(0.1)
+                local Rects = {{}}
+                for _, Cell in Target:GetChildren() do
+                    local function Visit(Node, Path)
+                        for _, Child in Node:GetChildren() do
+                            if Child:IsA("GuiObject") then
+                                local At = Path .. "/" .. Child.Name
+                                local Rect = {{ Child.AbsolutePosition.X - Cell.AbsolutePosition.X, Child.AbsolutePosition.Y - Cell.AbsolutePosition.Y, Child.AbsoluteSize.X, Child.AbsoluteSize.Y }}
+                                if Child:IsA("TextLabel") or Child:IsA("TextButton") or Child:IsA("TextBox") then
+                                    table.insert(Rect, Child.TextBounds.X)
+                                    table.insert(Rect, Child.TextBounds.Y)
+                                end
+                                Rects[At] = Rect
+                                Visit(Child, At)
+                            end
+                        end
+                    end
+                    Visit(Cell, "/" .. Cell.Name)
+                end
+                print(game:GetService("HttpService"):JSONEncode(Rects))
+            end)
+        end
+        "#
+    );
+    let lines = run(&script, pixel_scale, 0.5);
+    let json = lines.iter().find_map(|line| line.strip_prefix("print: {").map(|rest| format!("{{{rest}"))).unwrap_or_else(|| panic!("no rects: {lines:#?}"));
+    serde_json::from_str(&json).unwrap()
+}
+
+fn rect_values(value: &serde_json::Value) -> Vec<f64> {
+    value.as_array().map(|items| items.iter().filter_map(|v| v.as_f64()).collect()).unwrap_or_default()
+}
+
+/// The client's measurements of the AutomaticSize measure fixtures (data/studio/whole/autosize-measure.json).
+fn measured() -> serde_json::Value {
+    serde_json::from_str(include_str!("../../../../data/studio/whole/autosize-measure.json")).expect("measurements")
+}
+
+/// AutomaticSize measures against a Roblox 0.747 client's rects (data/studio/whole/autosize-measure.json): while an
+/// automatic frame is measured, its childless children size against its own Size (the scale part resolved against
+/// the space it can grow into, capped by its MaxSize, less its padding), as do a list's scale gaps; the second pass
+/// resolves the gaps against the box less the padding and lets them grow the frame; deeper down, a plain
+/// container's childless children size against its Size resolved against its measured box; an object its
+/// children pushed past its box resolves its padding's scale against that box.
+#[test]
+fn automatic_frames_measure_against_their_own_size() {
+    let studio = measured();
+    let fixtures = [
+        ("layout-autosize-constraint3", include_str!("../../../../fixtures/layout-autosize-constraint3.luau")),
+        ("layout-autolist-scalepad", include_str!("../../../../fixtures/layout-autolist-scalepad.luau")),
+        ("layout-autonested-scalepos", include_str!("../../../../fixtures/layout-autonested-scalepos.luau")),
+    ];
+    let (mut compared, mut misses) = (0, Vec::new());
+    for (name, source) in fixtures {
+        let ours = cell_rects(source, 1.5);
+        for (path, want) in studio["fixtures"][name].as_object().unwrap() {
+            let (want, got) = (rect_values(want), rect_values(&ours[path]));
+            compared += 1;
+            if !(got.len() >= 4 && (0..4).all(|k| (want[k] - got[k]).abs() < 0.01)) {
+                misses.push(format!("{name} {path}: client {:?}, ours {got:?}", &want[..4]));
+            }
+        }
+    }
+    assert!(misses.is_empty(), "{} of {compared} rects differ from the client's:\n{}", misses.len(), misses.join("\n"));
+    assert!(compared > 560, "only {compared} rects compared");
+}
+
+/// Text measures against a Roblox 0.747 client (data/studio/whole/autosize-measure.json): wrapped AutomaticSize XY
+/// text with less room than its box takes its height from the text laid out in that room (a (0.5, 30) label in a
+/// 0 px wide frame is 100 tall, one glyph per line), unwrapped AutomaticSize X text drops its last space run only
+/// where that fits its room, and wrapped AutomaticSize Y labels keep a line their box ends float32 roundings short
+/// of (UIScale sweep). The client reports TextBounds in whole px, so every value is compared within 1 px.
+#[test]
+fn automatic_text_measures_in_the_room_it_has() {
+    if crate::engine::text::fonts::discover_content_root().is_none() {
+        eprintln!("skipped: no Studio content root (the cases need Studio's fonts)");
+        return;
+    }
+    let studio = measured();
+    let fixtures = [
+        ("layout-autotext-matrix", include_str!("../../../../fixtures/layout-autotext-matrix.luau"), 1.5),
+        ("layout-autotext-linefit", include_str!("../../../../fixtures/layout-autotext-linefit.luau"), 1.5),
+        ("layout-autotext-linefit@1x", include_str!("../../../../fixtures/layout-autotext-linefit.luau"), 1.0),
+    ];
+    let (mut compared, mut misses) = (0, Vec::new());
+    for (name, source, pixel_scale) in fixtures {
+        let ours = cell_rects(source, pixel_scale);
+        for (path, want) in studio["fixtures"][name].as_object().unwrap() {
+            let (want, got) = (rect_values(want), rect_values(&ours[path]));
+            compared += 1;
+            // (within the client's whole-px TextBounds, which move automatic sizes and list rows by less than a px; a
+            // line kept or cut moves them by a whole line)
+            if !(got.len() == want.len() && (0..want.len()).all(|k| (want[k] - got[k]).abs() < 1.0)) {
+                misses.push(format!("{name} {path}: client {want:?}, ours {got:?}"));
+            }
+        }
+    }
+    assert!(misses.is_empty(), "{} of {compared} rects differ from the client's:\n{}", misses.len(), misses.join("\n"));
+    assert!(compared > 1500, "only {compared} rects compared");
 }
 
 

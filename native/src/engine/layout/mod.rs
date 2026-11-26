@@ -160,6 +160,8 @@ pub(crate) struct Sized {
     /// cut it: its content clamped by the constraint plus its padding offsets (None when that is not wider).
     pub held_w: Option<f64>,
     pub held_h: Option<f64>,
+    /// A text object's TextBounds as this measure laid its text out (absolute px).
+    pub bounds: Option<(f64, f64)>,
 }
 
 /// ComputeSize's inputs (the memo key; compared with Luau `==`).
@@ -180,7 +182,6 @@ pub(crate) struct SizeArgs {
 /// height, or a kept automatic width.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CarryEntry {
-    pub text_box: Option<f64>,
     pub height: Option<f64>,
     pub width: Option<f64>,
 }
@@ -336,9 +337,12 @@ pub struct Layout {
     sticky: BoxSlots<Sticky>,
     text_carries: Slots<Option<Carry>>,
     carry_stores: Slots<usize>,
-    carry_maps: Vec<FxHashMap<InstanceId, [f64; 4]>>,
+    carry_maps: Vec<FxHashMap<InstanceId, [f64; 6]>>,
     carry_capture: Option<usize>,
     carry_apply: Option<usize>,
+    /// The objects whose children are being laid out (outermost first): id, rect, scroll window, rotation (their
+    /// records are out of `records` meanwhile)
+    open: Vec<(InstanceId, [f64; 4], Option<Rect>, f64)>,
     pub stats: Stats,
     /// Counters already flushed by `print_stats` so [`Self::total_stats`] stays monotonic
     cumulative: Stats,
@@ -398,6 +402,7 @@ impl Layout {
             carry_maps: Vec::new(),
             carry_capture: None,
             carry_apply: None,
+            open: Vec::new(),
             stats: Stats::default(),
             cumulative: Stats::default(),
             frame_layout_clock: 0,

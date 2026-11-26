@@ -704,15 +704,28 @@ impl<'a> Pass<'a> {
 
     /// Descendants count (DescendantExtent): returns the far edges in local px from `record`'s
     /// content origin of what `id` holds (see the Luau for the measured rules).
-    fn descendant_extent(&mut self, id: InstanceId, record: &Record, zero_x: bool, zero_y: bool) -> (f64, f64) {
+    /// `leaf_axes`: the axes (automatic ones) on which a container's childless descendants size against its Size.
+    fn descendant_extent(&mut self, id: InstanceId, record: &Record, zero_x: bool, zero_y: bool, leaf_axes: (bool, bool)) -> (f64, f64) {
         let origin = (record.content.x, record.content.y, record.scale);
-        let (max_x, max_y) = self.extent_visit(id, id, record, zero_x, zero_y, origin);
+        let (max_x, max_y) = self.extent_visit(id, id, record, None, zero_x, zero_y, origin, leaf_axes);
         (if zero_x { max_x } else { 0.0 }, if zero_y { max_y } else { 0.0 })
     }
 
     /// DescendantExtent's Visit: the far edges of what `parent` holds (its own far padding included
-    /// below the top).
-    fn extent_visit(&mut self, top_id: InstanceId, parent: InstanceId, parent_record: &Record, axis_x: bool, axis_y: bool, origin: (f64, f64, f64)) -> (f64, f64) {
+    /// below the top). Below the top, `leaves` is the record the parent's childless children size
+    /// against; the children that hold children size against `parent_record`.
+    #[allow(clippy::too_many_arguments)]
+    fn extent_visit(
+        &mut self,
+        top_id: InstanceId,
+        parent: InstanceId,
+        parent_record: &Record,
+        leaves: Option<&Record>,
+        axis_x: bool,
+        axis_y: bool,
+        origin: (f64, f64, f64),
+        leaf_axes: (bool, bool),
+    ) -> (f64, f64) {
         let (origin_x, origin_y, scale) = origin;
         let top = parent == top_id;
         let start_x = if top { 0.0 } else { (parent_record.content.x - origin_x) / scale };
@@ -720,8 +733,13 @@ impl<'a> Pass<'a> {
         let (mut edge_x, mut edge_y) = (start_x, start_y);
         let mut holds = false;
         {
-            let mut collect = |pass: &mut Pass, child: InstanceId, child_record: &Record| {
+            // (`only`: Some(true) visits the childless children, Some(false) the others, None all)
+            let mut visit = |pass: &mut Pass, child: InstanceId, child_record: &Record, only: Option<bool>| {
                 if !pass.visible(child) {
+                    return;
+                }
+                let nested = pass.has_gui_children(child);
+                if only.is_some_and(|leaf| leaf == nested) {
                     return;
                 }
                 holds = true;
@@ -729,7 +747,6 @@ impl<'a> Pass<'a> {
                 let (_, auto_x, auto_y) = pass.automatic_axes(child);
                 let child_x = axis_x && !scrolling && !auto_x;
                 let child_y = axis_y && !scrolling && !auto_y;
-                let nested = pass.has_gui_children(child);
                 let child_size = pass.udim2(child, pass.l.ids.n.Size);
                 if !top {
                     // A scale-sized container counts by what it holds (visited below), not by its box
@@ -762,7 +779,45 @@ impl<'a> Pass<'a> {
                 // Measured (a slider prompt's amount buttons): a list in a container of offset size keeps its
                 // alignment; only scale-sized containers measure their list from the padding.
                 inner.align_start = Some((child_x && child_size[0] != 0.0, child_y && child_size[2] != 0.0));
-                let (held_x, held_y) = pass.extent_visit(top_id, child, &inner, child_x, child_y, origin);
+                // Measured (fixtures/layout-autonested-scalepos.luau, a 0.747 client): inside a plain container the
+                // children that hold children size against its measured content box, but its childless children
+                // size against its own Size resolved against that box, as an automatic frame's children do in its
+                // first pass, and the edges count its padding's offsets only. A (0.5, 0.5) frame measured 95 x 77.5
+                // holding a (1, 1) frame counts 38.75 high, not 77.5; (0.8, 0.8) frames three deep holding a (1, 1)
+                // frame count 0.8^4 of the space; a 60 x 60 frame with 10 px of padding holding a (1, 1) frame counts
+                // 10 + 60 + 10.
+                // (measured on automatic axes only; a UIAspectRatioConstraint's measure of the other axis keeps the
+                // container's content box for every child)
+                let plain = pass.layout_object(child).is_none();
+                let (leaf_x, leaf_y) = (child_x && leaf_axes.0, child_y && leaf_axes.1);
+                if let (true, Some(pad)) = (plain, pass.first_child_of(child, pass.l.ids.c.UIPadding)) {
+                    // (a near padding with a scale part starts the edges at its offset part)
+                    let n = pass.l.ids.n;
+                    let (offset_left, _, offset_top, _) = pass.padding_offsets(child);
+                    if leaf_x && pass.udim(pad, n.PaddingLeft).0 != 0.0 {
+                        inner.content.x = f32r(child_record.x + offset_left * inner.scale);
+                    }
+                    if leaf_y && pass.udim(pad, n.PaddingTop).0 != 0.0 {
+                        inner.content.y = f32r(child_record.y + offset_top * inner.scale);
+                    }
+                }
+                let child_scale = inner.scale;
+                let leaf_record = (plain && (leaf_x || leaf_y)).then(|| {
+                    let resolve = |scale_part: f64, offset: f64, content: f64| lmax(f32r(f32r(scale_part * (content / child_scale)) + offset), 0.0) * child_scale;
+                    let mut leaf = inner.clone();
+                    if leaf_x {
+                        let width = resolve(child_size[0], child_size[1], inner.content.w);
+                        leaf.size_w = Some(width);
+                        leaf.item_w = Some(width);
+                    }
+                    if leaf_y {
+                        let height = resolve(child_size[2], child_size[3], inner.content.h);
+                        leaf.size_h = Some(height);
+                        leaf.item_h = Some(height);
+                    }
+                    leaf
+                });
+                let (held_x, held_y) = pass.extent_visit(top_id, child, &inner, leaf_record.as_ref(), child_x, child_y, origin, leaf_axes);
                 if child_x {
                     edge_x = lmax(edge_x, held_x);
                 }
@@ -770,7 +825,15 @@ impl<'a> Pass<'a> {
                     edge_y = lmax(edge_y, held_y);
                 }
             };
-            self.layout_children(parent, parent_record, true, Some(&mut collect));
+            match leaves {
+                Some(leaf_record) if !top => {
+                    self.layout_children(parent, parent_record, true, Some(&mut |pass: &mut Pass, child: InstanceId, record: &Record| visit(pass, child, record, Some(false))));
+                    self.layout_children(parent, leaf_record, true, Some(&mut |pass: &mut Pass, child: InstanceId, record: &Record| visit(pass, child, record, Some(true))));
+                }
+                _ => {
+                    self.layout_children(parent, parent_record, true, Some(&mut |pass: &mut Pass, child: InstanceId, record: &Record| visit(pass, child, record, None)));
+                }
+            }
         }
         if top {
             return (edge_x, edge_y);
@@ -805,7 +868,7 @@ impl<'a> Pass<'a> {
             ..Record::default()
         };
         let (extent_x, _) = self.layout_children(item, &probe, true, None);
-        let (deep_x, _) = self.descendant_extent(item, &probe, true, false);
+        let (deep_x, _) = self.descendant_extent(item, &probe, true, false, (false, false));
         lmax(extent_x, deep_x) + pad_left + pad_right
     }
 
@@ -841,6 +904,7 @@ impl<'a> Pass<'a> {
         let (mut held_w, mut held_h) = (None, None);
 
         let mut text_box = None;
+        let mut measured_bounds = None;
         if is_automatic {
             // Measured: when an ancestor's UIAspectRatioConstraint shrank its automatic size,
             // automatic content is still measured against the ancestor's unconstrained size.
@@ -910,8 +974,17 @@ impl<'a> Pass<'a> {
                     }
                     None => {
                         let height_basis = if auto_y { text_available_h } else { inner_height };
-                        let mut info = self.layout_text(id, if auto_x { text_available } else { inner_width }, height_basis, scale, false);
-                        text_box = if auto_x { Some(text_available) } else { None };
+                        // Measured (fixtures/layout-autotext-matrix.luau narrow_w40_nowrap, layout-autoavail-chain.luau;
+                        // a 0.747 client): unwrapped AutomaticSize X text drops its last space run only where that
+                        // fits the room it has, not its box: "Hi there" (53.33 px) in a (0.5, 30) label 50 px wide
+                        // with 40 px of room keeps 53.33 (TextBounds too), laid out in a box that wide.
+                        let room = match available {
+                            Some(available) if auto_x && sticky_key.is_some() => lmax(available / self.own_scale(id) - pad_left - pad_right, 0.0),
+                            _ => INF,
+                        };
+                        let measure_at = if auto_x { lmin(text_available, room) } else { inner_width };
+                        let mut info = self.layout_text(id, measure_at, height_basis, scale, false);
+                        text_box = if auto_x { Some(if room < text_available { lmax(text_available, info.bounds_x) } else { text_available }) } else { None };
                         // Measured (layout-probe-autotrunc 36/36): an automatic width capped by a
                         // UISizeConstraint lays the text out again at the cap and takes that text's width.
                         if auto_x {
@@ -930,6 +1003,22 @@ impl<'a> Pass<'a> {
                 };
                 content_width = lmax(content_width, text_info.bounds_x);
                 content_height = lmax(content_height, text_info.bounds_y);
+                measured_bounds = Some((text_info.absolute_x, text_info.absolute_y));
+                // Measured (fixtures/layout-autotext-matrix.luau narrow_*, a 0.747 client): wrapped AutomaticSize XY
+                // text with less room than its box measures its height with the text laid out in that room, while
+                // its width, TextBounds and drawn text keep the box: a (0.5, 30) label "Hi there" in a 0 px wide
+                // AutomaticSize Y frame is 30 wide and 100 tall (one glyph per line, capped by the 100 px it may
+                // grow into) with TextBounds 28 x 60; in a 20 px frame 40 x 80.
+                if auto_x && auto_y && self.is_true(id, n.TextWrapped) {
+                    if let Some(available) = available {
+                        let room = lmax(available / self.own_scale(id) - pad_left - pad_right, 0.0);
+                        if room < text_available {
+                            let height_basis = text_available_h;
+                            let narrow = self.layout_text(id, room, height_basis, scale, false);
+                            content_height = lmax(content_height, narrow.bounds_y);
+                        }
+                    }
+                }
             }
 
             // Measured: children size and position against a stable size (see the Luau).
@@ -981,7 +1070,6 @@ impl<'a> Pass<'a> {
                             text_extent = lmax(text_extent, child_position[1] + text_w);
                             if child_auto_y {
                                 set_carry(&mut carry, child, CarryEntry {
-                                    text_box: Some(wrap_w / child_scale),
                                     height: Some(lmax(base_h, info.bounds_y * child_scale)),
                                     width: None,
                                 });
@@ -1008,7 +1096,6 @@ impl<'a> Pass<'a> {
                                     let space_h = if auto_y { inner_available_h } else { inner_height };
                                     let info = self.layout_text(child, box_w / child_scale, lmax(space_h, base_h) / child_scale, scale * child_scale, false);
                                     set_carry(&mut carry, child, CarryEntry {
-                                        text_box: Some(box_w / child_scale),
                                         height: Some(lmax(base_h, info.bounds_y * child_scale)),
                                         width: None,
                                     });
@@ -1025,7 +1112,7 @@ impl<'a> Pass<'a> {
                                     full_w: Some(inner_available),
                                     full_h: Some(inner_height),
                                 });
-                                set_carry(&mut carry, child, CarryEntry { text_box: None, height: None, width: Some(item.w) });
+                                set_carry(&mut carry, child, CarryEntry { height: None, width: Some(item.w) });
                             }
                         }
                     }
@@ -1036,6 +1123,49 @@ impl<'a> Pass<'a> {
             self.l.text_carries.set(id, carry);
             let flow_items = flow_class == Some(c_list) || flow_class == Some(c_grid);
             let mut first = probe(if auto_x { 0.0 } else { inner_width }, if auto_y { 0.0 } else { inner_height }, None, None);
+            // Measured (fixtures/layout-autosize-constraint3.luau, layout-autolist-scalepad.luau; a 0.747 client): the
+            // first pass measures against the object's own Size, its scale part resolved against the space the
+            // object can grow into (capped by its MaxSize) less its padding (the padding's scale resolved against
+            // the base size). A plain container's children size against it but still position against the empty
+            // content box: a scale 1 child of a Size (0, 20) frame with 6 + 6 px of padding is 20 wide and the frame
+            // 32; a 0.5 child of a Size (0, 50) frame capped at 30 asks for 25 and ends 12.5 wide; a Size (0.1, 0)
+            // frame with 136 px to grow into gives 12.4. A list's scale Padding resolves against it: a Size
+            // (1, 0, 0.2, 0) list with 0.1 + 4 and 6 px of padding in 150 px measures its gaps against
+            // 0.2 x (150 - 7 - 6) = 27.4 (the frame 62.74).
+            let list = flow_class == Some(c_list);
+            let (first_w, first_h) = {
+                let size = self.udim2(id, self.l.ids.n.Size);
+                let (mut max_w, mut max_h) = (INF, INF);
+                self.size_constraints(id, |_, max| {
+                    max_w = lmin(max_w, max.0);
+                    max_h = lmin(max_h, max.1);
+                });
+                let (base_left, base_right, base_top, base_bottom) = self.padding(id, width, height);
+                let basis = |scale_part: f64, offset: f64, grow: Option<f64>, cap: f64, pads: f64| -> Option<f64> {
+                    let grow = grow.filter(|v| *v < INF)?;
+                    let space = lmax(lmin(grow, cap) - pads, 0.0);
+                    Some(lmax(f32r(f32r(scale_part * space) + offset), 0.0))
+                };
+                (
+                    if auto_x { basis(size[0], size[1], available, max_w, base_left + base_right) } else { None },
+                    if auto_y { basis(size[2], size[3], available_h, max_h, base_top + base_bottom) } else { None },
+                )
+            };
+            // (not measured with a UIAspectRatioConstraint, whose own rule below measures the content; a client fits
+            // such a holder's base Size to its ratio first: fixtures/layout-autosize-prompt.luau, open)
+            if flow.is_none() && self.first_child_of(id, self.l.ids.c.UIAspectRatioConstraint).is_none() {
+                let size = self.udim2(id, self.l.ids.n.Size);
+                // (with nothing to grow into, only the offset)
+                if auto_x {
+                    first.size_w = Some(first_w.unwrap_or(lmax(size[1], 0.0)) * scale);
+                }
+                if auto_y {
+                    first.size_h = Some(first_h.unwrap_or(lmax(size[3], 0.0)) * scale);
+                }
+            } else if list {
+                first.gap_w = first_w.map(|v| v * scale);
+                first.gap_h = first_h.map(|v| v * scale);
+            }
             if flow_items {
                 if auto_x && inner_available < INF {
                     first.item_w = Some(inner_available * scale);
@@ -1062,23 +1192,6 @@ impl<'a> Pass<'a> {
                 self.l.give_vec(children);
                 if !held.is_empty() {
                     first.held_w = Some(Rc::new(held));
-                }
-            }
-            // Measured (layout-probe-autolistgap, -autolistgap2): the first pass resolves a scale list
-            // Padding against the object's own Size taken against the space it can grow into.
-            let list = flow_class == Some(c_list);
-            let padded = self.first_child_of(id, self.l.ids.c.UIPadding).is_some();
-            if list {
-                let size = self.udim2(id, self.l.ids.n.Size);
-                if auto_x {
-                    if let Some(grow_w) = available.filter(|v| *v < INF) {
-                        first.gap_w = Some(lmax(size[0] * grow_w + size[1], 0.0) * scale);
-                    }
-                }
-                if auto_y {
-                    if let Some(grow_h) = available_h.filter(|v| *v < INF) {
-                        first.gap_h = Some(lmax(size[2] * grow_h + size[3], 0.0) * scale);
-                    }
                 }
             }
             // Measured (layout-probe-autoaspect3, -autoaspect4, an options prompt): with a
@@ -1128,7 +1241,7 @@ impl<'a> Pass<'a> {
                     deep.item_h = Some(deep.content.h);
                     deep.sizing_h = Some(0.0);
                 }
-                let (deep_x, deep_y) = self.descendant_extent(id, &deep, auto_x || aspect_x, auto_y || aspect_y);
+                let (deep_x, deep_y) = self.descendant_extent(id, &deep, auto_x || aspect_x, auto_y || aspect_y, (auto_x, auto_y));
                 if aspect_x {
                     natural_x = lmax(natural_x, deep_x);
                 }
@@ -1186,9 +1299,15 @@ impl<'a> Pass<'a> {
             let mut second = probe(lmax(box_w - pad_left - pad_right, 0.0), lmax(box_h - pad_top - pad_bottom, 0.0), child_measure_w, child_measure_h);
             second.w = box_w * scale;
             second.h = box_h * scale;
-            if list && padded {
-                second.gap_w = if auto_x { Some(0.0) } else { None };
-                second.gap_h = if auto_y { Some(0.0) } else { None };
+            // Measured (fixtures/layout-autolist-scalepad.luau): the second pass resolves a scale list Padding against
+            // the box less the whole padding, its scale resolved against the constrained box (a 0.1 scale top pad
+            // and a 0.1 gap make 50 px of items 54.5 tall; with MaxSize 40 and 0.1 + 4 and 6 px of padding the gaps
+            // measure against 50 - 8 - 6 = 36), and where the items end up extends the frame past its stable size.
+            if list {
+                let (capped_w, capped_h) = self.apply_size_constraint(id, box_w, box_h);
+                let (left, right, top, bottom) = self.padding(id, capped_w, capped_h);
+                second.gap_w = if auto_x { Some(lmax(box_w - left - right, 0.0) * scale) } else { None };
+                second.gap_h = if auto_y { Some(lmax(box_h - top - bottom, 0.0) * scale) } else { None };
             }
             let (extent_x, extent_y) = self.layout_children(id, &second, true, None);
             // Measured (layout-probe-autocenter; fixtures/layout-autosize-constraint.luau): where children end
@@ -1202,7 +1321,7 @@ impl<'a> Pass<'a> {
             held_h = if auto_y && asked_h > height { Some(asked_h) } else { None };
         }
 
-        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h }
+        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h, bounds: measured_bounds }
     }
 
     /// ComputeSize, memoized for AutomaticSize objects: a result stays valid while the object's
@@ -1244,7 +1363,8 @@ impl<'a> Pass<'a> {
         }
         let mut result = self.memoized_size(id, args);
         if let Some(capture) = self.l.carry_capture {
-            self.l.carry_maps[capture].insert(id, [result.w, result.h, result.base_w, result.base_h]);
+            let (bounds_x, bounds_y) = result.bounds.unwrap_or((f64::NAN, f64::NAN));
+            self.l.carry_maps[capture].insert(id, [result.w, result.h, result.base_w, result.base_h, bounds_x, bounds_y]);
         } else if let Some(apply) = self.l.carry_apply {
             if let Some(kept) = self.l.carry_maps[apply].get(&id).copied() {
                 if automatic == E::X || automatic == E::XY {
@@ -1270,11 +1390,17 @@ impl<'a> Pass<'a> {
         let n = self.l.ids.n;
         let scale = f32r(parent.scale * self.own_scale(id));
         let (width, height) = (f32r(unscaled_w * scale), f32r(unscaled_h * scale));
-        // Measured (fixtures/layout-autosize-constraint.luau): an automatic object its children pushed past
-        // its MaxSize resolves its padding's scale against the capped size (0.1 of a frame capped at 30 is 3
-        // px while it reads 40 wide).
+        // Measured (fixtures/layout-autosize-constraint.luau, layout-autolist-scalepad.luau): an automatic object
+        // its children pushed past its box resolves its padding's scale against that box, constrained: 0.1 of a
+        // frame capped at 30 is 3 px while it reads 40 wide; a 0.1 top padding of a list frame whose 50 px of
+        // items and 4.5 px gap make it 54.5 tall is 5.
         let (_, auto_x, auto_y) = self.automatic_axes(id);
-        let (pad_basis_w, pad_basis_h) = if auto_x || auto_y { self.apply_size_constraint(id, unscaled_w, unscaled_h) } else { (unscaled_w, unscaled_h) };
+        let (pad_basis_w, pad_basis_h) = if auto_x || auto_y {
+            let (box_w, box_h) = base.unwrap_or((unscaled_w, unscaled_h));
+            self.apply_size_constraint(id, box_w, box_h)
+        } else {
+            (unscaled_w, unscaled_h)
+        };
         let (pad_left, pad_right, pad_top, pad_bottom) = self.padding(id, pad_basis_w, pad_basis_h);
 
         // Measured (layout-probe-negcontent): padding wider than the object leaves the content box
@@ -1950,11 +2076,11 @@ impl<'a> Pass<'a> {
                 full_w,
                 full_h,
             });
-            let (mut width, mut height, mut text_box, mut base_w, mut base_h) = (sized.w, sized.h, sized.text_box, sized.base_w, sized.base_h);
+            let (mut width, mut height, text_box, mut base_w, mut base_h) = (sized.w, sized.h, sized.text_box, sized.base_w, sized.base_h);
             if let Some(kept) = text_carry.as_ref().and_then(|carry| carry.iter().find(|(c, _)| *c == child).map(|(_, e)| *e)) {
-                if let Some(kept_box) = kept.text_box {
-                    text_box = Some(kept_box);
-                }
+                // Measured (fixtures/layout-autotext-matrix.luau, a 0.747 client): a carried label keeps the measure's
+                // height but draws (and reports TextBounds for) its text laid out in its own box: "Which units would
+                // you like to unequip" measured 129.33 px wide is drawn wrapped in its 65 px label (TextBounds 57 x 20).
                 if let Some(kept_height) = kept.height {
                     height = kept_height;
                     base_h = kept_height;
@@ -2414,22 +2540,30 @@ impl<'a> Pass<'a> {
                 Some(info) => info,
                 None => {
                     self.l.stats.texts += 1;
-                    // Measured (round 3, layout-probe-autotext2 Y rows): an AutomaticSize text box
-                    // narrower than its padding keeps the text its measure laid out 0 wide.
-                    let automatic = self.code(id, n_auto);
-                    let negative = automatic != E::NONE && automatic != E::EMPTY;
-                    let text_w = match (record.local_space_w, record.local_w) {
-                        (Some(space), Some(local)) if negative && space < local => space,
-                        _ => record.content.w / record.scale,
-                    };
-                    let text_h = match (record.local_space_h, record.local_h) {
-                        (Some(space), Some(local)) if negative && space < local => space,
-                        _ => record.content.h / record.scale,
-                    };
+                    // Measured (fixtures/layout-autotext-matrix.luau, a 0.747 client): a drawn label lays its text out in
+                    // its content box, |W - padding| wide also where that is negative (a (1, -20) AutomaticSize Y label in
+                    // a 0 px wide frame wraps at 20: TextBounds 15 x 80, where Studio's undrawn probe read the measure's
+                    // one glyph per line).
+                    let (text_w, text_h) = (record.content.w / record.scale, record.content.h / record.scale);
                     self.layout_text(id, text_box.unwrap_or(text_w), text_h, record.scale, false)
                 }
             };
-            self.set_vector(id, n_bounds, info.absolute_x, info.absolute_y);
+            // Measured (a clipped column of AutomaticSize cards, a 0.747 client): an AutomaticSize label wholly outside
+            // its clip is not laid out for drawing and keeps the TextBounds of the AutomaticCanvasSize measure
+            // (129.33 x 100, laid out 143 px wide in the padded canvas) where one any part of which shows reports
+            // its 154 px box's (151.33 x 80), its centre in the window or not.
+            let mut bounds = (info.absolute_x, info.absolute_y);
+            if let Some(apply) = self.l.carry_apply {
+                let automatic = self.code(id, n_auto);
+                if automatic != E::NONE && automatic != E::EMPTY {
+                    if let Some(kept) = self.l.carry_maps[apply].get(&id) {
+                        if !kept[4].is_nan() && (kept[4], kept[5]) != bounds && self.outside_clip(id, &record) {
+                            bounds = (kept[4], kept[5]);
+                        }
+                    }
+                }
+            }
+            self.set_vector(id, n_bounds, bounds.0, bounds.1);
             let box_w = record.content.w / record.scale;
             let box_h = record.content.h / record.scale;
             let slack_w = lmax(1e-6, box_w * 4.0 * f64::from(f32::EPSILON));
@@ -2444,7 +2578,9 @@ impl<'a> Pass<'a> {
         if self.class(id) == self.l.ids.c.ScrollingFrame {
             self.layout_scrolling(id, &mut record);
         } else {
+            self.l.open.push((id, [record.x, record.y, record.w, record.h], None, record.rotation));
             self.layout_children(id, &record, false, None);
+            self.l.open.pop();
         }
 
         self.version(id, record, old);
@@ -2686,9 +2822,69 @@ impl<'a> Pass<'a> {
         let (outer_apply, outer_capture) = (self.l.carry_apply, self.l.carry_capture);
         self.l.carry_apply = carried;
         self.l.carry_capture = None;
+        self.l.open.push((id, [record.x, record.y, record.w, record.h], record.window, record.rotation));
         self.layout_children(id, &canvas_record, false, None);
+        self.l.open.pop();
         self.l.carry_apply = outer_apply;
         self.l.carry_capture = outer_capture;
+    }
+
+    /// Whether `id`'s box lies wholly outside the clip its ancestors give it (ClipsDescendants frames, scroll
+    /// windows, CanvasGroups; export.rs `outside`), unturned and in no scrolled ScrollingFrame: the client does not
+    /// lay such a label out for drawing.
+    fn outside_clip(&self, id: InstanceId, record: &Record) -> bool {
+        let n = self.l.ids.n;
+        let c = self.l.ids.c;
+        if record.rotation != 0.0 {
+            return false;
+        }
+        let mut chain: Vec<InstanceId> = Vec::new();
+        let mut at = self.parent(id);
+        while let Some(ancestor) = at {
+            if !self.is_a(ancestor, c.GuiObject) {
+                break;
+            }
+            chain.push(ancestor);
+            at = self.parent(ancestor);
+        }
+        let mut clip: Option<[f64; 4]> = None;
+        for &ancestor in chain.iter().rev() {
+            // (an ancestor whose children are being laid out has its record out of `records`)
+            let open = self.l.open.iter().rev().find(|(open, ..)| *open == ancestor).map(|&(_, rect, window, rotation)| (rect, window, rotation));
+            let Some((rect, window, rotation)) = open.or_else(|| self.l.records.get(ancestor).map(|r| ([r.x, r.y, r.w, r.h], r.window, r.rotation))) else {
+                return false;
+            };
+            if rotation != 0.0 {
+                return false;
+            }
+            if self.class(ancestor) == c.ScrollingFrame {
+                if let Some((x, y)) = self.vec2(ancestor, n.CanvasPosition) {
+                    if x != 0.0 || y != 0.0 {
+                        return false;
+                    }
+                }
+            }
+            if self.is_true(ancestor, n.ClipsDescendants) || self.is_a(ancestor, c.CanvasGroup) {
+                // (unturned: AbsolutePosition is the record's corner; a located scroll window is absolute)
+                let rect = match window {
+                    Some(window) => [window.x, window.y, window.w, window.h],
+                    None => rect,
+                };
+                let (mut x1, mut y1, mut x2, mut y2) = (rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]);
+                if let Some(outer) = clip {
+                    x1 = x1.max(outer[0]);
+                    y1 = y1.max(outer[1]);
+                    x2 = x2.min(outer[0] + outer[2]);
+                    y2 = y2.min(outer[1] + outer[3]);
+                }
+                clip = Some([f32r(x1), f32r(y1), f32r((x2 - x1).max(0.0)), f32r((y2 - y1).max(0.0))]);
+            }
+        }
+        let Some(clip) = clip else { return false };
+        if clip[2] <= 0.0 || clip[3] <= 0.0 {
+            return true;
+        }
+        record.x + record.w <= clip[0] || record.x >= clip[0] + clip[2] || record.y + record.h <= clip[1] || record.y >= clip[1] + clip[3]
     }
 
     // Roots
