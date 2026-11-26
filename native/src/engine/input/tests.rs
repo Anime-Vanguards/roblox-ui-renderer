@@ -1508,3 +1508,478 @@ local function Case(Label, B, Text, Cursor, Selection, Steps, WantText, WantCurs
 	if Got ~= Want then table.insert(Failures, `{Label}: {Got}, the client {Want}`) end
 end
 "##;
+
+/// The wheel's gameProcessedEvent when nothing scrolls, measured in a 0.747 client (wheel notches injected with
+/// VirtualInputManager over each object): an Active object or a ScrollingFrame with ScrollingEnabled under the cursor
+/// makes it processed, whether that frame can move or not (Active or not); ScrollingEnabled = false does not.
+#[test]
+fn wheel_game_processed_matches_a_client() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r##"
+local UIS = game:GetService("UserInputService")
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+local function Cell(Name, Class, X, Y, Props)
+	local O = Instance.new(Class)
+	O.Name = Name
+	O.Position = UDim2.fromOffset(X, Y)
+	O.Size = UDim2.fromOffset(80, 80)
+	for K, V in Props or {} do
+		O[K] = V
+	end
+	O.Parent = Root
+	return O
+end
+Cell("Plain", "Frame", 100, 100, { Active = false })
+Cell("ActiveF", "Frame", 190, 100, { Active = true })
+Cell("Btn", "TextButton", 280, 100)
+Cell("BtnInactive", "TextButton", 370, 100, { Active = false })
+Cell("Label", "TextLabel", 460, 100)
+Cell("Box", "TextBox", 550, 100)
+Cell("SFStuck", "ScrollingFrame", 640, 100, { CanvasSize = UDim2.fromOffset(0, 0) })
+Cell("SFScroll", "ScrollingFrame", 100, 300, { CanvasSize = UDim2.fromOffset(0, 400) })
+Cell("SFDisabled", "ScrollingFrame", 190, 300, { CanvasSize = UDim2.fromOffset(0, 400), ScrollingEnabled = false })
+Cell("SFInactive", "ScrollingFrame", 280, 300, { CanvasSize = UDim2.fromOffset(0, 0), Active = false })
+local AtEnd = Cell("SFAtEnd", "ScrollingFrame", 370, 300, { CanvasSize = UDim2.fromOffset(0, 400) })
+local Under = Cell("SFUnder", "ScrollingFrame", 460, 300, { CanvasSize = UDim2.fromOffset(0, 0), Active = false })
+local Over = Instance.new("Frame")
+Over.Size = UDim2.fromOffset(40, 40)
+Over.Active = true
+Over.Parent = Under
+UpdateAll()
+AtEnd.CanvasPosition = Vector2.new(0, 10000)
+UpdateAll()
+local Processed
+UIS.InputChanged:Connect(function(Input, P)
+	if Input.UserInputType == Enum.UserInputType.MouseWheel then Processed = P end
+end)
+local Got = {}
+for _, Spec in {
+	{ "Empty", 20, 110 }, { "Plain", 140, 140 }, { "ActiveF", 230, 140 }, { "Btn", 320, 140 }, { "BtnInactive", 410, 140 },
+	{ "Label", 500, 140 }, { "Box", 590, 140 }, { "SFStuck", 680, 140 }, { "SFScroll", 140, 340 }, { "SFDisabled", 230, 340 },
+	{ "SFInactive", 320, 340 }, { "SFAtEnd", 410, 340 }, { "ActiveOver", 470, 310 }, { "SFUnder", 530, 370 },
+} do
+	Processed = nil
+	Dispatch({ type = "move", x = Spec[2], y = Spec[3] })
+	Dispatch({ type = "wheel", x = Spec[2], y = Spec[3], notches = -1 })
+	Flush()
+	table.insert(Got, `{Spec[1]} {Processed}`)
+end
+local Joined = table.concat(Got, ",")
+local Client = "Empty false,Plain false,ActiveF true,Btn true,BtnInactive false,Label false,Box true,SFStuck true,SFScroll true,SFDisabled false,SFInactive true,SFAtEnd true,ActiveOver true,SFUnder true"
+assert(Joined == Client, Joined)
+"##,
+    );
+}
+
+/// InputActions get only input the GUI did not process, measured in a 0.747 client: a key a sinking
+/// ContextActionService bind takes, a click a GuiButton / TextBox / Active object takes and Return on the selected
+/// button reach no action; a press that reached one is released wherever it ends.
+#[test]
+fn input_actions_get_only_unprocessed_input() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r##"
+local CAS = game:GetService("ContextActionService")
+local Log = {}
+local Context = Instance.new("InputContext")
+local function Action(Label, KeyCode)
+	local A = Instance.new("InputAction")
+	A.Name = Label
+	local B = Instance.new("InputBinding")
+	B.KeyCode = KeyCode
+	B.Parent = A
+	A.Parent = Context
+	A.Pressed:Connect(function() table.insert(Log, Label .. ".Pressed") end)
+	A.Released:Connect(function() table.insert(Log, Label .. ".Released") end)
+end
+Action("E", Enum.KeyCode.E)
+Action("R", Enum.KeyCode.R)
+Action("L", Enum.KeyCode.MouseLeftButton)
+Action("Ret", Enum.KeyCode.Return)
+Context.Parent = game:GetService("ReplicatedStorage")
+CAS:BindAction("SinkE", function() return Enum.ContextActionResult.Sink end, false, Enum.KeyCode.E)
+CAS:BindAction("PassR", function() return Enum.ContextActionResult.Pass end, false, Enum.KeyCode.R)
+local function Key(Name)
+	Dispatch({ type = "key", key = Name, down = true })
+	Flush()
+	Dispatch({ type = "key", key = Name, down = false })
+	Flush()
+end
+local function Click(Label, X, Y, X2, Y2)
+	table.insert(Log, Label)
+	Dispatch({ type = "down", x = X, y = Y, button = 1 })
+	Flush()
+	Dispatch({ type = "up", x = X2 or X, y = Y2 or Y, button = 1 })
+	Flush()
+end
+Key("E")
+Key("R")
+CAS:UnbindAction("SinkE")
+Key("E")
+local Gui = Instance.new("ScreenGui")
+Gui.IgnoreGuiInset = true
+local function Make(Class, Name, X, Props)
+	local O = Instance.new(Class)
+	O.Name = Name
+	O.Position = UDim2.fromOffset(X, 100)
+	O.Size = UDim2.fromOffset(100, 100)
+	for K, V in Props or {} do
+		O[K] = V
+	end
+	O.Parent = Gui
+	return O
+end
+local Btn = Make("TextButton", "Btn", 100)
+Make("TextButton", "BtnInactive", 220, { Active = false })
+Make("Frame", "ActiveF", 340, { Active = true })
+Make("Frame", "PlainF", 460, { Active = false })
+local Box = Make("TextBox", "Box", 580, { ClearTextOnFocus = false })
+Gui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+UpdateAll()
+Click("Btn", 150, 150)
+Click("BtnInactive", 270, 150)
+Click("ActiveF", 390, 150)
+Click("PlainF", 510, 150)
+Click("empty", 700, 400)
+Click("Box", 630, 150)
+Box:ReleaseFocus()
+Click("empty then Btn", 700, 400, 150, 150)
+table.insert(Log, "selected Return")
+game:GetService("GuiService").SelectedObject = Btn
+Flush()
+Key("Return")
+local Joined = table.concat(Log, ",")
+local Client = "R.Pressed,R.Released,E.Pressed,E.Released,Btn,BtnInactive,ActiveF,PlainF,L.Pressed,L.Released,empty,L.Pressed,L.Released,Box,empty then Btn,L.Pressed,L.Released,selected Return"
+assert(Joined == Client, Joined)
+"##,
+    );
+}
+
+/// Hit-testing skips what a 0.747 client culls (GetGuiObjectsAtPosition there, mouse input agreeing; the layout of
+/// the capture): AutomaticSize objects whose centre is not strictly inside their clip (turned or not, not in a
+/// scrolled ScrollingFrame; a text object keeps itself) and their own children (unless a layout places them or they
+/// are turned; grandchildren stay), and turned objects whose unturned rect lies outside their clip.
+#[test]
+fn hit_testing_skips_what_a_client_culls() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r##"
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+Root.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local function Make(Class, Parent, Props)
+	local O = Instance.new(Class)
+	for K, V in Props do
+		O[K] = V
+	end
+	O.Parent = Parent
+	return O
+end
+local X = Enum.AutomaticSize.X
+local C1 = Make("Frame", Root, { Name = "C1", Position = UDim2.fromOffset(100, 100), Size = UDim2.fromOffset(200, 200), ClipsDescendants = true })
+local A1 = Make("Frame", C1, { Name = "A1", Position = UDim2.fromOffset(-100, 20), Size = UDim2.fromOffset(150, 40), AutomaticSize = X })
+Make("TextButton", A1, { Name = "A1B", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+local N1 = Make("Frame", C1, { Name = "N1", Position = UDim2.fromOffset(-100, 80), Size = UDim2.fromOffset(150, 40) })
+Make("TextButton", N1, { Name = "N1B", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+local A2 = Make("Frame", C1, { Name = "A2", Position = UDim2.fromOffset(20, 170), Size = UDim2.fromOffset(60, 60), AutomaticSize = Enum.AutomaticSize.Y })
+Make("TextButton", A2, { Name = "A2B", Size = UDim2.fromOffset(60, 30), Text = "" })
+local A3 = Make("Frame", C1, { Name = "A3", Position = UDim2.fromOffset(160, 20), Size = UDim2.fromOffset(30, 30), AutomaticSize = Enum.AutomaticSize.XY })
+Make("TextButton", A3, { Name = "A3B", Size = UDim2.fromOffset(30, 30), Text = "" })
+Make("TextButton", C1, { Name = "AT", Position = UDim2.fromOffset(-100, 140), Size = UDim2.fromOffset(150, 30), AutomaticSize = X, Text = "x" })
+local AG = Make("Frame", C1, { Name = "AG", Position = UDim2.fromOffset(150, 150), Size = UDim2.fromOffset(150, 40), AutomaticSize = X, BackgroundTransparency = 1 })
+Make("UIGridLayout", AG, { CellSize = UDim2.fromOffset(40, 40) })
+Make("TextButton", AG, { Name = "AGB", Text = "" })
+local C2 = Make("Frame", Root, { Name = "C2", Position = UDim2.fromOffset(400, 100), Size = UDim2.fromOffset(200, 200), ClipsDescendants = true })
+Make("TextButton", C2, { Name = "R1", Position = UDim2.fromOffset(10, -30), Size = UDim2.fromOffset(180, 8), Rotation = 45, Text = "" })
+Make("TextButton", C2, { Name = "R2", Position = UDim2.fromOffset(10, 150), Size = UDim2.fromOffset(180, 8), Rotation = 45, Text = "" })
+local AR = Make("Frame", C2, { Name = "AR", Position = UDim2.fromOffset(-100, 100), Size = UDim2.fromOffset(150, 40), AutomaticSize = X, Rotation = 10 })
+Make("TextButton", AR, { Name = "ARB", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+local S = Make("ScrollingFrame", Root, { Name = "S", Position = UDim2.fromOffset(100, 350), Size = UDim2.fromOffset(200, 150), CanvasSize = UDim2.fromOffset(0, 600), ScrollBarThickness = 0 })
+local AS = Make("Frame", S, { Name = "AS", Position = UDim2.fromOffset(-100, 80), Size = UDim2.fromOffset(150, 40), AutomaticSize = X })
+Make("TextButton", AS, { Name = "ASB", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+UpdateAll()
+S.CanvasPosition = Vector2.new(0, 50)
+UpdateAll()
+local Got = {}
+local function At(Label, PX, PY)
+	local Names = {}
+	for _, O in HitAt(PX, PY) do
+		table.insert(Names, O.Name)
+	end
+	table.insert(Got, `{Label} [{table.concat(Names, ",")}]`)
+end
+At("A1B", 125, 140)
+At("N1B", 125, 200)
+At("A2B", 150, 285)
+At("A3B", 275, 135)
+At("AT", 125, 255)
+At("AGB", 270, 270)
+At("R1 in clip", 535, 109)
+At("R1 above clip", 500, 74)
+At("R2 in clip", 465, 219)
+At("R2 below clip", 549, 303)
+At("ARB", 425, 225)
+At("ASB", 125, 400)
+local Joined = table.concat(Got, "; ")
+local Client = "A1B [C1]; N1B [N1B,N1,C1]; A2B [C1]; A3B [A3B,A3,C1]; AT [AT,C1]; AGB [AGB,C1]; R1 in clip [C2]; R1 above clip []; R2 in clip [R2,C2]; R2 below clip []; ARB [ARB,C2]; ASB [ASB,AS,S]"
+assert(Joined == Client, Joined)
+-- Which descendants a culled AutomaticSize object takes with it
+Root:ClearAllChildren()
+local function Clip(Name, PX, PY, Class)
+	return Make(Class or "Frame", Root, { Name = Name, Position = UDim2.fromOffset(PX, PY), Size = UDim2.fromOffset(150, 150), ClipsDescendants = true })
+end
+local D1 = Clip("C1", 20, 20)
+local AText = Make("TextLabel", D1, { Name = "AText", Position = UDim2.fromOffset(-100, 20), Size = UDim2.fromOffset(150, 40), AutomaticSize = X, Text = "t" })
+Make("TextButton", AText, { Name = "ATextB", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+local AGrand = Make("Frame", D1, { Name = "AGrand", Position = UDim2.fromOffset(-100, 80), Size = UDim2.fromOffset(150, 40), AutomaticSize = X })
+local Mid = Make("Frame", AGrand, { Name = "Mid", Position = UDim2.fromOffset(90, 0), Size = UDim2.fromOffset(60, 40) })
+Make("TextButton", Mid, { Name = "GrandB", Position = UDim2.fromOffset(10, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+local D2 = Clip("C2", 200, 20)
+local ACanvas = Make("CanvasGroup", D2, { Name = "ACanvas", Position = UDim2.fromOffset(-100, 20), Size = UDim2.fromOffset(150, 40), AutomaticSize = X })
+Make("UIGridLayout", ACanvas, { CellSize = UDim2.fromOffset(150, 40) })
+Make("TextButton", ACanvas, { Name = "ACanvasB", Text = "" })
+local AImg = Make("ImageButton", D2, { Name = "AImgBtn", Position = UDim2.fromOffset(-100, 80), Size = UDim2.fromOffset(150, 40), AutomaticSize = X })
+Make("Frame", AImg, { Name = "AImgChild", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40) })
+local S0 = Make("ScrollingFrame", Root, { Name = "S0", Position = UDim2.fromOffset(380, 20), Size = UDim2.fromOffset(150, 150), CanvasSize = UDim2.fromOffset(0, 600), ScrollBarThickness = 0 })
+local AS0 = Make("Frame", S0, { Name = "AS0", Position = UDim2.fromOffset(-100, 20), Size = UDim2.fromOffset(150, 40), AutomaticSize = X })
+Make("TextButton", AS0, { Name = "AS0B", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+local AEdge = Make("Frame", Root, { Name = "AEdge", Position = UDim2.fromOffset(-100, 300), Size = UDim2.fromOffset(150, 40), AutomaticSize = X })
+Make("TextButton", AEdge, { Name = "AEdgeB", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+local D3 = Clip("C3", 560, 20)
+local ATurnKid = Make("Frame", D3, { Name = "ATurnKid", Position = UDim2.fromOffset(-100, 20), Size = UDim2.fromOffset(150, 40), AutomaticSize = X })
+Make("TextButton", ATurnKid, { Name = "TurnedB", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Rotation = 5, Text = "" })
+local AR3 = Make("Frame", D3, { Name = "AR", Position = UDim2.fromOffset(-100, 80), Size = UDim2.fromOffset(150, 40), AutomaticSize = X, Rotation = 3 })
+Make("TextButton", AR3, { Name = "ARB", Position = UDim2.fromOffset(100, 0), Size = UDim2.fromOffset(50, 40), Text = "" })
+Make("Frame", D3, { Name = "TurnedInside", Position = UDim2.fromOffset(20, 125), Size = UDim2.fromOffset(60, 20), AutomaticSize = X, Rotation = 3 })
+UpdateAll()
+table.clear(Got)
+At("ATextB", 45, 60)
+At("AText", 25, 60)
+At("GrandB", 45, 120)
+At("ACanvasB", 200, 60)
+At("AImgChild", 225, 120)
+At("AS0B", 405, 60)
+At("AEdgeB", 25, 320)
+At("AEdge", 5, 320)
+At("TurnedB", 585, 60)
+At("ARB", 584.931, 122.617)
+At("AR", 585, 120)
+At("TurnedInside", 610, 155)
+Joined = table.concat(Got, "; ")
+Client = "ATextB [AText,C1]; AText [AText,C1]; GrandB [GrandB,C1]; ACanvasB [ACanvasB,C2]; AImgChild [C2]; AS0B [S0]; AEdgeB [AEdgeB,AEdge]; AEdge [AEdgeB,AEdge]; TurnedB [TurnedB,C3]; ARB [ARB,C3]; AR [ARB,C3]; TurnedInside [TurnedInside,C3]"
+assert(Joined == Client, Joined)
+"##,
+    );
+}
+
+fn start_with(width: f64, height: f64, mode: &str, device: Option<roblox_engine_emulator::client_profile::DeviceKind>) -> (Lua, Rc<Engine>) {
+    let mut options = crate::engine::options();
+    options.profile.device.viewport = Some((width, height));
+    options.profile.device.kind = device;
+    options.mode = mode.to_string();
+    let engine = crate::engine::new_engine(options).expect("engine");
+    let lua = Lua::new();
+    engine_lua::start(&lua, &engine).expect("start");
+    engine.state.borrow_mut().sched.set_main_thread(&lua.current_thread());
+    (lua, engine)
+}
+
+/// UIDragDetector in a playing client (0.747, mouse drags injected with VirtualInputManager): DragStart before
+/// InputBegan and the press processed; every move translates by the whole delta from the press; a GuiButton with a
+/// detector is neither clicked nor activated (it is once the detector is disabled); Rotate turns by the angle the
+/// mouse swept about the centre.
+#[test]
+fn drag_detector_in_play_mode_matches_a_client() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", None);
+    run(
+        &lua,
+        &engine,
+        r##"
+local UIS = game:GetService("UserInputService")
+local Root = Instance.new("ScreenGui")
+Root.IgnoreGuiInset = true
+local Log = {}
+local function Make(Class, Props)
+	local O = Instance.new(Class)
+	for K, V in Props do
+		O[K] = V
+	end
+	O.Parent = Root
+	return O
+end
+local P = Make("Frame", { Name = "P", Position = UDim2.fromOffset(300, 200), Size = UDim2.fromOffset(100, 100) })
+local D = Instance.new("UIDragDetector")
+D.Parent = P
+D.DragStart:Connect(function(At) table.insert(Log, `DragStart {At.X},{At.Y}`) end)
+D.DragContinue:Connect(function(At) table.insert(Log, `DragContinue {At.X},{At.Y}`) end)
+D.DragEnd:Connect(function(At) table.insert(Log, `DragEnd {At.X},{At.Y}`) end)
+P.InputBegan:Connect(function(Input) if Input.UserInputType == Enum.UserInputType.MouseButton1 then table.insert(Log, "P.InputBegan") end end)
+UIS.InputBegan:Connect(function(Input, Processed) if Input.UserInputType == Enum.UserInputType.MouseButton1 then table.insert(Log, `UIS.InputBegan {Processed}`) end end)
+UIS.InputEnded:Connect(function(Input, Processed) if Input.UserInputType == Enum.UserInputType.MouseButton1 then table.insert(Log, `UIS.InputEnded {Processed}`) end end)
+local B = Make("TextButton", { Name = "B", Position = UDim2.fromOffset(100, 400), Size = UDim2.fromOffset(100, 60) })
+local BD = Instance.new("UIDragDetector")
+BD.Parent = B
+BD.DragStart:Connect(function(At) table.insert(Log, `DragStart {At.X},{At.Y}`) end)
+BD.DragContinue:Connect(function(At) table.insert(Log, `DragContinue {At.X},{At.Y}`) end)
+BD.DragEnd:Connect(function(At) table.insert(Log, `DragEnd {At.X},{At.Y}`) end)
+B.Activated:Connect(function() table.insert(Log, "B.Activated") end)
+B.MouseButton1Click:Connect(function() table.insert(Log, "B.Click") end)
+Root.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+UpdateAll()
+local function Drag(Points)
+	Dispatch({ type = "down", x = Points[1][1], y = Points[1][2], button = 1 })
+	Flush()
+	for I = 2, #Points do
+		Dispatch({ type = "move", x = Points[I][1], y = Points[I][2] })
+		StepDisplay(1 / 60)
+		Flush()
+		UpdateAll()
+	end
+	local Last = Points[#Points]
+	Dispatch({ type = "up", x = Last[1], y = Last[2], button = 1 })
+	Flush()
+end
+Drag({ { 350, 250 }, { 352, 250 }, { 380, 270 } })
+assert(P.Position == UDim2.fromOffset(330, 220) and D.DragUDim2 == UDim2.fromOffset(30, 20), `{P.Position} {D.DragUDim2}`)
+local Joined = table.concat(Log, ",")
+assert(Joined == "DragStart 350,250,P.InputBegan,UIS.InputBegan true,DragContinue 352,250,DragContinue 380,270,DragEnd 380,270,UIS.InputEnded true", Joined)
+table.clear(Log)
+Drag({ { 150, 430 }, { 170, 440 } })
+Drag({ { 170, 440 } })
+assert(B.Position == UDim2.fromOffset(120, 410), tostring(B.Position))
+BD.Enabled = false
+Drag({ { 190, 450 } })
+Joined = table.concat(Log, ",")
+assert(Joined == "DragStart 150,430,UIS.InputBegan true,DragContinue 170,440,DragEnd 170,440,UIS.InputEnded true,DragStart 170,440,UIS.InputBegan true,DragEnd 170,440,UIS.InputEnded true,UIS.InputBegan true,B.Click,B.Activated,UIS.InputEnded true", Joined)
+-- Rotate: pressed 40 px right of the centre, moved to 40 px below it
+P.Position = UDim2.fromOffset(300, 200)
+D.DragStyle = Enum.UIDragDetectorDragStyle.Rotate
+UpdateAll()
+Drag({ { 390, 250 }, { 350, 290 } })
+assert(math.abs(P.Rotation - 90) < 1e-4 and math.abs(D.DragRotation - 90) < 1e-4 and P.Position == UDim2.fromOffset(300, 200), `{P.Rotation} {D.DragRotation}`)
+"##,
+    );
+}
+
+/// A touch device (a 0.747 touch client, touches injected with VirtualInputManager:SendTouchEvent): the
+/// finger hovers only while it is down, its Touch input is both the hover and the press input, TouchStarted /
+/// TouchMoved / TouchEnded follow InputBegan / InputChanged / InputEnded, a release fires MouseButton1Up, Activated,
+/// MouseButton1Click in that order, a TextBox takes focus at the release.
+#[test]
+fn touch_input_matches_a_client() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    run(
+        &lua,
+        &engine,
+        r##"
+local UIS = game:GetService("UserInputService")
+local Root = Instance.new("ScreenGui")
+Root.IgnoreGuiInset = true
+local Log = {}
+local function Fmt(Input)
+	return `{Input.UserInputType.Name} {Input.UserInputState.Name} {Input.Position.X},{Input.Position.Y}`
+end
+local function Watch(O)
+	for _, S in { "MouseEnter", "MouseLeave", "MouseMoved" } do
+		O[S]:Connect(function(X, Y) table.insert(Log, `{O.Name}.{S} {X},{Y}`) end)
+	end
+	for _, S in { "InputBegan", "InputChanged", "InputEnded" } do
+		O[S]:Connect(function(Input) table.insert(Log, `{O.Name}.{S} {Fmt(Input)}`) end)
+	end
+	O:GetPropertyChangedSignal("GuiState"):Connect(function() table.insert(Log, `{O.Name}.GuiState={O.GuiState.Name}`) end)
+end
+local B = Instance.new("TextButton")
+B.Name = "B"
+B.Position = UDim2.fromOffset(100, 100)
+B.Size = UDim2.fromOffset(200, 100)
+B.Parent = Root
+local F = Instance.new("Frame")
+F.Name = "F"
+F.Position = UDim2.fromOffset(400, 100)
+F.Size = UDim2.fromOffset(200, 100)
+F.Parent = Root
+local TB = Instance.new("TextBox")
+TB.Name = "TB"
+TB.Position = UDim2.fromOffset(400, 300)
+TB.Size = UDim2.fromOffset(200, 60)
+TB.ClearTextOnFocus = false
+TB.Parent = Root
+Watch(B)
+Watch(F)
+for _, S in { "MouseButton1Down", "MouseButton1Up" } do
+	B[S]:Connect(function(X, Y) table.insert(Log, `B.{S} {X},{Y}`) end)
+end
+B.MouseButton1Click:Connect(function() table.insert(Log, "B.MouseButton1Click") end)
+B.Activated:Connect(function(Input) table.insert(Log, `B.Activated {Fmt(Input)}`) end)
+TB.Focused:Connect(function() table.insert(Log, "TB.Focused") end)
+for _, S in { "InputBegan", "InputChanged", "InputEnded", "TouchStarted", "TouchMoved", "TouchEnded" } do
+	UIS[S]:Connect(function(Input, Processed) table.insert(Log, `UIS.{S} {Fmt(Input)} {Processed}`) end)
+end
+Root.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+UpdateAll()
+local function Finger(Kind, X, Y)
+	if Kind == "move" then
+		Dispatch({ type = "move", x = X, y = Y })
+		StepDisplay(1 / 60)
+	else
+		Dispatch({ type = Kind, x = X, y = Y, button = 1 })
+	end
+	Flush()
+end
+local Cases = {}
+local function Case(Label, Steps)
+	table.clear(Log)
+	for _, Step in Steps do
+		Finger(Step[1], Step[2], Step[3])
+	end
+	table.insert(Cases, Label .. ": " .. table.concat(Log, ", "))
+end
+Case("tap B", { { "move", 150, 150 }, { "down", 150, 150 }, { "up", 150, 150 } })
+Case("press B, move in B", { { "down", 150, 150 }, { "move", 170, 160 }, { "up", 170, 160 } })
+Case("press B, release on F", { { "move", 150, 150 }, { "down", 150, 150 }, { "move", 450, 150 }, { "up", 450, 150 } })
+Case("press F, release on B", { { "move", 450, 150 }, { "down", 450, 150 }, { "move", 150, 150 }, { "up", 150, 150 } })
+Case("tap TextBox", { { "move", 450, 330 }, { "down", 450, 330 }, { "up", 450, 330 } })
+local Got = table.concat(Cases, "\n")
+local Client = table.concat({
+	"tap B: B.MouseButton1Down 150,150, B.MouseEnter 150,150, B.InputBegan Touch Begin 150,150, B.GuiState=Press, UIS.InputBegan Touch Begin 150,150 true, UIS.TouchStarted Touch Begin 150,150 true, B.MouseButton1Up 150,150, B.Activated Touch End 150,150, B.MouseButton1Click, B.MouseLeave 150,150, B.InputEnded Touch End 150,150, B.GuiState=Idle, UIS.InputEnded Touch End 150,150 true, UIS.TouchEnded Touch End 150,150 true",
+	"press B, move in B: B.MouseButton1Down 150,150, B.MouseEnter 150,150, B.InputBegan Touch Begin 150,150, B.GuiState=Press, UIS.InputBegan Touch Begin 150,150 true, UIS.TouchStarted Touch Begin 150,150 true, B.MouseMoved 170,160, B.InputChanged Touch Change 170,160, UIS.InputChanged Touch Change 170,160 true, UIS.TouchMoved Touch Change 170,160 true, B.MouseButton1Up 170,160, B.Activated Touch End 170,160, B.MouseButton1Click, B.MouseLeave 170,160, B.InputEnded Touch End 170,160, B.GuiState=Idle, UIS.InputEnded Touch End 170,160 true, UIS.TouchEnded Touch End 170,160 true",
+	"press B, release on F: B.MouseButton1Down 150,150, B.MouseEnter 150,150, B.InputBegan Touch Begin 150,150, B.GuiState=Press, UIS.InputBegan Touch Begin 150,150 true, UIS.TouchStarted Touch Begin 150,150 true, F.MouseMoved 450,150, B.MouseLeave 450,150, B.InputEnded Touch Change 450,150, B.GuiState=Idle, F.MouseEnter 450,150, F.InputBegan Touch Change 450,150, UIS.InputChanged Touch Change 450,150 false, UIS.TouchMoved Touch Change 450,150 false, F.MouseLeave 450,150, F.InputEnded Touch End 450,150, UIS.InputEnded Touch End 450,150 false, UIS.TouchEnded Touch End 450,150 false",
+	"press F, release on B: F.MouseEnter 450,150, F.InputBegan Touch Begin 450,150, F.GuiState=Press, UIS.InputBegan Touch Begin 450,150 false, UIS.TouchStarted Touch Begin 450,150 false, B.MouseMoved 150,150, F.MouseLeave 150,150, F.InputEnded Touch Change 150,150, F.GuiState=Idle, B.MouseEnter 150,150, B.InputBegan Touch Change 150,150, UIS.InputChanged Touch Change 150,150 true, UIS.TouchMoved Touch Change 150,150 true, B.MouseButton1Up 150,150, B.MouseLeave 150,150, B.InputEnded Touch End 150,150, UIS.InputEnded Touch End 150,150 true, UIS.TouchEnded Touch End 150,150 true",
+	"tap TextBox: UIS.InputBegan Touch Begin 450,330 true, UIS.TouchStarted Touch Begin 450,330 true, TB.Focused, UIS.InputEnded Touch End 450,330 true, UIS.TouchEnded Touch End 450,330 true",
+}, "\n")
+assert(Got == Client, Got)
+"##,
+    );
+}
+
+/// A connected gamepad's button in a 0.747 client (VirtualInputManager:HandleGamepadButtonInput): the InputObject is
+/// Gamepad1's, Position (0, 0, 1) and Delta (0, 0, 1) going down, (0, 0, 0) and (0, 0, -1) coming up.
+#[test]
+fn gamepad_buttons_carry_the_clients_positions() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r##"
+local UIS = game:GetService("UserInputService")
+local Log = {}
+local function Fmt(Input) return `{Input.UserInputType.Name} {Input.KeyCode.Name} {Input.UserInputState.Name} {Input.Position} {Input.Delta}` end
+UIS.InputBegan:Connect(function(Input) table.insert(Log, Fmt(Input)) end)
+UIS.InputEnded:Connect(function(Input) table.insert(Log, Fmt(Input)) end)
+Dispatch({ type = "move", x = 300, y = 200 })
+Dispatch({ type = "key", key = "ButtonA", down = true })
+Dispatch({ type = "key", key = "ButtonA", down = false })
+Flush()
+local Joined = table.concat(Log, "; ")
+assert(string.find(Joined, "Gamepad1 ButtonA Begin 0, 0, 1 0, 0, 1; Gamepad1 ButtonA End 0, 0, 0 0, 0, -1", 1, true), Joined)
+"##,
+    );
+}

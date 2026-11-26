@@ -6,6 +6,13 @@
 //! Measured in Studio (notes/interaction.md): every GuiObject under the cursor takes part (occluded
 //! ones too), whatever its Active / transparency; Interactable = false objects get no input.
 //!
+//! Culled objects take no part (measured in a 0.747 client, GetGuiObjectsAtPosition and mouse input
+//! agree; notes/interaction.md "Hit-test geometry"): a turned object whose unturned rect lies wholly
+//! outside its clip, and an AutomaticSize object whose centre is not strictly inside its clip (turned
+//! or not; not inside a ScrollingFrame scrolled away from (0, 0); a text object keeps itself). Such an
+//! AutomaticSize object's own children are culled with it unless a layout places them or they are
+//! turned; their descendants are not.
+//!
 //! The draw order is cached until a GUI property (other than the visual-only ones) or the
 //! hierarchy changes (the input's PropertyChanged / HierarchyChanged hooks), like the Luau
 //! `Hit.Invalidate`. Entries copy their record's rect at build time: every layout change comes
@@ -75,6 +82,20 @@ fn outside(record: &Record, clip: Option<[f64; 4]>) -> bool {
     x + record.w <= clip[0] || x >= clip[0] + clip[2] || y + record.h <= clip[1] || y >= clip[1] + clip[3]
 }
 
+/// The export's AutoCulled: an AutomaticSize object whose centre is not strictly inside its clip.
+fn auto_culled(input: &Input, state: &State, none: Option<u32>, id: InstanceId, record: &Record, clip: Option<[f64; 4]>) -> bool {
+    let Some(clip) = clip else { return false };
+    let automatic = match state.dom.raw_get(id, input.n.AutomaticSize) {
+        Some(Value::EnumItem(item)) => Some(*item) != none,
+        _ => false,
+    };
+    if !automatic {
+        return false;
+    }
+    let (cx, cy) = (record.x + record.w / 2.0, record.y + record.h / 2.0);
+    !(cx > clip[0] && cx < clip[0] + clip[2] && cy > clip[1] && cy < clip[1] + clip[3])
+}
+
 struct Item {
     entry: Option<Entry>,
     z: f64,
@@ -90,6 +111,17 @@ struct Collect<'a> {
     global: bool,
     rotation_clipping: bool,
     sequence: u32,
+    /// AutomaticSize.None
+    auto_none: Option<u32>,
+}
+
+/// What a node's children inherit besides the matrix and clip: whether a ScrollingFrame above is scrolled away
+/// from (0, 0) (no AutomaticSize culling inside it), and whether the node is an AutomaticSize object culled
+/// with its children.
+#[derive(Clone, Copy, Default)]
+struct Inherit {
+    scrolled: bool,
+    culled_parent: bool,
 }
 
 impl Collect<'_> {
@@ -110,6 +142,22 @@ impl Collect<'_> {
         children
     }
 
+    fn has_layout(&self, id: InstanceId) -> bool {
+        let c = &self.input.c;
+        self.state.dom.at(id).children.iter().any(|&child| {
+            let class = Some(self.state.dom.at(child).class);
+            [c.UIListLayout, c.UIGridLayout, c.UIPageLayout, c.UITableLayout].iter().any(|layout| layout.is_some() && *layout == class)
+        })
+    }
+
+    /// A TextLabel, TextButton or TextBox: culled by its centre, it keeps itself (measured, as it draws)
+    fn is_text(&self, id: InstanceId) -> bool {
+        let class = self.state.dom.at(id).class;
+        let c = &self.input.c;
+        [c.TextLabel, c.TextButton, c.TextBox].iter().any(|text| text.is_some() && self.input.class_is(class, *text))
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn visit(
         &mut self,
         id: InstanceId,
@@ -118,6 +166,7 @@ impl Collect<'_> {
         matrix: Option<Transform>,
         clip: Option<[f64; 4]>,
         groups: Option<Rc<Vec<Group>>>,
+        inherit: Inherit,
     ) {
         let n = &self.input.n;
         for child in self.ordered_children(id) {
@@ -136,15 +185,25 @@ impl Collect<'_> {
             }
             self.sequence += 1;
             let escapes = child_rotated && !self.rotation_clipping;
+            let node_clip = if escapes { None } else { clip };
+            // Measured: a turned object whose unturned rect is wholly outside its clip is culled (both modes)
+            let rotation_culled = child_rotated && outside(record, clip);
+            let auto = !inherit.scrolled && auto_culled(self.input, self.state, self.auto_none, child, record, node_clip);
             let entry = Entry {
                 id: child,
                 rect: [record.x, record.y, record.w, record.h],
                 matrix: child_matrix,
-                clip: if escapes { None } else { clip },
-                culled: escapes && outside(record, clip),
+                clip: node_clip,
+                culled: rotation_culled || (auto && !self.is_text(child)) || (inherit.culled_parent && !child_rotated),
                 groups: groups.clone(),
             };
-            let culled = entry.culled;
+            let culled = rotation_culled;
+            let child_inherit = Inherit {
+                scrolled: inherit.scrolled
+                    || (Some(self.state.dom.at(child).class) == self.input.c.ScrollingFrame
+                        && self.state.dom.raw_get(child, n.CanvasPosition).and_then(Value::as_vector2).is_some_and(|p| p.x != 0.0 || p.y != 0.0)),
+                culled_parent: auto && !self.has_layout(child),
+            };
             let class = self.state.dom.at(child).class;
             let is_group = Some(class) == self.input.c.CanvasGroup;
 
@@ -172,11 +231,11 @@ impl Collect<'_> {
 
             if self.global {
                 let mut item = Item { entry: Some(entry), z: self.z(child), sequence: self.sequence, group: is_group, children: Vec::new() };
-                self.visit(child, &mut item, out, child_matrix, child_clip, child_groups);
+                self.visit(child, &mut item, out, child_matrix, child_clip, child_groups, child_inherit);
                 parent.children.push(item);
             } else {
                 out.push(entry);
-                self.visit(child, parent, out, child_matrix, child_clip, child_groups);
+                self.visit(child, parent, out, child_matrix, child_clip, child_groups, child_inherit);
             }
         }
     }
@@ -354,9 +413,10 @@ impl Input {
                 global,
                 rotation_clipping: engine.options.clips_descendants_supports_rotation,
                 sequence: 0,
+                auto_none: engine.reflection.enum_item("AutomaticSize", "None"),
             };
             let mut tree = Item { entry: None, z: 0.0, sequence: 0, group: false, children: Vec::new() };
-            collect.visit(root, &mut tree, &mut out, None, None, None);
+            collect.visit(root, &mut tree, &mut out, None, None, None, Inherit::default());
             if global {
                 emit_global(tree, false, &mut out);
             }

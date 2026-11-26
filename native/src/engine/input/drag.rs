@@ -6,9 +6,14 @@
 //!     InputBegan; every move sets Position = start Position + (mouse - press point) in offset;
 //!     releasing fires DragStopped(x, y) before InputEnded. Works in edit mode.
 //!   - UIDragDetector does nothing in Studio edit mode, which is where UI Labs stories run. In play
-//!     mode the documented behaviour is emulated (not measured): TranslatePlane / TranslateLine,
-//!     ResponseStyle Offset / Scale / Custom*, DragUDim2, BoundingUI, Min/MaxDragTranslation,
-//!     DragStart / DragContinue / DragEnd(inputPosition).
+//!     mode, measured in a 0.747 client (mouse input through VirtualInputManager, notes/interaction.md
+//!     "Dragging"): the detector's parent takes a left press like a button (DragStart(position) before
+//!     the objects' InputBegan, gameProcessed true; a GuiButton parent is then neither clicked nor
+//!     activated); every move fires DragContinue(position) and translates by the whole mouse delta from
+//!     the press (no threshold): TranslatePlane, TranslateLine along DragAxis, ResponseStyle Offset /
+//!     Scale (of the parent's size) / CustomOffset / CustomScale (DragUDim2 only), Min/MaxDragTranslation,
+//!     BoundingUI, the parent's UIScale; Rotate turns the parent by the angle the mouse swept about its
+//!     centre (DragRotation). DragEnd(position) at the release.
 
 use mlua::prelude::*;
 use rbx_dom_weak::types as dom;
@@ -23,10 +28,17 @@ pub struct Active {
     start_x: f64,
     start_y: f64,
     start_position: dom::UDim2,
+    start_rotation: f64,
 }
 
 fn udim2_of(value: Option<Value>) -> dom::UDim2 {
     value.and_then(|v| v.as_udim2()).unwrap_or(dom::UDim2::new(dom::UDim::new(0.0, 0), dom::UDim::new(0.0, 0)))
+}
+
+/// Whether `id` has an enabled UIDragDetector (in play mode it takes a left press as a button does, and
+/// makes the press and its release processed: measured).
+pub(crate) fn has_detector(cx: &Cx, id: InstanceId) -> bool {
+    first_detector(cx, id).is_some()
 }
 
 fn first_detector(cx: &Cx, id: InstanceId) -> Option<InstanceId> {
@@ -44,14 +56,15 @@ pub(crate) fn press(cx: &Cx, receivers: &[InstanceId], x: f64, y: f64, edit_mode
         if cx.is_true(id, n.Draggable) && cx.is_true(id, n.Active) {
             let start = cx.get(id, n.Position);
             let start_position = udim2_of(start.clone());
-            *cx.i.drag.borrow_mut() = Some(Active { target: id, detector: None, start_x: x, start_y: y, start_position });
+            *cx.i.drag.borrow_mut() = Some(Active { target: id, detector: None, start_x: x, start_y: y, start_position, start_rotation: 0.0 });
             cx.fire(id, n.DragBegin, vec![start.unwrap_or(Value::Nil)]);
             return true;
         }
         if !edit_mode {
             if let Some(detector) = first_detector(cx, id) {
                 let start_position = udim2_of(cx.get(id, n.Position));
-                *cx.i.drag.borrow_mut() = Some(Active { target: id, detector: Some(detector), start_x: x, start_y: y, start_position });
+                let start_rotation = cx.number(id, n.Rotation).unwrap_or(0.0);
+                *cx.i.drag.borrow_mut() = Some(Active { target: id, detector: Some(detector), start_x: x, start_y: y, start_position, start_rotation });
                 cx.fire(detector, n.DragStart, vec![vector2(x, y)]);
                 return true;
             }
@@ -114,6 +127,35 @@ pub(crate) fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
             dx = ax / length * along;
             dy = ay / length * along;
         }
+    } else if style == "Rotate" {
+        // Measured: pressed 40 px right of the centre and moved to 40 px below it, Rotation and DragRotation
+        // read 90 (clockwise on screen). The angle range (Min/MaxDragAngle, used when Max > Min) follows the
+        // translation range's rule, not measured.
+        let Some((cx_, cy_)) = cx.record(active.target, |r| {
+            let (ax, ay) = crate::engine::layout::absolute_position(r);
+            (ax + r.w / 2.0, ay + r.h / 2.0)
+        }) else {
+            return Ok(());
+        };
+        let swept = (y - cy_).atan2(x - cx_) - (active.start_y - cy_).atan2(active.start_x - cx_);
+        let mut angle = swept.to_degrees();
+        while angle > 180.0 {
+            angle -= 360.0;
+        }
+        while angle <= -180.0 {
+            angle += 360.0;
+        }
+        let (min, max) = (cx.number(detector, n.MinDragAngle).unwrap_or(0.0), cx.number(detector, n.MaxDragAngle).unwrap_or(0.0));
+        if max > min {
+            angle = clamp(angle, min, max);
+        }
+        cx.set(detector, n.DragRotation, Value::Number(angle));
+        let response = cx.enum_name(detector, n.ResponseStyle);
+        if response == "Offset" || response == "Scale" {
+            cx.assign(active.target, "Rotation", LuaValue::Number(active.start_rotation + angle))?;
+        }
+        cx.fire(detector, n.DragContinue, vec![vector2(x, y)]);
+        return Ok(());
     } else if style != "TranslatePlane" {
         cx.fire(detector, n.DragContinue, vec![vector2(x, y)]);
         return Ok(());

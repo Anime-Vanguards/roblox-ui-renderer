@@ -3633,31 +3633,31 @@
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-click": {
-			"digest": "54544dd028b89881033984b933eb74bb39e4c8b21a1b61d24197a54ee0cff83d",
+			"digest": "f24f990d22d27ec9f5388cf09da463c86f58c16850eb9afcd155356853d178a4",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-default": {
-			"digest": "fd18887ea4fba8eaf082e2e964b6736e7347e343ae4eecdef0dc6cf36fad9fc1",
+			"digest": "cb8c394cf7d69517f592c676671683ff094d028684c761c23a50766eed1a54c8",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-click": {
-			"digest": "1fe6a76c3f488e6a299a0fc7618589a8883b8e0befac271fea6561e502a5fac8",
+			"digest": "5ce3eea29a567c15aae31a4c5ae3febad205d23c81626e06643360d5ecbdc9bd",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-default": {
-			"digest": "758b488d3459ec020dc7575cf747c638cb85c698bc4dfb1fe2de6364e5a49128",
+			"digest": "9af4b567dde610e55e335893270fe096012a764908cd1ba82e8b2e4f0bda63b0",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-presentation": {
-			"digest": "89cbf20b2838b6542a19bd32e979c96586a4acfd0f0e0112d47193213d5ab798",
+			"digest": "a927f4e9ddf687d259f751a2dcfc906c0722482968d5cc501818e0119ec8b9a0",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-click": {
-			"digest": "12f64d3d63dcd0b6f34ba376a488cc1e73434fc6b4d3a6f5598d520457419e0e",
+			"digest": "73c3d5c22fd13ecd5a34e754a4aedda44018f367df45873ffe7775afd1c1a272",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-default": {
-			"digest": "de223217e88f2c78134b86b3d24dbc0ea9ffa1a00834f8ed16ebc09b96f8e1aa",
+			"digest": "dbdd48931051d3da8542402587c9985af76da087f3f62f709fa51d8dac71958a",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-no-input": {
@@ -3665,11 +3665,11 @@
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-presentation": {
-			"digest": "1a356c799150d3091acd6622872e4e7e0de03cb987162084e13e254b3c63c452",
+			"digest": "a817ac643280f850731f6b8b6092926b73cb09b03f61ad5cd482276195a56a5c",
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-26T20:52:59.978Z",
+	"recorded": "2026-11-26T21:10:02.169Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
