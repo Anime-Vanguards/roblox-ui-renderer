@@ -909,6 +909,19 @@ fn whole_glyph_x(pen: f64, offset: f64) -> f64 {
     (pen + 0.5).floor() + (offset + 0.5).trunc()
 }
 
+/// The size, in device px and unfloored, at which a rich line its truncation cut to no glyph draws its lone ellipsis:
+/// E x UIScale logical px (text/measure.rs `cut_size`), the size E = floor(TextSize x UIScale) taken through the UIScale
+/// a second time, rasterized at its floor and stretched like a fractional size (`quadScale`). The line is aligned as
+/// that tall, and its pen stays where the ellipsis at the label's own size puts it. Measured (sim client 0.747, 1.5x,
+/// fixtures/text-probe-richtrunc-scaled.luau and -richtrunc-edge.luau, SourceSans 14 to 26 at UIScale 0.7 to 2): the
+/// client's dots are those of a glyph rasterized at that size (7 px dots at 64.35 px where the label's own 49.5 px
+/// draw 5), pitched 17.40 px apart where that size gives 17.42, and their rows in Top, Center and Bottom labels fit a
+/// line 64 to 65 px tall. None when nothing is drawn.
+fn lone_ellipsis(info: &super::text::TextMeasure, pixel_scale: f64) -> Option<f64> {
+    let drawn = info.layout.lines.iter().any(|line| line.glyphs.iter().any(|glyph| !is_space(glyph.code)));
+    info.cut_size.filter(|_| drawn && info.layout.runs.is_some()).map(|size| f32r(size * pixel_scale)).filter(|size| *size > 0.0)
+}
+
 fn text_lines(
     ctx: &Ctx,
     text: &TextEngine,
@@ -927,12 +940,15 @@ fn text_lines(
     let x_align = ctx.enum_name(ctx.get(id, K::TextXAlignment as NameId)).unwrap_or("Center");
     let y_align = ctx.enum_name(ctx.get(id, K::TextYAlignment as NameId)).unwrap_or("Center");
 
+    // A lone ellipsis of a rich line cut to no glyph is aligned at the size it is drawn at (`lone_ellipsis`)
+    let lone = lone_ellipsis(info, pixel_scale);
+    let block_height = lone.unwrap_or(result.height);
     let top = if y_align == "Top" {
         content_y
     } else if y_align == "Bottom" {
-        content_y + content_h - result.height
+        content_y + content_h - block_height
     } else {
-        content_y + (content_h - result.height) / 2.0
+        content_y + (content_h - block_height) / 2.0
     };
 
     let size = result.size;
@@ -1042,6 +1058,10 @@ fn text_lines(
                         continue;
                     }
                     let glyph_size = if glyph.size != 0.0 { glyph.size } else { size };
+                    let glyph_size = match lone {
+                        Some(drawn) if ellipsis && glyph_size == size => drawn.floor().max(1.0),
+                        _ => glyph_size,
+                    };
                     let font_index = registry.font_index(text, glyph.face);
                     let face_ppem = ppem(&text.face(glyph.face).font, glyph_size);
                     let mut entry = Vec::with_capacity(if rich { 5 } else { 4 });
@@ -1282,7 +1302,12 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     // The FontFace's requested weight (100-900) and style ("normal" / "italic")
     export.insert("weight".into(), number(info.weight));
     export.insert("style".into(), Json::String(info.style.clone()));
-    if let (false, Some(quad_scale)) = (text.subpixel, info.quad_scale) {
+    // (a lone ellipsis stretched from its own floored size instead: `lone_ellipsis`)
+    let quad_scale = match lone_ellipsis(info, pixel_scale) {
+        Some(drawn) => Some(drawn / drawn.floor().max(1.0)).filter(|scale| (scale - 1.0).abs() > 1e-9),
+        None => info.quad_scale,
+    };
+    if let (false, Some(quad_scale)) = (text.subpixel, quad_scale) {
         export.insert("quadScale".into(), number(quad_scale));
     }
     // Measured (fixtures/text-probe-selfclip.luau): the object's own ClipsDescendants also cuts its own

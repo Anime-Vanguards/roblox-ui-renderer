@@ -61,6 +61,9 @@ pub struct TextMeasure {
     pub fit_y: f64,
     /// An unwrapped rich line its truncation cut to no glyph: TextBounds.Y is not the layout's height (E x UIScale)
     pub cut_to_nothing: bool,
+    /// The size such a line's lone ellipsis is drawn at, in logical px: E x UIScale, the TextBounds.Y above before the
+    /// rounding (export.rs `lone_ellipsis`)
+    pub cut_size: Option<f64>,
     pub weight: f64,
     pub style: String,
     /// Quad scale for the renderer (unfloored over floored pixel size), None when 1.
@@ -285,12 +288,11 @@ impl TextEngine {
             && result.lines.len() == 1
             && result.lines[0].truncated
             && result.lines[0].glyphs.iter().all(|glyph| glyph.is_ellipsis());
-        let exact_y = if cut_to_nothing {
+        let cut_size = cut_to_nothing.then(|| {
             let (_, scaled) = super::layout::rich_size_for(used_size, dpi, Some(object.family), Some(scale), effective_size);
             f32r(scaled * f32r(scale))
-        } else {
-            exact_y
-        };
+        });
+        let exact_y = cut_size.unwrap_or(exact_y);
         let (absolute_x, absolute_y) = (text_bounds(exact_x), text_bounds(exact_y));
 
         // Local (unscaled) bounds for automatic sizes: float32(bounds / UIScale), except that a whole
@@ -339,6 +341,7 @@ impl TextEngine {
             fit_x: local_bounds(exact_x),
             fit_y: local_bounds(exact_y),
             cut_to_nothing,
+            cut_size,
             weight: object.weight,
             style: object.style.to_string(),
             quad_scale,

@@ -226,7 +226,16 @@ fn hooks(lua: &Lua, engine: &Rc<Engine>, env: &LuaTable) -> LuaResult<()> {
 
 /// Runs `source` with the test hooks (and `globals`); panics with the script's error.
 fn run(options: Options, source: &str, globals: &[(&str, bool)]) {
+    run_with_fonts(options, source, globals, None);
+}
+
+/// [`run`], the text engine reading `fonts` (a test's own font set, engine::cli `own_fonts`) instead of the machine's
+fn run_with_fonts(options: Options, source: &str, globals: &[(&str, bool)], fonts: Option<&crate::engine::text::FontPaths>) {
     let (lua, engine) = start(options);
+    if let Some(fonts) = fonts {
+        use crate::engine::GuiEngine;
+        *engine.text().borrow_mut() = Some(crate::engine::text::TextEngine::new(fonts.clone()));
+    }
     let script = {
         let mut state = engine.state.borrow_mut();
         let class = engine.reflection.class_id("ModuleScript").unwrap();
@@ -1047,4 +1056,62 @@ assert(ByName["I180_180_0"].matrix ~= nil, "a whole turn (AbsoluteRotation 360) 
 "#,
         &[],
     );
+}
+
+/// A rich line its truncation cut to no glyph draws its lone ellipsis at E x UIScale logical px, E = floor(TextSize x
+/// UIScale) taken through the UIScale again (a client's glyph rasterized at that size: TextSize 26 under UIScale 1.3 at
+/// 1.5x is 64.35 px, from the 64 px raster, where the label's own text is 49.5 px from 49), aligned as that tall, at the
+/// pen the label's own ellipsis has (fixtures/text-probe-richtrunc-scaled.luau, -richtrunc-edge.luau). A label that
+/// keeps a grapheme draws its ellipsis at its own size.
+#[test]
+fn a_lone_ellipsis_is_drawn_at_its_size_taken_through_the_uiscale_twice() {
+    if crate::assets::tests::test_font().is_none() {
+        eprintln!("skipped: no test font (set RUR_TEST_FONT)");
+        return;
+    }
+    let directory = std::env::temp_dir().join(format!("rur-lone-ellipsis-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let fonts = crate::engine::cli::own_fonts(&directory, &crate::engine::default_repo());
+    run_with_fonts(
+        options(800.0, 600.0, 1.5),
+        r#"
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+local Holder = Instance.new("Frame", Root)
+Holder.Size = UDim2.fromOffset(500, 300)
+Instance.new("UIScale", Holder).Scale = 1.3
+local function Label(Name, Width, Align, Y)
+	local L = Instance.new("TextLabel", Holder)
+	L.Name = Name
+	L.FontFace = Font.new("rbxasset://fonts/families/SourceSansPro.json")
+	L.TextSize = 26
+	L.RichText = true
+	L.Text = "End of it"
+	L.TextTruncate = Enum.TextTruncate.AtEnd
+	L.TextYAlignment = Enum.TextYAlignment[Align]
+	L.Position = UDim2.fromOffset(10, Y)
+	L.Size = UDim2.fromOffset(Width, 40)
+end
+Label("LoneTop", 30, "Top", 0)
+Label("LoneBottom", 30, "Bottom", 50)
+Label("Kept", 80, "Top", 100)
+local ByName = {}
+for _, Node in Check(Root, "lone").nodes do ByName[Node.name] = Node end
+local function Glyphs(Node) return Node.text.lines[1].glyphs end
+local Lone, Bottom, Kept = ByName.LoneTop, ByName.LoneBottom, ByName.Kept
+assert(#Glyphs(Lone) == 1 and #Glyphs(Kept) > 1, "one ellipsis glyph alone, and kept text")
+local Ellipsis, Own = Glyphs(Lone)[1], Glyphs(Kept)[#Glyphs(Kept)]
+assert(Ellipsis[2] == Own[2], "the same ellipsis glyph")
+-- ppem = (size + 1) x units per em / height: 65 / 50 from the 64 px raster over the label's 49
+assert(math.abs(Ellipsis[4] / Own[4] - 65 / 50) < 1e-4, `raster {Ellipsis[4]} vs {Own[4]}`)
+assert(math.abs(Lone.text.quadScale - 64.35 / 64) < 1e-5, `quad scale {Lone.text.quadScale}`)
+assert(math.abs(Kept.text.quadScale - 49.5 / 49) < 1e-5, `the kept label's quad scale {Kept.text.quadScale}`)
+local Content = Bottom.text.content
+assert(math.abs(Lone.text.lines[1].top - Lone.text.content[2]) < 1e-6, "Top: at the content's top")
+assert(math.abs(Bottom.text.lines[1].top - (Content[2] + Content[4] - 64.35)) < 1e-3, `Bottom: {Bottom.text.lines[1].top} for a line 64.35 px tall in {Content[2]} + {Content[4]}`)
+"#,
+        &[],
+        Some(&fonts),
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
 }
