@@ -280,6 +280,21 @@ pub fn stroke_alpha_byte(coverage: f64, a: f64, ring: bool) -> u8 {
     ((t * 255. + 2047.) / 4096.).floor() as u8
 }
 
+/// The reach past the frame (logical px) up to which a sharp, unturned Round stroke has no outer margin: a pixel
+/// centre on its outer edge then falls by the top-left rule, one past it is empty. Measured at 1x, 1.5x, 2x, 2.5x
+/// and 3x (fixtures/stroke-probe-margin-scale.luau, Outer and Center): a reach of 1.70710 logical px has none, one
+/// of 1.707125 the 0.1 logical px margin, at every scale, so 1 + 1/sqrt(2). (Not 2 logical px, as 1x and 1.5x
+/// alone allowed: at 2x an Outer Thickness 1.75 stroke's right and bottom edge pixels are half covered, 3.5 px out.)
+pub const SHARP_REACH: f64 = 1.0 + std::f64::consts::FRAC_1_SQRT_2;
+
+/// A GPU snaps a quad's corners to 1/256 px before it fills the quad: an edge within 1/512 px of a pixel centre lies
+/// on it, and that centre falls by the top-left rule (fixtures/stroke-probe-snap.luau at 1x, 1.5x, 2x and 3x:
+/// strokes whose outer or inner edge is 0.0005 to 0.0015 px from a pixel centre, either side). `shift` is the
+/// device position of the local origin.
+fn gpu_snap(v: f64, shift: f64) -> f64 {
+    ((v + shift) * 256.0).round_ties_even() / 256.0 - shift
+}
+
 /// border_stroke_alpha_limited plus a mask that is 1 where the pixel's corner quadrant renders in ring
 /// mode (corner radius r > I, except Inner Miter / Bevel; stroke_alpha_byte converts those differently).
 #[allow(clippy::too_many_arguments)]
@@ -346,9 +361,7 @@ pub fn border_stroke_alpha_modes(
         } else if sharp && d == 0.0 {
             mode = Mode::Hard;
             margin = 0.0;
-        } else if sharp && d <= 2.0 * scale && (!rotated || mixed) {
-            // (up to 2 logical px: at 1.5x an edge 3 px out has no margin and one 3.375 px out has it, at 1x
-            // one 1.5 px out has none and one 2.5 px out has it: fixtures/stroke-sweep.luau at both scales)
+        } else if sharp && d <= SHARP_REACH * scale && (!rotated || mixed) {
             margin = 0.0;
         }
         Quadrant {
@@ -381,9 +394,15 @@ pub fn border_stroke_alpha_modes(
     let mut ring = vec![0u8; (gw * gh) as usize];
     // Under a translation each row's hole (pixels every branch below leaves at 0) is one span
     // around cx, skipped whole: on pill-shaped frames `interior` exceeds the half height and skips
-    // nothing. The span is shrunk by HOLE_MARGIN so pixels near its ends take the exact path.
-    const HOLE_MARGIN: f64 = 1e-4;
+    // nothing. The span is shrunk by HOLE_MARGIN so pixels near its ends take the exact path (more than the
+    // 1/512 px gpu_snap can move an edge).
+    const HOLE_MARGIN: f64 = 1.0 / 128.0;
     let translated = to_local[0] == 1.0 && to_local[1] == 0.0 && to_local[2] == 0.0 && to_local[3] == 1.0;
+    // Under a translation the edges a GPU fills to are snapped to its 1/256 px grid (gpu_snap; `shift` is the
+    // local origin's device position); a turned frame's are exact and its ties fall by the nudge below
+    let shift = [-to_local[4], -to_local[5]];
+    let snap = |v: f64, axis: usize| if turned { v } else { gpu_snap(v, shift[axis]) };
+    let (hx0, hx1, hy0, hy1) = (snap(x0 + inset, 0), snap(x1 - inset, 0), snap(y0 + inset, 1), snap(y1 - inset, 1));
     let [lx0, ly0] = apply(to_local, gx as f64 + 0.5, gy as f64 + 0.5);
     // The hole's half width left or right of cx in quadrant q on a row at local y (negative: none)
     let hole_half = |q: Quadrant, y: f64| -> f64 {
@@ -466,9 +485,9 @@ pub fn border_stroke_alpha_modes(
             // (500 + 1.4 + 0.1 rounds to 501.5), which is not (fixtures/stroke-fringe.luau at 1x, column 8)
             // (a turned frame's ties fall by the nudge above, which single precision would swamp)
             let (df, mf) = (d as f32, m as f32);
-            let low = |edge: f64| if turned { edge - d - m } else { ((edge as f32 - df) - mf) as f64 };
-            let high = |edge: f64| if turned { edge + d + m } else { ((edge as f32 + df) + mf) as f64 };
-            if x < low(x0) || x >= high(x1) || y < low(y0) || y >= high(y1) {
+            let low = |edge: f64, axis: usize| if turned { edge - d - m } else { snap(((edge as f32 - df) - mf) as f64, axis) };
+            let high = |edge: f64, axis: usize| if turned { edge + d + m } else { snap(((edge as f32 + df) + mf) as f64, axis) };
+            if x < low(x0, 0) || x >= high(x1, 0) || y < low(y0, 1) || y >= high(y1, 1) {
                 continue;
             }
             let u = (x - x0).min(x1 - x);
@@ -490,13 +509,7 @@ pub fn border_stroke_alpha_modes(
                 // (pixel centres, top-left rule) and ramps only inside each corner's square: an inner edge
                 // 0.3 px past a pixel centre leaves that pixel empty where equal radii leave it 0.2
                 // (fixtures/stroke-probe-mixed.luau)
-                if mixed
-                    && (qx <= 0.0 || qy <= 0.0)
-                    && x >= x0 + inset
-                    && x < x1 - inset
-                    && y >= y0 + inset
-                    && y < y1 - inset
-                {
+                if mixed && (qx <= 0.0 || qy <= 0.0) && x >= hx0 && x < hx1 && y >= hy0 && y < hy1 {
                     continue;
                 }
                 let screen_left = if turned { to_screen[0] * (x - cx) + to_screen[2] * (y - cy) < 0.0 } else { left };
@@ -525,9 +538,9 @@ pub fn border_stroke_alpha_modes(
                 // fixtures/stroke-modes.luau S10_8)
                 let flipped = position == "Inner" && q.sharp && !mixed;
                 let mut hole = if flipped {
-                    x > x0 + inset && x <= x1 - inset && y > y0 + inset && y <= y1 - inset
+                    x > hx0 && x <= hx1 && y > hy0 && y <= hy1
                 } else {
-                    x >= x0 + inset && x < x1 - inset && y >= y0 + inset && y < y1 - inset
+                    x >= hx0 && x < hx1 && y >= hy0 && y < hy1
                 };
                 if !flipped && hole && bevel && position == "Inner" {
                     let s = u + v - 3.0 * inset;
@@ -1091,6 +1104,98 @@ mod tests {
         assert_eq!(wide[12 * 24 + 5], 0.5);
         assert_eq!(wide[12 * 24 + 18], 0.5);
         assert_eq!(wide[18 * 24 + 12], 0.5);
+    }
+
+    /// The margin starts past 1 + 1/sqrt(2) logical px at every scale (fixtures/stroke-probe-margin-scale.luau at
+    /// 1x to 3x): at 2x an Outer stroke of Thickness 1.75 has its right and bottom edge pixels, 3.5 px out, half
+    /// covered (fixtures/stroke-sweep.luau, where 2 logical px left them empty), and one of 1.25 none; at 3x a
+    /// Thickness of 1.75 draws the pixel centred 0.25 px past its edge; at 2x and 2.5x a reach of 1.7071 logical
+    /// px leaves the pixel 0.0858 / 0.2322 px past its edge empty and one of 1.707125 draws it.
+    #[test]
+    fn a_sharp_stroke_gets_its_margin_past_one_plus_a_half_root_two_logical_px() {
+        let stroke = |thickness: f64, position: &str, scale: f64| {
+            border_stroke_alpha(
+                Rect::new(16.0, 16.0, 16.0, 16.0),
+                [0.0; 4],
+                (thickness as f32 * scale as f32) as f64,
+                position,
+                "Round",
+                [0, 0],
+                [48, 48],
+                super::super::geometry::IDENTITY,
+                false,
+                scale,
+            )
+        };
+        let at = |alpha: &[f32], x: usize, y: usize| alpha[y * 48 + x];
+        // 2x: the edge 3.5 px out: left/top half covered either way, right/bottom only with the margin
+        let thin = stroke(1.25, "Outer", 2.0);
+        assert_eq!((at(&thin, 13, 24), at(&thin, 34, 24), at(&thin, 24, 34)), (0.5, 0.0, 0.0));
+        let wide = stroke(1.75, "Outer", 2.0);
+        assert_eq!((at(&wide, 12, 24), at(&wide, 35, 24), at(&wide, 24, 35)), (0.5, 0.5, 0.5));
+        let center = stroke(3.5, "Center", 2.0);
+        assert_eq!((at(&center, 35, 24), at(&center, 24, 35)), (0.5, 0.5));
+        // 3x: 5.25 px out, the pixel 0.25 past it
+        let three = stroke(1.75, "Outer", 3.0);
+        assert!(at(&three, 10, 24) > 0.15 && at(&three, 37, 24) > 0.15);
+        let mid = stroke(1.5, "Outer", 3.0);
+        assert_eq!((at(&mid, 11, 24), at(&mid, 36, 24)), (0.5, 0.0));
+        // The bound itself, at 2x and 2.5x (the frame at 16 px: its right edge at 32)
+        for (scale, pixel) in [(2.0, 35), (2.5, 36)] {
+            assert_eq!(at(&stroke(1.7071, "Outer", scale), pixel, 24), 0.0, "{scale}x below");
+            assert!(at(&stroke(1.707125, "Outer", scale), pixel, 24) > 0.0, "{scale}x above");
+            assert_eq!(at(&stroke(2.0 * 1.7071, "Center", scale), pixel, 24), 0.0, "{scale}x Center below");
+            assert!(at(&stroke(2.0 * 1.707125, "Center", scale), pixel, 24) > 0.0, "{scale}x Center above");
+        }
+    }
+
+    /// A GPU fills a quad whose corners it snapped to 1/256 px: an edge 0.0005 to 0.0015 px beside a pixel centre is
+    /// on it (fixtures/stroke-probe-snap.luau at 1x, 1.5x, 2x and 3x). At 1.5x, a frame at whole pixels: an Outer
+    /// stroke reaching 2.4985 px draws its left and top edge pixels (outside the exact edge) half, one reaching
+    /// 2.5015 px leaves its right and bottom ones (inside the exact edge) empty; a Center stroke's hole takes the
+    /// pixel 0.0015 px short of its left edge and leaves the one 0.0015 px inside its right edge.
+    #[test]
+    fn stroke_edges_within_a_512th_of_a_pixel_centre_lie_on_it() {
+        let stroke = |reach: f64, position: &str| {
+            let thickness = if position == "Center" { 2.0 * reach } else { reach };
+            border_stroke_alpha(
+                Rect::new(16.0, 16.0, 16.0, 16.0),
+                [0.0; 4],
+                thickness,
+                position,
+                "Round",
+                [0, 0],
+                [48, 48],
+                super::super::geometry::IDENTITY,
+                false,
+                1.5,
+            )
+        };
+        let at = |alpha: &[f32], x: usize, y: usize| alpha[y * 48 + x];
+        let short = stroke(2.4985, "Outer");
+        assert!((at(&short, 13, 24) - 0.5).abs() < 0.01 && (at(&short, 24, 13) - 0.5).abs() < 0.01);
+        let long = stroke(2.5015, "Outer");
+        assert_eq!((at(&long, 34, 24), at(&long, 24, 34)), (0.0, 0.0));
+        // 0.0025 px away the edge is its own
+        assert_eq!(at(&stroke(2.4975, "Outer"), 13, 24), 0.0);
+        assert!(at(&stroke(2.5025, "Outer"), 34, 24) > 0.0);
+        // The hole of a Center stroke: from 16 + 2.5015 (the pixel at 18.5 is in it) to 32 - 2.4985 (29.5 is not)
+        assert_eq!(at(&stroke(2.5015, "Center"), 18, 24), 0.0);
+        assert_eq!(at(&stroke(2.4985, "Center"), 29, 24), 1.0);
+        // Under a translation the grid is the screen's: the same frame one pixel further gives the same pixels
+        let moved = border_stroke_alpha(
+            Rect::new(17.25, 16.0, 16.0, 16.0),
+            [0.0; 4],
+            2.4985,
+            "Outer",
+            "Round",
+            [0, 0],
+            [48, 48],
+            [1.0, 0.0, 0.0, 1.0, 1.25, 0.0],
+            false,
+            1.5,
+        );
+        assert_eq!(&moved[..], &short[..]);
     }
 
     #[test]
