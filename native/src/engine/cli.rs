@@ -2609,3 +2609,71 @@ mod font_tests {
         let _ = std::fs::remove_dir_all(&directory);
     }
 }
+
+#[cfg(test)]
+mod text_measure_tests {
+    use super::*;
+
+    const FIXTURE: &str = r#"return function(Target)
+	local function Label(Props, Parent)
+		local L = Instance.new(Props.Class or "TextLabel")
+		L.FontFace = Font.new("rbxasset://fonts/families/SourceSansPro.json")
+		Props.Class = nil
+		for Key, Value in Props do
+			L[Key] = Value
+		end
+		L.Parent = Parent or Target
+		return L
+	end
+	local Scaled = Instance.new("Frame")
+	Scaled.Size = UDim2.fromOffset(300, 200)
+	Scaled.Parent = Target
+	local UIScale = Instance.new("UIScale")
+	UIScale.Scale = 0.885
+	UIScale.Parent = Scaled
+	local Cut = Label({ RichText = true, Text = "Hello", TextSize = 17, TextTruncate = Enum.TextTruncate.AtEnd, Size = UDim2.fromOffset(1, 30) }, Scaled)
+	local Whole = Label({ RichText = true, Text = "Hello", TextSize = 17, TextTruncate = Enum.TextTruncate.AtEnd, Size = UDim2.fromOffset(200, 30) }, Scaled)
+	local Tiny = Label({ RichText = true, Text = "Hi", TextSize = 1, Size = UDim2.fromOffset(100, 30) })
+	local TinyPlain = Label({ Text = "Hi", TextSize = 1, Size = UDim2.fromOffset(100, 30) })
+	local TinyLines = Label({ RichText = true, Text = "a\nb", TextSize = 1, Size = UDim2.fromOffset(100, 30) })
+	Label({ Class = "TextBox", Name = "Placeholder", Text = "", PlaceholderText = "Search here", MaxVisibleGraphemes = 4, Size = UDim2.fromOffset(200, 30) })
+	Label({ Class = "TextBox", Name = "RichPlaceholder", RichText = true, Text = "", PlaceholderText = "<b>Hi</b>", Size = UDim2.fromOffset(200, 30) })
+	task.spawn(function()
+		task.wait(0.05)
+		print(string.format("cut %.3f whole %.3f tiny %.3f plain %.3f lines %.3f", Cut.TextBounds.Y, Whole.TextBounds.Y, Tiny.TextBounds.Y, TinyPlain.TextBounds.Y, TinyLines.TextBounds.Y))
+	end)
+end
+"#;
+
+    /// Measured in a Roblox 0.747 client at 1.5x (fixtures/text-probe-richtrunc-scaled.luau, text-probe-placeholder.luau,
+    /// the tiny-size probes in notes/text.md): rich text whose truncation keeps no glyph reports TextBounds.Y = E x UIScale
+    /// (15 x 0.885 = 13.275, rounded up to 14, where its line is 14.667, 15); a rich line of 1 px glyphs is 2 px tall (a
+    /// plain one 1 px); an empty TextBox's placeholder is cut by MaxVisibleGraphemes and laid out as plain text, tags
+    /// and all, under RichText.
+    #[test]
+    fn truncated_rich_text_tiny_rich_lines_and_placeholders_measure_as_the_client() {
+        let directory = std::env::temp_dir().join(format!("rur-text-measure-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let fixture = directory.join("labels.luau");
+        std::fs::write(&fixture, FIXTURE).unwrap();
+        let repo = crate::engine::default_repo();
+        let args = parse(&[
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--fixture".into(), fixture.to_string_lossy().into_owned(),
+            "--viewport".into(), "400x300".into(), "--time".into(), "0.2".into(), "--no-snapshots".into(),
+        ])
+        .unwrap();
+        let output = run_once_with_fonts(&args, &own_fonts(&directory, &repo)).unwrap();
+        assert_eq!(output.status, "ok", "{}", output.text);
+        let scene = &output.scene;
+        let printed: Vec<&str> = scene["diagnostics"]["output"].as_array().into_iter().flatten().filter_map(|line| line["message"].as_str()).collect();
+        assert_eq!(printed, vec!["cut 14.000 whole 15.000 tiny 2.000 plain 1.000 lines 3.000"], "{}", output.text);
+        let text = |name: &str| scene["nodes"].as_array().into_iter().flatten().find(|node| node["path"].as_str().is_some_and(|path| path.ends_with(name))).map(|node| node["text"].clone()).unwrap_or_default();
+        let placeholder = text(".Placeholder");
+        assert_eq!(placeholder["lines"][0]["shown"], serde_json::json!(4), "{placeholder}");
+        let rich = text(".RichPlaceholder");
+        let glyphs = rich["lines"].as_array().into_iter().flatten().map(|line| line["glyphs"].as_array().map_or(0, Vec::len)).sum::<usize>();
+        assert_eq!((glyphs, rich["runs"].is_null()), ("<b>Hi</b>".len(), true), "{rich}");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}

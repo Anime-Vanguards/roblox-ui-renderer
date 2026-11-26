@@ -96,7 +96,7 @@ function describe(node) {
 	if (node.text) {
 		const props = node.props || {};
 		const text = String(props.text ?? "").replace(/\n/g, "\\n");
-		parts.push(`text=${JSON.stringify(text.length > 60 ? text.slice(0, 57) + "..." : text)} size=${node.text.textSize} bounds=${round(node.text.width / SCALE)}x${round(node.text.height / SCALE)}`);
+		parts.push(`text=${JSON.stringify(text.length > 60 ? text.slice(0, 57) + "..." : text)} size=${node.text.textSize} bounds=${(node.text.bounds || [node.text.width, node.text.height].map(pixels => Math.ceil(Math.fround(pixels / SCALE)))).map(round).join("x")}`);
 	}
 	if (node.path2d) parts.push(`path=${round(node.path2d.thickness)}${hex(node.path2d.color)} segments=${node.path2d.segments.length}${node.path2d.closed ? " closed" : ""}`);
 	if (node.scroll) parts.push(`scroll canvas=${node.scroll.canvas.slice(2).map(round).join("x")}`);

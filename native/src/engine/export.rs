@@ -214,6 +214,7 @@ impl Classes {
 /// Property names outside `K` (resolved once per build).
 struct Names {
     placeholder_color3: Option<NameId>,
+    placeholder_text: Option<NameId>,
     text_stroke_transparency: Option<NameId>,
     text_stroke_color3: Option<NameId>,
     text_truncate: Option<NameId>,
@@ -229,6 +230,7 @@ impl Names {
         let id = |name: &str| reflection.name_id(name);
         Names {
             placeholder_color3: id("PlaceholderColor3"),
+            placeholder_text: id("PlaceholderText"),
             text_stroke_transparency: id("TextStrokeTransparency"),
             text_stroke_color3: id("TextStrokeColor3"),
             text_truncate: id("TextTruncate"),
@@ -1120,19 +1122,24 @@ fn text_lines(
     Some((Json::Array(lines), content))
 }
 
-/// MaxVisibleGraphemes per line (text/reveal.rs); None when it hides nothing. A TextBox's placeholder is
-/// drawn whole (not measured).
+/// MaxVisibleGraphemes per line (text/reveal.rs); None when it hides nothing. Measured (fixtures/
+/// text-probe-placeholder.luau, Roblox 0.747 client): an empty TextBox's placeholder is cut like Text, its layout
+/// (alignment, truncation, TextScaled size, TextBounds) kept whole: N 4 draws "Sear", centred where the whole line
+/// starts, and a truncated placeholder at N 5 "Searc…".
 fn text_reveal(ctx: &Ctx, text: &TextEngine, id: InstanceId, result: &TextLayout) -> Option<Vec<Option<LineReveal>>> {
     let max = ctx.get_opt(id, ctx.n.max_visible_graphemes).and_then(Value::as_number)?;
     if max < 0.0 {
         return None;
     }
-    let source = match ctx.get(id, K::Text as NameId) {
+    let mut source = match ctx.get(id, K::Text as NameId) {
         Some(Value::String(s)) => s.as_bytes(),
         _ => b"",
     };
     if source.is_empty() && ctx.is(id, ctx.c.text_box) {
-        return None;
+        source = match ctx.get_opt(id, ctx.n.placeholder_text) {
+            Some(Value::String(s)) => s.as_bytes(),
+            _ => b"",
+        };
     }
     text.reveal(result, source, max)
 }
@@ -1218,6 +1225,11 @@ fn text_static(ctx: &Ctx, text: &mut TextEngine, id: InstanceId, record: &Record
     export.insert("lineHeight".into(), number(result.line_height));
     export.insert("height".into(), number(result.height));
     export.insert("width".into(), number(result.width));
+    // TextBounds where they are not the laid-out size (rounded up to whole logical px: text/measure.rs text_bounds):
+    // an unwrapped rich line its truncation cut to no glyph
+    if info.cut_to_nothing {
+        export.insert("bounds".into(), numbers(&[info.absolute_x, info.absolute_y]));
+    }
     export.insert("xAlign".into(), Json::String(x_align));
     export.insert("yAlign".into(), Json::String(y_align));
     insert_str(&mut export, "truncate", ctx.enum_name(ctx.get_opt(id, ctx.n.text_truncate)));

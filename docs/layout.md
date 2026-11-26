@@ -66,10 +66,13 @@ With `--topbar-inset <px>` (e.g., `58`), scripts read `AbsolutePosition` in Robl
 ## Text boxes
 
 - **Physical size:** `floor(floor(TextSize * UIScale) * DPI)` in `f32`. `TextBounds` is reported in absolute (scaled) pixels.
+- **`TextBounds` round up** to a whole logical pixel (`FFlagTextBoundsRoundUpToLogicalPixels`, on in production clients and Studio), and so do `TextService:GetTextSize` and `GetTextBoundsAsync`. An `AutomaticSize` label takes the rounded bounds; line breaks, `TextScaled`'s size and `TextFits` use the unrounded ones.
+- A rich line of 1 px glyphs (`TextSize` 1 at 1.5x, or a `<font size>` that small) is 2 px tall; a plain one, or a size `TextScaled` picked, 1 px.
+- An empty `TextBox` lays out its `PlaceholderText` as plain text, tags and all, even with `RichText` on, and `MaxVisibleGraphemes` cuts the placeholder as it cuts `Text`.
 - **Line fitting:** Plain text fits a box if `W <= f32(box * DPI)`; rich text only wraps when a line exceeds that by at least `1 px`.
 - Unwrapped lines wider than their box drop trailing whitespace from reported width if doing so makes them fit. Wrapped `TextBounds.X` spans all lines, including lines clipped vertically.
 - Word wrap moves a word to a new line only if more of it fits on a fresh line than on the remainder of the current line; otherwise it splits mid-word.
-- **`TextTruncate`:** Measures ellipsis (`…`, U+2026) using its rounded advance. `AtEnd` keeps the longest whole-word prefix (or character prefix of the first word); `SplitWord` keeps the longest character prefix plus trailing whitespace. `TextBounds` reflects the visible truncated text.
+- **`TextTruncate`:** Measures ellipsis (`…`, U+2026) using its rounded advance. `AtEnd` keeps the longest whole-word prefix (or character prefix of the first word); `SplitWord` keeps the longest character prefix plus trailing whitespace. `TextBounds` reflects the visible truncated text. An unwrapped rich line cut so short that not even its first grapheme and the ellipsis fit reports `TextBounds.Y = E * UIScale` (`E = floor(TextSize * UIScale)`, so `UIScale` is applied twice) instead of its line height.
 - **`TextScaled`:** Picks the largest integer size where no word splits and all lines fit (stepping UIScale'd logical sizes for plain text, physical sizes for rich text). Enabling `TextScaled` forces `TextWrapped = true`; disabling `TextWrapped` clears `TextScaled`.
 
 See [text.md](text.md) for glyph metrics, font fallbacks, and text rasterization.

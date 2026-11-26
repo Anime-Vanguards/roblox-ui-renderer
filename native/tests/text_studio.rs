@@ -260,16 +260,10 @@ fn text_bounds_sweep() {
 /// runtime/tests/text_wrap.luau: wrapped layout against data/studio/wrap-1.5x.json.
 #[test]
 fn text_wrap() {
+    // (measured again in a Roblox 0.747 client, quarter-pixel text, 2026-11-26: Studio 0.746 wrapped "a  b   c    d"
+    // at runs of spaces 14 and 11 px wide, the client as rur, 44 and 38)
     let (hits, total, misses) = wrap_hits("data/studio/wrap-1.5x.json", true);
-    assert_eq!((hits, total), (538, 540), "wrap-1.5x.json misses: {misses:#?}");
-    // The known misses: runs of spaces at a break (the Luau reference missed the same kind of case).
-    assert_eq!(
-        misses,
-        vec![
-            "SourceSansPro s=20 w=30 t=3 \"a  b   c    d\" studio=(14,60) ours=(44,60) lines=2".to_string(),
-            "FredokaOne s=14 w=30 t=3 \"a  b   c    d\" studio=(11,42) ours=(38,42) lines=2".to_string(),
-        ]
-    );
+    assert_eq!((hits, total), (540, 540), "wrap-1.5x.json misses: {misses:#?}");
 }
 
 /// The wrapped layouts of a wrap dataset that have Studio's TextBounds, and the first misses.

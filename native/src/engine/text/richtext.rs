@@ -518,6 +518,10 @@ impl TextEngine {
             paragraph_sizes: &shaped.paragraph_sizes,
             cache_key: &shaped.cache_key,
             empty_height,
+            // Measured (Roblox 0.747 client, 1.5x: TextSize 1, sizes UIScale floors to 1 px, a <font size="1"> line,
+            // LineHeight 2; 24 of 24 values): a rich line of 1 px glyphs is 2 px tall (plain text: 1 px); a size
+            // TextScaled picks keeps its 1 px line (rich TextScaled in 1 .. 1.5 px boxes)
+            min_line: if params.pixel_size.is_none() { 2.0 } else { 0.0 },
         };
         let runs = parsed.runs.clone();
         self.layout_core(&copy, Some(&prepared), Some(&runs))

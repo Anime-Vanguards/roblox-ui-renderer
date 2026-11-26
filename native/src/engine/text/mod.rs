@@ -71,6 +71,7 @@ pub(crate) struct MeasureKey<'a> {
     pub line_factor: u64,
     pub truncate: Truncate,
     pub empty_height: u64,
+    pub min_line: u64,
     pub cache_key: &'a str,
     pub text: &'a [u8],
 }
@@ -185,7 +186,7 @@ impl TextEngine {
     }
 
     fn measure_numbers(key: &MeasureKey) -> [u64; 8] {
-        [key.weight, key.size, key.max_width, key.max_height, key.box_width, key.line_factor, key.empty_height, 0]
+        [key.weight, key.size, key.max_width, key.max_height, key.box_width, key.line_factor, key.empty_height, key.min_line]
     }
 
     pub(crate) fn measure_lookup(&self, hash: u64, key: &MeasureKey) -> Option<Arc<TextLayout>> {

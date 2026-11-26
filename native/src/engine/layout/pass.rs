@@ -204,6 +204,22 @@ fn number_key(value: f64) -> u64 {
     if value.is_nan() { f64::NAN.to_bits() } else { value.to_bits() }
 }
 
+/// Whether a text object shows its PlaceholderText: an empty TextBox.
+fn shows_placeholder(state: &State, ids: &Ids, reflection: &Reflection, id: InstanceId) -> bool {
+    let empty = match state.dom.raw_get(id, ids.n.Text) {
+        Some(Value::String(s)) => s.as_bytes().is_empty(),
+        _ => true,
+    };
+    empty && reflection.class(state.dom.at(id).class).is_a(ids.c.TextBox)
+}
+
+/// RichText as the text is laid out. Measured (fixtures/text-probe-placeholder.luau, Roblox 0.747 client): a
+/// placeholder is plain text under RichText too, its tags shown and measured ("<b>Search</b> for <i>items</i>" is 257 px
+/// wide at TextSize 24, where the rich text would be 134).
+fn lays_out_rich(state: &State, ids: &Ids, reflection: &Reflection, id: InstanceId) -> bool {
+    matches!(state.dom.raw_get(id, ids.n.RichText), Some(Value::Bool(true))) && !shows_placeholder(state, ids, reflection, id)
+}
+
 /// DisplayText: Text, or PlaceholderText for an empty TextBox.
 fn display_text<'s>(state: &'s State, ids: &Ids, reflection: &Reflection, id: InstanceId) -> &'s [u8] {
     let text = match state.dom.raw_get(id, ids.n.Text) {
@@ -256,7 +272,7 @@ fn text_object<'s>(state: &'s State, ids: &Ids, reflection: &Reflection, id: Ins
         });
     TextObject {
         text: display_text(state, ids, reflection, id),
-        rich: is_true(n.RichText),
+        rich: lays_out_rich(state, ids, reflection, id),
         family: std::str::from_utf8(family).unwrap_or(""),
         weight,
         style: if italic { "italic" } else { "normal" },
@@ -541,7 +557,7 @@ impl<'a> Pass<'a> {
             weight: number_key(weight),
             italic,
             text_size: self.num(id, n.TextSize).map(number_key),
-            rich: self.is_true(id, n.RichText),
+            rich: lays_out_rich(self.state, &self.l.ids, self.reflection, id),
             line_height: self.num(id, n.LineHeight).map(number_key),
             x_alignment: match self.get(id, n.TextXAlignment) {
                 Some(Value::EnumItem(item)) => Some(*item),
@@ -2568,9 +2584,10 @@ impl<'a> Pass<'a> {
             let box_h = record.content.h / record.scale;
             let slack_w = lmax(1e-6, box_w * 4.0 * f64::from(f32::EPSILON));
             let slack_h = lmax(1e-6, box_h * 4.0 * f64::from(f32::EPSILON));
+            // (the text as laid out, not TextBounds rounded up to whole logical px: measure.rs text_bounds)
             let fits = info.layout.fits
-                && info.bounds_x <= box_w + slack_w
-                && info.bounds_y <= box_h + slack_h;
+                && info.fit_x <= box_w + slack_w
+                && info.fit_y <= box_h + slack_h;
             self.set_bool(id, n_fits, fits);
             record.text = Some(info);
         }

@@ -707,8 +707,11 @@ export function compareLayout(studioNodes, scene, dpi, targetOffset) {
 		if (error <= 1) within1++;
 		const row = { path: studio.path, class: studio.class, error: +error.toFixed(3), studio: [studio.x - targetOffset[0], studio.y - targetOffset[1], studio.w, studio.h].map(v => +v.toFixed(3)), ours: [x, y, w, h] };
 		if (studio.tbx !== undefined && node.text) {
-			row.textBounds = { studio: [studio.tbx, studio.tby], ours: [node.text.width / dpi, node.text.height / dpi] };
-			row.textError = Math.max(Math.abs(studio.tbx - node.text.width / dpi), Math.abs(studio.tby - node.text.height / dpi));
+			// TextBounds: the text's logical size rounded up to whole logical px (native/src/engine/text/measure.rs
+			// text_bounds), or the scene's `bounds` where they are not the laid-out size
+			const ours = node.text.bounds || [node.text.width, node.text.height].map(pixels => Math.ceil(Math.fround(pixels / dpi)));
+			row.textBounds = { studio: [studio.tbx, studio.tby], ours };
+			row.textError = Math.max(Math.abs(studio.tbx - ours[0]), Math.abs(studio.tby - ours[1]));
 		}
 		if (studio.props) {
 			const diffs = propertyDiffs(studio.props, node);

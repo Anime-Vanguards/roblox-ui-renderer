@@ -176,6 +176,8 @@ pub(crate) struct Prepared<'p> {
     pub paragraph_sizes: &'p [f64],
     pub cache_key: &'p str,
     pub empty_height: Option<f64>,
+    /// The least height of a line with glyphs, px (`RichText.Layout`: 2 unless TextScaled picks the size; 0: none)
+    pub min_line: f64,
 }
 
 #[inline]
@@ -1065,6 +1067,8 @@ impl TextEngine {
         hasher.u64(line_factor.to_bits());
         hasher.u64(truncate as u64);
         hasher.u64(opt_bits(empty_height));
+        let min_line = prepared.map_or(0.0, |prepared| prepared.min_line);
+        hasher.u64(min_line.to_bits());
         hasher.bytes(cache_key.as_bytes());
         hasher.bytes(params.text);
         let key = super::MeasureKey {
@@ -1078,6 +1082,7 @@ impl TextEngine {
             line_factor: line_factor.to_bits(),
             truncate,
             empty_height: opt_bits(empty_height),
+            min_line: min_line.to_bits(),
             cache_key,
             text: params.text,
         };
@@ -1131,6 +1136,9 @@ impl TextEngine {
             let mut height: f64 = 0.0;
             for glyph in &lines[index].glyphs {
                 height = lmax(height, glyph.size);
+            }
+            if !lines[index].glyphs.is_empty() {
+                height = lmax(height, min_line);
             }
             if lines[index].glyphs.is_empty() {
                 height = lines[index].default_size;

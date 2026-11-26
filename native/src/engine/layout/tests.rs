@@ -423,12 +423,69 @@ fn automatic_canvas_size_applies_size_and_aspect_constraints() {
     assert_eq!(lines.last().map(String::as_str), Some("print: checked 10, bad 0"), "{lines:#?}");
 }
 
+/// TextBounds, an automatic label's size and TextService's sizes are the text's logical size rounded up to a whole
+/// logical px (FFlagTextBoundsRoundUpToLogicalPixels, on in production clients): a Roblox 0.747 client at 1.5x
+/// reports these (text/measure.rs text_bounds; unrounded, "Max Players" is 79.333 px, under UIScale 0.9 72.667).
+#[test]
+fn text_bounds_round_up_to_whole_logical_pixels() {
+    let script = r#"
+        return function(Target)
+            local Face = Font.new("rbxasset://fonts/families/SourceSansPro.json")
+            local function Label(Parent, Rich, Automatic)
+                local L = Instance.new("TextLabel")
+                L.FontFace = Face
+                L.TextSize = 20
+                L.RichText = Rich
+                L.Text = "Max Players"
+                if Automatic then
+                    L.AutomaticSize = Enum.AutomaticSize.XY
+                    L.Size = UDim2.new()
+                else
+                    L.Size = UDim2.fromOffset(280, 100)
+                end
+                L.Parent = Parent
+                return L
+            end
+            local Scaled = Instance.new("Frame")
+            Scaled.Size = UDim2.fromOffset(300, 200)
+            Scaled.Parent = Target
+            local UIScale = Instance.new("UIScale")
+            UIScale.Scale = 0.9
+            UIScale.Parent = Scaled
+            local Cases = { plain = Label(Target, false, false), rich = Label(Target, true, false), auto = Label(Target, false, true), scaled = Label(Scaled, true, false), scaledAuto = Label(Scaled, true, true) }
+            task.spawn(function()
+                task.wait(0.05)
+                for _, Name in { "plain", "rich", "auto", "scaled", "scaledAuto" } do
+                    local L = Cases[Name]
+                    print(string.format("%s %.3f %.3f %.3f %.3f", Name, L.TextBounds.X, L.TextBounds.Y, L.AbsoluteSize.X, L.AbsoluteSize.Y))
+                end
+                local Size = game:GetService("TextService"):GetTextSize("Hello world", 17, Enum.Font.SourceSans, Vector2.new(1000, 1000))
+                print(string.format("GetTextSize %.3f %.3f", Size.X, Size.Y))
+            end)
+        end
+    "#;
+    let lines = run(script, 1.5, 0.2);
+    let printed: Vec<&str> = lines.iter().filter_map(|line| line.strip_prefix("print: ")).collect();
+    assert_eq!(
+        printed,
+        vec![
+            "plain 80.000 20.000 280.000 100.000",
+            "rich 80.000 20.000 280.000 100.000",
+            "auto 80.000 20.000 80.000 20.000",
+            "scaled 73.000 18.000 252.000 90.000",
+            "scaledAuto 73.000 18.000 73.000 18.000",
+            "GetTextSize 65.000 17.000",
+        ],
+        "{lines:#?}"
+    );
+}
+
 /// AutomaticSize with UIPadding and UISizeConstraint against a Roblox 0.747 client's rects
 /// (data/studio/whole/autosize-constraint.json): on an automatic axis the constraint bounds the content inside the
 /// padding offsets (MinSize 22 and 6 + 6 px of padding make a label holding 8 px of text 34 wide), MaxSize then caps
 /// the object but its children still push it past the cap, an automatic parent measures a capped child at the size
-/// its content asked for, and a MinSize above MaxSize switches the constraint off. Cells whose text measures
-/// differently from Studio's are counted apart: their sizes follow the text, not these rules.
+/// its content asked for, and a MinSize above MaxSize switches the constraint off. Automatic labels take their
+/// TextBounds rounded up to whole logical px (text/measure.rs text_bounds), as the client does.
 #[test]
 fn automatic_size_constraints_bound_the_content_inside_the_padding() {
     let studio: serde_json::Value = serde_json::from_str(include_str!("../../../../data/studio/whole/autosize-constraint.json")).expect("measurements");
@@ -436,7 +493,7 @@ fn automatic_size_constraints_bound_the_content_inside_the_padding() {
         ("layout-autosize-constraint", include_str!("../../../../fixtures/layout-autosize-constraint.luau")),
         ("layout-autosize-constraint2", include_str!("../../../../fixtures/layout-autosize-constraint2.luau")),
     ];
-    let (mut compared, mut text_cells, mut misses) = (0, 0, Vec::new());
+    let (mut compared, mut misses) = (0, Vec::new());
     for (name, source) in fixtures {
         let script = format!(
             r#"
@@ -473,30 +530,17 @@ fn automatic_size_constraints_bound_the_content_inside_the_padding() {
         let ours: serde_json::Value = serde_json::from_str(&json).unwrap();
         let expected = studio["fixtures"][name].as_object().unwrap();
         let values = |value: &serde_json::Value| -> Vec<f64> { value.as_array().map(|items| items.iter().filter_map(|v| v.as_f64()).collect()).unwrap_or_default() };
-        let cell_of = |path: &str| path.split('/').nth(1).unwrap_or("").to_string();
-        // Cells holding text that measures differently from Studio's
-        let mut text_differs = std::collections::HashSet::new();
-        for (path, want) in expected {
-            let (want, got) = (values(want), values(&ours[path]));
-            if want.len() == 6 && (got.len() != 6 || (want[4] - got[4]).abs() > 0.01) {
-                text_differs.insert(cell_of(path));
-            }
-        }
         for (path, want) in expected {
             let (want, got) = (values(want), values(&ours[path]));
             compared += 1;
-            let same = got.len() >= 4 && (0..4).all(|k| (want[k] - got[k]).abs() < 0.01);
+            // (rect, then TextBounds for text objects)
+            let same = got.len() == want.len() && (0..want.len()).all(|k| (want[k] - got[k]).abs() < 0.01);
             if same {
                 continue;
             }
-            if text_differs.contains(&cell_of(path)) {
-                text_cells += 1;
-                continue;
-            }
-            misses.push(format!("{name} {path}: Studio {:?}, ours {got:?}", &want[..4]));
+            misses.push(format!("{name} {path}: Studio {want:?}, ours {got:?}"));
         }
     }
-    eprintln!("compared {compared}, {text_cells} differing only through their text's width");
     assert!(misses.is_empty(), "{} of {compared} rects differ from Studio's:\n{}", misses.len(), misses.join("\n"));
     assert!(compared > 260, "only {compared} rects compared");
 }

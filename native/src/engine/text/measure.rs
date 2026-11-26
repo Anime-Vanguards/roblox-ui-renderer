@@ -48,16 +48,32 @@ pub struct TextMeasure {
     pub effective_size: f64,
     /// DPI x UIScale.
     pub pixel_scale: f64,
-    /// TextBounds in absolute (UIScale-multiplied) logical px.
+    /// TextBounds in absolute (UIScale-multiplied) logical px, rounded up to whole logical px
+    /// ([`text_bounds`]).
     pub absolute_x: f64,
     pub absolute_y: f64,
-    /// Local (unscaled) bounds for automatic sizes.
+    /// Local (unscaled) bounds for automatic sizes, from the rounded TextBounds.
     pub bounds_x: f64,
     pub bounds_y: f64,
+    /// Local (unscaled) bounds of the text as laid out, before the rounding: what TextFits compares with
+    /// the box.
+    pub fit_x: f64,
+    pub fit_y: f64,
+    /// An unwrapped rich line its truncation cut to no glyph: TextBounds.Y is not the layout's height (E x UIScale)
+    pub cut_to_nothing: bool,
     pub weight: f64,
     pub style: String,
     /// Quad scale for the renderer (unfloored over floored pixel size), None when 1.
     pub quad_scale: Option<f64>,
+}
+
+/// TextBounds (and TextService's sizes) from the laid-out text's logical size: rounded up to a whole logical px.
+/// Measured (a Roblox 0.747 client, FFlagTextBoundsRoundUpToLogicalPixels, on in production clients
+/// and Studio): with the flag every TextBounds is the unrounded value rounded up (1.5x: 480/480 labels at UIScale
+/// 0.625 .. 1.25, 2640/2640 Montserrat / FredokaOne values; 2x and 3x likewise; 1x is already whole), and AutomaticSize
+/// takes the rounded value; line breaks, TextScaled's size and TextFits still use the unrounded one.
+pub fn text_bounds(exact: f64) -> f64 {
+    exact.ceil()
 }
 
 /// Largest candidate in [low, high] that fits (low when none does), for fitting sizes that form a
@@ -252,11 +268,30 @@ impl TextEngine {
         // Measured: TextBounds is in absolute (UIScale-multiplied) px; BoundsX/Y stay local for sizing.
         // Plain text converts with the float32 reciprocal of the DPI scale (layout-probe-uiscaletext
         // 396/396 bit-exact); rich text divides (layout-probe-richsize 424/424).
-        let (absolute_x, absolute_y) = if rich {
+        let (exact_x, exact_y) = if rich {
             (f32r(result.width / dpi), f32r(result.height / dpi))
         } else {
             (f32r(result.width * inverse), f32r(result.height * inverse))
         };
+        // Measured (Roblox 0.747 client, 1.5x, SourceSans 17 / 18 / 26 at UIScale 0.885 / 0.9 / 1.3, box widths 1 .. 45 local
+        // px, AtEnd and SplitWord: 2880 values): an unwrapped rich line cut so short that it keeps no glyph (its
+        // ellipsis alone, or nothing) reports TextBounds.Y = E x UIScale, the scaled size E taken through the UIScale
+        // again (13.275 for TextSize 17 at 0.885, where its line is 14.667); from the width at which the first
+        // grapheme and the ellipsis fit, the line's own height. TextBounds.X is the kept text's, as before. (TextScaled
+        // text is left out: not measured.)
+        let cut_to_nothing = rich
+            && !wrapped
+            && !object.scaled
+            && result.lines.len() == 1
+            && result.lines[0].truncated
+            && result.lines[0].glyphs.iter().all(|glyph| glyph.is_ellipsis());
+        let exact_y = if cut_to_nothing {
+            let (_, scaled) = super::layout::rich_size_for(used_size, dpi, Some(object.family), Some(scale), effective_size);
+            f32r(scaled * f32r(scale))
+        } else {
+            exact_y
+        };
+        let (absolute_x, absolute_y) = (text_bounds(exact_x), text_bounds(exact_y));
 
         // Local (unscaled) bounds for automatic sizes: float32(bounds / UIScale), except that a whole
         // number of px that would come back below itself (float32(local x UIScale) < bounds) rounds up
@@ -301,6 +336,9 @@ impl TextEngine {
             absolute_y,
             bounds_x: local_bounds(absolute_x),
             bounds_y: local_bounds(absolute_y),
+            fit_x: local_bounds(exact_x),
+            fit_y: local_bounds(exact_y),
+            cut_to_nothing,
             weight: object.weight,
             style: object.style.to_string(),
             quad_scale,

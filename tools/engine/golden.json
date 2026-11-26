@@ -213,15 +213,15 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize": {
-			"digest": "8de257ecafc43cdf477c5462fd8cef26512bd176663151ead03f9f4ad7fe31fd",
+			"digest": "a35253c88a80ecd37ee03cedf32678019caea5828873935686952658be625ebf",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-constraint": {
-			"digest": "6ecc428e42228971acc7aa630d2a74d985ea882f3e1284f55b9b799846f40876",
+			"digest": "2e810ec7ab0fcb8560693109355a7799c7b3ac4b43db7d95c3cee4aacaf99a75",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-constraint2": {
-			"digest": "2f75e35d485ef0e66a3f7415836da3410b5f5cb9c183295566803ea6e9ad16b0",
+			"digest": "f7ea882d69ffe4f47c58006defe7f1dc10b82a55244a80cdddef55f3c3cf3e28",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-constraint3": {
@@ -229,27 +229,27 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-offscreen": {
-			"digest": "72011676575336c7b1c87bdf6f9729eb677f43fc182383c6deef9e8ba2af8738",
+			"digest": "15eae8312c93c8f6546f30be3acc68a718ee161d8c181e23a68ca153b35f561b",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-prompt": {
-			"digest": "a21d10cf9ed33492d75f52c4879a8bd31c5fbf7891738f42406555d6f82aeb84",
+			"digest": "4ebdd26e2b756151366246c140e1d7fcba8a28a75c143140ae2a250bf37976ec",
 			"status": "ok"
 		},
 		"fast/edit/layout-autotext-linefit": {
-			"digest": "f7136e47f75e6f2450dbb4bf3e2ba458dbe4911208d2548df14c20e38d0ce2fe",
+			"digest": "023e25e7f9479533019a06076daf86ba134ec5dff7adb20540334655666dc773",
 			"status": "ok"
 		},
 		"fast/edit/layout-autotext-matrix": {
-			"digest": "44a65ec445db398c6d8bd98926ffe518117dbbb015ee8dccc08bf26e36871d8b",
+			"digest": "7baf46590b889bf01c0ca81db6b1da047114343560bbdb9d09e3ffa5cadde200",
 			"status": "ok"
 		},
 		"fast/edit/layout-dynamic": {
-			"digest": "d276a21e0b85c5ba497f1e0533c234f11ad86943212192b150940dd0f5462405",
+			"digest": "c922021df8214681e46b96bf955b15b2831799f1340f8958b8ef04cfd9be71d9",
 			"status": "ok"
 		},
 		"fast/edit/layout-f32-lists": {
-			"digest": "1591eef5c006f5293d8201027f347f4da0603a71cf180aa39facb1f658e3dbde",
+			"digest": "47549ccfa45f18c18f7156a6745feefea8333c7659e6bb25c379fb2e68493524",
 			"status": "ok"
 		},
 		"fast/edit/layout-flex": {
@@ -405,7 +405,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
-			"digest": "75a340b3a3089a64db916bace10ed9c71d0d191297d64fb26a218e17fd705c6b",
+			"digest": "dd4636cd22aa8c605fad9f0804c241cf0415385b4bc46a996a7f8a8b09ae79d1",
 			"status": "ok"
 		},
 		"fast/edit/rects": {
@@ -817,11 +817,11 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-case": {
-			"digest": "ec3e07f295c139b1aaf51e3923a1985c64a8f1012ed95f28301096bc258d5bd0",
+			"digest": "b3057a856b2351a23f4108d2c2ab032bd03653b8c0b4c62c02eb74da93653f86",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-case@quarter": {
-			"digest": "dce03643d5607394b1371abe4d4b1d7d377a22f143ef43648b25b798b416f320",
+			"digest": "51b98a8ab76dbf786a29f7d296cf775234b7994d38fe613b50740cf9db2ee443",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-decor": {
@@ -1000,6 +1000,14 @@
 			"digest": "564fdbf5b6cffe912790e084c977a3814ff7ea6bf951da5bf95146f2d61cc027",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-placeholder": {
+			"digest": "82029aa75ab758c63fdae71e1e9553462f907e8b9569c17bb2bee53104159ee9",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-placeholder@quarter": {
+			"digest": "bfc818d0969deb1b12095fc814a0d4966594de4e0c34b2363c05caee3a229396",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-quadties": {
 			"digest": "f06be3e6b0facc23bcfce9ce4f62c33db2d01a08c9336d43e745dbb1a9b41174",
 			"status": "ok"
@@ -1041,11 +1049,19 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richtrunc": {
-			"digest": "353572ba8a85fcc401b826d7f511d395cde0fd6893788663a7f2c27fcdf14719",
+			"digest": "0142194df75d5c70a1f0a92dd36c6c2f97df1ad10d627ac54000da772ad8551f",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-richtrunc-scaled": {
+			"digest": "ebacc873625ade7c346851993c3300dfd0f7aebc4aa2b41f037cf4db79e1dae2",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-richtrunc-scaled@quarter": {
+			"digest": "52de06f54ee9c36e654fee2c4186705bf664b85b9abcdb50995edd6b5a1b5453",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-richtrunc@quarter": {
-			"digest": "a5fa85837af11d351f228f1cbe4d6a7df094a61715f49d370edf1bd8920c4983",
+			"digest": "1ab1674e0050e4bbab303a7d65a1d0bdba2b6487ca5b0c285780dfa8e8206692",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-rotate": {
@@ -1150,6 +1166,14 @@
 		},
 		"fast/edit/text-probe-view@quarter": {
 			"digest": "bcab1d47a59a29babd3d497e0dccc6755b9e4af1c7e2d8d36ccf849b0a27d162",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-wrapspaces": {
+			"digest": "f013a5fd7ac0ddd13f496fe82173331f2d341e00adb3ff2ec30f3701a1a312a8",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-wrapspaces@quarter": {
+			"digest": "fb094ee3e0b6e653ea127d7d10edbcb817b50a5ee373af15672c0a3a368ef27c",
 			"status": "ok"
 		},
 		"fast/edit/text-raster": {
@@ -1409,15 +1433,15 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize": {
-			"digest": "c6dac60801d116cff325de900bef623171afaf825df1f8324c92e44c107d2284",
+			"digest": "d6cf2f6714a65a02a72647b4763fee42583ec104a584aeba8477786360aa687b",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint": {
-			"digest": "a728d1746356a8c362c7022b91211c446c4f3712c4b8aa7f4757313d58c13279",
+			"digest": "929ca4af2f29fdf02f03a6ac89d9f788d1fb97d009880d9e2566e5d4b2343066",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint2": {
-			"digest": "c237cf07c3f3656eee877987621bfacb18b302ddb72bc0a451f6f5d446f10c9a",
+			"digest": "834255339e261b24ccf3ee60f49f6adc63b952e7ea508ff7e1f2f317a7a32cf2",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint3": {
@@ -1425,27 +1449,27 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-offscreen": {
-			"digest": "91587ed4eaeab2b7ac54a1f9ab8ec3972d90c296c686ac76324f28514a94add8",
+			"digest": "9744345ebb20b6d548ad2144b892f0967feef0632fe7749f480ca14e6a6c7493",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-prompt": {
-			"digest": "7a3fb294a5b96be23f4740c3c038ff93056065483b1c4da8ecc351524f468239",
+			"digest": "2578068f6c9d10ad30dc26b925eb424e36280986bc270e39e757c4f7fa2ecd8e",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autotext-linefit": {
-			"digest": "06278360f31ab4fcc0c059c7824f645144349c06589cec380c5c026b9851aeac",
+			"digest": "6d6bb383713f66aff16b88aa199ca54f85e54a95282981d00135e1efc69b749f",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autotext-matrix": {
-			"digest": "dcebd9aea100d9e1e5e1a5bda045a3518530b4cce1d75bed5a775d13faa5ed25",
+			"digest": "969543b90a68def03477629ce8ce8ff3d1471d7984e97c68d70c7ec7aa975d34",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-dynamic": {
-			"digest": "a306bb4a21dff572c2151c5b167ac06b3ac0661c2335bd7ed5ec6d4c42c1b216",
+			"digest": "a3b71bf3506ab3a52ddba9287da0cfbda9228cf53c5b5acd30f28723bcbc93dd",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-f32-lists": {
-			"digest": "8cf8850418535b70003d0e31560bf2000a28ca1891fce4a156674f84d952ea97",
+			"digest": "db8e449f4d26cc363e8df635905fa56dc6dc76a83a2d9e639743b70dec99ab84",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-flex": {
@@ -1601,7 +1625,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
-			"digest": "3fbfcb5c39e15f28352e7093be76d73a96e5feb896c3c0e5e97b9ac63f9333d8",
+			"digest": "911d0f1ee9acabf673c92d315272c9c0304023ccf49449df2871bbfff932848c",
 			"status": "ok"
 		},
 		"fixtures/edit/rects": {
@@ -2013,11 +2037,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-case": {
-			"digest": "7944ed9fc4a7534857beb975dae7e47356c660d208ec03833aded78a7834d466",
+			"digest": "2808f9f35fd1a2c56dba5dbc03a601d547e585713b5af64cc88391de910a3ba5",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-case@quarter": {
-			"digest": "f4c0999a1c673ed86116c1ae246347a0c66e605276caf5e9289e406da064c901",
+			"digest": "9f9d27d071de0b2b7be4fbafa2840b2238ae17a67b7c36b3f6afa9d45e2a8eb8",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor": {
@@ -2196,6 +2220,14 @@
 			"digest": "4617c093b413e9f9f3759c7dd2178ab4e9240cdf3939e8743f8b616beedb5fe1",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-placeholder": {
+			"digest": "6f1ff31ea3c01bcdb5af4cce0c1e5464bc46d856688dc550e8892d1e9d8bff67",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-placeholder@quarter": {
+			"digest": "a53382df6f80f3f87578d50b2fd03f337e816470feb42c95cf72a3abbef233bc",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-quadties": {
 			"digest": "17262a33e95325e36e252dce5e00f824763ef1ead9bdc8e54d312b478c522dfa",
 			"status": "ok"
@@ -2237,11 +2269,19 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc": {
-			"digest": "b3170f2f270bb0d9cf7a6201adb88c2ebe1e80bc69052fbd0955f65a2656dadd",
+			"digest": "53b8f8f0b7a500e9cbef95e41e369ae881215f970fca02dde7a7de9e146e8a67",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-richtrunc-scaled": {
+			"digest": "4f9f0dec8da08e98f0920a3f48de02a72b70730eca9c28baa3cb90f3023babda",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-richtrunc-scaled@quarter": {
+			"digest": "5641f9dba2a1d9ac7414e9ea0145b9bb5db26c1bd201cedefb9a882ef851e263",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc@quarter": {
-			"digest": "ceb1716c36bd75c5e1de458ca750609a328e74629ee6aee49c32b2821ee2c081",
+			"digest": "305f5d5535fb6d837a7fd3d575c4478cf85a00e969d53cf4479d46cf6c261dbd",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate": {
@@ -2346,6 +2386,14 @@
 		},
 		"fixtures/edit/text-probe-view@quarter": {
 			"digest": "9ffa7ac94bc803f9ee1443a18a4be0f0b0a3c68bb5ee17ba9be9d1e51c57b97e",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-wrapspaces": {
+			"digest": "e47a8cdd55a4bb28ce2311ce7bc017ca16c16a928c7c5638ede80dbb4d30f37d",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-wrapspaces@quarter": {
+			"digest": "370c986280416dff8b538fd99ccbfc801cca2e95c3605dc24a6d522af94819bf",
 			"status": "ok"
 		},
 		"fixtures/edit/text-raster": {
@@ -2593,15 +2641,15 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize": {
-			"digest": "dafd7ed12710f99a43ded1b8889e60a3675a75074465c09cd44c4778c23ba15d",
+			"digest": "72cccd5b8bfd648bb1a568974a6bd0af0a8415b3e8e5562388550e9c7567819b",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint": {
-			"digest": "93349da2e533edc0e3ff10615cc402648e3fa041cc38e23a9681c4eca46c0b77",
+			"digest": "244d723fd4cd10f1ee78ebd70381205203235c909e9a8fdb784b85dbbc6c9ec0",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint2": {
-			"digest": "f2a414e7fe2414642a5ca65f1d2e7ed6f40d5362f7afa455fe37508eb9fd7b3b",
+			"digest": "7912960222efc2d02588c3b5ac5887ef0ac5ed8b81a420e439d2bf3363375d47",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint3": {
@@ -2609,27 +2657,27 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-offscreen": {
-			"digest": "9d8cd28688c6de2d20bfcd417fd6bd6dab69f3f8522eba725e99a12a11fca7a3",
+			"digest": "430a8907bf47afb253851bdb7b31987c0728e624743197b239c7e336f34db7ba",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-prompt": {
-			"digest": "cfcdbabe3a329f2ab672b72aa1512f412a7f51fbb37ae28f25bccb84235541bf",
+			"digest": "ee5fb3140555afa075ef5464323967e37772c47c596bbf04c2602900c0284514",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autotext-linefit": {
-			"digest": "40353685cbb5093ca4e2a16bc34f392a5d9c0d3f5b1f6d3b4b2737e156ed7c01",
+			"digest": "ed52e6e937707fe9ce4a9df0ca700388cc0f9fd2071b604e26bcc9b517edc8bb",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autotext-matrix": {
-			"digest": "68f1d8236b89d5a2d2659fd6ef33d49460cc22261fe01701da2f5837d9e1cb71",
+			"digest": "8b711024bdd488590f8dadd6e463c68630116a3ca7f606663e5d7de19b768f03",
 			"status": "ok"
 		},
 		"fixtures/play/layout-dynamic": {
-			"digest": "660fb9150a39b585291b17a7f1f08170e7138c978035c85f7b7515c43b1576a6",
+			"digest": "fee686511c032583ceb34abea65a5a8d05de86df1368b23d12ead892eceb0040",
 			"status": "ok"
 		},
 		"fixtures/play/layout-f32-lists": {
-			"digest": "f4d1bebc58f526c321ffe77e61c5b513ec0ce0f123bdd2b1aada0128d006accc",
+			"digest": "2a2797fb3bb5a60cf93447d2300958b45d588d27c4acdd88d0b55d483e76e926",
 			"status": "ok"
 		},
 		"fixtures/play/layout-flex": {
@@ -2749,7 +2797,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "adb018032bd1d207d1c07e19850ac13502febcd739c162cb582fd743286f7a7b",
+			"digest": "d5a6afd52708dbb18665e252a1810882078062106ff3005818ce3e90657e96ea",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
@@ -3109,7 +3157,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-case": {
-			"digest": "253008d8ce2105d82a96c3853d3af28bd73cdfc663c8a2ae46db7a5b5405883c",
+			"digest": "df642325aa3dc59ebea815d71d92116bd0e67a614df337291ac9f561cc13e387",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor": {
@@ -3200,6 +3248,10 @@
 			"digest": "8a5ad2f24951df5ac8a72e11a01a0b4c7908aeb1d8f399e5cd144711ff6cbf03",
 			"status": "ok"
 		},
+		"fixtures/play/text-probe-placeholder": {
+			"digest": "1c89c2736fe75965a59a2ed34d58807fd223cd15f24cd1a69048abc0044d4df9",
+			"status": "ok"
+		},
 		"fixtures/play/text-probe-quadties": {
 			"digest": "53e653c6d727ac9ea6d870089b651d899785f923a48fb426aedae66ac346db91",
 			"status": "ok"
@@ -3221,7 +3273,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richtrunc": {
-			"digest": "039a0e99b8b3d165ac75a89f16ad6276849a21db58324236aa4030faa595adef",
+			"digest": "900d5b0c55c93e5de6eb77e8964942c47b7604c1ac02efe64cd229463e4a9e8f",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-richtrunc-scaled": {
+			"digest": "2a2d12b5b13fd56b53d78ac9e1baa3e5635114efaa0cfa131662ea048ec510c5",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotate": {
@@ -3274,6 +3330,10 @@
 		},
 		"fixtures/play/text-probe-view": {
 			"digest": "3f30b02b5a418688918ae1b56e629cad391083c9acc2d51408be882a7df5e8f0",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-wrapspaces": {
+			"digest": "64718a45dfbca5e39fa582c141313e7d6709ed888e443ad401b5b0141ed56a8e",
 			"status": "ok"
 		},
 		"fixtures/play/text-raster": {
@@ -3541,7 +3601,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-26T18:51:53.173Z",
+	"recorded": "2026-11-26T19:50:10.200Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

@@ -38,6 +38,8 @@ fn measure(engine: &Engine, text: &[u8], face: &FontValue, size: f64, width: f64
     let pixel_scale = engine.options.pixel_scale;
     let (family, weight, style) = font_parts(engine, face);
     let wrapped = width < f64::INFINITY;
+    // Measured: rounded up to whole logical px, like TextBounds (text/measure.rs text_bounds)
+    let bounds = |pixels: f64| crate::engine::text::measure::text_bounds(f64::from((pixels / pixel_scale) as f32)) as f32;
     with_text(engine, |text_engine| {
         let mut params = LayoutParams::new(text, &family, weight, style, size, pixel_scale);
         params.wrapped = wrapped;
@@ -45,12 +47,12 @@ fn measure(engine: &Engine, text: &[u8], face: &FontValue, size: f64, width: f64
         params.line_height = Some(1.0);
         let full = text_engine.layout(&params, rich);
         if !wrapped || height >= f64::INFINITY {
-            return dom::Vector2::new((full.width / pixel_scale) as f32, (full.height / pixel_scale) as f32);
+            return dom::Vector2::new(bounds(full.width), bounds(full.height));
         }
         // Measured: the height keeps only the lines that fit the frame, the width spans all lines
         params.max_height = Some(height * pixel_scale);
         let clamped = text_engine.layout(&params, rich);
-        dom::Vector2::new((full.width / pixel_scale) as f32, (clamped.height / pixel_scale) as f32)
+        dom::Vector2::new(bounds(full.width), bounds(clamped.height))
     })
 }
 
