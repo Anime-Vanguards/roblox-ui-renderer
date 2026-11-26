@@ -634,7 +634,7 @@ impl DrawPreparer {
 
     /// A CanvasGroup nested in a resampled group's texture: its own texture sampled in the outer texture's
     /// space (texture_group_placement: 8-bit bilinear weights, 12-bit truncation) by the GROUP record
-    /// (straight output, flag 32, image blend).
+    /// (straight output, image blend).
     fn texture_group(
         &mut self,
         pass: &mut BuildContext,
@@ -683,7 +683,7 @@ impl DrawPreparer {
 
         let tint = color(&inner["group"]["color"], [1.0; 3]).map(quantize);
         let masked = place.mask.is_some();
-        let flags = u32::from(tint.iter().any(|v| *v < 255)) | (u32::from(masked) << 1) | 8 | 16 | 32;
+        let flags = u32::from(tint.iter().any(|v| *v < 255)) | (u32::from(masked) << 1) | 8 | 16;
         let start = self.begin(pass, [place.x0, place.y0, place.x1, place.y1], None, GROUP);
         self.push([place.tx0, place.ty0, place.tx1 - place.tx0, place.ty1 - place.ty0]);
         let info_at = self.packet.texels.len();
@@ -876,8 +876,11 @@ impl DrawPreparer {
                 self.push([tap[0], tap[1], tap[2], 0.0]);
             }
         }
+        // The straight colour under the image blend: Studio blends the composite once,
+        // round((c A + D (255 - A)) / 255) (fixtures/group-blend.luau)
         let mut batch = DrawBatch {
             layer: Some(texture),
+            blend: BlendMode::Image,
             ..Default::default()
         };
         if masked {
@@ -1495,6 +1498,20 @@ mod tests {
         let packet = prepared(nodes, serde_json::json!([{"group":1,"draw":[1]}]), None);
         let texture = records(&packet, pass_of(&packet, 182, 137));
         assert_eq!(texture.first().map(|r| (r.0, r.1)), Some((1, [0.0, 0.0, 182.0, 137.0])), "{texture:?}");
+    }
+
+    /// fixtures/group-blend.luau: Studio blends a CanvasGroup's composite once, round((c A + D (255 - A)) / 255): the
+    /// record outputs the straight colour under the image blend (bit-exact 94.99% -> 98.58%)
+    #[test]
+    fn an_unturned_group_composites_under_the_image_blend() {
+        let nodes = serde_json::json!([
+            {"id":1,"rect":[20,20,256,16],"group":{"color":[1,1,1],"transparency":0.3},"bg":{"color":[0.1,0.2,0.4],"transparency":0}}
+        ]);
+        let packet = prepared(nodes, serde_json::json!([{"group":1,"draw":[1]}]), None);
+        let screen = records(&packet, packet.passes.len() - 1);
+        let group: Vec<_> = screen.iter().filter(|r| r.0 == GROUP).collect();
+        assert_eq!(group.len(), 1, "{screen:?}");
+        assert_eq!(group[0].2, BlendMode::Image);
     }
 
     #[test]

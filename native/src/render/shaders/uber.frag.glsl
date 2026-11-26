@@ -1246,9 +1246,9 @@ float divRN(float x, float y) {
 }
 
 
-// GROUP (groups.rs composite_group: an axis-aligned CanvasGroup's shaded texture as a straight layer, output
-// premultiplied as round(c A / 255), premultiplied blend): rect in
-// target pixels (x, y, W, H), (flags: 1 tint, 2 corner, 4 gradient, 8 / 16 resampled x / y, 32 straight, opacity
+// GROUP (groups.rs composite_group, texture_group: an axis-aligned CanvasGroup's shaded texture as a straight
+// layer, output straight for the image blend, which blends it once as Studio does): rect in
+// target pixels (x, y, W, H), (flags: 1 tint, 2 corner, 4 gradient, 8 / 16 resampled x / y, opacity
 // byte, x taps offset, y taps offset), (tint bytes, gradient block offset), (corner mask slot, 0, 0, 0),
 // (0, 0, 0, 0); taps (texel a, texel b, w8, 0) per column / row of the N x N texture (uLayer); gradient
 // block as imageGradient's
@@ -1309,13 +1309,7 @@ vec4 kindGroup(ivec2 P, vec2 X) {
 	if (A <= 0) {
 		DISCARD
 	}
-	// Flag 32 (a group nested in a resampled group's texture, groups.rs texture_group): the straight
-	// colour for the image blend
-	if ((flags & 32) != 0) {
-		return fromBytes(ivec4(c8, A));
-	}
-	// The straight bytes as putImageData stores them: round(c A / 255)
-	return fromBytes(ivec4(mulDiv255(ivec4(c8, 0), A).rgb, A));
+	return fromBytes(ivec4(c8, A));
 }
 
 // A text quad's image texel (the glyph bitmap with a transparent 1 px border, like the atlas padding),
