@@ -22,7 +22,16 @@ fn start(pixel_scale: f64) -> (Lua, Rc<Engine>) {
 /// Runs `source` (a chunk returning `function(Target)`) against a full-viewport Target frame in a
 /// CoreGui ScreenGui, runs virtual time to `until`, and returns the output lines.
 fn run(source: &str, pixel_scale: f64, until: f64) -> Vec<String> {
+    run_with_fonts(source, pixel_scale, until, None)
+}
+
+/// [`run`], its text engine reading `fonts` (a test's own font set, engine::cli `own_fonts`) instead of the machine's
+fn run_with_fonts(source: &str, pixel_scale: f64, until: f64, fonts: Option<&crate::engine::text::FontPaths>) -> Vec<String> {
     let (lua, engine) = start(pixel_scale);
+    if let Some(fonts) = fonts {
+        use crate::engine::GuiEngine;
+        *engine.text().borrow_mut() = Some(crate::engine::text::TextEngine::new(fonts.clone()));
+    }
     let script = {
         let mut state = engine.state.borrow_mut();
         let class = engine.reflection.class_id("ModuleScript").unwrap();
@@ -426,6 +435,8 @@ fn automatic_canvas_size_applies_size_and_aspect_constraints() {
 /// TextBounds, an automatic label's size and TextService's sizes are the text's logical size rounded up to a whole
 /// logical px (FFlagTextBoundsRoundUpToLogicalPixels, on in production clients): a Roblox 0.747 client at 1.5x
 /// reports these (text/measure.rs text_bounds; unrounded, "Max Players" is 79.333 px, under UIScale 0.9 72.667).
+/// The client's widths are Source Sans Pro's, so they are checked where Studio's fonts are; without them (CI) the
+/// test font stands in for Source Sans, and the same lines must come out with its widths, each a whole px.
 #[test]
 fn text_bounds_round_up_to_whole_logical_pixels() {
     let script = r#"
@@ -464,20 +475,40 @@ fn text_bounds_round_up_to_whole_logical_pixels() {
             end)
         end
     "#;
-    let lines = run(script, 1.5, 0.2);
-    let printed: Vec<&str> = lines.iter().filter_map(|line| line.strip_prefix("print: ")).collect();
-    assert_eq!(
-        printed,
+    // (the widths: "Max Players" at 20, under UIScale 0.9, "Hello world" at 17)
+    let expected = |plain: &str, scaled: &str, service: &str| {
         vec![
-            "plain 80.000 20.000 280.000 100.000",
-            "rich 80.000 20.000 280.000 100.000",
-            "auto 80.000 20.000 80.000 20.000",
-            "scaled 73.000 18.000 252.000 90.000",
-            "scaledAuto 73.000 18.000 73.000 18.000",
-            "GetTextSize 65.000 17.000",
-        ],
-        "{lines:#?}"
-    );
+            format!("plain {plain} 20.000 280.000 100.000"),
+            format!("rich {plain} 20.000 280.000 100.000"),
+            format!("auto {plain} 20.000 {plain} 20.000"),
+            format!("scaled {scaled} 18.000 252.000 90.000"),
+            format!("scaledAuto {scaled} 18.000 {scaled} 18.000"),
+            format!("GetTextSize {service} 17.000"),
+        ]
+    };
+    if crate::engine::text::fonts::discover_content_root().is_some() {
+        let lines = run(script, 1.5, 0.2);
+        let printed: Vec<&str> = lines.iter().filter_map(|line| line.strip_prefix("print: ")).collect();
+        assert_eq!(printed, expected("80.000", "73.000", "65.000"), "{lines:#?}");
+        return;
+    }
+    if crate::assets::tests::test_font().is_none() {
+        eprintln!("skipped: no Studio content root and no test font (set RUR_TEST_FONT)");
+        return;
+    }
+    let directory = std::env::temp_dir().join(format!("rur-text-bounds-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let fonts = crate::engine::cli::own_fonts(&directory, &crate::engine::default_repo());
+    let lines = run_with_fonts(script, 1.5, 0.2, Some(&fonts));
+    std::fs::remove_dir_all(&directory).unwrap();
+    let printed: Vec<&str> = lines.iter().filter_map(|line| line.strip_prefix("print: ")).collect();
+    let width = |line: usize| printed.get(line).and_then(|line| line.split(' ').nth(1)).unwrap_or_default();
+    let (plain, scaled, service) = (width(0), width(3), width(5));
+    for value in [plain, scaled, service] {
+        let whole = value.parse::<f64>().is_ok_and(|value| value > 0.0 && value.fract() == 0.0);
+        assert!(whole, "the test font's widths are whole px: {lines:#?}");
+    }
+    assert_eq!(printed, expected(plain, scaled, service), "{lines:#?}");
 }
 
 /// AutomaticSize with UIPadding and UISizeConstraint against a Roblox 0.747 client's rects
@@ -485,9 +516,11 @@ fn text_bounds_round_up_to_whole_logical_pixels() {
 /// padding offsets (MinSize 22 and 6 + 6 px of padding make a label holding 8 px of text 34 wide), MaxSize then caps
 /// the object but its children still push it past the cap, an automatic parent measures a capped child at the size
 /// its content asked for, and a MinSize above MaxSize switches the constraint off. Automatic labels take their
-/// TextBounds rounded up to whole logical px (text/measure.rs text_bounds), as the client does.
+/// TextBounds rounded up to whole logical px (text/measure.rs text_bounds), as the client does. The client's text
+/// widths are its fonts': without Studio's fonts (CI) only the cells holding no text are compared.
 #[test]
 fn automatic_size_constraints_bound_the_content_inside_the_padding() {
+    let fonts = crate::engine::text::fonts::discover_content_root().is_some();
     let studio: serde_json::Value = serde_json::from_str(include_str!("../../../../data/studio/whole/autosize-constraint.json")).expect("measurements");
     let fixtures = [
         ("layout-autosize-constraint", include_str!("../../../../fixtures/layout-autosize-constraint.luau")),
@@ -530,7 +563,13 @@ fn automatic_size_constraints_bound_the_content_inside_the_padding() {
         let ours: serde_json::Value = serde_json::from_str(&json).unwrap();
         let expected = studio["fixtures"][name].as_object().unwrap();
         let values = |value: &serde_json::Value| -> Vec<f64> { value.as_array().map(|items| items.iter().filter_map(|v| v.as_f64()).collect()).unwrap_or_default() };
+        let cell_of = |path: &str| path.split('/').nth(1).unwrap_or("").to_string();
+        // (cells with a text object: their rects follow the text's width)
+        let text_cells: std::collections::HashSet<String> = expected.iter().filter(|(_, want)| values(want).len() == 6).map(|(path, _)| cell_of(path)).collect();
         for (path, want) in expected {
+            if !fonts && text_cells.contains(&cell_of(path)) {
+                continue;
+            }
             let (want, got) = (values(want), values(&ours[path]));
             compared += 1;
             // (rect, then TextBounds for text objects)
@@ -542,7 +581,7 @@ fn automatic_size_constraints_bound_the_content_inside_the_padding() {
         }
     }
     assert!(misses.is_empty(), "{} of {compared} rects differ from Studio's:\n{}", misses.len(), misses.join("\n"));
-    assert!(compared > 260, "only {compared} rects compared");
+    assert!(compared > if fonts { 260 } else { 220 }, "only {compared} rects compared");
 }
 
 /// Every GuiObject below each cell (a child of the target) of the fixture `source` as path -> [x, y, w, h] relative

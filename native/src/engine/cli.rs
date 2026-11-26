@@ -2450,7 +2450,7 @@ end
 /// test font in the place of the face every family without files of its own falls back to (Source Sans Pro Regular),
 /// so a test's labels draw the same glyphs on a machine with no Studio install
 #[cfg(test)]
-fn own_fonts(directory: &std::path::Path, repo: &std::path::Path) -> crate::engine::text::FontPaths {
+pub(crate) fn own_fonts(directory: &std::path::Path, repo: &std::path::Path) -> crate::engine::text::FontPaths {
     let font = crate::assets::tests::test_font().expect("the labels need a TrueType font: set RUR_TEST_FONT");
     let fonts = directory.join("fonts");
     let faces = fonts.join("studio").join("content").join("fonts");
