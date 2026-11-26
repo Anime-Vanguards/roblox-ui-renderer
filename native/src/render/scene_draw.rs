@@ -165,6 +165,41 @@ mod tests {
         assert!(uploads_fit_a_texture(&packet));
         assert_eq!(layer(&packet).0, 300);
     }
+    /// A Path2D longer than a texture can be wide: a straight path 3,000 logical px long at 3x (9,003 x 77 px) failed
+    /// the draw ("Invalid texture extent 9003x77") where a client draws the line across the screen. Its layer is the
+    /// part that shows, with the pixels the whole stroke has there, also under a clip; a path wholly off the screen
+    /// draws nothing.
+    #[test]
+    fn a_path_longer_than_a_texture_draws_the_part_that_shows() {
+        let path = |from: f64, to: f64, y: f64| {
+            json!({"id": 1, "rect": [from, y - 2.5, to - from, 5], "path2d": {"origin": [from, y - 2.5], "segments": [[from, y, to, y]], "thickness": 4, "color": [1, 1, 1]}})
+        };
+        let layer = |packet: &RenderPacket| {
+            assert_eq!(packet.textures.len(), 1, "one layer");
+            let level = &packet.textures[0].levels[0];
+            (level.width, level.height, level.bytes.to_vec())
+        };
+        for (from, to) in [(-1000.0, 8100.0), (-3000.0, 9000.0), (-20000.0, 20000.0), (100.0, 9000.0)] {
+            let packet = prepared([400, 200], json!([path(from, to, 100.25)]));
+            assert!(uploads_fit_a_texture(&packet), "{from}..{to}");
+            let (w, h, bytes) = layer(&packet);
+            assert!(w <= 400 && h < 20, "{from}..{to}: {w}x{h}");
+            assert!(bytes.chunks_exact(4).any(|pixel| pixel[3] == 255), "{from}..{to}: drawn");
+        }
+        // Where it shows, its pixels are those of a path a texture holds (the same mesh from the same pixel grid)
+        let (w, h, wide) = layer(&prepared([400, 200], json!([path(-1000.0, 8100.0, 100.25)])));
+        let (narrow_w, narrow_h, narrow) = layer(&prepared([400, 200], json!([path(-1000.0, 6000.0, 100.25)])));
+        assert_eq!((w, h), (400, narrow_h));
+        for row in 0..h as usize {
+            let start = (row * narrow_w as usize + 1000) * 4;
+            assert_eq!(&wide[row * 400 * 4..(row + 1) * 400 * 4], &narrow[start..start + 400 * 4], "row {row}");
+        }
+        // Under a clip, and wholly below the screen
+        let mut clipped = path(-1000.0, 8100.0, 100.25);
+        clipped["clip"] = json!([50, 50, 300, 150]);
+        assert_eq!(layer(&prepared([400, 200], json!([clipped]))).0, 300);
+        assert!(prepared([400, 200], json!([path(-1000.0, 8100.0, 400.0)])).textures.is_empty());
+    }
     /// The other layers made the size of an element: a UIGradient's border, a UIShadow and one its frame cuts, each
     /// on a frame wider than a texture can be, keep only the part that shows
     #[test]
@@ -1877,14 +1912,22 @@ impl DrawPreparer {
         let scale = self.scale;
         let mesh = stroke.mesh(scale);
         let Some([x0, y0, x1, y1]) = super::path2d::Stroke::extent(&mesh) else { return };
-        // (a box no texture holds: a path far larger than any screen)
-        let (width, height) = ((x1 - x0) as u64, (y1 - y0) as u64);
-        if width > 16384 || height > 16384 {
-            return;
-        }
+        let clip = clip_rect(node, ctx.origin, scale);
+        // A box wider or taller than a texture can be keeps the part that shows: a straight path 3,000 logical px
+        // long at 3x (9,003 px) failed the draw ("Invalid texture extent 9003x77") where a client draws the line
+        // across the screen
+        let whole = Rect::new(x0 as f64, y0 as f64, (x1 - x0) as f64, (y1 - y0) as f64);
+        let [x0, y0, width, height] = if over_texture_limit(whole) {
+            let shown = visible_part(ctx, whole, [-ctx.origin[0], -ctx.origin[1]], clip);
+            if shown.w <= 0. || shown.h <= 0. {
+                return;
+            }
+            [shown.x as i64, shown.y as i64, shown.w as i64, shown.h as i64]
+        } else {
+            [x0, y0, x1 - x0, y1 - y0]
+        };
         let (width, height) = (width as u32, height as u32);
         let at = Rect::new(x0 as f64 - ctx.origin[0], y0 as f64 - ctx.origin[1], width as f64, height as f64);
-        let clip = clip_rect(node, ctx.origin, scale);
         if Self::culled(ctx, at.bounds(), clip) {
             return;
         }
