@@ -1806,6 +1806,9 @@ impl Input {
             }
             // (a client steps touch coasting before it handles the frame's touches)
             profiled("scrolling", || touch::step(&cx, delta));
+            if engine.options.profile.device.kind().touch() {
+                touch::step_bars(&cx);
+            }
             profiled("pointer", || process_move(&cx))?;
             profiled("scrolling", || scrolling::step(&cx, delta))?;
             profiled("hover", || {
@@ -2039,6 +2042,7 @@ fn install_hooks(engine: &Rc<Engine>, input: &Rc<Input>) {
             input.scroll.forget(id);
             input.touches.forget(id);
             input.last_activation.borrow_mut().remove(&id);
+            input.touches.forget_bar(id);
             input.dropped.borrow_mut().remove(&id);
         }
     }));

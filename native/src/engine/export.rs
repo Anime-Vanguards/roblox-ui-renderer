@@ -1489,6 +1489,12 @@ fn scroll(ctx: &Ctx, id: InstanceId, record: &Record) -> Option<Map<String, Json
         scroll.insert("scrollingEnabled".into(), Json::Bool(*enabled));
     }
     insert_str(&mut scroll, "verticalPosition", ctx.enum_name(ctx.get(id, K::VerticalScrollBarPosition as NameId)));
+    // A touch device draws a ScrollingFrame's bars only while they are shown: `touch` is their strength (1 shown, fading
+    // to 0, 0 hidden; input/touch.rs, measured P6e)
+    if ctx.engine.options.profile.device.kind().touch() {
+        let strength = super::input::get(ctx.engine).map_or(0.0, |input| input.touches.bar_strength(id, ctx.state.sched.now));
+        scroll.insert("touch".into(), number(strength));
+    }
     let position = canvas_position.map_or([0.0, 0.0], |p| [p.x as f64, p.y as f64]);
     scroll.insert("canvasPosition".into(), numbers(&[float32(position[0]), float32(position[1])]));
     scroll.insert("scrollOffset".into(), numbers(&[bars.scroll_x, bars.scroll_y]));

@@ -108,10 +108,47 @@ impl DrawStats {
     }
 }
 
+/// A touch device's scroll bar thumb while the canvas is past an edge (`pos` outside 0..`range`): round(thumb (1 - past /
+/// 100)), no shorter than 2t + 1 (it stays against that edge). Measured in 0.747 touch clients (P6e): 11 cases, windows of
+/// 150, 300 and 450 px, e.g. a 90 px thumb is 72 px 20.497 px past the top and 76 px 15.64 px past the bottom.
+fn touch_thumb(thumb: f64, t: f64, visible: f64, pos: f64, range: f64) -> f64 {
+    let past = (-pos).max(pos - range).max(0.);
+    if past == 0. {
+        return thumb;
+    }
+    visible.min((2. * t + 1.).max(snap(thumb * (1. - past / 100.))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    /// The thumb of a touch device's scroll bar past an edge, against a client's captures (P6e: the length between the
+    /// thumb's half-coverage edges plus the 11 px its caps leave clear): (window, canvas, CanvasPosition, client thumb)
+    #[test]
+    fn a_touch_thumb_shrinks_past_an_edge_like_a_client() {
+        for (window, canvas, pos, client) in [
+            (150., 450., -5.0, 48.),
+            (150., 450., -10.248, 45.),
+            (150., 450., -21.245, 39.),
+            (300., 900., -8.029, 92.),
+            (300., 900., -15.640, 84.),
+            (450., 1350., -5.0, 143.),
+            (450., 1350., -13.342, 130.),
+            (450., 1350., -28.345, 107.),
+            (300., 1000., -20.497, 72.),
+            (300., 1000., 720.497, 72.),
+            (300., 1000., 715.640, 76.),
+            (300., 3000., -10.611, 27.),
+            (300., 3000., -29.730, 25.),
+            (300., 3000., -86.223, 25.),
+            (300., 3000., 2710.611, 27.),
+            (300., 3000., 1000.0, 30.),
+        ] {
+            let thumb = 25f64.max(snap(window * window / canvas));
+            assert_eq!(touch_thumb(thumb, 12., window, pos, canvas - window), client, "{window} {canvas} {pos}");
+        }
+    }
     /// The packet of a scene of `nodes` (all drawn, in order) in a `viewport` at scale 1
     fn prepared(viewport: [u32; 2], nodes: serde_json::Value) -> RenderPacket {
         let draw: Vec<u64> = nodes.as_array().unwrap().iter().map(|node| node["id"].as_u64().unwrap()).collect();
@@ -3817,8 +3854,15 @@ impl DrawPreparer {
         if !scroll.is_object() {
             return Ok(());
         }
+        // A touch device's bars (`touch`, their strength; engine/input/touch.rs): none at 0, else the bars' alpha times it
+        // (the border line beside them at full strength while they show; measured P6e)
+        let touch = scroll["touch"].as_f64();
+        if touch.is_some_and(|strength| strength <= 0.) {
+            return Ok(());
+        }
+        let transparency = 1. - (1. - number(&scroll["transparency"], 0.)) * touch.unwrap_or(1.);
         let t = (number(&scroll["thickness"], 0.) - 1e-6).ceil();
-        if t <= 0. || alpha8(1. - number(&scroll["transparency"], 0.)) == 0 {
+        if t <= 0. || alpha8(1. - transparency) == 0 {
             return Ok(());
         }
         let [fx, fy, fw, fh] = std::array::from_fn(|i| component(&node["rect"], i, 0.));
@@ -3874,6 +3918,7 @@ impl DrawPreparer {
                 axis,
                 component(&scroll["window"], axis, 0.) - component(&scroll["canvas"], axis, 0.),
             );
+            let thumb = if touch.is_some() { touch_thumb(thumb, t, visible, pos, range) } else { thumb };
             let progress = if range > 0. {
                 (pos / range).clamp(0., 1.)
             } else {
@@ -3930,7 +3975,7 @@ impl DrawPreparer {
                     } else {
                         continue;
                     };
-                let mut part = serde_json::json!({"rect":rect,"image":{"uri":source.id.0,"density":density,"color":scroll["color"],"transparency":scroll["transparency"],"scaleType":"Stretch"}});
+                let mut part = serde_json::json!({"rect":rect,"image":{"uri":source.id.0,"density":density,"color":scroll["color"],"transparency":transparency,"scaleType":"Stretch"}});
                 part["clip"] = node["clip"].clone();
                 part["matrix"] = node["matrix"].clone();
                 if let Some(turn) = turn {

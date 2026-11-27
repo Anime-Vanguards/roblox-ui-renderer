@@ -366,6 +366,11 @@ pub(crate) fn property_changed(engine: &Engine, input: &Input, state: &mut State
     if name != n.CanvasPosition && name != n.ScrollingEnabled {
         return;
     }
+    // A touch device shows a ScrollingFrame's own scroll bars when its CanvasPosition changes (a script's write, a drag,
+    // a coast, a spring; measured P6e, input/touch.rs)
+    if name == n.CanvasPosition && engine.options.profile.device.kind().touch() {
+        input.touches.bar_activity(id, state.sched.now);
+    }
     // Changed-value script writes cancel the wheel destination. Same-value assignments do not
     // notify this hook and leave it running, as measured in Studio.
     if name == n.CanvasPosition && scroll.motion_writing.get() != Some(id) && scroll.presentation_writing.get() != Some(id) {

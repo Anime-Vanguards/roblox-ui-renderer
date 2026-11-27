@@ -252,6 +252,10 @@
 			"digest": "a4008098a18d55df89f79661dfb167cf0b4531a59769cda4ebbfd73d4fed8f48",
 			"status": "ok"
 		},
+		"fast/edit/interaction-touch-scrollbars": {
+			"digest": "8e2c7321b6afe17213096d4f9e66982d9b4caf45128bea47f0fe593700b0ca6e",
+			"status": "ok"
+		},
 		"fast/edit/layout-autolist-scalepad": {
 			"digest": "a88014a46d60a1e1fab10edd9f8b7905eb6d428f298c6c4bef0c464022621b22",
 			"status": "ok"
@@ -1696,6 +1700,10 @@
 			"digest": "4e17c2835c11c4966f0f2627bc59f1de44a9a94e9bbe9232e410e716629cdaeb",
 			"status": "ok"
 		},
+		"fixtures/edit/interaction-touch-scrollbars": {
+			"digest": "4fb2602f105c88b0c92205706ffb9bdcbf943c199466b7067f27d658acc01cb6",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-autolist-scalepad": {
 			"digest": "f682fd6f1fe4f4de16b6bd6649312881ecb55f86e29575ab6cb28eef055ab69a",
 			"status": "ok"
@@ -3126,6 +3134,10 @@
 		},
 		"fixtures/play/interaction-touch-buttons": {
 			"digest": "6e438b238c6232fefb124a6ec2ee832787a09a46937e2d465c526f9fa459288e",
+			"status": "ok"
+		},
+		"fixtures/play/interaction-touch-scrollbars": {
+			"digest": "59ec4fd9a7a358faa9d1a07eae4dc9c2feacf3d5037076040f1d1e38b1bfce0d",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autolist-scalepad": {

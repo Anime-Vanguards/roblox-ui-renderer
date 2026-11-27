@@ -5128,6 +5128,108 @@ fn more_stacks_match_a_client() {
     stacked_cases(&["stack5_touch", "stack5_mouse", "mbuttons", "mlegacy"]);
 }
 
+/// A touch device's own scroll bars (P6e, IN12e): none on a frame nothing touched or scrolled; at full strength at once
+/// from a script's CanvasPosition write and while a finger holds the frame (a still one too); 1 s after the write or the
+/// release they fade out linearly over 0.5 s (a 0.747 client: 1.0006 / 0.4982 s ... over 14 cases); a desktop exports no
+/// strength.
+#[test]
+fn touch_scroll_bars_show_and_fade_like_a_client() {
+    let (lua, engine) = touch_client(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r##"
+local g = Instance.new("ScreenGui")
+g.Name = "Bars"
+g.IgnoreGuiInset = true
+g.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+for i = 1, 3 do
+	local S = Instance.new("ScrollingFrame")
+	S.Name = "F" .. i
+	S.Position = UDim2.fromOffset(10 + (i - 1) * 95, 60)
+	S.Size = UDim2.fromOffset(85, 300)
+	S.CanvasSize = UDim2.fromOffset(0, 3000)
+	S.Parent = g
+end
+for _ = 1, 10 do
+	StepDisplay(1 / 60)
+	Flush()
+end
+UpdateAll()
+"##,
+    );
+    let frame = |name: &str| {
+        let state = engine.state.borrow();
+        state.dom.descendants(engine.world().game).into_iter().find(|&id| state.dom.at(id).name.to_string() == name).unwrap()
+    };
+    let (f1, f2, f3) = (frame("F1"), frame("F2"), frame("F3"));
+    let strengths = || {
+        let input = super::get(&engine).unwrap();
+        let now = engine.state.borrow().sched.now;
+        [f1, f2, f3].map(|id| input.touches.bar_strength(id, now))
+    };
+    let step = |frames: usize| {
+        run(&lua, &engine, &format!("for _ = 1, {frames} do StepDisplay(1 / 60) Flush() end UpdateAll()"));
+    };
+    assert_eq!(strengths(), [0.0, 0.0, 0.0], "frames just made show no bars");
+    // F2 scrolled by a script, a still finger on F3
+    run(
+        &lua,
+        &engine,
+        r##"
+local g = game:GetService("Players").LocalPlayer.PlayerGui.Bars
+g.F2.CanvasPosition = Vector2.new(0, 500)
+Dispatch({ type = "down", x = 242, y = 210, button = 1, finger = 1 })
+"##,
+    );
+    assert_eq!(strengths(), [0.0, 1.0, 1.0]);
+    step(54);
+    assert_eq!(strengths(), [0.0, 1.0, 1.0], "0.9 s on");
+    step(15);
+    let [_, fading, held] = strengths();
+    assert!((fading - 0.7).abs() < 1e-6, "1.15 s after the write: {fading}");
+    assert_eq!(held, 1.0, "a held frame shows its bars");
+    step(30);
+    assert_eq!(strengths(), [0.0, 0.0, 1.0], "the write's bars are gone 1.65 s after it");
+    step(120);
+    assert_eq!(strengths()[2], 1.0, "still held after 3.65 s");
+    run(&lua, &engine, r##"Dispatch({ type = "up", x = 242, y = 210, button = 1, finger = 1 })"##);
+    step(59);
+    assert_eq!(strengths()[2], 1.0, "0.98 s after the release");
+    step(16);
+    assert!((strengths()[2] - 0.5).abs() < 1e-6, "1.25 s after the release: {}", strengths()[2]);
+    step(16);
+    assert_eq!(strengths()[2], 0.0, "1.52 s after the release");
+    // exported: a touch device's scroll nodes carry the strength, a desktop's none
+    let scene = |engine: &Rc<Engine>| {
+        let gui = {
+            let state = engine.state.borrow();
+            state.dom.descendants(engine.world().game).into_iter().find(|&id| state.dom.at(id).name.to_string() == "Bars").unwrap()
+        };
+        crate::engine::story::build_scene(engine, &[gui], serde_json::Map::new())
+    };
+    let touch = scene(&engine);
+    let scrolls: Vec<&Json> = touch["nodes"].as_array().unwrap().iter().filter(|n| n["scroll"].is_object()).collect();
+    assert_eq!(scrolls.len(), 3);
+    assert!(scrolls.iter().all(|n| n["scroll"]["touch"].as_f64() == Some(0.0)), "{scrolls:?}");
+    let (lua, desktop) = start(800.0, 600.0);
+    run(
+        &lua,
+        &desktop,
+        r##"
+local g = Instance.new("ScreenGui")
+g.Name = "Bars"
+g.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+local S = Instance.new("ScrollingFrame")
+S.Size = UDim2.fromOffset(85, 300)
+S.CanvasSize = UDim2.fromOffset(0, 3000)
+S.Parent = g
+"##,
+    );
+    let plain = scene(&desktop);
+    assert!(plain["nodes"].as_array().unwrap().iter().filter(|n| n["scroll"].is_object()).all(|n| n["scroll"].get("touch").is_none()));
+}
+
 /// Activated's click count (P6e, IN15), a finger and the mouse: per button, one more than the button's last activation
 /// when it was less than 0.5 s before, else 0, and a button's making counts as an activation with 0.
 #[test]

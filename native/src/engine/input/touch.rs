@@ -45,7 +45,7 @@ use std::{
 };
 
 use mlua::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::Value as Json;
 
 use super::{
@@ -82,6 +82,20 @@ const BAND: f64 = 0.55;
 /// A coast past an edge bounces from band(BOUNCE_V |v| - BOUNCE_P p) out
 const BOUNCE_V: f64 = 0.1714;
 const BOUNCE_P: f64 = 0.89;
+/// A touch device's own scroll bars (measured in 0.747 touch clients, P6e): a ScrollingFrame shows its bars at full
+/// strength at once while a finger holds it (a still finger too) and when its CanvasPosition changes (a script's write, a
+/// drag, a coast, a spring); BAR_SHOWN s after the later of the release and the last change they fade out linearly over
+/// BAR_FADE s (1.0006 / 0.4982 s, 0.9837 / 0.4997 s after a coast's last movement, ... over 14 cases in two runs). A frame
+/// nothing touched or scrolled (one just made, too) shows none. The bars are the frame's own (its images, colour,
+/// transparency, thickness and side), drawn as the mouse's are (render/scene_draw.rs), their alpha times the strength.
+const BAR_SHOWN: f64 = 1.0;
+const BAR_FADE: f64 = 0.5;
+
+/// A touch scroll bar's strength `since` s after the frame's last activity
+fn bar_fade(since: f64) -> f64 {
+    if since <= BAR_SHOWN { 1.0 } else { (1.0 - (since - BAR_SHOWN) / BAR_FADE).max(0.0) }
+}
+
 #[inline]
 fn f32r(value: f64) -> f64 {
     value as f32 as f64
@@ -219,6 +233,9 @@ pub(crate) struct Touch {
     holder: Cell<Option<u32>>,
     /// The ScrollingFrames the layout lets past their range
     overscroll: RefCell<FxHashSet<InstanceId>>,
+    /// Touch scroll bars: per ScrollingFrame, the time of its last activity (a release, a CanvasPosition change) and the
+    /// strength last exported
+    bars: RefCell<FxHashMap<InstanceId, (f64, f64)>>,
 }
 
 impl Touch {
@@ -261,6 +278,25 @@ impl Touch {
     /// Drops a ScrollingFrame's coasting (ScrollToTop, ResetScrollVelocity, a freed frame)
     pub fn forget(&self, frame: InstanceId) {
         self.motions.borrow_mut().retain(|(id, _)| *id != frame);
+    }
+
+    /// Something showed `frame`'s touch scroll bars at `now` (a release, a CanvasPosition change)
+    pub fn bar_activity(&self, frame: InstanceId, now: f64) {
+        self.bars.borrow_mut().entry(frame).or_insert((now, 0.0)).0 = now;
+    }
+
+    /// The strength of `frame`'s touch scroll bars at `now`: 1 while a finger holds it, then by the time since its last
+    /// activity; 0 for one nothing touched or scrolled
+    pub fn bar_strength(&self, frame: InstanceId, now: f64) -> f64 {
+        if self.fingers.borrow().iter().any(|f| f.drag.is_some_and(|d| d.frame == frame)) {
+            return 1.0;
+        }
+        self.bars.borrow().get(&frame).map_or(0.0, |&(at, _)| bar_fade(now - at))
+    }
+
+    /// A freed frame's bar state goes
+    pub fn forget_bar(&self, frame: InstanceId) {
+        self.bars.borrow_mut().remove(&frame);
     }
 
     /// Instances held while touches are down or frames coast (pinned like the press state)
@@ -382,6 +418,48 @@ pub(crate) fn moved(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
     mouse.positioned = true;
     cx.i.mouse.set(mouse);
     cx.update_legacy_mouse()
+}
+
+/// Per frame (touch devices): the ScrollingFrames whose touch scroll bars changed strength are exported again; bars gone
+/// leave the list
+pub(crate) fn step_bars(cx: &Cx) {
+    let now = cx.now();
+    let frames: Vec<InstanceId> = cx.i.touches.bars.borrow().keys().copied().collect();
+    let mut changed = Vec::new();
+    for id in frames {
+        if !cx.alive(id) {
+            cx.i.touches.forget_bar(id);
+            continue;
+        }
+        let strength = cx.i.touches.bar_strength(id, now);
+        let mut bars = cx.i.touches.bars.borrow_mut();
+        let Some(entry) = bars.get_mut(&id) else { continue };
+        if entry.1 != strength {
+            entry.1 = strength;
+            changed.push(id);
+        }
+        if strength <= 0.0 {
+            bars.remove(&id);
+        }
+    }
+    mark_bars(cx, &changed);
+}
+
+/// The scene export takes these frames again (their touch scroll bars changed)
+fn mark_bars(cx: &Cx, frames: &[InstanceId]) {
+    if frames.is_empty() {
+        return;
+    }
+    let state = cx.engine.state.borrow();
+    if let Ok(mut guard) = cx.engine.layout().try_borrow_mut() {
+        if let Some(layout) = guard.as_mut() {
+            for &id in frames {
+                if state.dom.get(id).is_some_and(|i| !i.has(flags::DESTROYED)) {
+                    layout.mark_changed(&state, id);
+                }
+            }
+        }
+    }
 }
 
 /// Per frame: each finger's waiting move, in the order the moves came
@@ -653,6 +731,11 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
         }
     }
     let scroller = if grabbed { None } else { candidate };
+    // (the frame a finger holds shows its touch scroll bars at once, measured P6e)
+    if let Some(frame) = scroller {
+        cx.i.touches.bar_activity(frame, cx.now());
+        mark_bars(cx, &[frame]);
+    }
     for o in walk.objects() {
         let sunk = walk.is_sunk(o);
         if !sunk {
@@ -806,6 +889,8 @@ pub(crate) fn up(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
         deliver_to_actions(cx, button_key(cx, 1.0), false);
     }
     if let Some(drag) = finger.drag {
+        // (its touch scroll bars stay BAR_SHOWN s from the release)
+        cx.i.touches.bar_activity(drag.frame, cx.now());
         if drag.dragging {
             release_frame(cx, drag.frame, &finger.samples);
         }
