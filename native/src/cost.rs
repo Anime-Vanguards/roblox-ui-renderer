@@ -720,7 +720,15 @@ const PASS_SHADOW_MESH_US: f64 = 1.5;
 const PASS_DRAW_US: f64 = 0.2;
 /// A frame in which CanvasGroups re-render their textures pays this once more (UITextureRenderer::renderJob and the
 /// composite step's extra work), on top of the re-rendered content's pieces.
-const PASS_GROUP_RERENDER_US: f64 = 70.0;
+const PASS_GROUP_RERENDER_US: f64 = 63.0;
+/// What a piece drawn into a re-rendering CanvasGroup's texture costs over the same piece on the screen (Pass2d does the
+/// group's vertex work): measured in a 0.747 client, one full-screen group of 100 / 500 / 2,000 frames, 500 labels of 3
+/// glyphs and 500 images with a child moved every frame, the geometric mean of two sessions: 0.46 us a frame (4.0x), 0.51 a
+/// glyph (3.5x), 1.51 an image (6.2x) on 63 us (notes/cost-calibration.md "CanvasGroup re-render frames"); a sliced image,
+/// a shadow and an off-axis element are taken at the frames' 4.0x (not measured in groups).
+const GROUP_PLAIN_FACTOR: f64 = 4.0;
+const GROUP_GLYPH_FACTOR: f64 = 3.5;
+const GROUP_IMAGE_FACTOR: f64 = 6.2;
 
 /// The batch-break causes the client shows, in the order `BatchState::break_cause` tests them.
 const BREAK_CAUSES: [&str; 7] = ["renderTarget", "clip", "ownDraw", "shader", "texture", "constants", "batchLimit"];
@@ -736,7 +744,7 @@ struct BatchState {
     shader: &'static str,
     texture: Option<String>,
     pixelated: bool,
-    constants: Option<[i64; 7]>,
+    constants: Option<[i64; 9]>,
     own: u64,
     scissor: Option<[i64; 4]>,
 }
@@ -768,6 +776,8 @@ enum Geometry {
     Quads(u64),
     Edged(u64),
     Mesh(u64, u32),
+    /// Quads sharing their corners: (quads, vertices), kept whole in a vertex chunk and priced as quads
+    Shared(u64, u32),
 }
 
 impl Geometry {
@@ -775,7 +785,7 @@ impl Geometry {
         match self {
             Geometry::Quads(n) => n,
             Geometry::Edged(n) => 5 * n,
-            Geometry::Mesh(quads, _) => quads,
+            Geometry::Mesh(quads, _) | Geometry::Shared(quads, _) => quads,
         }
     }
 
@@ -799,7 +809,7 @@ struct Look {
     shader: &'static str,
     texture: Option<String>,
     pixelated: bool,
-    constants: Option<[i64; 7]>,
+    constants: Option<[i64; 9]>,
     own: bool,
 }
 
@@ -809,7 +819,7 @@ fn pass_piece_us(geometry: Geometry, fill: Fill) -> f64 {
     match geometry {
         Geometry::Edged(n) => n as f64 * PASS_EDGED_ELEMENT_US,
         Geometry::Mesh(..) => PASS_SHADOW_MESH_US,
-        Geometry::Quads(n) => {
+        Geometry::Quads(n) | Geometry::Shared(n, _) => {
             n as f64
                 * match fill {
                     Fill::Plain => PASS_PLAIN_QUAD_US,
@@ -827,7 +837,7 @@ impl Look {
     }
 
     /// A fill or image piece: a UIGradient makes it a draw of its own, a UICorner a rounded shape.
-    fn styled(texture: &str, gradient: bool, rounded: Option<[i64; 7]>, pixelated: bool) -> Look {
+    fn styled(texture: &str, gradient: bool, rounded: Option<[i64; 9]>, pixelated: bool) -> Look {
         if gradient {
             Look { shader: "gradient", texture: Some(texture.to_string()), pixelated, constants: None, own: true }
         } else if let Some(constants) = rounded {
@@ -852,8 +862,117 @@ fn corner_radii(node: &Value) -> [f64; 4] {
 }
 
 /// The rounded shader's per-draw constants for a shape of device rect `rect`.
-fn rounded_constants(rect: Rect, radii: [f64; 4], thickness: f64) -> [i64; 7] {
-    [to_64ths(rect.w), to_64ths(rect.h), to_64ths(radii[0]), to_64ths(radii[1]), to_64ths(radii[2]), to_64ths(radii[3]), to_64ths(thickness)]
+fn rounded_constants(rect: Rect, radii: [f64; 4], thickness: f64) -> [i64; 9] {
+    [to_64ths(rect.w), to_64ths(rect.h), to_64ths(radii[0]), to_64ths(radii[1]), to_64ths(radii[2]), to_64ths(radii[3]), to_64ths(thickness), 0, 0]
+}
+
+/// A border UIStroke's constants: the rounded shape's, and its half-size as the client computes it in float32. Measured in
+/// RenderDoc captures of a 0.747 client (rows and columns of identical strokes, notes/cost-calibration.md "Rows of identical
+/// strokes"): the frame's snapped device edges are kept as float32 logical coordinates (edge / scale), offset by the stroke's
+/// logical thickness in float32, and the half-size is (right - left) * scale / 2 in float32. Two strokes batch only while
+/// those bits agree, so a row of identical strokes breaks where the float32 rounding of its edges changes (every power of
+/// two of the logical x: 1,300 strokes in rows of 49 at 1.5x draw 163 times), and never on whole-number edges.
+fn stroke_constants(rect: Rect, radii: [f64; 4], thickness: f64, scale: f64) -> [i64; 9] {
+    let s = scale as f32;
+    let t = thickness as f32;
+    let half = |low: f64, high: f64| {
+        let left = low as f32 / s - t;
+        let right = high as f32 / s + t;
+        i64::from(((right - left) * s / 2.0).to_bits())
+    };
+    let mut constants = rounded_constants(rect, radii, thickness);
+    constants[7] = half(rect.x, rect.x + rect.w);
+    constants[8] = half(rect.y, rect.y + rect.h);
+    constants
+}
+
+/// The quads a client draws for a Path2D's segments (`[x0, y0, x1, y1]` straight, 6 numbers a quadratic, 8 a cubic, logical
+/// px). Measured in RenderDoc captures of a 0.747 client (25 single paths at 1.5x): a straight segment is one quad; a curved one is stepped along t from 0 in steps of 1/15 where that piece of the curve lies within 1 logical px of
+/// its chord, else 1/30, a quad a step (16 for a quarter arc of any radius, 23 for an S curve and 26 at twice its size), and
+/// one quad more when its last step was a long one; each join between two segments is a quad (a 10-point polyline: 17).
+fn path2d_quads(segments: &[Value]) -> u64 {
+    let mut quads = 0u64;
+    for segment in segments {
+        // (a straight segment is exported as its two ends, a curved one as its quadratic or cubic; a quadratic is the cubic
+        // whose handles lie two thirds of the way to its control point)
+        let v = |i: usize| segment[i].as_f64().unwrap_or(0.0);
+        match segment.as_array().map_or(0, Vec::len) {
+            8.. => quads += curve_pieces(std::array::from_fn(v)),
+            6 => {
+                let (x0, y0, cx, cy, x1, y1) = (v(0), v(1), v(2), v(3), v(4), v(5));
+                let third = |a: f64, b: f64| a + (b - a) * 2.0 / 3.0;
+                quads += curve_pieces([x0, y0, third(x0, cx), third(y0, cy), third(x1, cx), third(y1, cy), x1, y1]);
+            }
+            _ => quads += 1,
+        }
+    }
+    quads + (segments.len() as u64).saturating_sub(1)
+}
+
+/// A curved Path2D segment's quads (`path2d_quads`): steps of 2 or 1 thirtieths of t by the piece's chord deviation.
+fn curve_pieces(c: [f64; 8]) -> u64 {
+    let point = |t: f64| {
+        let u = 1.0 - t;
+        let (a, b, d, e) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+        [a * c[0] + b * c[2] + d * c[4] + e * c[6], a * c[1] + b * c[3] + d * c[5] + e * c[7]]
+    };
+    // (the largest distance of 15 points of the piece from its chord, logical px)
+    let deviation = |from: f64, to: f64| {
+        let (start, end) = (point(from), point(to));
+        let (dx, dy) = (end[0] - start[0], end[1] - start[1]);
+        let length = dx.hypot(dy);
+        (1..16)
+            .map(|i| {
+                let p = point(from + (to - from) * i as f64 / 16.0);
+                if length > 1e-9 { ((p[0] - start[0]) * dy - (p[1] - start[1]) * dx).abs() / length } else { (p[0] - start[0]).hypot(p[1] - start[1]) }
+            })
+            .fold(0.0, f64::max)
+    };
+    let (mut step, mut pieces, mut last_long) = (0u32, 0u64, false);
+    while step < 30 {
+        let long = step + 2 <= 30 && deviation(step as f64 / 30.0, (step + 2) as f64 / 30.0) <= 1.0;
+        step += if long { 2 } else { 1 };
+        last_long = long;
+        pieces += 1;
+    }
+    pieces + u64::from(last_long)
+}
+
+/// The cells a sliced image draws: those with an on-screen width and height, as the renderer places them
+/// (`render::images::image_quads`). Measured in RenderDoc captures of a 0.747 client (10 sliced 16 px textures each): a
+/// SliceCenter edge on the texture's edge leaves its column or row out (0, 4, 16, 12: 3 cells; 0, 0, 16, 16: 1), an image
+/// no larger than its corners draws the corners only (4), a thinner one its top and bottom rows (6), SliceScale 0 the middle
+/// only (1), and a centre of no texels still draws (8, 8, 8, 8: 9). Without the texture's size (not on this machine) 9.
+fn slice_cells(image: &Value, uri: &str, raw: Rect, scale: f64, ui_scale: f64) -> u64 {
+    let Some(texture) = texture_size(uri) else { return 9 };
+    if image["sliceScale"].as_f64() == Some(0.0) {
+        return 1;
+    }
+    crate::render::images::image_quads(image, texture, [raw.x, raw.y, raw.w, raw.h], scale, ui_scale).len() as u64
+}
+
+/// Where `rur cost` looks up texture sizes (its checkout: `set_texture_root`); unset, no texture's size is known.
+static TEXTURE_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+static TEXTURE_SIZES: std::sync::Mutex<BTreeMap<String, Option<[u32; 2]>>> = std::sync::Mutex::new(BTreeMap::new());
+
+/// Lets this process's cost passes read texture sizes from the files URIs resolve to on this machine (never downloading).
+pub fn set_texture_root(repo: &Path) {
+    let _ = TEXTURE_ROOT.set(repo.to_path_buf());
+}
+
+/// A texture's pixel size from its local file's header, cached by URI.
+fn texture_size(uri: &str) -> Option<[u32; 2]> {
+    let root = TEXTURE_ROOT.get()?;
+    let mut sizes = TEXTURE_SIZES.lock().ok()?;
+    if let Some(found) = sizes.get(uri) {
+        return *found;
+    }
+    let size = crate::resolve::Resolver::new(root.clone(), true)
+        .local_file(uri)
+        .and_then(|file| image::image_dimensions(&file).ok())
+        .map(|(w, h)| [w, h]);
+    sizes.insert(uri.to_string(), size);
+    size
 }
 
 /// Whether a transform into the render target turns its quads off the pixel axes (a multiple of 90 degrees does not).
@@ -861,10 +980,16 @@ fn off_axis(transform: Option<Transform>) -> bool {
     transform.is_some_and(|m| m[0].abs() > 1e-6 && m[1].abs() > 1e-6)
 }
 
-/// A border UIStroke's quads for a thickness in device px: 4 edge quads, or 8 (edges and corners) from 2.5 px
-/// (measured: 0.75 to 2.25 px drew 4, 3 px and up 8).
+/// A border UIStroke's quads for a thickness in device px: 4 edge quads on 12 vertices, or 8 (edges and corners) on 16 from
+/// 2.5 px (measured: 0.75 to 2.25 px drew 4, 3 px and up 8; the vertices in captures of rows of strokes, whose 10,000-vertex
+/// chunks end every 625 thick strokes).
 fn stroke_quads(thickness: f64) -> u64 {
     if thickness >= 2.5 { 8 } else { 4 }
+}
+
+fn stroke_geometry(thickness: f64) -> Geometry {
+    let quads = stroke_quads(thickness);
+    Geometry::Shared(quads, if quads == 8 { 16 } else { 12 })
 }
 
 /// The batcher's state per render target: the open draw's state and the vertices used in the current chunk.
@@ -991,6 +1116,29 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The fill quads of a line's glyphs (`[font, glyph, x, advance]` entries): one a glyph, a colour emoji's COLR layers,
+    /// none for an empty glyph of a colour font (`glyphs::Rasterizer::glyph_quads`). A glyph whose font file is unknown
+    /// counts one.
+    fn glyph_quads(&self, glyphs: &[Value]) -> u64 {
+        let fonts = self.scene.fonts();
+        let mut rasterizer = None;
+        let mut quads = 0u64;
+        for entry in glyphs {
+            let file = entry[0].as_u64().and_then(|index| fonts.get(index as usize)).and_then(|font| font["file"].as_str());
+            let glyph = entry[1].as_u64().and_then(|g| u32::try_from(g).ok());
+            let (Some(file), Some(glyph)) = (file, glyph) else {
+                quads += 1;
+                continue;
+            };
+            let guard = rasterizer.get_or_insert_with(|| crate::glyphs::shared().lock());
+            quads += match guard {
+                Ok(raster) => u64::from(raster.glyph_quads(file, glyph)),
+                Err(_) => 1,
+            };
+        }
+        quads
+    }
+
     /// Resolves the active clip rect for `node` (`nid`) when drawing onto `target_id`.
     /// On screen (`target_id == 0`), the exported scene clip already holds all ancestors.
     /// Inside a `CanvasGroup` (`target_id != 0`), Studio clips only by interior clipping ancestors
@@ -1103,7 +1251,7 @@ impl<'a> Analyzer<'a> {
         let (unit, mut left) = match geometry {
             Geometry::Quads(n) => (4u32, n),
             Geometry::Edged(n) => (8, n),
-            Geometry::Mesh(_, vertices) => (vertices.clamp(1, BATCH_VERTICES), 1),
+            Geometry::Mesh(_, vertices) | Geometry::Shared(_, vertices) => (vertices.clamp(1, BATCH_VERTICES), 1),
         };
         while left > 0 {
             let room = u64::from((BATCH_VERTICES - chunk.min(BATCH_VERTICES)) / unit);
@@ -1128,7 +1276,12 @@ impl<'a> Analyzer<'a> {
             self.totals.static_draw_calls += draws;
             self.totals.pass_screen_us += piece_us;
         } else {
-            self.totals.pass_offscreen_us += piece_us;
+            let factor = match (geometry, fill) {
+                (Geometry::Quads(_) | Geometry::Shared(..), Fill::Glyph) => GROUP_GLYPH_FACTOR,
+                (Geometry::Quads(_) | Geometry::Shared(..), Fill::Image) => GROUP_IMAGE_FACTOR,
+                _ => GROUP_PLAIN_FACTOR,
+            };
+            self.totals.pass_offscreen_us += piece_us * factor;
         }
         if !causes.is_empty() {
             let breaks = causes.len() as u64;
@@ -1222,7 +1375,7 @@ impl<'a> Analyzer<'a> {
 
         // Path2D
         if let Some(p2d) = node.get("path2d").and_then(Value::as_object) {
-            let segs = p2d.get("segments").and_then(Value::as_array).map_or(0, Vec::len) as u64;
+            let segs = p2d.get("segments").and_then(Value::as_array).map_or(0, |segments| path2d_quads(segments));
             if segs > 0 {
                 let phys = physical_rect(node, self.scale).rect;
                 let clip = self.effective_node_clip(node, nid, target_id, target_bounds, false, group_ancestor_clip);
@@ -1302,7 +1455,11 @@ impl<'a> Analyzer<'a> {
                     let kind = if corner || gradient { "styled_image" } else { "image" };
                     let pixelated = img.get("resample").and_then(Value::as_str) == Some("Pixelated");
                     let look = Look::styled(uri, gradient, rounded, pixelated);
-                    let quads = if img.get("scaleType").and_then(Value::as_str) == Some("Slice") { 9 } else { 1 };
+                    let quads = if img.get("scaleType").and_then(Value::as_str) == Some("Slice") {
+                        slice_cells(&node["image"], uri, physical_rect(node, self.scale).raw, self.scale, node["scale"].as_f64().filter(|s| *s != 0.0).unwrap_or(1.0))
+                    } else {
+                        1
+                    };
                     let geometry = Geometry::of(quads, edged && look.shader == "plain");
                     let fill = if quads == 9 { Fill::Slice } else { Fill::Image };
                     self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, kind, look, clip, geometry, fill, clipped_area);
@@ -1323,9 +1480,10 @@ impl<'a> Analyzer<'a> {
                     let Some(g) = line_obj.get("glyphs").and_then(Value::as_array).filter(|g| !g.is_empty()) else {
                         continue;
                     };
+                    // (a colour emoji is a quad per COLR layer, an empty glyph of a colour font none: glyph_quads)
                     let drawn_g = match line_obj.get("shown").and_then(Value::as_u64) {
-                        Some(shown) => shown + line_obj.get("ellipsis").and_then(Value::as_u64).unwrap_or(0),
-                        None => g.len() as u64,
+                        Some(shown) => self.glyph_quads(&g[..(shown as usize).min(g.len())]) + line_obj.get("ellipsis").and_then(Value::as_u64).unwrap_or(0),
+                        None => self.glyph_quads(g),
                     };
                     if drawn_g == 0 {
                         continue;
@@ -1422,9 +1580,8 @@ impl<'a> Analyzer<'a> {
                 let thickness = st["thickness"].as_f64().unwrap_or(0.0);
                 if !is_text_stroke && thickness > 0.0 && alpha8(1.0 - st["transparency"].as_f64().unwrap_or(0.0)) > 0 && phys.w > 0.0 && phys.h > 0.0 {
                     let stroke_gradient = st.get("gradient").is_some_and(Value::is_object);
-                    let look = Look::styled("white", stroke_gradient, Some(rounded_constants(phys, radii, thickness)), false);
-                    let quads = stroke_quads(thickness * self.scale);
-                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, "stroke", look, clip, Geometry::Quads(quads), Fill::Plain, 0.0);
+                    let look = Look::styled("white", stroke_gradient, Some(stroke_constants(phys, radii, thickness, self.scale)), false);
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, "stroke", look, clip, stroke_geometry(thickness * self.scale), Fill::Plain, 0.0);
                     drawn_any = true;
                 }
             }
@@ -1468,9 +1625,8 @@ impl<'a> Analyzer<'a> {
                 let thickness = st["thickness"].as_f64().unwrap_or(0.0);
                 if thickness > 0.0 && alpha8(1.0 - st["transparency"].as_f64().unwrap_or(0.0)) > 0 {
                     let stroke_gradient = st.get("gradient").is_some_and(Value::is_object);
-                    let look = Look::styled("white", stroke_gradient, Some(rounded_constants(phys, radii, thickness)), false);
-                    let quads = stroke_quads(thickness * self.scale);
-                    self.emit_quads(sg, gnode, gid, target_id, target_bounds, target_area_scale, "stroke", look, clip, Geometry::Quads(quads), Fill::Plain, 0.0);
+                    let look = Look::styled("white", stroke_gradient, Some(stroke_constants(phys, radii, thickness, self.scale)), false);
+                    self.emit_quads(sg, gnode, gid, target_id, target_bounds, target_area_scale, "stroke", look, clip, stroke_geometry(thickness * self.scale), Fill::Plain, 0.0);
                 }
             }
         }
@@ -1617,6 +1773,9 @@ pub fn layout_stats_json(stats: LayoutStats) -> Value {
         "texts": stats.texts,
         "scrollPasses": stats.scroll_passes,
         "scrollMoved": stats.scroll_moved,
+        "relaid": stats.relaid,
+        "relaidUnder": stats.relaid_under,
+        "resorted": stats.resorted,
     })
 }
 
@@ -1633,6 +1792,9 @@ fn layout_stats_json_scoped(stats: LayoutStats, scope: &'static str) -> Value {
         "texts": stats.texts,
         "scrollPasses": stats.scroll_passes,
         "scrollMoved": stats.scroll_moved,
+        "relaid": stats.relaid,
+        "relaidUnder": stats.relaid_under,
+        "resorted": stats.resorted,
     })
 }
 
@@ -1648,6 +1810,10 @@ pub fn desktop_layout_cpu_ms(stats: LayoutStats) -> f64 {
         + stats.stored as f64 * CLIENT_LAYOUT_STORED_MS
         + stats.moved as f64 * CLIENT_LAYOUT_MOVED_MS
         + stats.scroll_moved as f64 * CLIENT_LAYOUT_SCROLL_MOVED_MS
+        + stats.texts as f64 * CLIENT_LAYOUT_TEXT_MS
+        + stats.relaid as f64 * CLIENT_LAYOUT_RELAID_MS
+        + stats.relaid_under as f64 * CLIENT_LAYOUT_RELAID_UNDER_MS
+        + stats.resorted as f64 * CLIENT_LAYOUT_RESORTED_MS
 }
 
 /// The UI draw pass's cost of one analysed frame (`PASS_*_US`, microseconds): the pieces drawn onto the screen (all a
@@ -1660,7 +1826,7 @@ pub struct PassCost {
     pub group_targets: u64,
 }
 
-const DRAW_PASS_SOURCE: &str = "Studio 0.747 rendered client on the reference desktop: LibMP Pass2d + fillGuiVertices + UI + compositeUITextures per render frame (the capture did not change the render call's CPU), per-piece slopes of single-factor scenes averaged over two runs: 20 us once any UI draws, 0.116 us a plain quad, 0.243 an image quad, 0.45 a sliced image quad, 0.145 a glyph, 0.226 an off-axis element, 1.5 a UIShadow, 0.2 a draw; a frame whose CanvasGroups re-render adds 70 us and their content";
+const DRAW_PASS_SOURCE: &str = "Studio 0.747 rendered client on the reference desktop: LibMP Pass2d + fillGuiVertices + UI + compositeUITextures per render frame (the capture did not change the render call's CPU), per-piece slopes of single-factor scenes averaged over two runs: 20 us once any UI draws, 0.116 us a plain quad, 0.243 an image quad, 0.45 a sliced image quad, 0.145 a glyph, 0.226 an off-axis element, 1.5 a UIShadow, 0.2 a draw; a frame whose CanvasGroups re-render adds 63 us and their content at 4.0x a frame's, 3.5x a glyph's and 6.2x an image's screen price";
 const DRAW_PASS_ACCURACY: &str = "calibration scenes median error 12 %; two runs agreed within 35 % (a busy machine); held-out fixtures in notes/cost-calibration.md";
 
 /// `predicted.*.drawPassCpuMs` for an analysed frame.
@@ -1773,9 +1939,6 @@ fn phone_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_from: &'s
                 "range": [PHONE_CAPTURE_FACTOR_LOW, PHONE_CAPTURE_FACTOR_HIGH],
                 "basis": "measured_desktop_ui_work"
             },
-        "relaid": stats.relaid,
-        "relaidUnder": stats.relaid_under,
-        "resorted": stats.resorted,
             "liveFrameWeight": {
                 "value": PHONE_UI_LIVE_WEIGHT,
                 "basis": "recorded_phone_gui_category"
@@ -1792,9 +1955,6 @@ pub fn predicted_sequence_json(desk_ms: f64, scope: &'static str, draw: Option<(
     let (desk_draw, phone_draw) = draw_pass_or_refusal(draw);
     let desk_from = "Studio 0.747 client per-frame UpdateUILayouts (grids, chains, lists, moved subtrees, text) fitted to rur's per-frame counters";
     let phone_from = "desktop-ref extrapolated layoutCpuMs scaled by the derived phone ratio (4.09 * measured 0.88..1.12 capture factor * 0.77)";
-        "relaid": stats.relaid,
-        "relaidUnder": stats.relaid_under,
-        "resorted": stats.resorted,
     json!({
         "desktop-ref": {
             "layoutCpuMs": desktop_layout_extrapolation(desk_ms, scope, desk_from),
@@ -1810,10 +1970,6 @@ pub fn predicted_sequence_json(desk_ms: f64, scope: &'static str, draw: Option<(
 }
 
 pub fn predicted_json(stats: LayoutStats) -> Value {
-        + stats.texts as f64 * CLIENT_LAYOUT_TEXT_MS
-        + stats.relaid as f64 * CLIENT_LAYOUT_RELAID_MS
-        + stats.relaid_under as f64 * CLIENT_LAYOUT_RELAID_UNDER_MS
-        + stats.resorted as f64 * CLIENT_LAYOUT_RESORTED_MS
     predicted_sequence_json(desktop_layout_cpu_ms(stats), "per_frame", None)
 }
 
@@ -3592,6 +3748,8 @@ impl SequenceAccumulator {
                         acc.moved += entry.moved;
                         acc.scroll_passes += entry.scroll_passes;
                         acc.scroll_moved += entry.scroll_moved;
+                        acc.relaid += entry.relaid;
+                        acc.relaid_under += entry.relaid_under;
                         acc.pos = entry.pos;
                         acc.sibling_index = entry.sibling_index;
                         acc.path_count = entry.path_count;
@@ -3703,6 +3861,9 @@ impl SequenceAccumulator {
             ("layoutMoved", |m| m.layout.moved as f64),
             ("layoutScrollPasses", |m| m.layout.scroll_passes as f64),
             ("layoutScrollMoved", |m| m.layout.scroll_moved as f64),
+            ("layoutRelaid", |m| m.layout.relaid as f64),
+            ("layoutRelaidUnder", |m| m.layout.relaid_under as f64),
+            ("layoutResorted", |m| m.layout.resorted as f64),
         ];
         let mut mean_map = Map::new();
         let mut peak_map = Map::new();
@@ -3748,8 +3909,21 @@ impl SequenceAccumulator {
         } else {
             0.0
         };
-                        acc.relaid += entry.relaid;
-                        acc.relaid_under += entry.relaid_under;
+        let steady_relaid = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.relaid as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_relaid_under = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.relaid_under as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_resorted = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.resorted as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
         let steady_desk_ms = if has_steady_client_frames {
             steady_slice.iter().map(|m| desktop_layout_cpu_ms(m.layout)).sum::<f64>() / denom
         } else {
@@ -3778,6 +3952,9 @@ impl SequenceAccumulator {
             "moved": round6(steady_moved),
             "scrollPasses": round6(steady_scroll_passes),
             "scrollMoved": round6(steady_scroll),
+            "relaid": round6(steady_relaid),
+            "relaidUnder": round6(steady_relaid_under),
+            "resorted": round6(steady_resorted),
         });
         let play_probe = outcome.play_mode_probe.as_ref();
         let steady_cpu_json = if !is_play {
@@ -3868,9 +4045,6 @@ impl SequenceAccumulator {
                     })
                     .collect()
             } else {
-            ("layoutRelaid", |m| m.layout.relaid as f64),
-            ("layoutRelaidUnder", |m| m.layout.relaid_under as f64),
-            ("layoutResorted", |m| m.layout.resorted as f64),
                 Vec::new()
             };
             let total_drivers = raw_drivers.len();
@@ -3909,6 +4083,8 @@ impl SequenceAccumulator {
                         "moved": round6(m),
                         "scrollPasses": round6(sp),
                         "scrollMoved": round6(sm),
+                        "relaid": round6(r),
+                        "relaidUnder": round6(ru),
                         "desktopMs": round9(est_ms),
                         "share": round6(share),
                     })
@@ -3916,21 +4092,6 @@ impl SequenceAccumulator {
                 .collect();
             let reported_drivers = drivers_json.len();
             obj.insert("layoutDrivers".into(), Value::Array(drivers_json));
-        let steady_relaid = if has_steady_client_frames {
-            steady_slice.iter().map(|m| m.layout.relaid as f64).sum::<f64>() / denom
-        } else {
-            0.0
-        };
-        let steady_relaid_under = if has_steady_client_frames {
-            steady_slice.iter().map(|m| m.layout.relaid_under as f64).sum::<f64>() / denom
-        } else {
-            0.0
-        };
-        let steady_resorted = if has_steady_client_frames {
-            steady_slice.iter().map(|m| m.layout.resorted as f64).sum::<f64>() / denom
-        } else {
-            0.0
-        };
             obj.insert(
                 "layoutDriverSummary".into(),
                 json!({
@@ -3959,9 +4120,6 @@ impl SequenceAccumulator {
                     "layoutCpuMs".into(),
                     if !is_play {
                         if play_probe.is_some_and(|p| !p.mounts_in_play_mode) {
-            "relaid": round6(steady_relaid),
-            "relaidUnder": round6(steady_relaid_under),
-            "resorted": round6(steady_resorted),
                             json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz; play mode does not mount this story, so per-frame layoutCpuMs is unavailable as-is)")
                         } else {
                             json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz, 4 beats per 60 Hz frame; pass --mode play for client per-frame layoutCpuMs)")
@@ -3998,6 +4156,9 @@ impl SequenceAccumulator {
                             "moved": round6(steady_moved),
                             "scrollPasses": round6(steady_scroll_passes),
                             "scrollMoved": round6(steady_scroll),
+                            "relaid": round6(steady_relaid),
+                            "relaidUnder": round6(steady_relaid_under),
+                            "resorted": round6(steady_resorted),
                         },
                         "steadyStateLayoutCpuMs": steady_cpu_json,
                     },
@@ -4030,6 +4191,7 @@ pub fn run_sequence_cost(
         spec.client_hz = Some(60.0);
     }
     spec.collect_cost = true;
+    set_texture_root(repo);
     let mut resolver = crate::resolve::Resolver::new(repo.to_path_buf(), engine_args.offline);
     let mut frames_rx = crate::sequence::start_fresh(&engine_args, &spec)?;
     let recv_first = |rx: &std::sync::mpsc::Receiver<engine::cli::SequenceMessage>| match rx.recv() {
@@ -4083,8 +4245,6 @@ pub fn run_sequence_cost(
         let outcome = scene.apply_owned(&mut reply).map_err(|e| format!("frame {index}: {e}"))?;
         acc.record_frame(
             index,
-                        "relaid": round6(r),
-                        "relaidUnder": round6(ru),
             time,
             unchanged,
             outcome.changed_nodes.len(),
@@ -4156,9 +4316,6 @@ fn format_phone_range(range: &[f64; 2], band: &[f64; 2]) -> String {
         format_ms_approx(band[1]),
     )
 }
-                            "relaid": round6(steady_relaid),
-                            "relaidUnder": round6(steady_relaid_under),
-                            "resorted": round6(steady_resorted),
 
 fn pair_at(value: &Value, ptr: &str) -> [f64; 2] {
     let arr = value.pointer(ptr).and_then(Value::as_array);
@@ -5347,6 +5504,7 @@ fn attach_cli_run_metadata(
 
 fn run_cli(argv: &[String]) -> Result<CliOutput, Failure> {
     let (context, args) = Context::new(argv)?;
+    set_texture_root(&context.repo);
     let is_compare = args.positional.first().map(String::as_str) == Some("compare");
     validate_cost_cli_args(&args, is_compare)?;
 
@@ -5733,6 +5891,128 @@ mod tests {
         assert_eq!((t["drawCalls"].as_u64(), t["fillGlyphQuads"].as_u64(), t["strokeGlyphQuads"].as_u64()), (Some(1), Some(0), Some(3)));
     }
 
+    /// A one-layer scene at `scale` (logical px rects), like `batch_scene`.
+    fn scene_at(scale: f64, nodes: Vec<Value>) -> Value {
+        let draw: Vec<Value> = nodes.iter().map(|n| n["id"].clone()).collect();
+        let mut all = vec![json!({"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 1280, 720], "enabled": true})];
+        all.extend(nodes);
+        let report = analyze_scene(
+            &store_of(json!({
+                "viewport": {"width": 1280, "height": 720, "scale": scale},
+                "status": "ok",
+                "nodes": all,
+                "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": draw}],
+                "fonts": [],
+                "images": []
+            })),
+            LayoutStats::default(),
+            None,
+        );
+        report["totals"].clone()
+    }
+
+    #[test]
+    fn rows_of_identical_strokes_break_where_their_float32_half_size_changes() {
+        // RenderDoc captures of a 0.747 client at 1.5x: 49 strokes (19 px frames, thickness 2) every 26 px draw 2, 3, 5,
+        // 9, 20 and 10 at a time (their half-size in float32 changes at every power of two of the logical x)
+        let ring = |id: u64, x: f64, y: f64, w: f64, thickness: f64| {
+            json!({"id": id, "name": format!("F{id}"), "path": format!("G.F{id}"), "class": "Frame", "rect": [x, y, w, w], "bg": {"color": [1, 1, 1], "transparency": 1}, "strokes": [{"mode": "Border", "thickness": thickness, "transparency": 0}]})
+        };
+        let row: Vec<Value> = (0..49u64).map(|i| ring(2 + i, i as f64 * 26.0, 0.0, 19.0, 2.0)).collect();
+        let t = scene_at(1.5, row);
+        assert_eq!(t["drawCalls"], 6, "{t}");
+        assert_eq!(t["batchBreaksByCause"]["constants"], 5, "{t}");
+        // Thickness 1: 1, 1, 3, 5, 9, 20, 10
+        let thin: Vec<Value> = (0..49u64).map(|i| ring(2 + i, i as f64 * 26.0, 0.0, 19.0, 1.0)).collect();
+        assert_eq!(scene_at(1.5, thin)["drawCalls"], 7);
+        // Frames and steps on whole device pixels never break (121 strokes of 8 px every 10 px: one draw)
+        let whole: Vec<Value> = (0..121u64).map(|i| ring(2 + i, i as f64 * 10.0, 0.0, 8.0, 2.0)).collect();
+        assert_eq!(scene_at(1.5, whole)["drawCalls"], 1);
+        // 1,300 strokes in rows of 49: 163 draws, two of them where a 10,000-vertex chunk ends (16 vertices a thick stroke)
+        let grid: Vec<Value> = (0..1300u64).map(|i| ring(2 + i, (i % 49) as f64 * 26.0, (i / 49) as f64 * 26.0, 19.0, 2.0)).collect();
+        let t = scene_at(1.5, grid);
+        assert_eq!(t["drawCalls"], 163, "{}", t["batchBreaksByCause"]);
+        assert_eq!(t["batchBreaksByCause"]["batchLimit"], 2, "{}", t["batchBreaksByCause"]);
+    }
+
+    #[test]
+    fn path2d_pieces_follow_the_clients_stepping() {
+        // Measured quads (RenderDoc, a 0.747 client at 1.5x): a straight segment 1; a quarter arc of any radius 16 (15 long
+        // steps and one more after a long last step); an S curve 23, at twice its size 26; a quadratic arch 16; a 10-point
+        // straight polyline 17 (9 segments and 8 joins); two arcs joined 33
+        let quarter = |r: f64| json!([40.0, 40.0 + r, 40.0, 40.0 + r - (r * 0.5523).round(), 40.0 + r - (r * 0.5523).round(), 40.0, 40.0 + r, 40.0]);
+        assert_eq!(path2d_quads(&[json!([40, 100, 600, 400])]), 1);
+        for r in [10.0, 80.0, 600.0] {
+            assert_eq!(path2d_quads(&[quarter(r)]), 16, "radius {r}");
+        }
+        assert_eq!(path2d_quads(&[json!([40, 290, 240, 40, 400, 540, 600, 290])]), 23);
+        assert_eq!(path2d_quads(&[json!([40, 540, 440, 40, 760, 1040, 1160, 540])]), 26);
+        assert_eq!(path2d_quads(&[json!([800, 320, 980, 40, 1160, 320])]), 16);
+        let polyline: Vec<Value> = (0..9).map(|i| json!([40 + i * 100, 300 + (i % 2) * 200, 140 + i * 100, 300 + ((i + 1) % 2) * 200])).collect();
+        assert_eq!(path2d_quads(&polyline), 17);
+        assert_eq!(path2d_quads(&[json!([40, 120, 40, 76, 76, 40, 120, 40]), json!([120, 40, 164, 40, 200, 76, 200, 120])]), 33);
+    }
+
+    #[test]
+    fn sliced_images_draw_the_cells_with_an_on_screen_size() {
+        // RenderDoc captures of a 0.747 client (a 16 px texture, 100 px images): SliceCenter 4, 4, 12, 12 draws 9 cells,
+        // 0, 4, 16, 12 the middle column (3), 0, 0, 16, 16 one, an image of 6 px its 4 corners, SliceScale 0 the middle
+        let dir = std::env::temp_dir().join(format!("rur-slice-cells-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sixteen.png");
+        image::RgbaImage::new(16, 16).save(&file).unwrap();
+        set_texture_root(&dir);
+        let uri = format!("file:///{}", file.to_string_lossy().replace('\\', "/"));
+        let sliced = |id: u64, size: f64, center: [f64; 4], scale: f64| {
+            json!({"id": id, "name": format!("I{id}"), "path": format!("G.I{id}"), "class": "ImageLabel", "rect": [id as f64 * 110.0, 0, size, size], "bg": {"color": [1, 1, 1], "transparency": 1},
+                "image": {"uri": uri, "transparency": 0, "scaleType": "Slice", "sliceCenter": center, "sliceScale": scale}})
+        };
+        let quads = |node: Value| scene_at(1.5, vec![node])["quads"].as_u64().unwrap();
+        assert_eq!(quads(sliced(2, 100.0, [4.0, 4.0, 12.0, 12.0], 1.0)), 9);
+        assert_eq!(quads(sliced(2, 100.0, [0.0, 4.0, 16.0, 12.0], 1.0)), 3);
+        assert_eq!(quads(sliced(2, 100.0, [0.0, 0.0, 16.0, 16.0], 1.0)), 1);
+        assert_eq!(quads(sliced(2, 100.0, [4.0, 4.0, 16.0, 12.0], 1.0)), 6);
+        assert_eq!(quads(sliced(2, 100.0, [8.0, 8.0, 8.0, 8.0], 1.0)), 9, "a centre of no texels still draws");
+        assert_eq!(quads(sliced(2, 6.0, [4.0, 4.0, 12.0, 12.0], 1.0)), 4);
+        assert_eq!(quads(sliced(2, 100.0, [4.0, 4.0, 12.0, 12.0], 0.0)), 1);
+        // A texture whose size is not known here counts 9
+        let mut unknown = sliced(2, 100.0, [0.0, 4.0, 16.0, 12.0], 1.0);
+        unknown["image"]["uri"] = json!("file:///nowhere/missing.png");
+        assert_eq!(quads(unknown), 9);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_colour_emoji_draws_a_quad_per_layer() {
+        // RenderDoc captures of a 0.747 client: U+1F600 3 quads, a heart and its variation selector 1, U+1F451 10.
+        // Needs Studio's emoji font (not on a runner without Studio).
+        if crate::engine::text::fonts::discover_content_root().is_none() {
+            eprintln!("skipped: no Studio content root");
+            return;
+        }
+        let repo = crate::engine::default_repo();
+        let root = repo.join("tools/tests/oracle-root");
+        let tmp = std::env::temp_dir().join(format!("rur-emoji-cost-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let fixture = tmp.join("emoji.luau");
+        let source = "return function(Target)\n\tfor I, Text in { \"\\u{1F600}\", \"\\u{2764}\\u{FE0F}\", \"\\u{1F451}\", \"A\" } do\n\t\tlocal L = Instance.new(\"TextLabel\")\n\t\tL.Size = UDim2.fromOffset(60, 40)\n\t\tL.Position = UDim2.fromOffset(I * 70, 0)\n\t\tL.Font = Enum.Font.SourceSans\n\t\tL.TextSize = 28\n\t\tL.Text = Text\n\t\tL.Parent = Target\n\tend\nend\n";
+        std::fs::write(&fixture, source).unwrap();
+        let argv: Vec<String> = vec![
+            "--repo".into(), repo.to_string_lossy().into_owned(),
+            "--roots".into(), root.to_string_lossy().into_owned(),
+            "--fixture".into(), fixture.to_string_lossy().into_owned(),
+            "--viewport".into(), "800x600".into(),
+            "--scale".into(), "1.5".into(),
+            "--no-snapshots".into(),
+        ];
+        let run = engine::cli::run_once_with_cost(&engine::cli::parse(&argv).unwrap()).unwrap();
+        let mut store = SceneStore::default();
+        store.apply(&run.scene.scene).unwrap();
+        let report = analyze_scene(&store, run.layout, Some(&run.dom_hidden));
+        assert_eq!(report["totals"]["glyphQuads"], 3 + 1 + 10 + 1, "{}", report["totals"]);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn batches_split_at_10000_vertex_chunks() {
         // 2,500 plain quads fill a draw; the 2,501st starts another (measured: solid-2500 1 draw, solid-2501 2)
@@ -5796,7 +6076,8 @@ mod tests {
         // 20 us floor + composite (1 image quad) + 4 border quads + 1 frame quad + 2 draws
         let screen_us = PASS_FLOOR_US + PASS_IMAGE_QUAD_US + 5.0 * PASS_PLAIN_QUAD_US + 2.0 * PASS_DRAW_US;
         assert!((desk["ms"].as_f64().unwrap() - screen_us / 1000.0).abs() < 1e-9, "{desk}");
-        let rerender_us = screen_us + PASS_GROUP_RERENDER_US + 2.0 * PASS_PLAIN_QUAD_US + PASS_DRAW_US;
+        // (the group's content re-rendered at the measured group price: GROUP_PLAIN_FACTOR the screen's)
+        let rerender_us = screen_us + PASS_GROUP_RERENDER_US + (2.0 * PASS_PLAIN_QUAD_US + PASS_DRAW_US) * GROUP_PLAIN_FACTOR;
         assert!((desk["groupRerenderMs"].as_f64().unwrap() - rerender_us / 1000.0).abs() < 1e-9, "{desk}");
         let phone = &report["predicted"]["phone-mid"]["drawPassCpuMs"];
         assert_eq!(phone["basis"], "derived_extrapolation");

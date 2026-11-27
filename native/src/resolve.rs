@@ -217,6 +217,11 @@ impl Resolver {
     }
 
     /// The local answer for `uri`, or None when it needs a download (or the 3D worker).
+    /// The file a URI resolves to on this machine (the Studio install, a file:// path, the asset cache), without downloading
+    pub fn local_file(&mut self, uri: &str) -> Option<PathBuf> {
+        self.local(uri).and_then(Result::ok)
+    }
+
     fn local(&mut self, uri: &str) -> Option<Resolution> {
         let trimmed = uri.trim();
         let lower = trimmed.to_ascii_lowercase();

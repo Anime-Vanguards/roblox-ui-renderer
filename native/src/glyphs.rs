@@ -692,6 +692,8 @@ struct Font {
     stamp: Option<Stamp>,
     bitmaps: HashMap<BitmapKey, Arc<GlyphBitmap>>,
     layers: HashMap<u32, Layers>,
+    /// Whether a glyph of it was seen with COLR layers (`glyph_quads`)
+    color: bool,
 }
 
 /// Rasterized glyph bitmaps are kept up to this many coverage bytes (then the cache starts over)
@@ -758,7 +760,7 @@ impl Rasterizer {
             if face.is_null() {
                 bail!("FreeType cannot open font {file}");
             }
-            self.fonts.insert(file.to_string(), Font { face, stamp: before, bitmaps: HashMap::new(), layers: HashMap::new() });
+            self.fonts.insert(file.to_string(), Font { face, stamp: before, bitmaps: HashMap::new(), layers: HashMap::new(), color: false });
         }
         Ok(self.fonts.get_mut(file).unwrap())
     }
@@ -784,6 +786,27 @@ impl Rasterizer {
             .collect();
         font.layers.insert(glyph, layers.clone());
         Ok(layers)
+    }
+
+    /// The quads a client draws for one glyph (`rur cost`). Measured in RenderDoc captures of a 0.747 client: a colour emoji
+    /// draws a quad per COLR layer (U+1F600 3, U+1F451 10, a three-person ZWJ family 21, a heart 1) and an empty glyph of a
+    /// colour font none (the variation selector after a heart); any other glyph one. A font that cannot be read counts one.
+    pub fn glyph_quads(&mut self, file: &str, glyph: u32) -> u32 {
+        let Ok(layers) = self.color_layers(file, glyph) else { return 1 };
+        if !layers.is_empty() {
+            if let Some(font) = self.fonts.get_mut(file) {
+                font.color = true;
+            }
+            return layers.len() as u32;
+        }
+        if self.fonts.get(file).is_some_and(|font| font.color) {
+            if let Ok(bitmap) = self.glyph(file, 16.0, glyph, 0.0, None) {
+                if bitmap.layers.is_empty() && (bitmap.width == 0 || bitmap.rows == 0) {
+                    return 0;
+                }
+            }
+        }
+        1
     }
 
     /// One glyph's coverage, as rasterize.py renders `[file, ppem, glyph, strokePx, style]`. A glyph
