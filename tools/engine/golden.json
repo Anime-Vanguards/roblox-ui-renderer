@@ -64,6 +64,10 @@
 			"digest": "eeab6fe33ba7833a0e4b0f8906535a1186ab4881aa13607d2affe223cf8f474f",
 			"status": "ok"
 		},
+		"fast/edit/gradient-probe-panel": {
+			"digest": "028733167dd97e4a979e059c0f733cd1aded04b39b11ece587b73f35e6051b64",
+			"status": "ok"
+		},
 		"fast/edit/gradient-probe-table": {
 			"digest": "4fc66fd5cdd19e7e53294d0c3ecee8787c03de46d37da301c8393f202f28861d",
 			"status": "ok"
@@ -1444,6 +1448,10 @@
 			"digest": "15705bb6ea6ce6287cdaff6b7420df20ee418c5fd64e6b29417edeeb47bf4f6f",
 			"status": "ok"
 		},
+		"fixtures/edit/gradient-probe-panel": {
+			"digest": "276c9c9110e726c053fe762a68d7479fb64f1f1d863f008d3de2a1075001aaa4",
+			"status": "ok"
+		},
 		"fixtures/edit/gradient-probe-table": {
 			"digest": "d851dd9d814cf8a77548ab2bca9455f79f894f707d2d0dba1f6e683f707c23b0",
 			"status": "ok"
@@ -2812,6 +2820,10 @@
 			"digest": "6fee969b489011fff2d81005380283f1f6ce3086c4af5028131934dc5d49660f",
 			"status": "ok"
 		},
+		"fixtures/play/gradient-probe-panel": {
+			"digest": "03d7d9a36b2c3a0cb0730adce5a92e53e7856236ff4b11771fb945e35e59145d",
+			"status": "ok"
+		},
 		"fixtures/play/gradient-probe-table": {
 			"digest": "5b5ba03ef33c29281c408ab7cefd2ac84630bfe48a29b3e1847ff67121501679",
 			"status": "ok"
@@ -4045,7 +4057,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T01:37:28.762Z",
+	"recorded": "2026-11-27T02:48:27.481Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
