@@ -4731,7 +4731,8 @@ log("unbind all done")
 }
 
 /// SetTitle / SetImage / SetDescription / SetPosition / GetButton of a name that is not bound warn as a client does
-/// (UnbindAction of one does not); GetButton returns nil (a desktop client; touch clients do the same).
+/// (UnbindAction of one does not); GetButton returns nil on a desktop client (a touch-screen client returns the button:
+/// get_button_returns_the_touch_button_like_a_client).
 #[test]
 fn unbound_setters_warn_like_a_client() {
     let (lua, engine) = start(800.0, 600.0);
@@ -4774,6 +4775,139 @@ step("SetPosition button", function() CAS:SetPosition("Touchy", UDim2.new()) end
 step("GetButton button", function() log("GetButton", tostring(CAS:GetButton("Touchy"))) end)
 step("GetButton unbound", function() log("GetButton", tostring(CAS:GetButton("Nope"))) end)
 CAS:UnbindAllActions()
+"##,
+    );
+}
+
+/// GetButton on a touch device returns the action's button at once, as a touch-screen client running ContextActionTouch
+/// does (IN4d): the same instance after setters, while hidden, in the handler, after a script destroyed or moved it; nil
+/// without a button, without a free slot and after a rebind without one; a name not bound warns.
+#[test]
+fn get_button_returns_the_touch_button_like_a_client() {
+    let (lua, engine) = touch_client(800.0, 600.0);
+    touch_button_case(
+        &lua,
+        &engine,
+        "getbutton",
+        r##"
+local Frame = 0
+local since = #LogService:GetLogHistory()
+local function warnings()
+	frames(2)
+	local found = problems(since)
+	since = #LogService:GetLogHistory()
+	return #found == 0 and "no warning" or table.concat(found, " | ")
+end
+local Last = {}
+local function name(o)
+	if typeof(o) ~= "Instance" then
+		return tostring(o)
+	end
+	return o:GetFullName() .. (o.Parent and "" or " (no parent)")
+end
+local function get(label, action)
+	local state, value = "pending", nil
+	task.spawn(function()
+		local ok, res = pcall(function()
+			return CAS:GetButton(action)
+		end)
+		state = ok and "done" or "error"
+		value = res
+	end)
+	local extra = ""
+	if typeof(value) == "Instance" then
+		extra = string.format(" same-as-last=%s", tostring(Last[action] == value))
+		Last[action] = value
+		local frame = PlayerGui:FindFirstChild("ContextActionGui") and PlayerGui.ContextActionGui:FindFirstChild("ContextButtonFrame")
+		extra ..= string.format(" in-frame=%s pos=%s title=%s", tostring(frame ~= nil and value.Parent == frame), fmt(value.Position),
+			value:FindFirstChild("ActionTitle") and value.ActionTitle.Text or "-")
+	end
+	log(label, state, state ~= "pending" and "at once" or "pending", name(value) .. extra, warnings())
+end
+local function count()
+	local frame = PlayerGui:FindFirstChild("ContextActionGui") and PlayerGui.ContextActionGui:FindFirstChild("ContextButtonFrame")
+	return frame and #frame:GetChildren() or 0
+end
+local function handler()
+	return Enum.ContextActionResult.Pass
+end
+log("-- bound with a button")
+CAS:BindAction("A", handler, true, Enum.KeyCode.E)
+get("A (button)", "A")
+get("A again", "A")
+log("-- bound without a button")
+CAS:BindAction("B", handler, false, Enum.KeyCode.F)
+get("B (no button)", "B")
+log("-- a name never bound")
+get("Nope", "Nope")
+log("-- setters")
+CAS:SetTitle("A", "Go")
+CAS:SetImage("A", "rbxassetid://1")
+CAS:SetPosition("A", UDim2.fromOffset(10, 20))
+get("A after setters", "A")
+log("-- rebound with a button")
+CAS:BindAction("A", handler, true, Enum.KeyCode.E)
+get("A rebound", "A")
+log("-- rebound without a button")
+CAS:BindAction("A", handler, false, Enum.KeyCode.E)
+get("A rebound without", "A")
+log("-- bound at a priority with a button")
+CAS:BindActionAtPriority("P", handler, true, 3000, Enum.KeyCode.G)
+get("P (priority)", "P")
+log("-- the button destroyed by a script")
+CAS:BindAction("D", handler, true, Enum.KeyCode.H)
+local d = CAS:GetButton("D")
+log("D button", name(d), warnings())
+d:Destroy()
+get("D after Destroy", "D")
+log("-- the button renamed and moved by a script")
+CAS:BindAction("R", handler, true, Enum.KeyCode.J)
+local r = CAS:GetButton("R")
+r.Name = "Renamed"
+r.Parent = PlayerGui.ContextActionGui
+get("R moved", "R")
+CAS:UnbindAction("D")
+CAS:UnbindAction("R")
+log("-- touch controls hidden")
+GuiService.TouchControlsEnabled = false
+frames(2)
+get("P hidden", "P")
+GuiService.TouchControlsEnabled = true
+frames(2)
+log("-- seven buttons, then an eighth")
+for i = 1, 7 do
+	CAS:BindAction("C" .. i, handler, true, Enum.KeyCode.One)
+end
+log("buttons", count(), warnings())
+get("C7", "C7")
+get("C8 not bound yet", "C8")
+CAS:BindAction("C8", handler, true, Enum.KeyCode.Two)
+log("buttons", count(), warnings())
+get("C8 (no slot)", "C8")
+CAS:UnbindAction("C1")
+get("C1 unbound", "C1")
+CAS:BindAction("C9", handler, true, Enum.KeyCode.Three)
+get("C9 (freed slot)", "C9")
+log("-- UnbindAllActions")
+CAS:UnbindAllActions()
+get("C2 after UnbindAllActions", "C2")
+log("buttons", count(), warnings())
+log("-- inside the handler")
+CAS:BindAction("H", function(n, state)
+	if state == Enum.UserInputState.Begin then
+		log("handler GetButton", name(CAS:GetButton("H")))
+	end
+	return Enum.ContextActionResult.Pass
+end, true, Enum.KeyCode.K)
+local h = CAS:GetButton("H")
+local x, y = screenPoint(h)
+VIM:SendTouchEvent(1, 0, x, y)
+frames(2)
+VIM:SendTouchEvent(1, 2, x, y)
+frames(2)
+log("after the tap", warnings())
+CAS:UnbindAllActions()
+frames(2)
 "##,
     );
 }

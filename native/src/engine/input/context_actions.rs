@@ -28,8 +28,9 @@
 //!     return); binding a bound name again calls the old handler that way twice. UnbindAllActions calls none.
 //!   - SetTitle / SetImage / SetDescription / SetPosition / GetButton on a name that is not bound warn
 //!     "ContextActionService could not find the function passed in, doing nothing." (UnbindAction of one does not).
-//!     GetButton returns nil.
-//! On a touch device a bind with createTouchButton shows a button (touch_buttons.rs).
+//!     GetButton returns nil then, and on a device without a touch screen.
+//! On a touch device a bind with createTouchButton shows a button (touch_buttons.rs), and GetButton returns it (a
+//! touch-screen client's ContextActionTouch answers it; touch_buttons.rs).
 
 use std::{
     cell::{Cell, RefCell},
@@ -394,13 +395,16 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
     behaviors.add_method(class, n.GetAllBoundActionInfo, method(move |lua, engine, _, _| {
         Ok(values([LuaValue::Table(i.actions.all_info_table(lua, engine)?)]))
     }));
-    // Measured (0.747, desktop and touch clients): nil at once, also for an action with a touch button
+    // Measured (0.747): a touch-screen client returns the action's touch button at once (touch_buttons.rs); nil for an
+    // action without one and on other devices; a name not bound warns
     let i = input.clone();
     behaviors.add_method(class, n.GetButton, services::strings(FIRST, method(move |_, engine, _, args| {
-        if !i.actions.is_bound(&string_arg(args, 1)) {
+        let name = string_arg(args, 1);
+        if !i.actions.is_bound(&name) {
             engine.warn(NOT_BOUND);
+            return Ok(values([LuaValue::Nil]));
         }
-        Ok(values([LuaValue::Nil]))
+        Ok(values([touch_buttons::button(&i, &name)?]))
     })));
 }
 

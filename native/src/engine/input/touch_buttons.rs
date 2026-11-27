@@ -23,6 +23,11 @@
 //!     handlers are connections made when the button is made (signals run the newest connection first).
 //!   - Writing GuiService.TouchControlsEnabled or UserInputService.ModalEnabled shows (true / false) or hides the
 //!     frame, whatever the other holds: the last change decides.
+//!   - ContextActionService:GetButton(name) returns the button made for the action, at once (measured in a touch-screen
+//!     client, TouchScreenEnabled true, the core script started by StarterScript): the same instance after SetTitle /
+//!     SetImage / SetPosition, also while the frame is hidden, inside the action's handler, and after a script destroyed
+//!     the button or moved it; nil for an action bound without a button, one that got no slot, and once a rebind
+//!     without a button or an unbind took the button away.
 //! Not emulated: a key press, mouse button or gamepad connection hides the frame in the sim client, and a later touch
 //! does not show it again there (its touches fire no LastInputTypeChanged), so what a phone does is unknown.
 
@@ -195,6 +200,11 @@ function Module.Show(On)
 	end
 end
 
+function Module.Button(Name)
+	local Record = Buttons[Name]
+	return Record and Record.Button
+end
+
 return Module
 "#;
 
@@ -286,6 +296,15 @@ pub(super) fn update(input: &Input, which: &str, action: &str, value: LuaValue) 
     match existing(input, which) {
         Some(update) => update.call((action, value)),
         None => Ok(()),
+    }
+}
+
+/// GetButton: the button made for `action` (the same instance, also after a script destroyed or moved it); nil when it got
+/// none (bound without one, no free slot, or no button was ever made on this device)
+pub(super) fn button(input: &Input, action: &str) -> LuaResult<LuaValue> {
+    match existing(input, "Button") {
+        Some(button) => button.call(action),
+        None => Ok(LuaValue::Nil),
     }
 }
 
