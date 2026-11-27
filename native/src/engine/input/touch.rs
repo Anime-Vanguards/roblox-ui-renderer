@@ -860,6 +860,12 @@ struct Geometry {
     elastic: bool,
 }
 
+/// Whether `frame` can scroll: a canvas larger than its window on an axis its ScrollingDirection allows
+pub(crate) fn can_scroll(cx: &Cx, frame: InstanceId) -> bool {
+    let g = geometry(cx, frame);
+    g.allow.0 || g.allow.1
+}
+
 fn geometry(cx: &Cx, frame: InstanceId) -> Geometry {
     cx.update_layout();
     let max = scrolling::range(cx, frame);

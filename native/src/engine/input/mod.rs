@@ -189,6 +189,12 @@ pub struct Input {
     /// GuiObjects the cursor is over (MouseEnter fired, MouseLeave not yet), topmost first
     hovered: RefCell<Vec<InstanceId>>,
     hovered_set: RefCell<FxHashSet<InstanceId>>,
+    /// Hovered objects in ScreenGuis the last movement did not reach (an upper one with an Active object under the cursor
+    /// kept it): they keep their hover and GuiState until it reaches them again (walk.rs)
+    stale: RefCell<FxHashSet<InstanceId>>,
+    /// Objects a mouse release ended on that the press had not reached: Idle while hovered until the cursor leaves or
+    /// enters them or a press reaches them (measured, P6d)
+    released_idle: RefCell<FxHashSet<InstanceId>>,
     /// --device touch: the fingers that are down and the ScrollingFrames coasting after a drag (touch.rs)
     pub(crate) touches: touch::Touch,
     /// Presses by button number (ascending, like the Luau array)
@@ -435,6 +441,8 @@ impl Input {
             mouse: Cell::new(Mouse::default()),
             hovered: RefCell::default(),
             hovered_set: RefCell::default(),
+            stale: RefCell::default(),
+            released_idle: RefCell::default(),
             touches: touch::Touch::default(),
             presses: RefCell::default(),
             last_activation: RefCell::default(),
@@ -566,6 +574,26 @@ impl Input {
         }
     }
 
+    /// Whether a held mouse button's press reached `id` (it got the press's InputBegan)
+    fn pressed_by(&self, id: InstanceId) -> bool {
+        self.presses.borrow().iter().any(|(_, press)| press.receivers.contains(&id))
+    }
+
+    /// The mouse's GuiState of `id` (measured, P6d, a 0.747 client): Press while a held button's press reached it and the
+    /// cursor is over it (Frames too, also after the cursor left and came back), Hover while the cursor or the selection is
+    /// on it, else Idle; a release that ended on it without its press leaves it Idle (`released_idle`), and so does one
+    /// in a ScreenGui the movement no longer reaches (`stale`) once an event reaches it
+    fn mouse_state(&self, id: InstanceId) -> &'static str {
+        let hovered = self.hovered_set.borrow().contains(&id) && !self.stale.borrow().contains(&id) && !self.released_idle.borrow().contains(&id);
+        if hovered && self.pressed_by(id) {
+            "Press"
+        } else if hovered || self.selected.get() == Some(id) {
+            "Hover"
+        } else {
+            "Idle"
+        }
+    }
+
     /// The mouse location (GetMouseLocation)
     pub fn mouse_location(&self) -> (f64, f64) {
         let mouse = self.mouse.get();
@@ -642,16 +670,6 @@ impl Cx<'_> {
         }
     }
 
-    /// The first GuiButton / TextBox under the cursor takes mouse buttons; objects below it get none.
-    fn sink_of(&self, list: &[InstanceId]) -> (Option<InstanceId>, usize) {
-        for (index, &id) in list.iter().enumerate() {
-            if self.is(id, self.i.c.GuiButton) || self.is(id, self.i.c.TextBox) {
-                return (Some(id), index + 1);
-            }
-        }
-        (None, list.len())
-    }
-
     /// Measured: gameProcessedEvent is true for mouse movement when an Active object is under the
     /// cursor, for mouse buttons also when a GuiButton / TextBox is (Active or not).
     fn any_active(&self, list: &[InstanceId]) -> bool {
@@ -668,10 +686,6 @@ impl Cx<'_> {
         list.iter().any(|&id| self.class_name_is(id, self.i.c.ScrollingFrame) && !self.is_false(id, self.i.n.ScrollingEnabled))
     }
 
-    fn pressed_by(&self, id: InstanceId) -> bool {
-        self.i.presses.borrow().iter().any(|(_, press)| press.button == Some(id) && press.clickable)
-    }
-
     fn compute_state(&self, id: InstanceId) -> &'static str {
         if !self.i.interactable(&self.engine.state.borrow(), id) {
             return "NonInteractable";
@@ -682,7 +696,7 @@ impl Cx<'_> {
             return "Idle";
         }
         // Measured (select-press.mjs, edges.mjs): a selected object shows Hover, a selected button
-        // held by Return shows Press; Press is a GuiButton state
+        // held by Return shows Press
         if self.i.key_pressed.get() == Some(id) {
             return "Press";
         }
@@ -694,14 +708,7 @@ impl Cx<'_> {
             }
             return if self.i.selected.get() == Some(id) { "Hover" } else { "Idle" };
         }
-        let hovered = self.i.hovered_set.borrow().contains(&id);
-        if hovered || self.i.selected.get() == Some(id) {
-            if self.is(id, self.i.c.GuiButton) && self.pressed_by(id) && hovered {
-                return "Press";
-            }
-            return "Hover";
-        }
-        "Idle"
+        self.i.mouse_state(id)
     }
 
     pub fn update_state(&self, id: InstanceId) {
@@ -713,6 +720,12 @@ impl Cx<'_> {
         if !current.same(&item) {
             self.set(id, self.i.n.GuiState, item);
         }
+    }
+
+    /// Updates `id`'s GuiState now (the others touched wait for their own turn)
+    fn flush_one(&self, id: InstanceId) {
+        self.i.touched.borrow_mut().retain(|&t| t != id);
+        self.update_state(id);
     }
 
     fn flush_states(&self) {
@@ -794,9 +807,11 @@ fn set_position(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     cx.update_legacy_mouse()
 }
 
-/// Hover update for the cursor at (X, Y): measured order (all topmost first) MouseMoved on every
-/// object under the cursor, InputChanged on those already hovered, MouseLeave + InputEnded on those
-/// left, MouseEnter + InputBegan on those entered; then UserInputService.
+/// Hover update for the cursor at (X, Y), ScreenGui by ScreenGui from the top down to the first with an Active object
+/// under the cursor (measured in a 0.747 client, P6d; walk.rs): in each, MouseMoved on every object under the cursor,
+/// InputChanged on those already hovered, MouseLeave + InputEnded on those left, MouseEnter + InputBegan on those
+/// entered (topmost first; an Active object keeps nothing from the objects below it in its ScreenGui). What the cursor
+/// hovers in lower ScreenGuis stays hovered, with its GuiState. Then UserInputService.
 fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     let n = &cx.i.n;
     let movement = cx.input_object("MouseMovement", "MouseMovement");
@@ -818,45 +833,101 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     let list = cx.hit_list(x, y);
     let now: FxHashSet<InstanceId> = list.iter().copied().collect();
     let position = || vec![Value::Number(x), Value::Number(y)];
-    for &id in &list {
-        cx.fire(id, n.MouseMoved, position());
-    }
-    for &id in &list {
-        if cx.i.hovered_set.borrow().contains(&id) {
-            cx.fire(id, n.InputChanged, vec![Value::Instance(movement)]);
+    // Measured (P6d): while a press on a ScrollingFrame that can scroll is held, the movement is that frame's alone: it
+    // gets InputChanged, or MouseLeave / MouseEnter as the cursor leaves or comes back; nothing gets MouseMoved and the
+    // other objects keep their hover (the canvas does not move)
+    let pressed: Vec<InstanceId> = cx.i.presses.borrow().iter().find(|(key, _)| *key == 1.0).map_or_else(Vec::new, |(_, press)| press.receivers.clone());
+    let captor = pressed.into_iter().find(|&o| cx.alive(o) && cx.class_name_is(o, cx.i.c.ScrollingFrame) && touch::can_scroll(cx, o));
+    if let Some(frame) = captor {
+        let over = now.contains(&frame);
+        let was = cx.i.hovered_set.borrow().contains(&frame);
+        if over && was {
+            cx.fire(frame, n.InputChanged, vec![Value::Instance(movement)]);
+        } else if was {
+            cx.i.hovered_set.borrow_mut().remove(&frame);
+            cx.i.hovered.borrow_mut().retain(|&o| o != frame);
+            cx.i.touch(frame);
+            cx.fire(frame, n.MouseLeave, position());
+            cx.fire(frame, n.InputEnded, vec![Value::Instance(movement)]);
+            cx.flush_one(frame);
+        } else if over {
+            cx.i.hovered_set.borrow_mut().insert(frame);
+            cx.i.hovered.borrow_mut().insert(0, frame);
+            cx.i.touch(frame);
+            cx.fire(frame, n.MouseEnter, position());
+            cx.fire(frame, n.InputBegan, vec![Value::Instance(movement)]);
+            cx.flush_one(frame);
         }
-    }
-    let previous = cx.i.hovered.borrow().clone();
-    for id in previous {
-        if !now.contains(&id) {
-            cx.i.hovered_set.borrow_mut().remove(&id);
-            cx.i.touch(id);
-            if cx.alive(id) {
-                cx.fire(id, n.MouseLeave, position());
-                cx.fire(id, n.InputEnded, vec![Value::Instance(movement)]);
+    } else {
+        let ranks = walk::Ranks::new(cx);
+        let reach = walk::walk(cx, &ranks, &list, None, false);
+        let previous = cx.i.hovered.borrow().clone();
+        let hovered: Vec<(InstanceId, Option<usize>)> = previous.iter().map(|&o| (o, ranks.of(cx, o))).collect();
+        // Measured (P6d): while a press that began on a TextBox is held and the cursor is on that TextBox, it gets MouseMoved
+        // twice and the objects below it in its ScreenGui get neither MouseMoved nor InputChanged
+        let selecting = cx.i.presses.borrow().iter().find(|(key, _)| *key == 1.0).and_then(|(_, press)| press.sink).filter(|&sink| cx.is(sink, cx.i.c.TextBox));
+        for rank in walk::visit_order(&reach, &hovered) {
+            let here = reach.group(rank).to_vec();
+            let before: Vec<InstanceId> = hovered.iter().filter(|(_, r)| *r == rank).map(|(o, _)| *o).collect();
+            let cut = selecting.and_then(|text_box| here.iter().position(|&o| o == text_box));
+            let below = |index: usize| cut.is_some_and(|c| index > c);
+            if !before.is_empty() || !here.is_empty() {
+                for (index, &id) in here.iter().enumerate() {
+                    if !below(index) {
+                        cx.fire(id, n.MouseMoved, position());
+                    }
+                    if cut == Some(index) {
+                        cx.fire(id, n.MouseMoved, position());
+                    }
+                }
+                for (index, &id) in here.iter().enumerate() {
+                    if before.contains(&id) {
+                        if !below(index) {
+                            cx.fire(id, n.InputChanged, vec![Value::Instance(movement)]);
+                        }
+                        if cx.i.stale.borrow_mut().remove(&id) {
+                            cx.i.touch(id);
+                        }
+                    }
+                }
+                for &id in &before {
+                    if !here.contains(&id) {
+                        cx.i.hovered_set.borrow_mut().remove(&id);
+                        cx.i.stale.borrow_mut().remove(&id);
+                        cx.i.released_idle.borrow_mut().remove(&id);
+                        cx.i.touch(id);
+                        if cx.alive(id) {
+                            cx.fire(id, n.MouseLeave, position());
+                            cx.fire(id, n.InputEnded, vec![Value::Instance(movement)]);
+                        }
+                        cx.flush_one(id);
+                    }
+                }
+                for &id in &here {
+                    if !before.contains(&id) {
+                        cx.i.hovered_set.borrow_mut().insert(id);
+                        cx.i.released_idle.borrow_mut().remove(&id);
+                        cx.i.touch(id);
+                        cx.fire(id, n.MouseEnter, position());
+                        cx.fire(id, n.InputBegan, vec![Value::Instance(movement)]);
+                        cx.flush_one(id);
+                    }
+                }
             }
         }
-    }
-    for &id in &list {
-        let entered = cx.i.hovered_set.borrow_mut().insert(id);
-        if entered {
-            cx.i.touch(id);
-            cx.fire(id, n.MouseEnter, position());
-            cx.fire(id, n.InputBegan, vec![Value::Instance(movement)]);
+        let mut kept = reach.objects();
+        for &(id, rank) in &hovered {
+            if !reach.handles(rank) {
+                cx.i.stale.borrow_mut().insert(id);
+                kept.push(id);
+            }
         }
+        *cx.i.hovered.borrow_mut() = kept;
     }
-    *cx.i.hovered.borrow_mut() = list.clone();
 
-    // A press stops being a click once the cursor leaves the pressed button
-    let mut left = Vec::new();
-    for (_, press) in cx.i.presses.borrow_mut().iter_mut() {
-        if let Some(button) = press.button {
-            if !now.contains(&button) {
-                press.clickable = false;
-                left.push(button);
-            }
-        }
-    }
+    // (measured, a 0.747 client, P6d: a press whose cursor leaves the button and comes back still clicks it; Studio
+    // cancelled the click)
+    let left: Vec<InstanceId> = cx.i.presses.borrow().iter().filter_map(|(_, press)| press.button).filter(|b| !now.contains(b)).collect();
     for id in left {
         cx.i.touch(id);
     }
@@ -920,8 +991,10 @@ fn leave(cx: &Cx) -> LuaResult<()> {
     mouse.inside = false;
     cx.i.mouse.set(mouse);
     let hovered = std::mem::take(&mut *cx.i.hovered.borrow_mut());
+    cx.i.stale.borrow_mut().clear();
     for id in hovered {
         cx.i.hovered_set.borrow_mut().remove(&id);
+        cx.i.released_idle.borrow_mut().remove(&id);
         cx.i.touch(id);
         if cx.alive(id) {
             cx.fire(id, n.MouseLeave, vec![Value::Number(mouse.x), Value::Number(mouse.y)]);
@@ -994,6 +1067,48 @@ fn detector_under(cx: &Cx, list: &[InstanceId]) -> bool {
     !cx.engine.options.edit_mode() && list.iter().any(|&id| drag::has_detector(cx, id))
 }
 
+/// A mouse button's press or release, ScreenGui by ScreenGui from the top (measured in a 0.747 client, P6d): in each the
+/// objects under the cursor down to its first GuiButton / TextBox (the sink) get the press (an Active Frame above a
+/// button keeps nothing from it); a ScreenGui with a sink or an Active object under the cursor is the last. The
+/// receivers, the sink and what it reaches.
+fn press_reach(cx: &Cx, ranks: &walk::Ranks, list: &[InstanceId]) -> (Vec<InstanceId>, Option<InstanceId>, walk::Walk) {
+    let mut reach = walk::Walk { floor: None, groups: Vec::new(), sunk: FxHashSet::default() };
+    let mut receivers = Vec::new();
+    let mut sink = None;
+    for (rank, objects) in walk::groups(cx, ranks, list) {
+        let found = objects.iter().position(|&o| cx.is(o, cx.i.c.GuiButton) || cx.is(o, cx.i.c.TextBox));
+        receivers.extend_from_slice(&objects[..found.map_or(objects.len(), |i| i + 1)]);
+        let stops = found.is_some() || objects.iter().any(|&o| cx.is_true(o, cx.i.n.Active));
+        if let Some(index) = found {
+            sink = Some(objects[index]);
+        }
+        reach.groups.push((rank, objects));
+        if stops {
+            reach.floor = rank;
+            break;
+        }
+    }
+    (receivers, sink, reach)
+}
+
+/// The press's sink takes it: MouseButton1Down / 2Down on a GuiButton (buttons 1 and 2), focus and the caret on a TextBox
+/// (button 1)
+fn press_sink(cx: &Cx, button: f64, sink: InstanceId, x: f64, y: f64, object: InstanceId) -> LuaResult<()> {
+    let n = &cx.i.n;
+    if cx.is(sink, cx.i.c.GuiButton) && button <= 2.0 {
+        if let Some((_, press)) = cx.i.presses.borrow_mut().iter_mut().find(|(key, _)| *key == button) {
+            press.button = Some(sink);
+            press.clickable = true;
+        }
+        cx.i.touch(sink);
+        let event = if button == 1.0 { n.MouseButton1Down } else { n.MouseButton2Down };
+        cx.fire(sink, event, vec![Value::Number(x), Value::Number(y)]);
+    } else if cx.is(sink, cx.i.c.TextBox) && button == 1.0 {
+        textbox::press(cx, sink, x, y, object)?;
+    }
+    Ok(())
+}
+
 fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
     ensure_at(cx, x, y)?;
     cx.i.clicked_this_frame.set(true);
@@ -1004,9 +1119,12 @@ fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
     cx.set_input(object, "Begin", position, Some(delta));
 
     let list = cx.hit_list(x, y);
-    let (sink, sink_index) = cx.sink_of(&list);
-    let receivers: Vec<InstanceId> = list[..sink_index].to_vec();
+    let ranks = walk::Ranks::new(cx);
+    let (receivers, sink, reach) = press_reach(cx, &ranks, &list);
     let processed = cx.any_active(&list) || sink.is_some() || detector_under(cx, &list);
+    for &id in &receivers {
+        cx.i.released_idle.borrow_mut().remove(&id);
+    }
     {
         let mut presses = cx.i.presses.borrow_mut();
         presses.retain(|(key, _)| *key != button);
@@ -1021,18 +1139,14 @@ fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
         }
     }
 
-    if let Some(sink) = sink {
-        if cx.is(sink, cx.i.c.GuiButton) && button <= 2.0 {
-            if let Some((_, press)) = cx.i.presses.borrow_mut().iter_mut().find(|(key, _)| *key == button) {
-                press.button = Some(sink);
-                press.clickable = true;
-            }
-            cx.i.touch(sink);
-            let event = if button == 1.0 { n.MouseButton1Down } else { n.MouseButton2Down };
-            cx.fire(sink, event, vec![Value::Number(x), Value::Number(y)]);
-        } else if cx.is(sink, cx.i.c.TextBox) && button == 1.0 {
-            textbox::press(cx, sink, x, y, object)?;
-        }
+    // The sink's MouseButton*Down / focus come with its ScreenGui's InputBegan (measured, P6d: a lower ScreenGui's button
+    // gets MouseButton1Down after an upper one's objects got InputBegan)
+    let sink_rank = sink.map(|s| ranks.of(cx, s));
+    let first_rank = reach.groups.first().map(|(rank, _)| *rank);
+    let mut sink_pending = sink.is_some();
+    if sink.is_some() && sink_rank == first_rank {
+        press_sink(cx, button, sink.unwrap(), x, y, object)?;
+        sink_pending = false;
     }
 
     // Scroll bar thumbs and dragging (Draggable fires DragBegin before InputBegan, measured)
@@ -1047,8 +1161,16 @@ fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
         }
     }
 
-    for &id in &receivers {
-        cx.fire(id, n.InputBegan, vec![Value::Instance(object)]);
+    for (rank, objects) in &reach.groups {
+        if sink_pending && sink_rank == Some(*rank) {
+            press_sink(cx, button, sink.unwrap(), x, y, object)?;
+            sink_pending = false;
+        }
+        for &id in objects.iter().filter(|id| receivers.contains(id)) {
+            cx.i.touch(id);
+            cx.fire(id, n.InputBegan, vec![Value::Instance(object)]);
+            cx.flush_one(id);
+        }
     }
     cx.flush_states();
 
@@ -1078,6 +1200,39 @@ fn activation_count(cx: &Cx, button: InstanceId) -> f64 {
     count
 }
 
+/// A release's button events on its sink: MouseButton1Click (the press on this button), MouseButton1Up, Activated (the
+/// press taken by this button, not dragged); MB2: Click, SecondaryActivated, Up. MouseButton*Up fires on the button
+/// under the cursor wherever the press began. A 0.747 client (P6d) activates only the button that took the press (a
+/// press on empty space or on a Frame released over a button gives it MouseButton1Up and InputEnded only, where Studio
+/// activated it), and it clicks a button the cursor left and came back to during the press (Studio did not).
+fn release_sink(cx: &Cx, button: f64, sink: InstanceId, current: Option<&Press>, x: f64, y: f64, object: InstanceId) {
+    let n = &cx.i.n;
+    if !cx.is(sink, cx.i.c.GuiButton) || button > 2.0 {
+        return;
+    }
+    let clicked = current.is_some_and(|c| c.button == Some(sink) && c.clickable);
+    let activates = !cx.is_false(sink, n.Active) && current.is_some_and(|c| c.sink == Some(sink) && !c.dragged);
+    cx.i.touch(sink);
+    if button == 1.0 {
+        if clicked {
+            cx.fire(sink, n.MouseButton1Click, Vec::new());
+        }
+        cx.fire(sink, n.MouseButton1Up, vec![Value::Number(x), Value::Number(y)]);
+        if activates {
+            let count = activation_count(cx, sink);
+            cx.fire(sink, n.Activated, vec![Value::Instance(object), Value::Number(count)]);
+        }
+    } else {
+        if clicked {
+            cx.fire(sink, n.MouseButton2Click, Vec::new());
+        }
+        if activates {
+            cx.fire(sink, n.SecondaryActivated, vec![Value::Instance(object)]);
+        }
+        cx.fire(sink, n.MouseButton2Up, vec![Value::Number(x), Value::Number(y)]);
+    }
+}
+
 fn button_up(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
     ensure_at(cx, x, y)?;
     let n = &cx.i.n;
@@ -1101,75 +1256,73 @@ fn button_up(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
         drag::release(cx, x, y);
     }
     let list = cx.hit_list(x, y);
-    let (sink, sink_index) = cx.sink_of(&list);
+    let ranks = walk::Ranks::new(cx);
+    // The release reaches the ScreenGuis down to the first with a GuiButton / TextBox or an Active object under the
+    // cursor, as the press does (press_reach). Its sink: the first GuiButton / TextBox there, but a TextBox above the
+    // button the press took lets that button have the release (measured, P6d)
+    let (_, _, reach) = press_reach(cx, &ranks, &list);
+    let reached = reach.objects();
+    let pressed = current.as_ref().and_then(|c| c.button).filter(|b| reached.contains(b));
+    let sink = reached
+        .iter()
+        .copied()
+        .filter(|&o| cx.is(o, cx.i.c.GuiButton) || cx.is(o, cx.i.c.TextBox))
+        .find(|&o| !(pressed.is_some() && cx.is(o, cx.i.c.TextBox)));
+    let sink_rank = sink.map(|s| ranks.of(cx, s));
 
-    // Measured order: MouseButton1Click, MouseButton1Up, Activated (MB2: Click, SecondaryActivated,
-    // Up). MouseButton*Up fires on the button under the cursor wherever the press began. Activated
-    // needs the press to have been taken by this button or by no button / TextBox; leaving the
-    // button during the press does not stop it. The click needs the press on the same button
-    // without leaving it.
-    if let Some(sink) = sink {
-        if cx.is(sink, cx.i.c.GuiButton) && button <= 2.0 {
-            let clicked = current.as_ref().is_some_and(|c| c.button == Some(sink) && c.clickable);
-            let activates = !cx.is_false(sink, n.Active)
-                && current.as_ref().is_none_or(|c| (c.sink.is_none() || c.sink == Some(sink)) && !c.dragged);
-            cx.i.touch(sink);
-            if button == 1.0 {
-                if clicked {
-                    cx.fire(sink, n.MouseButton1Click, Vec::new());
+    // Measured (a 0.747 client, P6d): ScreenGui by ScreenGui from the top, the sink's button events, then InputEnded. In a
+    // ScreenGui the press reached, InputEnded goes to the objects it reached there (even if the cursor left them); in one
+    // it did not, to the objects under the cursor down to its GuiButton / TextBox, which turn Idle though the cursor is on
+    // them. The objects the press reached in ScreenGuis the release does not reach get it after UserInputService's
+    // InputEnded, and turn Idle.
+    let receivers: Vec<(InstanceId, Option<usize>)> = current.as_ref().map_or_else(Vec::new, |c| c.receivers.iter().map(|&o| (o, ranks.of(cx, o))).collect());
+    let mut ranks_to_visit = walk::visit_order(&reach, &receivers);
+    if let Some(rank) = sink_rank {
+        if !ranks_to_visit.contains(&rank) {
+            ranks_to_visit.push(rank);
+        }
+    }
+    for rank in ranks_to_visit {
+        if let (Some(sink), true) = (sink, sink_rank == Some(rank)) {
+            release_sink(cx, button, sink, current.as_ref(), x, y, object);
+        }
+        let theirs: Vec<InstanceId> = receivers.iter().filter(|(_, r)| *r == rank).map(|(o, _)| *o).collect();
+        if !theirs.is_empty() {
+            for id in theirs {
+                cx.i.touch(id);
+                if cx.alive(id) {
+                    cx.fire(id, n.InputEnded, vec![Value::Instance(object)]);
                 }
-                cx.fire(sink, n.MouseButton1Up, vec![Value::Number(x), Value::Number(y)]);
-                if activates {
-                    let count = activation_count(cx, sink);
-                    cx.fire(sink, n.Activated, vec![Value::Instance(object), Value::Number(count)]);
-                }
-            } else {
-                if clicked {
-                    cx.fire(sink, n.MouseButton2Click, Vec::new());
-                }
-                if activates {
-                    cx.fire(sink, n.SecondaryActivated, vec![Value::Instance(object)]);
-                }
-                cx.fire(sink, n.MouseButton2Up, vec![Value::Number(x), Value::Number(y)]);
+                cx.flush_one(id);
+            }
+        } else {
+            let here = reach.group(rank);
+            let end = here.iter().position(|&o| cx.is(o, cx.i.c.GuiButton) || cx.is(o, cx.i.c.TextBox)).map_or(here.len(), |i| i + 1);
+            for &id in &here[..end] {
+                cx.i.released_idle.borrow_mut().insert(id);
+                cx.i.touch(id);
+                cx.fire(id, n.InputEnded, vec![Value::Instance(object)]);
+                cx.flush_one(id);
             }
         }
     }
-    if let Some(pressed) = current.as_ref().and_then(|c| c.button) {
-        cx.i.touch(pressed);
-    }
-
-    // Measured: InputEnded goes to the objects that got InputBegan for the press; a press no
-    // button / TextBox took ends on the objects under the release point instead
-    let ended: Vec<InstanceId> = match &current {
-        Some(c) if c.sink.is_some() => c.receivers.clone(),
-        _ => {
-            let mut ended = Vec::new();
-            let mut seen = FxHashSet::default();
-            if let Some(c) = &current {
-                for &id in &c.receivers {
-                    seen.insert(id);
-                    ended.push(id);
-                }
-            }
-            for &id in &list[..sink_index] {
-                if !seen.contains(&id) {
-                    ended.push(id);
-                }
-            }
-            ended
-        }
-    };
-    for id in ended {
-        if cx.alive(id) {
-            cx.fire(id, n.InputEnded, vec![Value::Instance(object)]);
-        }
-    }
-    cx.flush_states();
+    let unreached: Vec<InstanceId> = receivers.iter().filter(|(_, rank)| !reach.handles(*rank)).map(|(o, _)| *o).collect();
 
     // Measured: gameProcessedEvent of the release follows what is under the release point
     cx.set_last_input_type(type_name);
     let processed = cx.any_active(&list) || sink.is_some() || detector_under(cx, &list);
     cx.fire_uis(n.InputEnded, vec![Value::Instance(object), Value::Bool(processed)]);
+    for id in unreached {
+        cx.i.released_idle.borrow_mut().insert(id);
+        if cx.alive(id) {
+            cx.fire(id, n.InputEnded, vec![Value::Instance(object)]);
+        }
+        cx.flush_one(id);
+    }
+    if let Some(pressed) = current.as_ref().and_then(|c| c.button) {
+        cx.i.touch(pressed);
+    }
+    cx.flush_states();
     deliver_to_actions(cx, button_key(cx, button), false);
     if button == 1.0 {
         cx.fire_legacy("Button1Up", Vec::new())?;
@@ -1581,7 +1734,10 @@ impl Input {
                 textbox::step(&cx);
                 let hovered = self.hovered.borrow().clone();
                 for id in hovered {
-                    cx.update_state(id);
+                    // (hovered objects the movement no longer reaches keep their state, measured)
+                    if !self.stale.borrow().contains(&id) {
+                        cx.update_state(id);
+                    }
                 }
             });
             Ok(())
@@ -1833,13 +1989,7 @@ pub(crate) fn update_state_in(engine: &Engine, input: &Input, state: &mut State,
                 "Idle"
             }
         } else {
-            let hovered = input.hovered_set.borrow().contains(&id);
-            if hovered || input.selected.get() == Some(id) {
-                let pressed = input.presses.borrow().iter().any(|(_, p)| p.button == Some(id) && p.clickable);
-                if input.class_is(instance.class, input.c.GuiButton) && pressed && hovered { "Press" } else { "Hover" }
-            } else {
-                "Idle"
-            }
+            input.mouse_state(id)
         }
     };
     let Some(item) = engine.reflection.enum_item("GuiState", name) else { return };

@@ -1425,11 +1425,11 @@
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
-			"digest": "04aa83e1fd963d50d8c313fe12db3bf7b7fe4de54329e0e5fa7a473b884852ca",
+			"digest": "6535d5cd9aed26aa3c05e74a6f15e3e266e15c536b5f51edb33c0b98830a1e57",
 			"status": "live"
 		},
 		"fast/live/interaction-textbox/120hz-click": {
-			"digest": "2379190e3cb8ab1f8adbbd49cf3b7c07b43e03d674673617f34f38de464b40c3",
+			"digest": "b07fb8a51978e25489637cba833fd53d8ed47edf2c6f79faa448e4166bfa37c4",
 			"status": "live"
 		},
 		"fast/live/live-scroll/60hz-default": {
@@ -3961,19 +3961,19 @@
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
-			"digest": "e427c491301fb485ee1c515b150bb9e750e514e0721f9ad5b2dbe758f4c0699c",
+			"digest": "8bcd397a5f519b9be2ec43f025b0ef33ced1817474f5a1b17590907909ca8507",
 			"status": "live"
 		},
 		"live/input/144hz-input-probe": {
-			"digest": "6ec72c3b78b21157788220a90aaf06c4fe71d814bd5d48bd03696ea693061e44",
+			"digest": "56d370a94f0f4cd19e2d24db49702407b107a8e056ba8792c4c952dba7796c80",
 			"status": "live"
 		},
 		"live/input/60hz-input-probe": {
-			"digest": "07a4856f94ae5c305fdd59242f74f92ca3ce84d3a7b8044099c640d71bdd8242",
+			"digest": "46200b72392737f8b7de04d10f3fa144680ddaa0c6b81c582f38a798e6f3b842",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-click": {
-			"digest": "2d56e06510c4a818db15f842dbb3837e488459b129c8d2d94e9e3c21c060a799",
+			"digest": "707d55cb3ea0115ab7e6cb4966e327934a7711db2e9b66be6805b361914f3a49",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-default": {
@@ -3981,7 +3981,7 @@
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/144hz-click": {
-			"digest": "b0473d15d9bee5781f50f62528b764a8b890143e0d13c7fcf6ef8c914f31da8c",
+			"digest": "67f61dce15fede711e94665d198e3bdcd13e1de4725056aaffcf0d910e297aa4",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/144hz-default": {
@@ -3989,7 +3989,7 @@
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-click": {
-			"digest": "fef1b05e655cbef2a28081ff792e977078f1ec9b8758f22b2fd102c28486022a",
+			"digest": "eea52648fab513c9e169b5113cf79521ac7e5f21517c507f64d49459c44f9d25",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-default": {
@@ -4001,7 +4001,7 @@
 			"status": "live"
 		},
 		"live/interaction-scroll/120hz-click": {
-			"digest": "1ea72749a949b23fef40e1bf8cfa183a45383405609ce8fb467d1a06e63ab4bb",
+			"digest": "aa098869479af6726db6f7fa88640ee6902cc6b883bd27ad0ee6de1cc83981d9",
 			"status": "live"
 		},
 		"live/interaction-scroll/120hz-default": {
@@ -4009,7 +4009,7 @@
 			"status": "live"
 		},
 		"live/interaction-scroll/144hz-click": {
-			"digest": "57ffe484d488ab148311e04018fa3652be4c272821da2d7a6fdd0f3f67e02ce0",
+			"digest": "4107063f801862b597c4eb12eea567919145c7f01a0b8987d5c0c4abb99aa63e",
 			"status": "live"
 		},
 		"live/interaction-scroll/144hz-default": {
@@ -4017,7 +4017,7 @@
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-click": {
-			"digest": "1596a39a799c907949257d842710669d743db476bbcfa4725bbfb9e85dc8a027",
+			"digest": "816e2a0558c8db1ee765d8bbff3d4a93a34e4b236cb1928a667df9ec306e0703",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-default": {
@@ -4029,7 +4029,7 @@
 			"status": "live"
 		},
 		"live/interaction-textbox/120hz-click": {
-			"digest": "317c14f64cd4e7f8a3773fed45b85f55dbd624f2f9d6ed7a5c9cc7dd1a9246a6",
+			"digest": "fe6766fbcf2756be4e0bd5724e96ecf5e85238cb4d5efe5296ad7b0873d1f4bd",
 			"status": "live"
 		},
 		"live/interaction-textbox/120hz-default": {
@@ -4037,7 +4037,7 @@
 			"status": "live"
 		},
 		"live/interaction-textbox/144hz-click": {
-			"digest": "42406d3d02e8ecf88c9c0e1f0514534630aaa8ab66b855c32628c4073081c23b",
+			"digest": "b8891282c3861d952b9143c974d352464460983f6bd7938999c01c92241216af",
 			"status": "live"
 		},
 		"live/interaction-textbox/144hz-default": {
@@ -4045,7 +4045,7 @@
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-click": {
-			"digest": "0108d83206c2b41051c2092a6e83312a17c440989a9280b1d718f6bedd0f095a",
+			"digest": "e57034e2db3616ff9c6be5d45d3d8fff8cce39277944ec36efa6864e0b66b123",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-default": {
@@ -4057,7 +4057,7 @@
 			"status": "live"
 		},
 		"live/live-rotated-cull/120hz-click": {
-			"digest": "d031b72f57b3b5b116d7f18ed8c70dba430b163cd568fafe7fd304ee82594db1",
+			"digest": "62bf6ffde6a3aec73f8653cdf2e33962f0a4a948ea178c90450312362f0be2d0",
 			"status": "live"
 		},
 		"live/live-rotated-cull/120hz-default": {
@@ -4065,7 +4065,7 @@
 			"status": "live"
 		},
 		"live/live-rotated-cull/144hz-click": {
-			"digest": "5672b72e5e04abeb470f6e933bc96e9e9d6bd6a6625ce146560794379e17c73b",
+			"digest": "7973c63f3cd9b1f51fb5991dd4b68eae89e1b257535787f8737c40baead0f71c",
 			"status": "live"
 		},
 		"live/live-rotated-cull/144hz-default": {
@@ -4077,7 +4077,7 @@
 			"status": "live"
 		},
 		"live/live-rotated-cull/60hz-click": {
-			"digest": "e00f3758dcf4f301bafa31d7378baa4f6e5df8c91cfe274feebecede570f1063",
+			"digest": "fbb6dc98f38e3b9f7946d9a30de60eec5ac86d18188d4b234be020c271fbf4a7",
 			"status": "live"
 		},
 		"live/live-rotated-cull/60hz-default": {
@@ -4093,7 +4093,7 @@
 			"status": "live"
 		},
 		"live/live-scroll/120hz-click": {
-			"digest": "c188856ac2babd3004e82834a0a8883622879482aa8b0a9dbd9becfcaf601944",
+			"digest": "c105c22be7ab2ad104f732db1c8d217828a043c9ad5620dab90d55e245fe46bd",
 			"status": "live"
 		},
 		"live/live-scroll/120hz-default": {
@@ -4101,7 +4101,7 @@
 			"status": "live"
 		},
 		"live/live-scroll/144hz-click": {
-			"digest": "62120e82a82e9206b9e5d227aa22128e114612d686dc974454e95dd4004a6c49",
+			"digest": "9af86ab9fdb7cc8f3cbedd33869b1610d9a995cbfe5010dc93e853e2797f88b5",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-default": {
@@ -4113,7 +4113,7 @@
 			"status": "live"
 		},
 		"live/live-scroll/60hz-click": {
-			"digest": "8092380d816451682bcd53ab0d1d22171185ac8dd7a1d2eab479868a82c9ed58",
+			"digest": "5e390d4cc3fd36ff2f34acd2064ef699971f96e1b30bde946f78011c8165930a",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-default": {
@@ -4129,7 +4129,7 @@
 			"status": "live"
 		},
 		"live/live-stress/120hz-click": {
-			"digest": "e6be15beae443260deef53a2b414aacf53b45f28220ffa8ddcd9f408ca42501d",
+			"digest": "0bad94a306154872f0aba26e5224416e9941d1a0d2aedb3a17dec6ad3f016909",
 			"status": "live"
 		},
 		"live/live-stress/120hz-default": {
@@ -4137,7 +4137,7 @@
 			"status": "live"
 		},
 		"live/live-stress/144hz-click": {
-			"digest": "6ab779044a8dfb567958d2178519b0f4f6a851d29ec50634ccd132de2d528329",
+			"digest": "3f8998fc0ef26e6d47d3e0478dd1857ce5b3ebe8fa7a31eaca279c610cf3adf6",
 			"status": "live"
 		},
 		"live/live-stress/144hz-default": {
@@ -4149,7 +4149,7 @@
 			"status": "live"
 		},
 		"live/live-stress/60hz-click": {
-			"digest": "a719c73d284e18f7e61481fb0e0dd32c4b8dd431883a9d8a3f0ea66cbf8c9f4d",
+			"digest": "fb9ff2fa6df84662502abc61c8217e12431a2625fcfe89fca167aa69c287f90f",
 			"status": "live"
 		},
 		"live/live-stress/60hz-default": {
@@ -4165,7 +4165,7 @@
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-click": {
-			"digest": "f24f990d22d27ec9f5388cf09da463c86f58c16850eb9afcd155356853d178a4",
+			"digest": "faffe1f6b36c123013304a42e220193e62fadc26f6cdff6b1d49a0fa5e684114",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-default": {
@@ -4173,7 +4173,7 @@
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-click": {
-			"digest": "5ce3eea29a567c15aae31a4c5ae3febad205d23c81626e06643360d5ecbdc9bd",
+			"digest": "251361682537a18a11f74a797306f1335dc4cec4edbc82f817338f9ed1c25280",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-default": {
@@ -4185,7 +4185,7 @@
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-click": {
-			"digest": "73c3d5c22fd13ecd5a34e754a4aedda44018f367df45873ffe7775afd1c1a272",
+			"digest": "19dd8702b29f95f774dd327068d133faa8a5e48f5c92ef69a768c82b9728d01d",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-default": {
@@ -4201,7 +4201,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T15:02:30.630Z",
+	"recorded": "2026-11-27T15:27:58.906Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

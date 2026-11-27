@@ -4950,3 +4950,10 @@ fn touch_on_scrolling_frames_and_text_boxes_matches_a_client() {
 fn fractional_touch_points_match_a_client() {
     stacked_cases(&["frac"]);
 }
+
+/// The mouse over the same stacks: in one ScreenGui every object under the cursor is hovered (an Active object sinks
+/// nothing), a ScreenGui with an Active object under the cursor keeps the movement and the buttons from lower ones.
+#[test]
+fn stacked_mouse_input_matches_a_client() {
+    stacked_cases(&["mstack_same", "mstack_lower", "mstack_nested", "mstack2", "mscroll"]);
+}
