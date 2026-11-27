@@ -240,6 +240,10 @@
 			"digest": "2e97a68feb46ef5b756b51c0860c10ef1b101e1372c6ff7c74d814c2dcd18f9f",
 			"status": "ok"
 		},
+		"fast/edit/interaction-touch-buttons": {
+			"digest": "a4008098a18d55df89f79661dfb167cf0b4531a59769cda4ebbfd73d4fed8f48",
+			"status": "ok"
+		},
 		"fast/edit/layout-autolist-scalepad": {
 			"digest": "a88014a46d60a1e1fab10edd9f8b7905eb6d428f298c6c4bef0c464022621b22",
 			"status": "ok"
@@ -1648,6 +1652,10 @@
 			"digest": "205fe3e50d58fadfd5f24ccde4e403c6b5f055f543f807eb8c59b63d58af2ff7",
 			"status": "ok"
 		},
+		"fixtures/edit/interaction-touch-buttons": {
+			"digest": "4e17c2835c11c4966f0f2627bc59f1de44a9a94e9bbe9232e410e716629cdaeb",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-autolist-scalepad": {
 			"digest": "f682fd6f1fe4f4de16b6bd6649312881ecb55f86e29575ab6cb28eef055ab69a",
 			"status": "ok"
@@ -3042,6 +3050,10 @@
 		},
 		"fixtures/play/interaction-textbox+actions": {
 			"digest": "836a52ed00d23aa530bbf27e37a103864dc1734dab57d2fb5147d7a470640cb8",
+			"status": "ok"
+		},
+		"fixtures/play/interaction-touch-buttons": {
+			"digest": "6e438b238c6232fefb124a6ec2ee832787a09a46937e2d465c526f9fa459288e",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autolist-scalepad": {

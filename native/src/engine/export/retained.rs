@@ -388,6 +388,7 @@ impl Retained {
     /// this build's scene.
     pub fn build(&mut self, engine: &Rc<Engine>, roots: &[InstanceId]) -> Update {
         let _memory = crate::memtrace::scope(crate::memtrace::Tag::Export);
+        let roots = &super::drawn_roots(engine, roots)[..];
         for &root in roots {
             crate::engine::layout::ensure(engine, root);
         }

@@ -2635,9 +2635,23 @@ fn text_engine(engine: &Engine) -> std::cell::RefMut<'_, TextEngine> {
     })
 }
 
-/// Scene.Build (one-shot, uncached): the scene JSON of `roots` plus `extra` top-level fields.
+/// The roots a scene draws: `roots`, then the ContextActionGui of a touch device's ContextActionService buttons
+/// (input/touch_buttons.rs) when the run made one, which a client draws whatever else is on screen (in the PlayerGui
+/// pass: under a story gui, which sits in CoreGui; `--all-layers` orders it among the PlayerGui's ScreenGuis).
+pub(crate) fn drawn_roots(engine: &Engine, roots: &[InstanceId]) -> Vec<InstanceId> {
+    let mut drawn = roots.to_vec();
+    if let Some(gui) = super::input::touch_buttons::gui(engine) {
+        if !drawn.contains(&gui) {
+            drawn.push(gui);
+        }
+    }
+    drawn
+}
+
+/// Scene.Build (one-shot, uncached): the scene JSON of `roots` (and [`drawn_roots`]) plus `extra` top-level fields.
 pub fn build(engine: &Rc<Engine>, roots: &[InstanceId], _records: &Records, extra: Map<String, Json>) -> Json {
     let _memory = crate::memtrace::scope(crate::memtrace::Tag::Export);
+    let roots = &drawn_roots(engine, roots)[..];
     for &root in roots {
         super::layout::ensure(engine, root);
     }

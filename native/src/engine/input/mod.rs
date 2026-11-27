@@ -28,6 +28,7 @@ pub mod navigation;
 pub mod scrolling;
 pub mod textbox;
 mod touch;
+pub mod touch_buttons;
 
 #[cfg(test)]
 mod tests;
@@ -87,7 +88,8 @@ names!(
     GetBoundActionInfo, GetAllBoundActionInfo, Select, Selectable, SelectionOrder, PreferredInput,
     IsGamepadButtonDown, GetGamepadConnected, GetImageForKeyCode, MouseIcon, MouseIconEnabled,
     MinDragAngle, MaxDragAngle, DragRotation, TouchStarted, TouchMoved, TouchEnded, AutomaticSize,
-    SelectionChanged, GuiNavigationEnabled, AutoSelectGuiEnabled, ElasticBehavior, GetButton,
+    SelectionChanged, GuiNavigationEnabled, AutoSelectGuiEnabled, ElasticBehavior, GetButton, TouchControlsEnabled,
+    ModalEnabled,
 );
 
 macro_rules! classes {
@@ -221,6 +223,11 @@ pub struct Input {
     legacy: RefCell<Option<(LuaTable, FxHashMap<&'static str, SignalId>)>>,
     /// ContextActionService binds
     actions: context_actions::Actions,
+    /// GuiService.TouchControlsEnabled and UserInputService.ModalEnabled on a touch device (a client reads true and false
+    /// until a script writes them), and whether the touch buttons show: the last change of either decides (touch_buttons.rs)
+    touch_controls: Cell<bool>,
+    modal: Cell<bool>,
+    touch_shown: Cell<bool>,
     /// True if a mouse button went down since the last `clear_frame_click`, so zero-hold `click`
     /// actions still register a pressed state on the frame they occur (`rur sequence --cursor`).
     clicked_this_frame: Cell<bool>,
@@ -450,6 +457,9 @@ impl Input {
             pinned: RefCell::default(),
             legacy: RefCell::new(None),
             actions: context_actions::Actions::default(),
+            touch_controls: Cell::new(true),
+            modal: Cell::new(false),
+            touch_shown: Cell::new(true),
             clicked_this_frame: Cell::new(false),
         }
     }
@@ -567,6 +577,11 @@ impl Input {
 
     pub fn hovered(&self) -> Vec<InstanceId> {
         self.hovered.borrow().clone()
+    }
+
+    /// Whether the touch buttons show (touch_buttons.rs)
+    pub(crate) fn touch_controls_shown(&self) -> bool {
+        self.touch_shown.get()
     }
 }
 
@@ -2212,6 +2227,34 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
                 Ok(())
             });
             behaviors.add_setter(gui_service, name, setter);
+        }
+    }
+
+    // GuiService.TouchControlsEnabled / UserInputService.ModalEnabled on a touch device: a 0.747 touch client reads true
+    // and false; a write that changes one shows the touch buttons (TouchControlsEnabled true, ModalEnabled false) or hides
+    // them inside the assignment, whatever the other holds (measured: Visible read right after it; ModalEnabled true,
+    // TouchControlsEnabled false, ModalEnabled false shows them)
+    if touch_buttons::enabled(engine) {
+        for (class, name, label, controls) in [(c.GuiService, n.TouchControlsEnabled, "TouchControlsEnabled", true), (c.UserInputService, n.ModalEnabled, "ModalEnabled", false)] {
+            let Some(class) = class.filter(|_| valid(name)) else { continue };
+            let i = input.clone();
+            let getter: GetterFn = Rc::new(move |_, _, _| Ok(LuaValue::Boolean(if controls { i.touch_controls.get() } else { i.modal.get() })));
+            behaviors.add_getter(class, name, getter);
+            let i = input.clone();
+            let setter: SetterFn = Rc::new(move |_, engine, id, value| {
+                let LuaValue::Boolean(on) = value else {
+                    return raise(&format!("Unable to assign property {label}. bool expected, got {}", value.type_name()));
+                };
+                let cell = if controls { &i.touch_controls } else { &i.modal };
+                let changed = cell.replace(on) != on;
+                super::lua::instance::set_property(engine, id, name, Value::Bool(on));
+                if changed {
+                    i.touch_shown.set(on == controls);
+                    touch_buttons::show(&i).map_err(Flow::Fail)?;
+                }
+                Ok(())
+            });
+            behaviors.add_setter(class, name, setter);
         }
     }
 

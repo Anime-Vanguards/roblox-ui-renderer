@@ -4137,7 +4137,7 @@ end
     run(&lua, &engine, &source);
 }
 
-// ContextActionService's unbinding and warnings (IN4), against client logs: data/studio/touch-buttons.json holds the
+// ContextActionService's touch buttons and unbinding (IN4), against client logs: data/studio/touch-buttons.json holds the
 // log lines a 0.747 client wrote for the same cases (the sim kit's prelude; frame numbers dropped).
 
 /// The sim kit's logging and helpers, over the test hooks (VirtualInputManager:SendTouchEvent becomes a finger event)
@@ -4268,6 +4268,393 @@ fn touch_button_case(lua: &Lua, engine: &Rc<Engine>, case: &str, body: &str) {
     run(lua, engine, &format!("{TOUCH_BUTTON_PRELUDE}\n{body}\nCheck([===[{client}]===])\n"));
 }
 
+fn touch_client(width: f64, height: f64) -> (Lua, Rc<Engine>) {
+    start_with(width, height, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch))
+}
+
+/// BindAction(..., true) on a touch device makes the client's PlayerGui.ContextActionGui tree: the frame, a button per
+/// action with its icon and title, every drawn property and the layout as a 0.747 touch client has them; a bind without a
+/// button makes nothing; UnbindAllActions leaves the empty frame.
+#[test]
+fn touch_buttons_make_the_clients_tree() {
+    let (lua, engine) = touch_client(800.0, 600.0);
+    touch_button_case(
+        &lua,
+        &engine,
+        "tree",
+        r##"
+local function handler()
+	return Enum.ContextActionResult.Sink
+end
+CAS:BindAction("NoTouch", handler, false, Enum.KeyCode.F1)
+frames(3)
+log("after a bind without a button", buttons())
+CAS:BindAction("Alpha", handler, true, Enum.KeyCode.F2)
+CAS:SetTitle("Alpha", "Alpha title that wraps")
+CAS:SetImage("Alpha", "rbxasset://textures/ui/GuiImagePlaceholder.png")
+CAS:SetDescription("Alpha", "A description")
+CAS:BindAction("Beta", handler, true, Enum.KeyCode.F3)
+frames(5)
+local root = PlayerGui:FindFirstChild("ContextActionGui")
+if root then
+	for _, line in dumpAll(root, 0, {}) do
+		log(line)
+	end
+end
+log("PlayerGui children", #PlayerGui:GetChildren())
+for _, c in PlayerGui:GetChildren() do
+	log("  ", c.ClassName, c.Name)
+end
+CAS:UnbindAllActions()
+frames(3)
+log("after unbind all", buttons())
+"##,
+    );
+}
+
+/// The buttons follow BindAction, SetTitle, SetImage, SetPosition, rebinding, UnbindAction and UnbindAllActions inside
+/// the call, take the first free of the seven slots, and SetTitle of an unbound name warns.
+#[test]
+fn touch_buttons_follow_binds_like_a_client() {
+    let (lua, engine) = touch_client(800.0, 600.0);
+    touch_button_case(
+        &lua,
+        &engine,
+        "timing",
+        r##"
+local before = #LogService:GetLogHistory()
+local function handler()
+	return Enum.ContextActionResult.Sink
+end
+local seen = before
+local function step(tag, fn)
+	fn()
+	log(tag .. " sync", buttons())
+	frames(3)
+	local hist = #LogService:GetLogHistory()
+	for _, line in problems(seen, 300) do
+		log("  warning after " .. tag .. ": " .. line)
+	end
+	seen = hist
+end
+step("bind A", function() CAS:BindAction("A", handler, true, Enum.KeyCode.F1) end)
+step("title A", function() CAS:SetTitle("A", "TitleA") end)
+step("image A", function() CAS:SetImage("A", "rbxasset://textures/ui/GuiImagePlaceholder.png") end)
+step("position A", function() CAS:SetPosition("A", UDim2.new(0, 10, 0, 20)) end)
+step("description A", function() CAS:SetDescription("A", "DescA") end)
+step("bind B", function()
+	CAS:BindAction("B", handler, true, Enum.KeyCode.F2)
+	CAS:SetTitle("B", "TitleB")
+end)
+step("rebind A touch", function() CAS:BindAction("A", handler, true, Enum.KeyCode.F3) end)
+step("title A again", function() CAS:SetTitle("A", "TitleA2") end)
+step("rebind A without a button", function() CAS:BindAction("A", handler, false, Enum.KeyCode.F3) end)
+step("title unbound", function() CAS:SetTitle("Nope", "x") end)
+step("bind C", function() CAS:BindAction("C", handler, true, Enum.KeyCode.F4) end)
+step("bind A touch again", function() CAS:BindAction("A", handler, true, Enum.KeyCode.F3) end)
+step("unbind B", function() CAS:UnbindAction("B") end)
+step("bind D", function()
+	CAS:BindAction("D", handler, true, Enum.KeyCode.F5)
+	CAS:SetTitle("D", "TitleD")
+end)
+step("bind E then title and position", function()
+	CAS:BindAction("E", handler, true, Enum.KeyCode.F6)
+	CAS:SetTitle("E", "TitleE")
+	CAS:SetPosition("E", UDim2.new(0.5, 0, 0, 0))
+	CAS:SetImage("E", "rbxasset://textures/ui/GuiImagePlaceholder.png")
+end)
+step("bind at priority F", function() CAS:BindActionAtPriority("F", handler, true, 3000, Enum.KeyCode.F7) end)
+step("unbind all", function() CAS:UnbindAllActions() end)
+step("bind G after unbind all", function() CAS:BindAction("G", handler, true, Enum.KeyCode.F8) end)
+"##,
+    );
+}
+
+/// A finger on a button: Begin, Change and End for the touch the button took (a later finger takes it over), Cancel
+/// for one lifted off it, the pressed image while it is the button's, and every event in the client's order.
+#[test]
+fn touch_button_presses_match_a_client() {
+    let (lua, engine) = touch_client(800.0, 600.0);
+    touch_button_case(
+        &lua,
+        &engine,
+        "press",
+        r##"
+startTouchScript()
+local result = "Sink"
+local lastUis = nil
+local function handler(name, state, io)
+	log("  handler", name, state.Name, io and io.UserInputType.Name or "nil", io and io.UserInputState.Name or "-",
+		io and string.format("(%g,%g)", io.Position.X, io.Position.Y) or "-", "sameAsUIS", io == lastUis)
+	return Enum.ContextActionResult[result]
+end
+for _, ev in { "InputBegan", "InputChanged", "InputEnded", "TouchStarted", "TouchMoved", "TouchEnded" } do
+	table.insert(Conns, UIS[ev]:Connect(function(io, processed)
+		lastUis = io
+		log("  UIS." .. ev, io.UserInputType.Name, io.UserInputState.Name, "processed", processed)
+	end))
+end
+CAS:BindAction("Solo", handler, true, Enum.KeyCode.F1)
+CAS:SetTitle("Solo", "Solo")
+CAS:SetImage("Solo", "rbxasset://textures/ui/GuiImagePlaceholder.png")
+frames(5)
+local button
+for _, b in PlayerGui.ContextActionGui.ContextButtonFrame:GetChildren() do
+	button = b
+end
+for _, ev in { "InputBegan", "InputChanged", "InputEnded", "MouseButton1Down", "MouseButton1Up", "Activated", "MouseButton1Click" } do
+	table.insert(Conns, button[ev]:Connect(function(io)
+		log("  button." .. ev, typeof(io) == "Instance" and io.UserInputState.Name or "")
+	end))
+end
+local function look(tag)
+	local icon, title = button:FindFirstChild("ActionIcon"), button:FindFirstChild("ActionTitle")
+	log(tag, "Image", button.Image, "ImageColor3", button.ImageColor3, "ImageTransparency", button.ImageTransparency,
+		"GuiState", button.GuiState, "Size", button.Size, "icon", icon and icon.ImageColor3, icon and icon.ImageTransparency,
+		"title", title and title.TextColor3, title and title.TextTransparency)
+end
+local function send(id, state, x, y, tag)
+	log(tag, string.format("finger %d %s (%g,%g)", id, state, x, y))
+	VIM:SendTouchEvent(id, ({ Begin = 0, Change = 1, End = 2 })[state], x, y)
+	frames(2)
+end
+local cx, cy = screenPoint(button)
+cx, cy = math.floor(cx), math.floor(cy)
+look("rest")
+send(1, "Begin", cx, cy, "a down")
+look("a held 2")
+frames(3)
+look("a held 5")
+send(1, "Change", cx + 5, cy + 5, "a move within")
+look("a after move within")
+send(1, "Change", cx + 80, cy, "a move off")
+look("a off")
+send(1, "Change", cx + 2, cy + 2, "a back on")
+look("a back on")
+send(1, "End", cx + 2, cy + 2, "a up on")
+look("a after up")
+frames(5)
+send(2, "Begin", cx - 100, cy, "b down off")
+send(2, "Change", cx, cy, "b move onto")
+look("b on")
+send(2, "End", cx, cy, "b up on")
+frames(5)
+send(3, "Begin", cx, cy, "c down on")
+send(3, "Change", cx + 80, cy, "c move off")
+send(3, "End", cx + 80, cy, "c up off")
+look("c after")
+frames(5)
+send(4, "Begin", cx - 5, cy, "d first down")
+send(5, "Begin", cx + 5, cy, "d second down")
+look("d both")
+send(5, "End", cx + 5, cy, "d second up")
+look("d first still")
+send(4, "End", cx - 5, cy, "d first up")
+frames(5)
+result = "Pass"
+send(6, "Begin", cx, cy, "e pass down")
+send(6, "End", cx, cy, "e pass up")
+result = "Sink"
+frames(5)
+log("f tap")
+VIM:SendTouchEvent(7, 0, cx, cy)
+VIM:SendTouchEvent(7, 2, cx, cy)
+frames(3)
+look("f after")
+CAS:UnbindAllActions()
+"##,
+    );
+}
+
+/// Where the handler runs among one touch's events: after the button's own connections, between UserInputService
+/// connections made after and before the button (the core script's are made with it), and an UnbindAction while the
+/// finger holds it (Cancel with a new InputObject, then nothing). (The client's case had a full-screen Frame in a lower
+/// ScreenGui under the button; what it got is left out here: notes/interaction.md "Touch buttons", stacked objects.)
+#[test]
+fn touch_button_events_run_in_the_clients_order() {
+    let (lua, engine) = touch_client(800.0, 600.0);
+    touch_button_case(
+        &lua,
+        &engine,
+        "order",
+        r##"
+startTouchScript()
+table.insert(Conns, UIS.InputBegan:Connect(function(io, p)
+	log("  UIS.InputBegan(early)", io.UserInputState.Name, p)
+end))
+table.insert(Conns, UIS.InputEnded:Connect(function(io, p)
+	log("  UIS.InputEnded(early)", io.UserInputState.Name, p)
+end))
+table.insert(Conns, UIS.InputChanged:Connect(function(io, p)
+	log("  UIS.InputChanged(early)", io.UserInputState.Name, p)
+end))
+local current
+local function handler(name, state, io)
+	log("  handler", name, state.Name, io and io.UserInputState.Name or "-", "same", io == current)
+	return Enum.ContextActionResult.Sink
+end
+CAS:BindAction("One", handler, true, Enum.KeyCode.F1)
+frames(3)
+local button = PlayerGui.ContextActionGui.ContextButtonFrame:GetChildren()[1]
+for _, ev in { "InputBegan", "InputChanged", "InputEnded", "MouseButton1Down", "MouseButton1Up", "Activated", "MouseButton1Click", "MouseEnter", "MouseLeave" } do
+	table.insert(Conns, button[ev]:Connect(function(io)
+		if ev == "InputBegan" and io.UserInputState == Enum.UserInputState.Begin then
+			current = io
+		end
+		log("  button." .. ev, typeof(io) == "Instance" and io.UserInputState.Name or "")
+	end))
+end
+table.insert(Conns, UIS.InputBegan:Connect(function(io, p)
+	log("  UIS.InputBegan(late)", io.UserInputState.Name, p)
+end))
+table.insert(Conns, UIS.InputEnded:Connect(function(io, p)
+	log("  UIS.InputEnded(late)", io.UserInputState.Name, p)
+end))
+table.insert(Conns, UIS.TouchEnded:Connect(function(io, p)
+	log("  UIS.TouchEnded(late)", io.UserInputState.Name, p)
+end))
+local cx, cy = screenPoint(button)
+cx, cy = math.floor(cx), math.floor(cy)
+local function send(id, state, x, y, tag)
+	log(tag)
+	VIM:SendTouchEvent(id, ({ Begin = 0, Change = 1, End = 2 })[state], x, y)
+	frames(2)
+end
+send(1, "Begin", cx, cy, "A down on")
+send(1, "Change", cx + 3, cy, "A move within")
+send(1, "End", cx + 3, cy, "A up on")
+frames(3)
+send(2, "Begin", cx, cy, "B down on")
+send(2, "Change", cx + 90, cy, "B move off")
+send(2, "Change", cx + 2, cy, "B back on")
+send(2, "Change", cx + 4, cy, "B move within after back on")
+send(2, "End", cx + 4, cy, "B up on")
+frames(3)
+send(3, "Begin", cx, cy, "C down on")
+send(3, "Change", cx + 90, cy, "C move off")
+send(3, "End", cx + 90, cy, "C up off")
+frames(3)
+send(4, "Begin", cx - 4, cy, "D first down")
+send(5, "Begin", cx + 4, cy, "D second down")
+send(4, "Change", cx - 90, cy, "D first moves off")
+send(4, "End", cx - 90, cy, "D first up off")
+send(5, "End", cx + 4, cy, "D second up on")
+frames(3)
+send(6, "Begin", cx, cy, "E down on")
+CAS:UnbindAction("One")
+log("E unbound while held")
+frames(2)
+send(6, "End", cx, cy, "E up")
+CAS:UnbindAllActions()
+"##,
+    );
+}
+
+/// A change of GuiService.TouchControlsEnabled or UserInputService.ModalEnabled shows or hides the frame inside the
+/// assignment, the last change deciding; an
+/// eighth button is refused with the client's warning and gets none when a slot frees, the next bind takes the freed
+/// slot, and a slot moved by SetPosition is freed by its unbind.
+#[test]
+fn touch_buttons_hide_and_cap_like_a_client() {
+    let (lua, engine) = touch_client(800.0, 600.0);
+    touch_button_case(
+        &lua,
+        &engine,
+        "extra",
+        r##"
+startTouchScript()
+local before = #LogService:GetLogHistory()
+local function handler()
+	return Enum.ContextActionResult.Sink
+end
+CAS:BindAction("One", handler, true, Enum.KeyCode.F1)
+local frame = PlayerGui.ContextActionGui.ContextButtonFrame
+GuiService.TouchControlsEnabled = false
+log("TouchControlsEnabled false: sync", frame.Visible)
+GuiService.TouchControlsEnabled = true
+log("TouchControlsEnabled true: sync", frame.Visible)
+UIS.ModalEnabled = true
+log("ModalEnabled true: sync", frame.Visible)
+GuiService.TouchControlsEnabled = false
+UIS.ModalEnabled = false
+log("both: TouchControlsEnabled false, ModalEnabled false: sync", frame.Visible)
+GuiService.TouchControlsEnabled = true
+log("TouchControlsEnabled true again: sync", frame.Visible)
+CAS:UnbindAllActions()
+frames(2)
+GuiService.TouchControlsEnabled = false
+frames(1)
+CAS:BindAction("Hidden", handler, true, Enum.KeyCode.F1)
+log("bind while TouchControlsEnabled false", buttons(), "visible", frame.Visible)
+GuiService.TouchControlsEnabled = true
+CAS:UnbindAllActions()
+frames(2)
+for i = 1, 8 do
+	CAS:BindAction("Slot" .. i, handler, true, Enum.KeyCode.F1)
+	CAS:SetTitle("Slot" .. i, tostring(i))
+end
+log("eight", buttons())
+CAS:UnbindAction("Slot1")
+log("unbind Slot1", buttons())
+CAS:SetTitle("Slot8", "8again")
+log("title Slot8 after a slot freed", buttons())
+CAS:BindAction("Late", handler, true, Enum.KeyCode.F2)
+CAS:SetTitle("Late", "late")
+log("bind Late", buttons())
+CAS:SetPosition("Slot2", UDim2.fromOffset(5, 5))
+CAS:UnbindAction("Slot2")
+CAS:BindAction("Later", handler, true, Enum.KeyCode.F3)
+CAS:SetTitle("Later", "later")
+log("moved Slot2 unbound, bind Later", buttons())
+CAS:BindAction("Slot8", handler, true, Enum.KeyCode.F1)
+CAS:SetTitle("Slot8", "8rebound")
+log("rebind Slot8 when full", buttons())
+frames(3)
+for _, line in problems(before, 300) do
+	log("  " .. line)
+end
+CAS:UnbindAllActions()
+"##,
+    );
+}
+
+/// The button size and the frame against the screen below the top bar inset: 35 x 35 at 320 px or less, else 45 x 45
+/// (measured twice at 800x320 / 800x321 without an inset and 800x378 / 800x379 with the 58 px top bar).
+#[test]
+fn touch_buttons_shrink_on_short_screens_like_a_client() {
+    for (height, inset, client) in [
+        (320.0, None, "frame (560,160) (240,160) button {0,35,0,35} (683,230) (35,35)"),
+        (321.0, None, "frame (560,160.5) (240,160.5) button {0,45,0,45} (683,230.5) (45,45)"),
+        (378.0, Some(58.0), "frame (560,160) (240,160) button {0,35,0,35} (683,230) (35,35)"),
+        (379.0, Some(58.0), "frame (560,160.5) (240,160.5) button {0,45,0,45} (683,230.5) (45,45)"),
+    ] {
+        let mut options = crate::engine::options();
+        options.profile.device.viewport = Some((800.0, height));
+        options.profile.device.kind = Some(roblox_engine_emulator::client_profile::DeviceKind::Touch);
+        options.profile.device.topbar_inset = inset;
+        options.mode = "play".into();
+        let engine = crate::engine::new_engine(options).expect("engine");
+        let lua = Lua::new();
+        engine_lua::start(&lua, &engine).expect("start");
+        engine.state.borrow_mut().sched.set_main_thread(&lua.current_thread());
+        run(
+            &lua,
+            &engine,
+            &format!(
+                r##"{TOUCH_BUTTON_PRELUDE}
+CAS:BindAction("One", function() end, true, Enum.KeyCode.F1)
+CAS:SetTitle("One", "One")
+frames(5)
+local frame = PlayerGui.ContextActionGui.ContextButtonFrame
+local button = frame:GetChildren()[1]
+log("frame", frame.AbsolutePosition, frame.AbsoluteSize, "button", button.Size, button.AbsolutePosition, button.AbsoluteSize)
+Check([===[{client}]===])
+"##
+            ),
+        );
+    }
+}
+
 /// UnbindAction calls the handler with Cancel and a new InputObject inside the call, a rebind calls the old handler that
 /// way twice, UnbindAllActions calls none (a desktop client; touch clients do the same).
 #[test]
@@ -4385,4 +4772,36 @@ step("GetButton unbound", function() log("GetButton", tostring(CAS:GetButton("No
 CAS:UnbindAllActions()
 "##,
     );
+}
+
+/// The ContextActionGui is drawn with the story (export.rs drawn_roots): a scene of a touch device's story gets the
+/// buttons' layer in the PlayerGui pass; a desktop's gets none.
+#[test]
+fn touch_buttons_are_exported_with_the_story() {
+    for (touch, layers) in [(true, 2), (false, 1)] {
+        let (lua, engine) = if touch { touch_client(800.0, 600.0) } else { start(800.0, 600.0) };
+        run(
+            &lua,
+            &engine,
+            r##"
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "Story"
+Gui.Parent = game:GetService("CoreGui")
+game:GetService("ContextActionService"):BindAction("Jump", function() end, true, Enum.KeyCode.Space)
+"##,
+        );
+        let core_gui = crate::engine::services::get_service(&engine, engine.world().game, "CoreGui").unwrap();
+        let story = {
+            let state = engine.state.borrow();
+            state.dom.at(core_gui).children.iter().copied().find(|&id| state.dom.at(id).name.to_string() == "Story").unwrap()
+        };
+        let scene = crate::engine::story::build_scene(&engine, &[story], serde_json::Map::new());
+        let layers_json = scene["layers"].as_array().unwrap();
+        assert_eq!(layers_json.len(), layers, "{}", scene["layers"]);
+        if touch {
+            assert_eq!(layers_json[1]["playerGui"], Json::Bool(true));
+            let names: Vec<&str> = scene["nodes"].as_array().unwrap().iter().filter_map(|n| n["name"].as_str()).collect();
+            assert!(names.contains(&"ContextActionButton") && names.contains(&"ActionTitle"), "{names:?}");
+        }
+    }
 }

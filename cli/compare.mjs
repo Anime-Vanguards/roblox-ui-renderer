@@ -1032,7 +1032,7 @@ export async function compare(args) {
 	const mountLuau = inContainer(MOUNT_LUAU({ pathParts, width, height, background, time, modelB64, fixtureSource, probes }));
 	const simConfig = null;
 	const captureKey = simConfig
-		? sha1(JSON.stringify({ backend: "sim", version: simConfig.version, dpi: simConfig.dpi, window: simConfig.window, flags: simConfig.flags, network: simConfig.network, mount: sha1(mountLuau) }))
+		? sha1(JSON.stringify({ backend: "sim", version: simConfig.version, dpi: simConfig.dpi, window: simConfig.window, flags: simConfig.flags, network: simConfig.network, ...(simConfig.device ? { device: simConfig.device } : {}), mount: sha1(mountLuau) }))
 		: sha1(JSON.stringify({ studio, dpi: dpi || "auto", mount: sha1(mountLuau) }));
 	const reuse = args.recapture ? { reason: "--recapture" } : reusableCapture(outDir, captureKey);
 	if (!reuse.record && args["reuse-only"]) throw new CaptureNeeded(reuse.reason);

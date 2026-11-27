@@ -409,14 +409,14 @@ fn process_moves_in(cx: &Cx, frame: u64) -> LuaResult<()> {
 /// it left, MouseEnter + InputBegan on those it entered, then the drag and UIS InputChanged and TouchMoved.
 fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
     let n = &cx.i.n;
-    let Some((object, from, hover, drag_before, button, moved_before)) = cx
+    let Some((object, from, hover, drag_before, moved_before)) = cx
         .i
         .touches
         .fingers
         .borrow()
         .iter()
         .find(|f| f.id == id)
-        .map(|f| (f.object, (f.x, f.y), f.hover.clone(), f.drag, f.press.button, f.samples.last().is_some_and(|s| s.0 + 1 == frame)))
+        .map(|f| (f.object, (f.x, f.y), f.hover.clone(), f.drag, f.samples.last().is_some_and(|s| s.0 + 1 == frame)))
     else {
         return Ok(());
     };
@@ -515,10 +515,10 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
             finger.y = y;
             finger.hover = list.clone();
             finger.drag = drag;
-            if button.is_some_and(|b| !now.contains(&b)) || drag.is_some_and(|d| d.dragging) {
-                finger.press.clickable = false;
-            }
+            // (measured, IN4: a finger that leaves the button it came down on and comes back still clicks it at the
+            // release; only a drag cancels the click)
             if drag.is_some_and(|d| d.dragging) {
+                finger.press.clickable = false;
                 finger.press.dragged = true;
             }
             if took_over {

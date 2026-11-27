@@ -29,6 +29,7 @@
 //!   - SetTitle / SetImage / SetDescription / SetPosition / GetButton on a name that is not bound warn
 //!     "ContextActionService could not find the function passed in, doing nothing." (UnbindAction of one does not).
 //!     GetButton returns nil.
+//! On a touch device a bind with createTouchButton shows a button (touch_buttons.rs).
 
 use std::{
     cell::{Cell, RefCell},
@@ -38,7 +39,7 @@ use std::{
 use mlua::prelude::*;
 use rbx_dom_weak::types as dom;
 
-use super::{Cx, Input, enum_arg, method};
+use super::{Cx, Input, enum_arg, method, touch_buttons};
 use super::super::{
     ClassId, Engine, InstanceId,
     instance as core,
@@ -69,6 +70,10 @@ struct Bound {
 pub struct Actions {
     bound: RefCell<Vec<Bound>>,
     next_order: Cell<u64>,
+    /// The touch buttons' Luau half (touch_buttons.rs), made by the first bind that asks for a button on a touch device
+    pub(super) touch: RefCell<Option<LuaTable>>,
+    /// The ContextActionGui it made
+    pub(super) touch_gui: Cell<Option<InstanceId>>,
 }
 
 impl Actions {
@@ -98,6 +103,11 @@ impl Actions {
         let mut bound = self.bound.borrow_mut();
         let index = bound.iter().position(|action| action.name == name)?;
         Some(bound.remove(index).handler)
+    }
+
+    /// The handler bound to `name`
+    pub(super) fn handler(&self, name: &str) -> Option<LuaFunction> {
+        self.bound.borrow().iter().find(|a| a.name == name).map(|a| a.handler.clone())
     }
 
     fn is_bound(&self, name: &str) -> bool {
@@ -249,9 +259,9 @@ fn string_arg(args: &super::Args, index: usize) -> String {
 /// Measured (0.747, desktop and touch): what a setter or GetButton warns for a name that is not bound
 const NOT_BOUND: &str = "ContextActionService could not find the function passed in, doing nothing.";
 
-/// Runs `handler` for action `name` in a thread of its own (resumed at once, as the client calls it inside the call):
-/// (name, UserInputState `state`, `object`)
-fn call(lua: &Lua, engine: &Rc<Engine>, name: &str, handler: &LuaFunction, state: &str, object: LuaValue) -> LuaResult<()> {
+/// Runs `handler` for action `name` in a thread of its own (resumed at once, as the client calls it inside the call or
+/// event): (name, UserInputState `state`, `object`)
+pub(super) fn call(lua: &Lua, engine: &Rc<Engine>, name: &str, handler: &LuaFunction, state: &str, object: LuaValue) -> LuaResult<()> {
     let Some(state_item) = engine.reflection.enum_item("UserInputState", state) else { return Ok(()) };
     let thread = lua.create_thread(handler.clone())?;
     let args = (name, enum_item_value(lua, engine, state_item)?, object).into_lua_multi(lua)?;
@@ -296,7 +306,7 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
         let create_touch_button = !matches!(args.get(3), LuaValue::Nil | LuaValue::Boolean(false));
         let inputs = collect_inputs(args.0.iter().skip(4).cloned());
         let replaced = i.actions.bind(name.clone(), handler, create_touch_button, default_priority(engine), inputs);
-        bound(lua, engine, &i, &name, replaced)?;
+        bound(lua, engine, &i, &name, replaced, create_touch_button)?;
         Ok(none())
     }));
     let i = input.clone();
@@ -311,7 +321,7 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
         };
         let inputs = collect_inputs(args.0.iter().skip(5).cloned());
         let replaced = i.actions.bind(name.clone(), handler, create_touch_button, priority, inputs);
-        bound(lua, engine, &i, &name, replaced)?;
+        bound(lua, engine, &i, &name, replaced, create_touch_button)?;
         Ok(none())
     }));
     let i = input.clone();
@@ -319,26 +329,34 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
         let name = args.get(1).to_string().unwrap_or_default();
         if let Some(handler) = i.actions.unbind(&name) {
             cancel(lua, engine, &i, &name, &handler)?;
+            touch_buttons::unbind(&i, &name)?;
         }
         Ok(none())
     }));
     let i = input.clone();
     behaviors.add_method(class, n.UnbindAllActions, method(move |_, _, _, _| {
         i.actions.clear();
+        touch_buttons::clear(&i)?;
         Ok(none())
     }));
     let i = input.clone();
-    behaviors.add_method(class, n.SetTitle, services::strings(FIRST_TWO, method(move |_, engine, _, args| {
-        if !i.actions.set_title(&string_arg(args, 1), string_arg(args, 2)) {
+    behaviors.add_method(class, n.SetTitle, services::strings(FIRST_TWO, method(move |lua, engine, _, args| {
+        let (name, title) = (string_arg(args, 1), string_arg(args, 2));
+        if !i.actions.set_title(&name, title.clone()) {
             engine.warn(NOT_BOUND);
+            return Ok(none());
         }
+        touch_buttons::update(&i, "Title", &name, LuaValue::String(lua.create_string(&title)?))?;
         Ok(none())
     })));
     let i = input.clone();
-    behaviors.add_method(class, n.SetImage, services::strings(FIRST_TWO, method(move |_, engine, _, args| {
-        if !i.actions.set_image(&string_arg(args, 1), string_arg(args, 2)) {
+    behaviors.add_method(class, n.SetImage, services::strings(FIRST_TWO, method(move |lua, engine, _, args| {
+        let (name, image) = (string_arg(args, 1), string_arg(args, 2));
+        if !i.actions.set_image(&name, image.clone()) {
             engine.warn(NOT_BOUND);
+            return Ok(none());
         }
+        touch_buttons::update(&i, "Image", &name, LuaValue::String(lua.create_string(&image)?))?;
         Ok(none())
     })));
     let i = input.clone();
@@ -360,9 +378,12 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
         };
         let cast = services::cast_strings(lua, engine, args, FIRST)?;
         let args = cast.as_ref().unwrap_or(args);
-        if !i.actions.set_position(&string_arg(args, 1), position) {
+        let name = string_arg(args, 1);
+        if !i.actions.set_position(&name, position) {
             engine.warn(NOT_BOUND);
+            return Ok(none());
         }
+        touch_buttons::update(&i, "Position", &name, pos_arg.clone())?;
         Ok(none())
     }));
     let i = input.clone();
@@ -383,11 +404,15 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
     })));
 }
 
-/// After a BindAction: the replaced handler's two Cancels
-fn bound(lua: &Lua, engine: &Rc<Engine>, input: &Input, name: &str, replaced: Option<LuaFunction>) -> LuaResult<()> {
+/// After a BindAction: the replaced handler's two Cancels and the end of its button, then the new button
+fn bound(lua: &Lua, engine: &Rc<Engine>, input: &Input, name: &str, replaced: Option<LuaFunction>, create_touch_button: bool) -> LuaResult<()> {
     if let Some(old) = replaced {
         cancel(lua, engine, input, name, &old)?;
         cancel(lua, engine, input, name, &old)?;
+        touch_buttons::unbind(input, name)?;
+    }
+    if create_touch_button && touch_buttons::enabled(engine) {
+        touch_buttons::bind(lua, engine, input, name)?;
     }
     Ok(())
 }
