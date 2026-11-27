@@ -2698,8 +2698,8 @@ fn predicted_edit_mode_sequence_json(run_mode: &str, scope: &'static str, play_p
 
 pub fn unmodeled_list() -> Value {
     json!([
-        "draw_call_residuals: drawCalls follow the client's measured batching; not modelled: a colour emoji's extra layer quads, the cells a SliceCenter leaves empty, and the pieces the client cuts a curved Path2D into (quads only; draws are unaffected)",
-        "draw_pass_cpu_ms_residuals: drawPassCpuMs prices pieces by measured desktop slopes; a curved Path2D's pieces, text shaping and UIScale'd trees cost the client more than their quads",
+        "draw_call_residuals: drawCalls follow the client's measured batching and quads (rows of strokes, colour emoji layers, sliced image cells and curved Path2D pieces included); a sliced image whose texture is not on this machine counts 9 cells",
+        "draw_pass_cpu_ms_residuals: drawPassCpuMs prices pieces by measured desktop slopes; text shaping and UIScale'd trees cost the client more than their quads, and a frame where one of many CanvasGroups re-renders costs it more than that group's content",
         "gpu_ui_ms: desktop GPU ms follows the GPU's clock state and a phone's tile-based GPU has no conversion from it (refused in predicted.*.gpuUiMs)",
         "thermal_throttling_dvfs: device clock scaling and sustained thermal throttling are not modeled",
         "luau_script_cpu_ms: Luau script work is measured separately with --profile work",
