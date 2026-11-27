@@ -941,13 +941,11 @@ fn curve_pieces(c: [f64; 8]) -> u64 {
 /// The cells a sliced image draws: those with an on-screen width and height, as the renderer places them
 /// (`render::images::image_quads`). Measured in RenderDoc captures of a 0.747 client (10 sliced 16 px textures each): a
 /// SliceCenter edge on the texture's edge leaves its column or row out (0, 4, 16, 12: 3 cells; 0, 0, 16, 16: 1), an image
-/// no larger than its corners draws the corners only (4), a thinner one its top and bottom rows (6), SliceScale 0 the middle
-/// only (1), and a centre of no texels still draws (8, 8, 8, 8: 9). Without the texture's size (not on this machine) 9.
+/// no larger than its corners draws the corners only (4), a thinner one its top and bottom rows (6), SliceScale 0 one cell
+/// over the whole image (1), and a centre of no texels still draws (8, 8, 8, 8: 9). Without the texture's size (not on this
+/// machine) 9.
 fn slice_cells(image: &Value, uri: &str, raw: Rect, scale: f64, ui_scale: f64) -> u64 {
     let Some(texture) = texture_size(uri) else { return 9 };
-    if image["sliceScale"].as_f64() == Some(0.0) {
-        return 1;
-    }
     crate::render::images::image_quads(image, texture, [raw.x, raw.y, raw.w, raw.h], scale, ui_scale).len() as u64
 }
 
@@ -5956,7 +5954,7 @@ mod tests {
     #[test]
     fn sliced_images_draw_the_cells_with_an_on_screen_size() {
         // RenderDoc captures of a 0.747 client (a 16 px texture, 100 px images): SliceCenter 4, 4, 12, 12 draws 9 cells,
-        // 0, 4, 16, 12 the middle column (3), 0, 0, 16, 16 one, an image of 6 px its 4 corners, SliceScale 0 the middle
+        // 0, 4, 16, 12 the middle column (3), 0, 0, 16, 16 one, an image of 6 px its 4 corners, SliceScale 0 one cell
         let dir = std::env::temp_dir().join(format!("rur-slice-cells-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("sixteen.png");

@@ -292,6 +292,17 @@ impl DrawPreparer {
         let rounded = radii.iter().any(|r| *r > 0.);
         let tint = color(&image["color"], [1.; 3]).map(|v| quantize(v) as f64 / 255.);
         let s = self.scale;
+        // What the image may cover: its rect, and a sliced image's far corner drawn out past it at a negative
+        // SliceScale (images.rs image_quads)
+        let mut area = [p.rect.x, p.rect.y, p.rect.x + p.rect.w, p.rect.y + p.rect.h];
+        if image["scaleType"] == "Slice" && number(&image["sliceScale"], 1.) < 0. {
+            for q in &quads {
+                let [x0, y0, x1, y1] = [q.x0, q.y0, q.x1, q.y1].map(|v| snap_device(v, s));
+                if x1 > x0 && y1 > y0 {
+                    area = [area[0].min(x0), area[1].min(y0), area[2].max(x1), area[3].max(y1)];
+                }
+            }
+        }
         for q in quads {
             let [x0, y0, x1, y1] = [q.x0, q.y0, q.x1, q.y1].map(|v| snap_device(v, s));
             // 9-slice parts without texels on an axis stay square (ImageQuad::unrounded)
@@ -300,12 +311,7 @@ impl DrawPreparer {
             if width <= 0. || height <= 0. {
                 continue;
             }
-            let visible = [
-                x0.max(p.rect.x),
-                y0.max(p.rect.y),
-                x1.min(p.rect.x + p.rect.w),
-                y1.min(p.rect.y + p.rect.h),
-            ];
+            let visible = [x0.max(area[0]), y0.max(area[1]), x1.min(area[2]), y1.min(area[3])];
             if visible[2] <= visible[0] || visible[3] <= visible[1] {
                 continue;
             }
@@ -343,12 +349,7 @@ impl DrawPreparer {
                 6,
             );
             self.push([x0 + tx, y0 + ty, width, height]);
-            self.push([
-                p.rect.x + tx,
-                p.rect.y + ty,
-                p.rect.x + p.rect.w + tx,
-                p.rect.y + p.rect.h + ty,
-            ]);
+            self.push([area[0] + tx, area[1] + ty, area[2] + tx, area[3] + ty]);
             self.push([
                 0.,
                 l0 as f64,

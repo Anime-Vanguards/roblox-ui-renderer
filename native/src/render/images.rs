@@ -558,19 +558,36 @@ pub fn image_quads(
                 (rw - cx1).max(0.0),
                 (rh - cy1).max(0.0),
             );
-            let k = or_number(&image["sliceScale"], 1.0) * pixel_scale * ui_scale;
-            let mut shrink: f64 = 1.0;
-            if (left + right) * k > w {
-                shrink = shrink.min(w / ((left + right) * k));
-            }
-            if (top + bottom) * k > h {
-                shrink = shrink.min(h / ((top + bottom) * k));
-            }
-            let xs = [x, x + left * k * shrink, x1 - right * k * shrink, x1];
-            let ys = [y, y + top * k * shrink, y1 - bottom * k * shrink, y1];
-            // The parts' unsnapped sizes, as the quad moves (their corner masks: ImageQuad::mask)
-            let widths = [left * k * shrink, w - (left + right) * k * shrink, right * k * shrink];
-            let heights = [top * k * shrink, h - (top + bottom) * k * shrink, bottom * k * shrink];
+            let k = n(&image["sliceScale"], 1.0) * pixel_scale * ui_scale;
+            // The parts' edges, and their unsnapped sizes as the quad moves (their corner masks: ImageQuad::mask)
+            let (xs, ys, widths, heights) = if k > 0.0 {
+                let mut shrink: f64 = 1.0;
+                if (left + right) * k > w {
+                    shrink = shrink.min(w / ((left + right) * k));
+                }
+                if (top + bottom) * k > h {
+                    shrink = shrink.min(h / ((top + bottom) * k));
+                }
+                (
+                    [x, x + left * k * shrink, x1 - right * k * shrink, x1],
+                    [y, y + top * k * shrink, y1 - bottom * k * shrink, y1],
+                    [left * k * shrink, w - (left + right) * k * shrink, right * k * shrink],
+                    [top * k * shrink, h - (top + bottom) * k * shrink, bottom * k * shrink],
+                )
+            } else {
+                // SliceScale 0 or below: a client puts the far corner's inner edge at the element's logical size
+                // less its border, times the scale, from the near edge (a positive scale measures the border from
+                // the far edge), and draws the cells left with a size. At 0 that is the far corner alone, its
+                // texels stretched over the whole image; below 0 the far corner too, drawn out past the near edges
+                // (fixtures/image-probe-slicescale0.luau, 1.5x and 1x, under UIScale 1 and 0.87)
+                let (far_x, far_y) = (x + (w / pixel_scale - right) * k, y + (h / pixel_scale - bottom) * k);
+                (
+                    [x, x + left * k, far_x, x1],
+                    [y, y + top * k, far_y, y1],
+                    [left * k, far_x - x - left * k, x + w - far_x],
+                    [top * k, far_y - y - top * k, y + h - far_y],
+                )
+            };
             // At most one texel per logical px of the unsnapped centre; a smaller centre shows only its first
             // texels (1.5x: 19.5 device px show 13 texels, not the snapped 20 px's 13.33;
             // fixtures/image-probe-slicecorner.luau 3712 -> 80 px > 2)
@@ -1578,6 +1595,44 @@ pub fn prepare_texture_image(
         PlannedLayer::Ready(layer) => layer,
         PlannedLayer::Pending(pending) => pending.finish(cache),
     })
+}
+
+#[cfg(test)]
+mod slice_scale_tests {
+    use super::*;
+    /// SliceScale 0 and below, measured in a 0.747 client (fixtures/image-probe-slicescale0.luau, 1.5x): one quad from
+    /// the far corner's inner edge, put at the element's logical size less the border times the scale from the near
+    /// edge, to the far edges, showing the far corner's texels. Edges as the client's (snapped) pixels show them.
+    #[test]
+    fn a_slice_scale_of_zero_or_below_draws_the_far_corner() {
+        let quads = |texture: [u32; 2], raw: [f64; 4], center: [f64; 4], scale: f64, ui_scale: f64| {
+            let image = serde_json::json!({"scaleType": "Slice", "sliceCenter": center, "sliceScale": scale});
+            let [tw, th] = texture.map(f64::from);
+            image_quads(&image, texture, raw, 1.5, ui_scale)
+                .iter()
+                .map(|q| ([q.x0, q.y0, q.x1, q.y1].map(f64::round), [q.u0 * tw, q.v0 * th, q.u1 * tw, q.v1 * th]))
+                .collect::<Vec<_>>()
+        };
+        // A 16 px texture over 72 px: the client shows texels 14 and 15 on each axis (blocks of 36 px), 7 to 15 by 12
+        // to 15 for a centre of (3, 1, 7, 12), and only the last texel for a centre on the texture's edges
+        let motor = [480., 375., 72., 72.];
+        assert_eq!(quads([16, 16], motor, [2., 2., 14., 14.], 0., 1.), vec![([480., 375., 552., 447.], [14., 14., 16., 16.])]);
+        assert_eq!(quads([16, 16], motor, [3., 1., 7., 12.], 0., 1.), vec![([480., 375., 552., 447.], [7., 12., 16., 16.])]);
+        assert_eq!(quads([16, 16], motor, [0., 0., 16., 16.], 0., 1.), vec![([480., 375., 552., 447.], [16., 16., 16., 16.])]);
+        assert_eq!(quads([16, 16], motor, [2., 2., 14., 14.], -0., 1.), quads([16, 16], motor, [2., 2., 14., 14.], 0., 1.));
+        // Below 0 (a 32 px texture, 64 x 64 logical at 1.5x): the client draws 696..876 x 81..261 for a 780..876 x
+        // 165..261 image at -1, 1629..1746 x 144..261 for 1650..1746 at -0.25, and 1170..1310 x 830..917 for a 64 x 40
+        // image of centre (4, 12, 20, 24) at -1 under UIScale 0.87
+        let stone = [8., 8., 24., 24.];
+        assert_eq!(quads([32, 32], [780., 165., 96., 96.], stone, -1., 1.), vec![([696., 81., 876., 261.], [24., 24., 32., 32.])]);
+        assert_eq!(quads([32, 32], [1650., 165., 96., 96.], stone, -0.25, 1.)[0].0, [1629., 144., 1746., 261.]);
+        let scaled = quads([32, 32], [940. * 1.305, (455. + 140. * 0.87) * 1.5, 64. * 1.305, 40. * 1.305], [4., 12., 20., 24.], -1., 0.87);
+        assert_eq!(scaled, vec![([1170., 830., 1310., 917.], [20., 24., 32., 32.])]);
+        // A small positive scale is an ordinary 9-slice (the client: 0.2 down to 1e-6 draw the middle's texels)
+        let tiny = quads([32, 32], [480., 555., 96., 96.], stone, 1e-6, 1.);
+        assert_eq!(tiny.len(), 9);
+        assert_eq!(tiny[4].1, [8., 8., 24., 24.]);
+    }
 }
 
 #[cfg(test)]
