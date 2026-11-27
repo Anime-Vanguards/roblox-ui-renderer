@@ -320,14 +320,21 @@ impl Input {
         }
     }
 
-    /// Layout.FindRoot: the topmost GuiBase2d ancestor-or-self (through Folders).
+    /// Layout.FindRoot: the topmost GuiBase2d ancestor-or-self (through Folders), stopping at the first LayerCollector
+    /// (a ScreenGui inside a GuiObject is a ScreenGui of its own: layout/mod.rs `find_root`).
     pub(crate) fn find_root(&self, state: &State, id: InstanceId) -> InstanceId {
         let mut root = id;
+        if self.class_is(state.dom.at(id).class, self.c.LayerCollector) {
+            return root;
+        }
         let mut current = state.dom.at(id).parent;
         while let Some(node) = current {
             let class = state.dom.at(node).class;
             if self.class_is(class, self.c.GuiBase2d) {
                 root = node;
+                if self.class_is(class, self.c.LayerCollector) {
+                    break;
+                }
             } else if Some(class) != self.c.Folder {
                 break;
             }
@@ -336,8 +343,11 @@ impl Input {
         root
     }
 
-    /// Layout.DisplayedRoots: every LayerCollector of CoreGui, StarterGui (edit mode) and the
-    /// players' PlayerGuis, by DisplayOrder then creation id.
+    /// Layout.DisplayedRoots: every LayerCollector of CoreGui, StarterGui (edit mode) and the players' PlayerGuis, and the
+    /// ScreenGuis nested in GuiObjects there (layers.rs `nested_screen_guis`), by DisplayOrder, then the order input meets
+    /// them in: when each came into its container, parents first (layers.rs; measured in a 0.747 client with
+    /// GetGuiObjectsAtPosition and clicks: Enabled does not change it, and a ScreenGui made before another but parented
+    /// after it is above it), then creation (a snapshot's, which came in through no hook).
     pub(crate) fn displayed_roots(&self, engine: &Engine, state: &State) -> Vec<InstanceId> {
         fn collect(input: &Input, state: &State, holder: InstanceId, out: &mut Vec<InstanceId>) {
             for &child in &state.dom.at(holder).children {
@@ -365,13 +375,19 @@ impl Input {
                 }
             }
         }
+        for id in crate::engine::layers::nested_screen_guis(engine, state) {
+            if !result.contains(&id) && self.is_displayed(engine, state, id) {
+                result.push(id);
+            }
+        }
         let order = |id: InstanceId| state.dom.raw_get(id, self.n.DisplayOrder).and_then(Value::as_number).unwrap_or(0.0);
+        let layers = engine.gui().layer_order.borrow();
         result.sort_by(|&a, &b| {
             let (oa, ob) = (order(a), order(b));
             if oa != ob {
                 oa.partial_cmp(&ob).unwrap_or(std::cmp::Ordering::Equal)
             } else {
-                state.dom.at(a).serial.cmp(&state.dom.at(b).serial)
+                layers.hit_of(a).cmp(&layers.hit_of(b)).then_with(|| state.dom.at(a).serial.cmp(&state.dom.at(b).serial))
             }
         });
         result

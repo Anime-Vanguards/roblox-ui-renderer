@@ -146,8 +146,9 @@ pub fn ensure_with_state(engine: &Engine, state: &mut crate::engine::State, id: 
 pub fn update_all(engine: &Engine) {
     let _memory = crate::memtrace::scope(crate::memtrace::Tag::Layout);
     let game = engine.world().game;
+    let nested = crate::engine::layers::nested_screen_guis(engine, &engine.state.borrow());
     with_pass(engine, |pass| {
-        let roots = pass.displayed_roots(game);
+        let roots = pass.displayed_roots(game, &nested);
         let mut ran = false;
         // (a change since the frame's layout point that this pass lays out is still owed to the tree's next read: ensure)
         for root in roots {
@@ -318,7 +319,8 @@ pub fn take_churn(engine: &Engine) -> Vec<super::LayoutChurnEntry> {
 /// The LayerCollectors that are displayed (`Pass::displayed_roots`), in draw order.
 pub fn displayed_roots(engine: &Engine) -> Vec<InstanceId> {
     let game = engine.world().game;
-    with_pass(engine, |pass| pass.displayed_roots(game)).unwrap_or_default()
+    let nested = crate::engine::layers::nested_screen_guis(engine, &engine.state.borrow());
+    with_pass(engine, |pass| pass.displayed_roots(game, &nested)).unwrap_or_default()
 }
 
 /// `Layout.Invalidate()`: the next Ensure / UpdateAll lays everything out again.

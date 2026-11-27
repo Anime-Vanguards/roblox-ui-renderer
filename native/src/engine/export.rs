@@ -2643,7 +2643,8 @@ fn text_engine(engine: &Engine) -> std::cell::RefMut<'_, TextEngine> {
 
 /// The roots a scene draws: `roots`, then the ContextActionGui of a touch device's ContextActionService buttons
 /// (input/touch_buttons.rs) when the run made one, which a client draws whatever else is on screen (in the PlayerGui
-/// pass: under a story gui, which sits in CoreGui; `--all-layers` orders it among the PlayerGui's ScreenGuis).
+/// pass: under a story gui, which sits in CoreGui; `--all-layers` orders it among the PlayerGui's ScreenGuis), and the
+/// ScreenGuis nested in GuiObjects of those, each a layer of its own (layers.rs `with_nested`).
 pub(crate) fn drawn_roots(engine: &Engine, roots: &[InstanceId]) -> Vec<InstanceId> {
     let mut drawn = roots.to_vec();
     if let Some(gui) = super::input::touch_buttons::gui(engine) {
@@ -2651,7 +2652,7 @@ pub(crate) fn drawn_roots(engine: &Engine, roots: &[InstanceId]) -> Vec<Instance
             drawn.push(gui);
         }
     }
-    drawn
+    super::layers::with_nested(engine, &drawn)
 }
 
 /// Scene.Build (one-shot, uncached): the scene JSON of `roots` (and [`drawn_roots`]) plus `extra` top-level fields.

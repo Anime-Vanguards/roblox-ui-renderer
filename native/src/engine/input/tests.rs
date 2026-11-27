@@ -5118,14 +5118,216 @@ fn stacked_mouse_input_matches_a_client() {
     stacked_cases(&["mstack_same", "mstack_lower", "mstack_nested", "mstack2", "mscroll"]);
 }
 
-/// More stacks (P6e, IN14b), a finger and the mouse: a SurfaceGui and a BillboardGui in PlayerGui without an Adornee get
-/// nothing; a Draggable frame or a UIDragDetector below an Active object (a finger: hover only, no drag; the mouse: the
-/// drag), the drag's move before the move's events, a UIDragDetector drag keeping the movement from the objects under
-/// it; a TextBox below an Active object or an inactive button; the mouse's second and third buttons over stacks and the
-/// legacy Mouse's buttons (only for what the GUI did not process).
+/// More stacks (P6e, IN14b), a finger and the mouse: a ScreenGui inside a GuiObject takes the input above the ScreenGui
+/// holding it (P4d); a SurfaceGui and a BillboardGui in PlayerGui without an Adornee get nothing; a Draggable frame or a
+/// UIDragDetector below an Active object (a finger: hover only, no drag; the mouse: the drag), the drag's move before the
+/// move's events, a UIDragDetector drag keeping the movement from the objects under it; a TextBox below an Active object
+/// or an inactive button; the mouse's second and third buttons over stacks and the legacy Mouse's buttons (only for what
+/// the GUI did not process).
 #[test]
 fn more_stacks_match_a_client() {
     stacked_cases(&["stack5_touch", "stack5_mouse", "mbuttons", "mlegacy"]);
+}
+
+/// Clicks where buttons of ScreenGuis of equal DisplayOrder overlap (P4d, LA-NESTED-SG): the click goes to the topmost of
+/// GetGuiObjectsAtPosition's list, which orders ScreenGuis by when they came into the PlayerGui (a subtree's ScreenGuis
+/// parents first), not by when they were made or last enabled, and not by the order they are drawn in (a ScreenGui enabled
+/// again is drawn on top and still clicked under); a ScreenGui inside a frame of an invisible frame of a disabled
+/// ScreenGui is clicked.
+#[test]
+fn clicks_over_screen_guis_follow_a_clients_order() {
+    stacked_cases(&["nested_order_mouse"]);
+}
+
+// P4d: the order a client draws ScreenGuis in and meets them in with input (data/studio/screen-gui-order.json: the probe's
+// scenes, run after this stand-in of its header, and the client's log and captures)
+
+const ORDER_PRELUDE: &str = r##"
+local Players = game:GetService("Players")
+local GuiService = game:GetService("GuiService")
+local PG = Players.LocalPlayer:WaitForChild("PlayerGui")
+local Log = {}
+local function L(...)
+	local T = {}
+	for I = 1, select("#", ...) do
+		T[I] = tostring((select(I, ...)))
+	end
+	table.insert(Log, table.concat(T, " "))
+end
+local Inset = GuiService:GetGuiInset()
+local Made = {}
+local function SG(Name, Order, Parent)
+	local G = Instance.new("ScreenGui")
+	G.Name = Name
+	G.DisplayOrder = Order or 0
+	G.IgnoreGuiInset = true
+	G.ResetOnSpawn = false
+	G.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	table.insert(Made, G)
+	if Parent then
+		G.Parent = Parent
+	end
+	return G
+end
+local function Box(Name, Parent, X, Y, Colour, W, H)
+	local F = Instance.new("Frame")
+	F.Name = Name
+	F.Position = UDim2.fromOffset(X, Y)
+	F.Size = UDim2.fromOffset(W or 300, H or 300)
+	F.BackgroundColor3 = Colour
+	F.BorderSizePixel = 0
+	F.Parent = Parent
+	return F
+end
+local RED, GREEN, BLUE, YELLOW = Color3.fromRGB(220, 40, 40), Color3.fromRGB(40, 200, 60), Color3.fromRGB(40, 90, 230), Color3.fromRGB(230, 210, 40)
+local function Frames(N)
+	for _ = 1, N or 3 do
+		StepDisplay(1 / 60)
+		Flush()
+	end
+	UpdateAll()
+end
+local function At(X, Y)
+	local Names = {}
+	for _, O in PG:GetGuiObjectsAtPosition(X, Y - Inset.Y) do
+		table.insert(Names, O.Name)
+	end
+	return table.concat(Names, ",")
+end
+local function Cleanup()
+	for _, G in Made do
+		G:Destroy()
+	end
+	Made = {}
+end
+local BG = Instance.new("ScreenGui")
+BG.Name = "P4dBackdrop"
+BG.DisplayOrder = -100
+BG.IgnoreGuiInset = true
+BG.ResetOnSpawn = false
+Box("Back", BG, 0, 0, Color3.fromRGB(20, 20, 26), 1600, 1000)
+BG.Parent = PG
+local Scenes = {}
+local function Scene(Name, Build)
+	table.insert(Scenes, { Name, Build })
+end
+"##;
+
+const ORDER_LOOP: &str = r##"
+for _, S in Scenes do
+	local Name, Build = S[1], S[2]
+	local Ok, Err = pcall(Build)
+	if not Ok then
+		L(Name, "error", Err)
+	end
+	Frames(4)
+	L(Name, "at350", At(350, 350), "at250", At(250, 250), "at450", At(450, 450), "at150", At(150, 150), "at550", At(550, 550))
+	for _, G in Made do
+		if G:IsA("ScreenGui") then
+			L("  ", G:GetFullName(), "abs", G.AbsolutePosition, G.AbsoluteSize, "enabled", G.Enabled, "order", G.DisplayOrder)
+		end
+	end
+	Capture(Name)
+	Cleanup()
+	Frames(2)
+end
+BG:Destroy()
+Result = Log
+"##;
+
+/// The colour of the topmost drawn node at (x, y) of a scene (the renderer's layer order: the PlayerGui pass, then
+/// DisplayOrder, stable; draw lists in order), named as the probe names it.
+fn top_colour(scene: &Json, x: f64, y: f64) -> String {
+    let nodes: std::collections::HashMap<u64, &Json> =
+        scene["nodes"].as_array().into_iter().flatten().filter_map(|node| Some((node["id"].as_u64()?, node))).collect();
+    let mut layers: Vec<&Json> = scene["layers"].as_array().into_iter().flatten().collect();
+    let core = |layer: &Json| layer["playerGui"] != Json::Bool(true);
+    layers.sort_by(|a, b| core(a).cmp(&core(b)).then(a["displayOrder"].as_f64().unwrap_or(0.0).total_cmp(&b["displayOrder"].as_f64().unwrap_or(0.0))));
+    fn visit(entry: &Json, nodes: &std::collections::HashMap<u64, &Json>, x: f64, y: f64, top: &mut Option<[f64; 3]>) {
+        if let Some(list) = entry["draw"].as_array() {
+            for item in list {
+                visit(item, nodes, x, y, top);
+            }
+            return;
+        }
+        let Some(node) = entry.as_u64().and_then(|id| nodes.get(&id)) else { return };
+        let rect: Vec<f64> = node["rect"].as_array().into_iter().flatten().filter_map(Json::as_f64).collect();
+        let colour: Vec<f64> = node["bg"]["color"].as_array().into_iter().flatten().filter_map(Json::as_f64).collect();
+        let shown = node["visible"] != Json::Bool(false) && node["bg"]["transparency"].as_f64().unwrap_or(0.0) < 1.0;
+        if shown && rect.len() == 4 && colour.len() == 3 && x >= rect[0] && x < rect[0] + rect[2] && y >= rect[1] && y < rect[1] + rect[3] {
+            *top = Some([colour[0], colour[1], colour[2]]);
+        }
+    }
+    let mut top = None;
+    for layer in layers {
+        visit(layer, &nodes, x, y, &mut top);
+    }
+    let Some(colour) = top else { return "nothing".into() };
+    let rgb = colour.map(|c| (c * 255.0).round() as i64);
+    let names = [("R", [220, 40, 40]), ("N", [40, 200, 60]), ("B", [40, 90, 230]), ("Y", [230, 210, 40]), ("bg", [20, 20, 26])];
+    names.iter().find(|(_, c)| *c == rgb).map_or(format!("{}/{}/{}", rgb[0], rgb[1], rgb[2]), |(name, _)| name.to_string())
+}
+
+/// ScreenGuis against a 0.747 client (P4d, LA-NESTED-SG; data/studio/screen-gui-order.json, 41 scenes): ties of
+/// DisplayOrder draw in the order the ScreenGuis came into the PlayerGui or turned Enabled, a subtree's children first
+/// (a ScreenGui inside a frame of another that came in with it draws under it, one parented in later above it; a move
+/// inside the PlayerGui keeps the order), and GetGuiObjectsAtPosition meets them in the order they came in, parents first,
+/// Enabled aside; a ScreenGui inside a GuiObject (a Folder, a Model, a frame of an invisible frame or of a disabled
+/// ScreenGui, two levels deep) is a ScreenGui of its own, by its own DisplayOrder, over the whole screen, and reads the
+/// screen's size also outside the PlayerGui. Compares the log line by line and the colour on top at five points.
+#[test]
+fn screen_guis_draw_and_take_input_in_a_clients_order() {
+    let data: Json = serde_json::from_str(include_str!("../../../../data/studio/screen-gui-order.json")).expect("screen-gui-order.json");
+    let mut failures = Vec::new();
+    let mut scenes = 0;
+    for probe in data["probes"].as_array().unwrap() {
+        let name = probe["probe"].as_str().unwrap();
+        let (lua, engine) = start_with(1600.0, 1000.0, "play", None);
+        let script = {
+            let mut state = engine.state.borrow_mut();
+            let class = engine.reflection.class_id("ModuleScript").unwrap();
+            crate::engine::instance::create_named(&mut state, &engine.reflection, class, "Test")
+        };
+        let env = engine_lua::modules::environment(&lua, &engine, script).expect("environment");
+        hooks(&lua, &engine, &env).expect("hooks");
+        let tops: Rc<std::cell::RefCell<Vec<(String, String)>>> = Rc::default();
+        {
+            let (engine, tops) = (engine.clone(), tops.clone());
+            let capture = lua
+                .create_function(move |_, scene_name: String| {
+                    crate::engine::layout::update_all(&engine);
+                    let roots = crate::engine::layers::screen_layers(&engine, &[]);
+                    let scene = crate::engine::story::build_scene(&engine, &roots, serde_json::Map::new());
+                    let top = [350.0, 250.0, 450.0, 150.0, 550.0].iter().map(|&p| top_colour(&scene, p, p)).collect::<Vec<_>>().join(" ");
+                    tops.borrow_mut().push((scene_name, top));
+                    Ok(())
+                })
+                .expect("capture");
+            env.raw_set("Capture", capture).expect("capture");
+        }
+        let source = format!("{ORDER_PRELUDE}\n{}\n{ORDER_LOOP}", probe["scenes"].as_str().unwrap());
+        let function = lua.load(source).set_name("=Test").set_environment(env.clone()).into_function().expect("compile");
+        let call = engine_lua::globals::call(&lua, &engine, function, LuaMultiValue::new()).expect("call");
+        if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+            panic!("{name}: script failed: {message}");
+        }
+        let got: Vec<String> = env.raw_get::<LuaTable>("Result").expect("Result").sequence_values::<String>().map(Result::unwrap).collect();
+        let client: Vec<String> = probe["log"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
+        for i in 0..got.len().max(client.len()) {
+            if got.get(i) != client.get(i) {
+                failures.push(format!("{name} log line {}: client {:?}, rur {:?}", i + 1, client.get(i), got.get(i)));
+            }
+        }
+        for (scene, top) in tops.borrow().iter() {
+            scenes += 1;
+            let want = probe["draw"][scene.as_str()].as_str().unwrap_or("(no capture)");
+            if want != top {
+                failures.push(format!("{name} {scene} on top at 350 250 450 150 550: client {want}, rur {top}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} differences:\n{}", failures.len(), failures.join("\n"));
+    assert_eq!(scenes, 41);
 }
 
 /// A touch device's own scroll bars (P6e, IN12e): none on a frame nothing touched or scrolled; at full strength at once

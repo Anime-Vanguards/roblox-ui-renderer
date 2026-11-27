@@ -4235,9 +4235,21 @@
 		"live/stories-autosize-cull/60hz-presentation": {
 			"digest": "a817ac643280f850731f6b8b6092926b73cb09b03f61ad5cd482276195a56a5c",
 			"status": "live"
+		},
+		"fast/edit/layout-nested-screengui": {
+			"digest": "4c05b39fbccf1f8a5b930da56c51729f2afcd76c0e0d9a9a2b32a5a4cbb9f2f2",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-nested-screengui": {
+			"digest": "713a48cd759885a3b3b0be9a45251992da75d9c2476a494a6f26a10f25b5356f",
+			"status": "ok"
+		},
+		"fixtures/play/layout-nested-screengui": {
+			"digest": "84931074f9a359fcea1ce0ea3cdafedde8463f4fe4557bdc1a18c8c952d520f2",
+			"status": "ok"
 		}
 	},
-	"recorded": "2026-11-27T19:42:35.451Z",
+	"recorded": "2026-11-27T21:35:54.977Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

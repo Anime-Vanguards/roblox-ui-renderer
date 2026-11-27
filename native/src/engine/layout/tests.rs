@@ -720,13 +720,15 @@ fn float32_rects(source: &str, viewport: (f64, f64)) -> (std::collections::HashM
                 task.wait(0.1)
                 local function Visit(Node, Path)
                     for _, Child in Node:GetChildren() do
-                        if Child:IsA("GuiObject") then
-                            local At = Path .. "/" .. Child.Name
+                        local At = Path .. "/" .. Child.Name
+                        if Child:IsA("GuiBase2d") then
                             local P, S = Child.AbsolutePosition - Target.AbsolutePosition, Child.AbsoluteSize
                             print(string.format("rect %s %.9g %.9g %.9g %.9g", At, P.X, P.Y, S.X, S.Y))
-                            if Child.Name == "T" and Child:IsA("TextLabel") then
+                            if (Child.Name == "T" or string.sub(Child.Name, 1, 2) == "U_") and Child:IsA("TextLabel") then
                                 print(string.format("text %s %s", At, Child.Text))
                             end
+                        end
+                        if Child:IsA("GuiObject") or Child:IsA("ScreenGui") or Child:IsA("Folder") then
                             Visit(Child, At)
                         end
                     end
@@ -754,24 +756,26 @@ fn float32_rects(source: &str, viewport: (f64, f64)) -> (std::collections::HashM
 
 /// The list, grid and canvas fixtures a client was measured on in float32 (data/studio/whole/layout-f32.json), with
 /// their viewports.
-const FLOAT32_FIXTURES: [(&str, &str, (f64, f64)); 3] = [
+const FLOAT32_FIXTURES: [(&str, &str, (f64, f64)); 4] = [
     ("layout-f32-lists", include_str!("../../../../fixtures/layout-f32-lists.luau"), (1200.0, 900.0)),
     ("layout-f32-grids", include_str!("../../../../fixtures/layout-f32-grids.luau"), (2160.0, 1270.0)),
     ("layout-f32-lists2", include_str!("../../../../fixtures/layout-f32-lists2.luau"), (2160.0, 1270.0)),
+    ("layout-nested-screengui", include_str!("../../../../fixtures/layout-nested-screengui.luau"), (1600.0, 1000.0)),
 ];
 
-/// Not reproduced: children of a ScrollingFrame's canvas, an ulp off in about a fifth of their values (their canvas
-/// basis is neither the canvas size nor its corner-read AbsoluteCanvasSize), and the AbsoluteWindowSize the fixture
-/// reads (an ulp off in 9 of 48 values).
-fn float32_known(path: &str) -> bool {
-    path.contains("_S/") || path.contains("/S/") || (path.starts_with("/s") && path.ends_with("/T"))
+/// Not reproduced: children of a ScrollingFrame's canvas in the list fixtures, an ulp off in about a fifth of their values
+/// (their canvas basis is neither the canvas size nor its corner-read AbsoluteCanvasSize), and the AbsoluteWindowSize
+/// layout-f32-lists2 reads (an ulp off in 9 of 48 values).
+fn float32_known(name: &str, path: &str) -> bool {
+    (name.starts_with("layout-f32-") && (path.contains("_S/") || path.contains("/S/") || (path.starts_with("/s") && path.ends_with("/T"))))
 }
 
 /// UIListLayout, UIGridLayout and a ScrollingFrame's canvas against a Roblox 0.747 client bit for bit (float32;
 /// data/studio/whole/layout-f32.json): lists walk their items in float32 local units (the next item at
 /// f32(f32(cursor + size) + gap)), grids size each item f32(f32(cell + pad) - pad) and place it by its cell's centre
 /// with an AnchorPoint of 0.5, AbsoluteCellSize is unscaled, AbsoluteContentSize is f32(content x UIScale), and
-/// AbsoluteCanvasSize reads back through the canvas's far corner.
+/// AbsoluteCanvasSize reads back through the canvas's far corner. P4d: a ScreenGui inside a GuiObject is laid out over the
+/// whole screen, unclipped, unturned and unscaled by what holds it (layout-nested-screengui).
 #[test]
 fn lists_grids_and_canvases_lay_out_in_a_clients_float32() {
     let studio: serde_json::Value = serde_json::from_str(include_str!("../../../../data/studio/whole/layout-f32.json")).expect("measurements");
@@ -782,7 +786,7 @@ fn lists_grids_and_canvases_lay_out_in_a_clients_float32() {
         let (rects, texts) = float32_rects(source, viewport);
         let expected = &studio["fixtures"][name];
         for (path, want) in expected["rects"].as_object().unwrap() {
-            if float32_known(path) || (!fonts && path.ends_with("_T")) {
+            if float32_known(name, path) || (!fonts && path.ends_with("_T")) {
                 continue;
             }
             let want: Vec<f32> = rect_values(want).iter().map(|v| *v as f32).collect();
@@ -793,7 +797,7 @@ fn lists_grids_and_canvases_lay_out_in_a_clients_float32() {
             }
         }
         for (path, want) in expected["texts"].as_object().unwrap() {
-            if float32_known(path) {
+            if float32_known(name, path) {
                 continue;
             }
             texts_compared += 1;

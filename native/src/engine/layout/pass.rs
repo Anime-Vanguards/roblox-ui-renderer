@@ -3204,7 +3204,9 @@ impl<'a> Pass<'a> {
 
         if info.is_a(c.ScreenGui) || info.is_a(c.LayerCollector) {
             let (x, y, width, height);
-            if class == c.ScreenGui && self.is_displayed(root) {
+            // (a ScreenGui that is not displayed, in ReplicatedStorage or inside a frame there, reads the screen's size too:
+            // measured in a 0.747 client, notes/layout.md "ScreenGuis inside GuiObjects")
+            if class == c.ScreenGui {
                 let below_topbar = match self.get(root, n.ScreenInsets) {
                     Some(value) => value.as_enum() == self.l.ids.core_ui_safe_insets,
                     None => true,
@@ -3415,8 +3417,9 @@ impl<'a> Pass<'a> {
     }
 
     /// DisplayedRoots: LayerCollectors under CoreGui / StarterGui (edit mode) / the players'
-    /// PlayerGuis, by DisplayOrder then creation.
-    pub(crate) fn displayed_roots(&self, game: InstanceId) -> Vec<InstanceId> {
+    /// PlayerGuis, and the displayed ones of `nested` (layers.rs `nested_screen_guis`: ScreenGuis inside GuiObjects, each a
+    /// root of its own), by DisplayOrder then creation.
+    pub(crate) fn displayed_roots(&self, game: InstanceId, nested: &[InstanceId]) -> Vec<InstanceId> {
         let c = self.l.ids.c;
         let mut result = Vec::new();
         fn collect(pass: &Pass, holder: InstanceId, out: &mut Vec<InstanceId>) {
@@ -3440,6 +3443,11 @@ impl<'a> Pass<'a> {
                         }
                     }
                 }
+            }
+        }
+        for &id in nested {
+            if self.state.dom.get(id).is_some() && !result.contains(&id) && self.is_displayed(id) {
+                result.push(id);
             }
         }
         let order = self.l.ids.n.DisplayOrder;

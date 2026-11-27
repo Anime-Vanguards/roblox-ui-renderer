@@ -557,6 +557,10 @@ impl Layout {
         while let Some(current) = node {
             let Some(instance) = state.dom.get(current) else { break };
             self.stamps.set(current, clock);
+            // (a ScreenGui is its own tree's root, also inside a GuiObject: what holds it is not laid out again)
+            if instance.class == self.ids.c.ScreenGui {
+                break;
+            }
             node = instance.parent;
         }
     }
@@ -591,14 +595,23 @@ impl Layout {
         }
     }
 
-    /// `Layout.FindRoot`: topmost GuiBase2d ancestor-or-self (through Folders).
+    /// `Layout.FindRoot`: topmost GuiBase2d ancestor-or-self (through Folders), stopping at the first LayerCollector: a
+    /// ScreenGui inside a GuiObject is a root of its own (measured in a 0.747 client: laid out over the whole screen,
+    /// whatever holds it; notes/layout.md "ScreenGuis inside GuiObjects").
     pub fn find_root(&self, state: &State, reflection: &Reflection, id: InstanceId) -> InstanceId {
         let mut root = id;
         let mut current = state.dom.at(id).parent;
+        if reflection.class(state.dom.at(id).class).is_a(self.ids.c.LayerCollector) {
+            return root;
+        }
         while let Some(node) = current {
             let instance = state.dom.at(node);
-            if reflection.class(instance.class).is_a(self.ids.c.GuiBase2d) {
+            let class = reflection.class(instance.class);
+            if class.is_a(self.ids.c.GuiBase2d) {
                 root = node;
+                if class.is_a(self.ids.c.LayerCollector) {
+                    break;
+                }
             } else if instance.class != self.ids.c.Folder {
                 break;
             }
