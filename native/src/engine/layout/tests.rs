@@ -694,6 +694,99 @@ fn automatic_text_measures_in_the_room_it_has() {
     assert!(compared > 1500, "only {compared} rects compared");
 }
 
+/// The client's measurements of the AutomaticSize + UIAspectRatioConstraint fixtures
+/// (data/studio/whole/autosize-aspect.json).
+fn aspect_measured() -> serde_json::Value {
+    serde_json::from_str(include_str!("../../../../data/studio/whole/autosize-aspect.json")).expect("measurements")
+}
+
+/// The AutomaticSize + UIAspectRatioConstraint fixtures the client was measured on.
+const ASPECT_FIXTURES: [(&str, &str); 9] = [
+    ("layout-autosize-aspect", include_str!("../../../../fixtures/layout-autosize-aspect.luau")),
+    ("layout-autosize-aspect2", include_str!("../../../../fixtures/layout-autosize-aspect2.luau")),
+    ("layout-autosize-aspect3", include_str!("../../../../fixtures/layout-autosize-aspect3.luau")),
+    ("layout-autosize-aspect4", include_str!("../../../../fixtures/layout-autosize-aspect4.luau")),
+    ("layout-autosize-aspect5", include_str!("../../../../fixtures/layout-autosize-aspect5.luau")),
+    ("layout-autosize-aspect-probes", include_str!("../../../../fixtures/layout-autosize-aspect-probes.luau")),
+    ("layout-autosize-aspect-panels", include_str!("../../../../fixtures/layout-autosize-aspect-panels.luau")),
+    ("layout-autosize-prompt", include_str!("../../../../fixtures/layout-autosize-prompt.luau")),
+    ("layout-autosize-aspect-view", include_str!("../../../../fixtures/layout-autosize-aspect-view.luau")),
+];
+
+/// Not reproduced: a (1, 1) frame in an automatic frame with a UIAspectRatioConstraint and top and bottom padding
+/// (the client sizes it neither against the ratio's box nor against the grown frame).
+const ASPECT_KNOWN: [&str; 2] = ["/pad10_full_b100x100/H/F", "/pady30_full_b100x40/H/F"];
+
+/// Automatic frames with a UIAspectRatioConstraint against a Roblox 0.747 client's rects
+/// (data/studio/whole/autosize-aspect.json): the content's natural size inside the padding, fitted to the ratio, plus
+/// the top and bottom padding, times the ratio is the width, at least the base Size fitted to the ratio and, on an
+/// axis that is not automatic, at most the base Size; the height follows the width; the children lay out in that box
+/// and push the automatic axes further. Automatic children grow into the box the ratio makes of the base width and
+/// the room the frame has. Cells without text (the text cells need Studio's fonts, see the next test).
+#[test]
+fn aspect_constrained_automatic_frames_fit_their_base_size_first() {
+    let studio = aspect_measured();
+    let (mut compared, mut misses, mut known) = (0, Vec::new(), 0);
+    for (name, source) in ASPECT_FIXTURES {
+        let ours = cell_rects(source, 1.5);
+        let expected = studio["fixtures"][name].as_object().unwrap();
+        let cell_of = |path: &str| path.split('/').nth(1).unwrap_or("").to_string();
+        let text_cells: std::collections::HashSet<String> = expected.iter().filter(|(_, want)| rect_values(want).len() == 6).map(|(path, _)| cell_of(path)).collect();
+        for (path, want) in expected {
+            if text_cells.contains(&cell_of(path)) {
+                continue;
+            }
+            let (want, got) = (rect_values(want), rect_values(&ours[path]));
+            compared += 1;
+            let same = got.len() >= 4 && (0..4).all(|k| (want[k] - got[k]).abs() < 0.01);
+            if ASPECT_KNOWN.contains(&path.as_str()) {
+                assert!(!same, "{name} {path} now matches the client: take it out of ASPECT_KNOWN");
+                known += 1;
+            } else if !same {
+                misses.push(format!("{name} {path}: client {:?}, ours {got:?}", &want[..4]));
+            }
+        }
+    }
+    assert!(misses.is_empty(), "{} of {compared} rects differ from the client's:\n{}", misses.len(), misses.join("\n"));
+    assert_eq!(known, ASPECT_KNOWN.len());
+    assert!(compared >= 615, "only {compared} rects compared");
+}
+
+/// Wrapped labels in automatic frames with a UIAspectRatioConstraint against a Roblox 0.747 client
+/// (data/studio/whole/autosize-aspect.json): on the axis that is not automatic a label measures against the frame's
+/// base Size, so a (1, -20) label in a 240 x 60 frame of ratio 3 keeps the two lines it has at 220 px while the frame
+/// is 180 wide. Rects and TextBounds within the client's whole-px TextBounds.
+#[test]
+fn aspect_constrained_automatic_frames_measure_text_against_their_base_size() {
+    if crate::engine::text::fonts::discover_content_root().is_none() {
+        eprintln!("skipped: no Studio content root (the cases need Studio's fonts)");
+        return;
+    }
+    let studio = aspect_measured();
+    let (mut compared, mut misses) = (0, Vec::new());
+    for (name, source) in ASPECT_FIXTURES {
+        let expected = studio["fixtures"][name].as_object().unwrap();
+        let cell_of = |path: &str| path.split('/').nth(1).unwrap_or("").to_string();
+        let text_cells: std::collections::HashSet<String> = expected.iter().filter(|(_, want)| rect_values(want).len() == 6).map(|(path, _)| cell_of(path)).collect();
+        if text_cells.is_empty() {
+            continue;
+        }
+        let ours = cell_rects(source, 1.5);
+        for (path, want) in expected {
+            if !text_cells.contains(&cell_of(path)) {
+                continue;
+            }
+            let (want, got) = (rect_values(want), rect_values(&ours[path]));
+            compared += 1;
+            if !(got.len() == want.len() && (0..want.len()).all(|k| (want[k] - got[k]).abs() < 1.0)) {
+                misses.push(format!("{name} {path}: client {want:?}, ours {got:?}"));
+            }
+        }
+    }
+    assert!(misses.is_empty(), "{} of {compared} rects differ from the client's:\n{}", misses.len(), misses.join("\n"));
+    assert!(compared >= 79, "only {compared} rects compared");
+}
+
 
 /// Per-instance storage (Slots): entries are guarded by the id's generation, and a slot far beyond
 /// the ones in use costs one chunk, not everything below it.

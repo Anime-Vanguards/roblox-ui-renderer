@@ -248,6 +248,38 @@
 			"digest": "a35253c88a80ecd37ee03cedf32678019caea5828873935686952658be625ebf",
 			"status": "ok"
 		},
+		"fast/edit/layout-autosize-aspect": {
+			"digest": "86bb1271c60b1f08cdee54e1dc71699973a138818ab5744a65dda65525b22925",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect-panels": {
+			"digest": "88bd6e77c346329b2dc9c92367fe9245f790168141878247e97cabe82bdadf76",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect-probes": {
+			"digest": "e1649c3f50da2d6226307049369050b5657becd2946e03ba164e2de4571bf1a6",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect-view": {
+			"digest": "47f5f100dbf4050316a9b5ea4ce37c4a2f6232a019c0beffd7fe7a1d7a9bb5aa",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect2": {
+			"digest": "2c1ea22b500122ac971d6ba94046813b214e962cd5523140797c045fc07850b1",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect3": {
+			"digest": "7dcaddcb46c1e82f1d725945e465875948d18700599b7468f08a6c4392251ddf",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect4": {
+			"digest": "797f6f2465cd9dfe276e22be8c1edb76467e6c91c9c6bed825641392d51ab8f0",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect5": {
+			"digest": "02a411df815c32d00ccfe131cebc33f5ecfcf3ea84e27812920b8d78b72475cf",
+			"status": "ok"
+		},
 		"fast/edit/layout-autosize-constraint": {
 			"digest": "2e810ec7ab0fcb8560693109355a7799c7b3ac4b43db7d95c3cee4aacaf99a75",
 			"status": "ok"
@@ -265,7 +297,7 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-prompt": {
-			"digest": "4ebdd26e2b756151366246c140e1d7fcba8a28a75c143140ae2a250bf37976ec",
+			"digest": "637feb40e01cf3a35d6b0e913513607a8978e43b01273bd6136e51e93b966f2b",
 			"status": "ok"
 		},
 		"fast/edit/layout-autotext-linefit": {
@@ -1596,6 +1628,38 @@
 			"digest": "d6cf2f6714a65a02a72647b4763fee42583ec104a584aeba8477786360aa687b",
 			"status": "ok"
 		},
+		"fixtures/edit/layout-autosize-aspect": {
+			"digest": "9b268a2a5a24b420d759fdb4d2cc0f0c666b254ee5b6a3834fdb401c5b7bb164",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect-panels": {
+			"digest": "00708adb7dfec21628f10637a1d0e92888de133352e3edf96cb42082c6bbf208",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect-probes": {
+			"digest": "29e694218564adeed3a6f49a4ea245fd480f52da75c32aa81d50d18aaad6b2a2",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect-view": {
+			"digest": "3291df08ad75e751c34e656578fdaf5854e61d0e8ef418fd6a6a9b6f2ff41d0a",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect2": {
+			"digest": "dd1a1bfa9c4f2161282d7159df25477e7266cc70078b4a8b51dff13ad9fcdc12",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect3": {
+			"digest": "3476c8a38e04aced5dde940d0f5ec79e77e99d985dad20feab0fcfc2b21705ca",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect4": {
+			"digest": "8976dcfcd36d7e727437eb06cc35ab7d18b57ca18b8d7e758b8b27dc29029c99",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect5": {
+			"digest": "7324c8ff2a1dd5f206934b2aac4e3a25c11b223094860f53d6340db13ba58701",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-autosize-constraint": {
 			"digest": "929ca4af2f29fdf02f03a6ac89d9f788d1fb97d009880d9e2566e5d4b2343066",
 			"status": "ok"
@@ -1613,7 +1677,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-prompt": {
-			"digest": "2578068f6c9d10ad30dc26b925eb424e36280986bc270e39e757c4f7fa2ecd8e",
+			"digest": "7d8bf06086f8e5c0dca988f7d8ef346b61e2bd3adcc074244fac6c7a821efd98",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autotext-linefit": {
@@ -2932,6 +2996,38 @@
 			"digest": "72cccd5b8bfd648bb1a568974a6bd0af0a8415b3e8e5562388550e9c7567819b",
 			"status": "ok"
 		},
+		"fixtures/play/layout-autosize-aspect": {
+			"digest": "5dc1ef82d375410163b8fccbd079eb4a40dd0af9e191dd2652d70e47428a163e",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect-panels": {
+			"digest": "2ccc852b1cb329632a568927d8b3b38a49b2e6037b1dac6be1ec4185f980fd0f",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect-probes": {
+			"digest": "2517388311741115cc1397658e3877186f3a79bc0fa5526254a529354f7f6e61",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect-view": {
+			"digest": "de11c62bee4f9cfbec9ab9a2961d3340f1e41eff31c81e4240e7337c6807d18c",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect2": {
+			"digest": "0ee88806a15ff6f2c2ab7044fd8ad77902ea6e4d7e1ffe6044c544d3b7708023",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect3": {
+			"digest": "7c5ae60f9c50ad2d7cde58ea119068a7a65d869daf8a0785d4e9b4cf8c6b9a1a",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect4": {
+			"digest": "4e4761980f369325c52420f89ec3b8a26c6ceaeb399af893e7c7f03b4c19e335",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect5": {
+			"digest": "3749dce1b24267123c152cc9b9f7b04343025f6d803a03dd4a474527bd0abd5f",
+			"status": "ok"
+		},
 		"fixtures/play/layout-autosize-constraint": {
 			"digest": "244d723fd4cd10f1ee78ebd70381205203235c909e9a8fdb784b85dbbc6c9ec0",
 			"status": "ok"
@@ -2949,7 +3045,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-prompt": {
-			"digest": "ee5fb3140555afa075ef5464323967e37772c47c596bbf04c2602900c0284514",
+			"digest": "b9115793414b223fddd4a72c128bc803d77c18cd9dadc11a80dd0354f595f06a",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autotext-linefit": {
@@ -3949,7 +4045,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T00:12:21.234Z",
+	"recorded": "2026-11-27T01:37:28.762Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

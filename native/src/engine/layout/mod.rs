@@ -162,6 +162,9 @@ pub(crate) struct Sized {
     pub held_h: Option<f64>,
     /// A text object's TextBounds as this measure laid its text out (absolute px).
     pub bounds: Option<(f64, f64)>,
+    /// The room an object automatic on one axis with a UIAspectRatioConstraint gives its children to grow into on
+    /// that axis (local units, inside its padding); see ComputeSize.
+    pub grow: Option<(Option<f64>, Option<f64>)>,
 }
 
 /// ComputeSize's inputs (the memo key; compared with Luau `==`).

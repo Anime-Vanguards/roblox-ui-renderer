@@ -322,6 +322,7 @@ pub(crate) struct Resolved {
     base_w: f64,
     base_h: f64,
     measure: Option<(f64, f64)>,
+    grow: Option<(Option<f64>, Option<f64>)>,
 }
 
 type Collect<'c> = &'c mut dyn FnMut(&mut Pass, InstanceId, &Record);
@@ -657,6 +658,18 @@ impl<'a> Pass<'a> {
         (width, height)
     }
 
+    /// The AspectRatio of the object's UIAspectRatioConstraint, if it has one that applies.
+    fn aspect_ratio(&self, id: InstanceId) -> Option<f64> {
+        let constraint = self.first_child_of(id, self.l.ids.c.UIAspectRatioConstraint)?;
+        self.num(constraint, self.l.ids.n.AspectRatio).filter(|ratio| *ratio > 0.0)
+    }
+
+    /// Whether the object's UIAspectRatioConstraint is of AspectType ScaleWithParentSize.
+    fn aspect_scales_with_parent(&self, id: InstanceId) -> bool {
+        self.first_child_of(id, self.l.ids.c.UIAspectRatioConstraint)
+            .is_some_and(|constraint| self.code(constraint, self.l.ids.n.AspectType) == E::SCALE_WITH_PARENT_SIZE)
+    }
+
     fn apply_aspect_ratio(&self, id: InstanceId, mut width: f64, mut height: f64, parent_w: f64, parent_h: f64) -> (f64, f64) {
         let Some(constraint) = self.first_child_of(id, self.l.ids.c.UIAspectRatioConstraint) else {
             return (width, height);
@@ -915,12 +928,17 @@ impl<'a> Pass<'a> {
         if !is_automatic {
             (width, height) = self.apply_aspect_ratio(id, width, height, parent_w, parent_h);
         }
+        // An automatic object's UIAspectRatioConstraint first fits its base Size, as on any object (see the stable
+        // size below).
+        let aspect_holder = is_automatic && self.aspect_ratio(id).is_some();
+        let (fit_w, fit_h) = if aspect_holder { self.apply_aspect_ratio(id, width, height, parent_w, parent_h) } else { (width, height) };
         let (mut base_w, mut base_h) = (width, height);
         let (mut child_measure_w, mut child_measure_h) = (None, None);
         let (mut held_w, mut held_h) = (None, None);
 
         let mut text_box = None;
         let mut measured_bounds = None;
+        let mut grow = None;
         if is_automatic {
             // Measured: when an ancestor's UIAspectRatioConstraint shrank its automatic size,
             // automatic content is still measured against the ancestor's unconstrained size.
@@ -934,7 +952,7 @@ impl<'a> Pass<'a> {
             let (pad_left, pad_right, pad_top, pad_bottom) = self.padding_offsets(id);
             let inner_width = lmax(measure_width - pad_left - pad_right, 0.0);
             let inner_height = lmax(measure_height - pad_top - pad_bottom, 0.0);
-            let inner_available = if auto_x {
+            let mut inner_available = if auto_x {
                 match available {
                     Some(available) => lmax(available - pad_left - pad_right, inner_width),
                     None => INF,
@@ -942,7 +960,7 @@ impl<'a> Pass<'a> {
             } else {
                 inner_width
             };
-            let inner_available_h = if auto_y {
+            let mut inner_available_h = if auto_y {
                 match available_h {
                     Some(available_h) => lmax(available_h - pad_top - pad_bottom, inner_height),
                     None => INF,
@@ -950,6 +968,31 @@ impl<'a> Pass<'a> {
             } else {
                 inner_height
             };
+            // Measured (fixtures/layout-autosize-aspect2.luau gap01_*, layout-autosize-prompt.luau popups; a 0.747
+            // client): an object automatic on one axis with a UIAspectRatioConstraint lets its children grow on that
+            // axis only into the box its constraint makes of its base Size with the room it has (capped by its
+            // MaxSize) on that axis, less its padding: a 240 x 60 frame of ratio 3 with 170 px of room below offers
+            // 80 (a 0.8 scale panel's list gaps measure against 0.8 x (80 - 16)), 56 with 56 px of room, 50 under a
+            // MaxSize of 50; of ratio 3 by height in a 296 px parent 296 / 3. A prompt holder of 500 x 158 at ratio
+            // 3 offers 166.67, so its panel's 0.1 gaps measure against 0.8862 x (166.67 - 30).
+            if aspect_holder && auto_x != auto_y {
+                let (mut max_w, mut max_h) = (INF, INF);
+                self.size_constraints(id, |_, max| {
+                    max_w = lmin(max_w, max.0);
+                    max_h = lmin(max_h, max.1);
+                });
+                if auto_y {
+                    let room = lmin(available_h.unwrap_or(INF), max_h);
+                    let (_, grow_h) = self.apply_aspect_ratio(id, width, room, parent_w, parent_h);
+                    inner_available_h = lmax(grow_h - pad_top - pad_bottom, 0.0);
+                    grow = Some((None, Some(inner_available_h)));
+                } else {
+                    let room = lmin(available.unwrap_or(INF), max_w);
+                    let (grow_w, _) = self.apply_aspect_ratio(id, room, height, parent_w, parent_h);
+                    inner_available = lmax(grow_w - pad_left - pad_right, 0.0);
+                    grow = Some((Some(inner_available), None));
+                }
+            }
             let (mut content_width, mut content_height) = (0.0, 0.0);
 
             if self.is_text_object(id) {
@@ -1167,9 +1210,9 @@ impl<'a> Pass<'a> {
                     if auto_y { basis(size[2], size[3], available_h, max_h, base_top + base_bottom) } else { None },
                 )
             };
-            // (not measured with a UIAspectRatioConstraint, whose own rule below measures the content; a client fits
-            // such a holder's base Size to its ratio first: fixtures/layout-autosize-prompt.luau, open)
-            if flow.is_none() && self.first_child_of(id, self.l.ids.c.UIAspectRatioConstraint).is_none() {
+            // (with a UIAspectRatioConstraint too: a (1, 1) frame in a 60 x 60 frame of ratio 0.5 automatic on X counts
+            // 60 wide, fixtures/layout-autosize-aspect4.luau x_full_b20x100)
+            if flow.is_none() {
                 let size = self.udim2(id, self.l.ids.n.Size);
                 // (with nothing to grow into, only the offset)
                 if auto_x {
@@ -1257,7 +1300,9 @@ impl<'a> Pass<'a> {
                     deep.item_h = Some(deep.content.h);
                     deep.sizing_h = Some(0.0);
                 }
-                let (deep_x, deep_y) = self.descendant_extent(id, &deep, auto_x || aspect_x, auto_y || aspect_y, (auto_x, auto_y));
+                // (the leaf rule also on the axis a UIAspectRatioConstraint measures: a 0.8 item holding a (1, 0) frame
+                // in a 240 px frame counts 0.8 x 0.8 x 240, fixtures/layout-autosize-aspect5.luau)
+                let (deep_x, deep_y) = self.descendant_extent(id, &deep, auto_x || aspect_x, auto_y || aspect_y, (auto_x || aspect_x, auto_y || aspect_y));
                 if aspect_x {
                     natural_x = lmax(natural_x, deep_x);
                 }
@@ -1282,13 +1327,18 @@ impl<'a> Pass<'a> {
             let (asked_x, asked_y) = self.apply_size_constraint(id, lmax(content_width, offset_x), lmax(content_height, offset_y));
             let asked_w = asked_x + pad_left + pad_right;
             let asked_h = asked_y + pad_top + pad_bottom;
-            let mut stable_w = if auto_x { lmax(width, asked_w) } else { width };
-            let mut stable_h = if auto_y { lmax(height, asked_h) } else { height };
-            if aspect_x {
-                stable_w = lmax(content_width, natural_x) + pad_left + pad_right;
+            let (grow_w, grow_h) = if aspect_holder { (fit_w, fit_h) } else { (width, height) };
+            let mut stable_w = if auto_x { lmax(grow_w, asked_w) } else { width };
+            let mut stable_h = if auto_y { lmax(grow_h, asked_h) } else { height };
+            let ratio = self.aspect_ratio(id).unwrap_or(1.0);
+            let fit_within = aspect && !self.aspect_scales_with_parent(id);
+            // (ScaleWithParentSize keeps its dominant axis: on the other axis the stable size is what the content
+            // holds, at least the fitted base and at most the base, as below)
+            if aspect_x && !fit_within {
+                stable_w = lmin(width, lmax(fit_w, lmax(content_width, natural_x) + ratio * (pad_top + pad_bottom)));
             }
-            if aspect_y {
-                stable_h = lmax(content_height, natural_y) + pad_top + pad_bottom;
+            if aspect_y && !fit_within {
+                stable_h = lmin(height, lmax(fit_h, lmax(content_height, natural_y) + (pad_left + pad_right) / ratio));
             }
             let (asked_box_w, asked_box_h) = (stable_w, stable_h);
             (stable_w, stable_h) = self.apply_size_constraint(id, stable_w, stable_h);
@@ -1302,11 +1352,43 @@ impl<'a> Pass<'a> {
             let mut box_w = if auto_x { asked_box_w } else { stable_w };
             let mut box_h = if auto_y { asked_box_h } else { stable_h };
 
-            // Measured: an AutomaticSize object's UIAspectRatioConstraint applies to this stable size.
-            let (constrained_w, constrained_h) = self.apply_aspect_ratio(id, stable_w, stable_h, parent_w, parent_h);
+            // Measured (fixtures/layout-autosize-aspect.luau, -aspect2 to -aspect5, layout-autosize-prompt.luau; a
+            // 0.747 client): a UIAspectRatioConstraint (FitWithinMaxSize, either DominantAxis) on an object that holds
+            // children takes the width from what they hold, fitted to the ratio, and the height from the width. The
+            // content is measured inside the padding, scale leaves at the base Size; its fitted height, plus the top
+            // and bottom padding, times the ratio is the width, at least the base Size's fitted width and, when the
+            // width is not automatic, at most the base width; the height is the width over the ratio, at most the
+            // base height when it is not automatic. Then the children lay out in that box and push the automatic
+            // axes further. A 240 x 60 frame of ratio 3 (fitted 180 x 60) holding a 100 x 40 box is 180 x 60, a
+            // 100 x 100 box 180 x 100, a 200 x 100 box 200 x 100, a 260 x 100 box 240 x 100; with 30 + 30 px of top
+            // and bottom padding a 100 x 40 box makes it 3 x (33.33 + 60) = 280, so 240 x 80; left and right padding
+            // count nowhere. A 240 x 0 frame (fitted 0 x 0) holding a 100 x 40 box is 100 x 40 (the options prompt's
+            // 518 x 154). A 60 x 60 frame of ratio 0.5 automatic on X holding a (1, 1) frame and a 20 x 100 box is
+            // 50 x 60 (the content 60 x 100 fitted to 50 x 100); the prompt holder of 500 x 158 at 2.87 is 453.46
+            // wide whatever its content's height.
+            let (constrained_w, constrained_h) = if fit_within {
+                let held_x = if auto_x { lmax(content_width, offset_x) } else { lmax(content_width, natural_x) };
+                let held_y = if auto_y { lmax(content_height, offset_y) } else { lmax(content_height, natural_y) };
+                let fitted_h = lmin(held_y, held_x / ratio);
+                let raw_w = ratio * (fitted_h + pad_top + pad_bottom);
+                let fitted_w = if auto_x { lmax(fit_w, raw_w) } else { lmin(width, lmax(fit_w, raw_w)) };
+                let fitted_h = if auto_y { fitted_w / ratio } else { lmin(fitted_w / ratio, height) };
+                // (a MaxSize the ratio's box passes cuts it and the ratio applies again; not measured)
+                let (capped_w, capped_h) = self.apply_size_constraint(id, fitted_w, fitted_h);
+                if capped_w != fitted_w || capped_h != fitted_h {
+                    self.apply_aspect_ratio(id, capped_w, capped_h, parent_w, parent_h)
+                } else {
+                    (fitted_w, fitted_h)
+                }
+            } else {
+                self.apply_aspect_ratio(id, stable_w, stable_h, parent_w, parent_h)
+            };
             if constrained_w != stable_w || constrained_h != stable_h {
-                child_measure_w = Some(lmax(stable_w - pad_left - pad_right, 0.0));
-                child_measure_h = Some(lmax(stable_h - pad_top - pad_bottom, 0.0));
+                // Measured (fixtures/layout-autosize-aspect2.luau text_*): on the axis that is not automatic, content
+                // measures against the base Size: a wrapped (1, -20) label in a 240 x 60 frame of ratio 3 keeps the
+                // two lines it has at 220 px while the frame is 180 wide.
+                child_measure_w = Some(lmax(if aspect_x { width } else { stable_w } - pad_left - pad_right, 0.0));
+                child_measure_h = Some(lmax(if aspect_y { height } else { stable_h } - pad_top - pad_bottom, 0.0));
                 (box_w, box_h) = (constrained_w, constrained_h);
             }
             stable_w = constrained_w;
@@ -1337,7 +1419,7 @@ impl<'a> Pass<'a> {
             held_h = if auto_y && asked_h > height { Some(asked_h) } else { None };
         }
 
-        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h, bounds: measured_bounds }
+        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h, bounds: measured_bounds, grow }
     }
 
     /// ComputeSize, memoized for AutomaticSize objects: a result stays valid while the object's
@@ -2112,6 +2194,7 @@ impl<'a> Pass<'a> {
                 base_w,
                 base_h,
                 measure: sized.measure_w.map(|w| (w, sized.measure_h.unwrap_or(0.0))),
+                grow: sized.grow,
             };
             // Measured (fixtures/layout-autosize-constraint.luau): an automatic parent measures a child its
             // MaxSize cut at the size the child's content asked for (a 30 px capped frame holding 24 px inside
@@ -2306,6 +2389,15 @@ impl<'a> Pass<'a> {
             if let Some((measure_w, measure_h)) = entry.measure {
                 child_record.measure_w = Some(measure_w * child_record.scale);
                 child_record.measure_h = Some(measure_h * child_record.scale);
+            }
+            // (an aspect holder's children grow into the room its constraint leaves, after the measure too)
+            if let Some((grow_w, grow_h)) = entry.grow {
+                if let Some(grow_w) = grow_w {
+                    child_record.available = Some(grow_w * child_record.scale);
+                }
+                if let Some(grow_h) = grow_h {
+                    child_record.available_h = Some(grow_h * child_record.scale);
+                }
             }
             if let Some(rects) = &cell_rects {
                 child_record.cells = rects[index].clone();
