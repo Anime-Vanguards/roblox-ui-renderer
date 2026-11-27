@@ -1296,6 +1296,14 @@
 			"digest": "fb094ee3e0b6e653ea127d7d10edbcb817b50a5ee373af15672c0a3a368ef27c",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-zwj": {
+			"digest": "12eabfb24ba467a3f85687033bf5ff7a851b76353b041d1d9367f6a058fb3e7e",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-zwj@quarter": {
+			"digest": "e3a788fca061154054cca47c5e67471a01b54bfc6c5efc017fd2ae690f6938c8",
+			"status": "ok"
+		},
 		"fast/edit/text-raster": {
 			"digest": "d47ab71205a145c48cfe00531bdbdf6b7efaac1ffd15f015d9137f1fd279f93f",
 			"status": "ok"
@@ -2636,6 +2644,14 @@
 			"digest": "370c986280416dff8b538fd99ccbfc801cca2e95c3605dc24a6d522af94819bf",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-zwj": {
+			"digest": "4307627a4c86cd1a0b4cc702cd18d36189ef2c9edfef56bc74770db79c57b9e0",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-zwj@quarter": {
+			"digest": "b9696dd1890e274a8726196d7a8547836945f95f158095696a31c612f7cf2f50",
+			"status": "ok"
+		},
 		"fixtures/edit/text-raster": {
 			"digest": "458dd29edc559349136fb588d493a7543763dfea5e90f4246fcacf5c3d387dae",
 			"status": "ok"
@@ -3662,6 +3678,10 @@
 		},
 		"fixtures/play/text-probe-wrapspaces": {
 			"digest": "64718a45dfbca5e39fa582c141313e7d6709ed888e443ad401b5b0141ed56a8e",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-zwj": {
+			"digest": "ba429420c5b7da903cc6d9e11e5319f484b5be15676fafb57a24238788127bd4",
 			"status": "ok"
 		},
 		"fixtures/play/text-raster": {

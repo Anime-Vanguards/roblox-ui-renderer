@@ -944,3 +944,40 @@ fn scroll_stats_coalesce_within_frame_and_separate_from_moved() {
     assert_eq!(delta2.moved, 0, "scroll must not count under non-scroll moved: {delta2:?}");
     drop(lua);
 }
+
+/// A joiner (ZWJ, ZWNJ) is one grapheme cluster with the character before it, and the cluster takes a face that has
+/// both: in SourceSans, which has no joiner, "A\u{200D}" measures as Arimo's "A", "A\u{200C}B" as "A\u{200D}B", and the B
+/// after a joiner stays SourceSans' (a Roblox 0.747 client, fixtures/text-probe-zwj.luau). Needs Studio's fonts.
+#[test]
+fn a_joiner_takes_the_character_before_it_into_a_face_that_has_both() {
+    if crate::engine::text::fonts::discover_content_root().is_none() {
+        eprintln!("skipped: needs Studio's fonts (SourceSans without a joiner, Arimo with one)");
+        return;
+    }
+    let script = r#"
+        return function(Target)
+            local TextService = game:GetService("TextService")
+            local function Width(Text, Family)
+                local L = Instance.new("TextLabel")
+                L.FontFace = Font.new("rbxasset://fonts/families/" .. Family .. ".json")
+                L.TextSize = 32
+                L.Size = UDim2.fromOffset(400, 50)
+                L.Text = Text
+                L.Parent = Target
+                return L.TextBounds.X
+            end
+            print(Width("A\u{200D}", "SourceSansPro"), Width("A", "Arimo"))
+            print(Width("A\u{200C}B", "SourceSansPro"), Width("A\u{200D}B", "SourceSansPro"))
+            print(Width("\u{200D}B", "SourceSansPro"), Width("B", "SourceSansPro"))
+            print(Width("A", "SourceSansPro") ~= Width("A", "Arimo"))
+        end
+    "#;
+    let lines = run(script, 1.5, 0.2);
+    let printed: Vec<&str> = lines.iter().filter_map(|line| line.strip_prefix("print: ")).collect();
+    assert_eq!(printed.len(), 4, "{lines:#?}");
+    for pair in &printed[..3] {
+        let values: Vec<&str> = pair.split(' ').collect();
+        assert_eq!(values[0], values[1], "{lines:#?}");
+    }
+    assert_eq!(printed[3], "true", "the two faces' A differ, so the first line is not vacuous: {lines:#?}");
+}

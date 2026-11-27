@@ -443,15 +443,16 @@ pub fn shape_paragraph(fonts: &mut FontRegistry, codepoints: &[Codepoint], face:
     }
     fonts.fallbacks();
     let primary = fonts.face(face).font.clone();
-    // Runs of consecutive code points with the same chosen face: (face, start, end).
-    let mut runs: Vec<(FaceId, usize, usize)> = Vec::new();
+    // The face of each code point, then runs of consecutive code points with the same face: (face, start, end).
+    let mut faces: Vec<FaceId> = Vec::with_capacity(codepoints.len());
     for (index, &(code, _)) in codepoints.iter().enumerate() {
         let mut chosen = face;
         // An emoji sequence stays in one face, so it shapes as one run and its ligature applies (a ZWJ
-        // family is one Twemoji glyph in Studio, fixtures/text-probe-emoji.luau Zwj / ZwjCouple)
-        let previous = index.checked_sub(1).map(|before| (codepoints[before].0, runs.last().unwrap().0));
+        // family is one Twemoji glyph in Studio, fixtures/text-probe-emoji.luau Zwj / ZwjCouple); a code point the
+        // label's face has stays in it after a ZWJ ("A\u{200D}B" draws its B in the label's face)
+        let previous = index.checked_sub(1).map(|before| (codepoints[before].0, faces[before]));
         let joined = previous.filter(|&(before, before_face)| {
-            (continues_emoji(code) || before == 0x200D) && fonts.face(before_face).font.has_glyph(code)
+            (continues_emoji(code) || (before == 0x200D && !primary.has_glyph(code))) && fonts.face(before_face).font.has_glyph(code)
         });
         if let Some((_, before_face)) = joined {
             chosen = before_face;
@@ -476,6 +477,30 @@ pub fn shape_paragraph(fonts: &mut FontRegistry, codepoints: &[Codepoint], face:
                 chosen = found;
             }
         }
+        faces.push(chosen);
+    }
+    // A joiner (ZWJ, ZWNJ) is one grapheme cluster with the character before it, and a cluster takes a face that has
+    // all of it: where the character's face has no joiner, both come from the first fallback that has them. Measured
+    // (sim client 0.747, 1.5x, fixtures/text-probe-zwj.luau, six faces at TextSize 14 / 20 / 32): "A\u{200D}" is 9 / 12
+    // / 19 logical px in every face, Arimo's "A", where SourceSans' own A gives 7 / 9 / 14; "A\u{200C}B" measures as
+    // "A\u{200D}B"; a word joiner (a cluster of its own) stays hidden.
+    for index in 1..codepoints.len() {
+        let (code, before) = (codepoints[index].0, codepoints[index - 1].0);
+        if !matches!(code, 0x200C | 0x200D) || is_space(before) || matches!(before, 0x200C | 0x200D) {
+            continue;
+        }
+        if fonts.face(faces[index - 1]).font.has_glyph(code) {
+            continue;
+        }
+        let mut candidates: Vec<FaceId> = fonts.loaded_fallbacks().to_vec();
+        candidates.extend(fonts.cloud_fallbacks().iter().copied());
+        if let Some(found) = candidates.into_iter().find(|&id| fonts.face(id).font.has_glyph(code) && fonts.face(id).font.has_glyph(before)) {
+            faces[index - 1] = found;
+            faces[index] = found;
+        }
+    }
+    let mut runs: Vec<(FaceId, usize, usize)> = Vec::new();
+    for (index, &chosen) in faces.iter().enumerate() {
         match runs.last_mut() {
             Some(run) if run.0 == chosen => run.2 = index + 1,
             _ => runs.push((chosen, index, index + 1)),
