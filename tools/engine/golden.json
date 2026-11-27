@@ -1433,7 +1433,7 @@
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
-			"digest": "6535d5cd9aed26aa3c05e74a6f15e3e266e15c536b5f51edb33c0b98830a1e57",
+			"digest": "425e9225189d7d74f2d89397e3b9c223c55ea7cfb718be54ef4581a52219a6f4",
 			"status": "live"
 		},
 		"fast/live/interaction-textbox/120hz-click": {
@@ -3985,15 +3985,15 @@
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
-			"digest": "8bcd397a5f519b9be2ec43f025b0ef33ced1817474f5a1b17590907909ca8507",
+			"digest": "423372fa054d1907fdd374bd6ab3c0fc1f16eb677b4c354a8fbc7f68eaacdb1d",
 			"status": "live"
 		},
 		"live/input/144hz-input-probe": {
-			"digest": "56d370a94f0f4cd19e2d24db49702407b107a8e056ba8792c4c952dba7796c80",
+			"digest": "1be95aae99c34975b1a418173bb96b3f112c7d96bb7bb7e18921000732830efd",
 			"status": "live"
 		},
 		"live/input/60hz-input-probe": {
-			"digest": "46200b72392737f8b7de04d10f3fa144680ddaa0c6b81c582f38a798e6f3b842",
+			"digest": "bec8d6a62297a49093a3b55762164cc6351310319d5d9583dfd486ec470df9b9",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-click": {
@@ -4225,7 +4225,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T17:31:19.430Z",
+	"recorded": "2026-11-27T19:42:35.451Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

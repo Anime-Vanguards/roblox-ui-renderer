@@ -82,7 +82,6 @@ const BAND: f64 = 0.55;
 /// A coast past an edge bounces from band(BOUNCE_V |v| - BOUNCE_P p) out
 const BOUNCE_V: f64 = 0.1714;
 const BOUNCE_P: f64 = 0.89;
-
 #[inline]
 fn f32r(value: f64) -> f64 {
     value as f32 as f64
@@ -168,6 +167,9 @@ struct Finger {
     /// The objects it came down on
     pressed: Vec<InstanceId>,
     press: Press,
+    /// It started a UIDragDetector drag: the objects under it get no more InputChanged or InputEnded (measured, P6e;
+    /// MouseEnter / MouseLeave and GuiState still come)
+    detector: bool,
     /// The GuiButtons its touch reached at the touch-down that no other finger held (Activated and MouseButton1Click
     /// go to them at the release)
     takers: Vec<InstanceId>,
@@ -410,20 +412,24 @@ fn process_moves_in(cx: &Cx, frame: u64) -> LuaResult<()> {
 /// InputChanged and TouchMoved.
 fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
     let n = &cx.i.n;
-    let Some((object, from, hover, drag_before, moved_before)) = cx
+    let Some((object, from, hover, drag_before, moved_before, detector)) = cx
         .i
         .touches
         .fingers
         .borrow()
         .iter()
         .find(|f| f.id == id)
-        .map(|f| (f.object, (f.x, f.y), f.hover.clone(), f.drag, f.samples.last().is_some_and(|s| s.0 + 1 == frame)))
+        .map(|f| (f.object, (f.x, f.y), f.hover.clone(), f.drag, f.samples.last().is_some_and(|s| s.0 + 1 == frame), f.detector))
     else {
         return Ok(());
     };
     cx.follow(x, y)?;
     let (position, delta) = position_delta(cx, object, x, y);
     cx.set_input(object, "Change", position, Some(delta));
+    // Measured (a 0.747 client, P6e): a drag (Draggable or UIDragDetector) moves its object before the move's events
+    if cx.i.touches.holder.get() == Some(id) {
+        drag::move_to(cx, x, y)?;
+    }
     let list = cx.hit_list(x, y);
     let point = || event_point(x, y);
 
@@ -493,7 +499,7 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
         let here = walk.group(rank).to_vec();
         let before: Vec<InstanceId> = hovered.iter().filter(|(_, r)| *r == rank).map(|(o, _)| *o).collect();
         for &o in &here {
-            if before.contains(&o) && !walk.is_sunk(o) && !inside_dragged(o) {
+            if before.contains(&o) && !walk.is_sunk(o) && !inside_dragged(o) && !detector {
                 cx.fire(o, n.InputChanged, vec![Value::Instance(object)]);
             }
         }
@@ -503,7 +509,9 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
                 cx.i.touch(o);
                 if cx.alive(o) {
                     cx.fire(o, n.MouseLeave, point());
-                    cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
+                    if !detector {
+                        cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
+                    }
                 }
                 cx.flush_states();
             }
@@ -559,7 +567,6 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
     cx.flush_states();
     if cx.i.touches.holder.get() == Some(id) {
         scrolling::drag(cx, x, y)?;
-        drag::move_to(cx, x, y)?;
     }
     if let Some(frame_id) = scroll_to {
         drag_frame(cx, id, frame_id, from, (x, y))?;
@@ -629,6 +636,7 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
     }
     let mut press = Press { button, sink, clickable: true, receivers: receivers.clone(), dragged: false };
     let mut grabbed = false;
+    let mut detector = false;
     if cx.i.touches.holder.get().is_none() {
         let bar = scrolling::press(cx, &receivers, x, y);
         grabbed = bar;
@@ -636,6 +644,7 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
             cx.i.touches.holder.set(Some(id));
         } else if drag::press(cx, &receivers, x, y, cx.engine.options.edit_mode()) {
             cx.i.touches.holder.set(Some(id));
+            detector = cx.i.drag.borrow().as_ref().is_some_and(|active| active.detector.is_some());
             let detected = cx.i.drag.borrow().as_ref().is_some_and(|active| active.detector.is_some() && Some(active.target) == button);
             if detected {
                 press.clickable = false;
@@ -666,6 +675,7 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
         hover: walk.objects(),
         pressed: receivers,
         press,
+        detector,
         takers,
         drag: scroller.map(|frame| Drag::new(frame, Some((x, y)), (x, y))),
         samples: vec![(frame, x, y)],
@@ -722,13 +732,10 @@ pub(crate) fn up(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
         None if !blocks_legacy(cx, &list) => cx.fire_legacy("Button1Up", Vec::new())?,
         None => {}
     }
-    let first_sink = receivers.iter().copied().find(|&o| cx.is(o, cx.i.c.GuiButton) || cx.is(o, cx.i.c.TextBox));
-    if let Some(text_box) = first_sink.filter(|&sink| cx.is(sink, cx.i.c.TextBox)) {
-        if finger.press.sink == Some(text_box) && !dragging {
-            textbox::press(cx, text_box, x, y, object)?;
-            textbox::release(cx);
-        }
-    }
+    // The TextBox it lifts on that its touch reached at the touch-down takes focus, also below a button that took the
+    // touch (measured, P6e: an inactive TextButton over it gets MouseButton1Up and Click, then it is Focused), after the
+    // clicks of its ScreenGui and before the leaves
+    let mut text_box = receivers.iter().copied().find(|&o| cx.is(o, cx.i.c.TextBox)).filter(|o| finger.pressed.contains(o) && !dragging);
     // Measured: the release is processed over an Active object or a detector, or when the finger dragged a
     // ScrollingFrame (a tap on one is not; nor one on an inactive button)
     let processed = cx.any_active(&list) || detector_under(cx, &list) || dragging;
@@ -738,7 +745,7 @@ pub(crate) fn up(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
         cx.i.touch(o);
         if cx.alive(o) {
             cx.fire(o, n.MouseLeave, event_point(x, y));
-            if ended {
+            if ended && !finger.detector {
                 cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
             }
         }
@@ -765,11 +772,16 @@ pub(crate) fn up(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
                     }
                 }
             }
+            if let Some(focus) = text_box.filter(|o| here.contains(o)) {
+                text_box = None;
+                textbox::press(cx, focus, x, y, object)?;
+                textbox::release(cx);
+            }
             for &o in &here {
                 let sunk = walk.is_sunk(o);
                 if before.contains(&o) {
                     leave(o, !sunk);
-                } else if !sunk {
+                } else if !sunk && !finger.detector {
                     cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
                 }
             }

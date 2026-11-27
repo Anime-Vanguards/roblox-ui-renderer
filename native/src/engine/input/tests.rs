@@ -4975,9 +4975,12 @@ local function log(...)
 		table.insert(parts, type(v) == "string" and v or fmt(v))
 	end
 	local line = table.concat(parts, " ")
-	if not (DROP and string.find(line, DROP, 1, true)) then
-		table.insert(Log, line)
+	for _, d in DROP do
+		if string.find(line, d, 1, true) then
+			return
+		end
 	end
+	table.insert(Log, line)
 end
 local function frames(n)
 	for _ = 1, n or 1 do
@@ -4999,17 +5002,23 @@ end
 function VIM:SendMouseButtonEvent(x, y, button, down)
 	Dispatch({ type = if down then "down" else "up", x = x, y = y, button = button + 1 })
 end
+-- (the kit's prelude waits until UserInputService has seen an injected event, which a client takes a frame to deliver,
+-- then two frames: three frames a step, which Activated's click count can tell apart from two)
 local function touchAt(id, state, x, y)
 	VIM:SendTouchEvent(id, state, x, y)
-	frames(2)
+	frames(3)
 end
 local function mouseTo(x, y)
 	VIM:SendMouseMoveEvent(x, y, game)
-	frames(2)
+	frames(3)
 end
 local function mouseButton(down, x, y)
 	VIM:SendMouseButtonEvent(x, y, 0, down, game, 0)
-	frames(2)
+	frames(3)
+end
+local function waitInput(signal, kind, send)
+	send()
+	frames(3)
 end
 "##;
 
@@ -5020,7 +5029,13 @@ fn stacked_case(name: &str) -> Result<(), String> {
     let case = &data[name];
     let device = (case["device"] == "touch").then_some(roblox_engine_emulator::client_profile::DeviceKind::Touch);
     let (lua, engine) = start_with(800.0, 600.0, "play", device);
-    let drop = case["drop"].as_str().map_or("nil".to_string(), |d| format!("{d:?}"));
+    // `drop`: one substring (P6d) or several (P6e)
+    let drops: Vec<String> = match &case["drop"] {
+        Json::String(d) => vec![d.clone()],
+        Json::Array(list) => list.iter().filter_map(|d| d.as_str().map(str::to_string)).collect(),
+        _ => Vec::new(),
+    };
+    let drop = format!("{{ {} }}", drops.iter().map(|d| format!("{d:?}")).collect::<Vec<_>>().join(", "));
     let source = format!("local DROP = {drop}\n{STACKED_PRELUDE}\nResult = (function()\n{}\nend)()\n", case["body"].as_str().expect("body"));
     let script = {
         let mut state = engine.state.borrow_mut();
@@ -5034,14 +5049,21 @@ fn stacked_case(name: &str) -> Result<(), String> {
     if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
         panic!("{name}: script failed: {message}");
     }
-    // (Activated's click count is left out: the kit logs it as n (above 0) or 0, and a 0.747 client counted the first
-    // activation of a new button above 0; the count is not part of what these cases measure)
-    let count = |line: String| match line.contains(".Activated ") && (line.ends_with(" n") || line.ends_with(" 0")) {
-        true => line[..line.len() - 2].to_string(),
-        false => line,
+    // `timing`: the click cases log the seconds since the last Activated, which follow the client's real time: cut them
+    // (the client's lines were cut the same way)
+    let timing = case["timing"] == true;
+    let cut = |line: String| {
+        if !timing {
+            return line;
+        }
+        if let Some(at) = line.find(" +").filter(|&at| line[at..].contains(" s")) {
+            return line[..at].to_string();
+        }
+        line.strip_suffix(" first").map_or(line.clone(), str::to_string)
     };
-    let got: Vec<String> = env.raw_get::<LuaTable>("Result").expect("Result").sequence_values::<String>().map(|l| count(l.unwrap())).collect();
-    let client: Vec<String> = case["client"].as_array().unwrap().iter().map(|l| count(l.as_str().unwrap().to_string())).collect();
+    let got: Vec<String> = env.raw_get::<LuaTable>("Result").expect("Result").sequence_values::<String>().map(|l| cut(l.unwrap())).collect();
+    let client: Vec<String> = case["client"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
+    let client: Vec<String> = client.into_iter().filter(|l| !drops.iter().any(|d| l.contains(d.as_str()))).collect();
     if let Ok(dir) = std::env::var("STACKED_INPUT_DUMP") {
         let _ = std::fs::write(std::path::Path::new(&dir).join(format!("{name}.txt")), got.join("\n"));
     }
@@ -5094,4 +5116,21 @@ fn fractional_touch_points_match_a_client() {
 #[test]
 fn stacked_mouse_input_matches_a_client() {
     stacked_cases(&["mstack_same", "mstack_lower", "mstack_nested", "mstack2", "mscroll"]);
+}
+
+/// More stacks (P6e, IN14b), a finger and the mouse: a SurfaceGui and a BillboardGui in PlayerGui without an Adornee get
+/// nothing; a Draggable frame or a UIDragDetector below an Active object (a finger: hover only, no drag; the mouse: the
+/// drag), the drag's move before the move's events, a UIDragDetector drag keeping the movement from the objects under
+/// it; a TextBox below an Active object or an inactive button; the mouse's second and third buttons over stacks and the
+/// legacy Mouse's buttons (only for what the GUI did not process).
+#[test]
+fn more_stacks_match_a_client() {
+    stacked_cases(&["stack5_touch", "stack5_mouse", "mbuttons", "mlegacy"]);
+}
+
+/// Activated's click count (P6e, IN15), a finger and the mouse: per button, one more than the button's last activation
+/// when it was less than 0.5 s before, else 0, and a button's making counts as an activation with 0.
+#[test]
+fn activated_click_counts_match_a_client() {
+    stacked_cases(&["clicks_touch", "clicks_mouse", "clicks2_touch", "clicks2_mouse"]);
 }

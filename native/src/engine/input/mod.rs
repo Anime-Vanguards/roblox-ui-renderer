@@ -165,8 +165,42 @@ struct Press {
 }
 
 /// Activated's clickCount (measured, clicks2.mjs): consecutive activations of a button less than
-/// 0.5 s apart count up 0, 1, 2, ... without a limit, whatever the distance between the clicks.
+/// 0.5 s apart count up 0, 1, 2, ... without a limit, whatever the distance between the clicks. A 0.747 client (P6e,
+/// mouse and touch) counts a button's making (Instance.new or Clone, not parenting) as an activation with 0, so its
+/// first activation less than 0.5 s after it was made reads 1.
 const CLICK_TIMEOUT: f64 = 0.5;
+
+/// How long `Made` keeps its marks (seconds): longer than CLICK_TIMEOUT
+const MADE_KEPT: f64 = 1.0;
+
+/// When instances were made, for Activated's count: (instances made so far, the time) at each frame where that number
+/// moved, for the last MADE_KEPT seconds (the engine keeps no creation times)
+#[derive(Default)]
+struct Made {
+    marks: std::collections::VecDeque<(u32, f64)>,
+    /// Instances up to this serial were made more than MADE_KEPT seconds ago
+    old: u32,
+}
+
+impl Made {
+    fn note(&mut self, created: u32, now: f64) {
+        if self.marks.back().is_none_or(|&(count, _)| count != created) {
+            self.marks.push_back((created, now));
+        }
+        while self.marks.front().is_some_and(|&(_, time)| time < now - MADE_KEPT) {
+            self.old = self.marks.pop_front().map_or(self.old, |(count, _)| count);
+        }
+    }
+
+    /// When the instance of `serial` was made (the first frame that counted it; now if none has yet), None when it was
+    /// more than MADE_KEPT seconds ago
+    fn time(&self, serial: u32, now: f64) -> Option<f64> {
+        if serial <= self.old {
+            return None;
+        }
+        Some(self.marks.iter().find(|&&(count, _)| count >= serial).map_or(now, |&(_, time)| time))
+    }
+}
 
 const BUTTON_TYPES: [&str; 3] = ["MouseButton1", "MouseButton2", "MouseButton3"];
 
@@ -199,7 +233,12 @@ pub struct Input {
     pub(crate) touches: touch::Touch,
     /// Presses by button number (ascending, like the Luau array)
     presses: RefCell<Vec<(f64, Press)>>,
-    last_activation: RefCell<FxHashMap<InstanceId, (f64, f64)>>,
+    /// Objects the mouse hovered when a UIDragDetector drag began: no movement InputChanged while it drags, and no
+    /// InputEnded when the cursor leaves them, then or later (measured, P6e: MouseLeave and GuiState still come)
+    dropped: RefCell<FxHashSet<InstanceId>>,
+    /// Per button: (its serial, the time of its last activation, that activation's count)
+    last_activation: RefCell<FxHashMap<InstanceId, (u32, f64, f64)>>,
+    made: RefCell<Made>,
     objects: RefCell<FxHashMap<String, InstanceId>>,
     /// The input objects' userdata, held like the Luau runtime's InputObjects table holds their
     /// proxies (identity in scripts' weak-keyed tables survives between events)
@@ -447,6 +486,8 @@ impl Input {
             touches: touch::Touch::default(),
             presses: RefCell::default(),
             last_activation: RefCell::default(),
+            dropped: RefCell::default(),
+            made: RefCell::default(),
             objects: RefCell::default(),
             object_values: RefCell::default(),
             keys_down: RefCell::default(),
@@ -830,6 +871,11 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     cx.i.mouse.set(mouse);
     cx.update_legacy_mouse()?;
     cx.set_input(movement, if first { "Begin" } else { "Change" }, vector3(x, y - cx.inset(), 0.0), Some(vector3(dx, dy, 0.0)));
+    // Measured (a 0.747 client, P6e): a drag (Draggable or UIDragDetector) moves its object before the move's events
+    let primary = cx.i.presses.borrow().iter().any(|(key, _)| *key == 1.0);
+    if primary {
+        drag::move_to(cx, x, y)?;
+    }
 
     let list = cx.hit_list(x, y);
     let now: FxHashSet<InstanceId> = list.iter().copied().collect();
@@ -867,6 +913,7 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
         // Measured (P6d): while a press that began on a TextBox is held and the cursor is on that TextBox, it gets MouseMoved
         // twice and the objects below it in its ScreenGui get neither MouseMoved nor InputChanged
         let selecting = cx.i.presses.borrow().iter().find(|(key, _)| *key == 1.0).and_then(|(_, press)| press.sink).filter(|&sink| cx.is(sink, cx.i.c.TextBox));
+        let detector_drag = cx.i.drag.borrow().as_ref().is_some_and(|active| active.detector.is_some());
         for rank in walk::visit_order(&reach, &hovered) {
             let here = reach.group(rank).to_vec();
             let before: Vec<InstanceId> = hovered.iter().filter(|(_, r)| *r == rank).map(|(o, _)| *o).collect();
@@ -883,7 +930,9 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
                 }
                 for (index, &id) in here.iter().enumerate() {
                     if before.contains(&id) {
-                        if !below(index) {
+                        // (while the detector drags; after it, the objects it took the movement from get InputChanged again
+                        // but no InputEnded when the cursor leaves them, measured P6e)
+                        if !below(index) && !(detector_drag && cx.i.dropped.borrow().contains(&id)) {
                             cx.fire(id, n.InputChanged, vec![Value::Instance(movement)]);
                         }
                         if cx.i.stale.borrow_mut().remove(&id) {
@@ -897,9 +946,12 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
                         cx.i.stale.borrow_mut().remove(&id);
                         cx.i.released_idle.borrow_mut().remove(&id);
                         cx.i.touch(id);
+                        let dropped = cx.i.dropped.borrow_mut().remove(&id);
                         if cx.alive(id) {
                             cx.fire(id, n.MouseLeave, position());
-                            cx.fire(id, n.InputEnded, vec![Value::Instance(movement)]);
+                            if !dropped {
+                                cx.fire(id, n.InputEnded, vec![Value::Instance(movement)]);
+                            }
                         }
                         cx.flush_one(id);
                     }
@@ -934,11 +986,9 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     }
     cx.flush_states();
 
-    let primary = cx.i.presses.borrow().iter().any(|(key, _)| *key == 1.0);
     if primary {
         textbox::drag(cx, x, y)?;
         scrolling::drag(cx, x, y)?;
-        drag::move_to(cx, x, y)?;
     }
 
     let active = cx.any_active(&list);
@@ -1070,17 +1120,20 @@ fn detector_under(cx: &Cx, list: &[InstanceId]) -> bool {
 
 /// A mouse button's press or release, ScreenGui by ScreenGui from the top (measured in a 0.747 client, P6d): in each the
 /// objects under the cursor down to its first GuiButton / TextBox (the sink) get the press (an Active Frame above a
-/// button keeps nothing from it); a ScreenGui with a sink or an Active object under the cursor is the last. The
-/// receivers, the sink and what it reaches.
-fn press_reach(cx: &Cx, ranks: &walk::Ranks, list: &[InstanceId]) -> (Vec<InstanceId>, Option<InstanceId>, walk::Walk) {
+/// button keeps nothing from it); a ScreenGui with a sink or an Active object under the cursor is the last. The middle
+/// button (3) has no sink: every object under the cursor in that last ScreenGui gets it (measured, P6e). The receivers,
+/// the sink and what it reaches.
+fn press_reach(cx: &Cx, ranks: &walk::Ranks, list: &[InstanceId], button: f64) -> (Vec<InstanceId>, Option<InstanceId>, walk::Walk) {
     let mut reach = walk::Walk { floor: None, groups: Vec::new(), sunk: FxHashSet::default() };
     let mut receivers = Vec::new();
     let mut sink = None;
     for (rank, objects) in walk::groups(cx, ranks, list) {
         let found = objects.iter().position(|&o| cx.is(o, cx.i.c.GuiButton) || cx.is(o, cx.i.c.TextBox));
-        receivers.extend_from_slice(&objects[..found.map_or(objects.len(), |i| i + 1)]);
-        let stops = found.is_some() || objects.iter().any(|&o| cx.is_true(o, cx.i.n.Active));
-        if let Some(index) = found {
+        let takes = found.filter(|_| button <= 2.0);
+        receivers.extend_from_slice(&objects[..takes.map_or(objects.len(), |i| i + 1)]);
+        // (the middle button passes an inactive button: only an Active object stops it, measured P6e)
+        let stops = takes.is_some() || objects.iter().any(|&o| cx.is_true(o, cx.i.n.Active));
+        if let Some(index) = takes {
             sink = Some(objects[index]);
         }
         reach.groups.push((rank, objects));
@@ -1121,7 +1174,7 @@ fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
 
     let list = cx.hit_list(x, y);
     let ranks = walk::Ranks::new(cx);
-    let (receivers, sink, reach) = press_reach(cx, &ranks, &list);
+    let (receivers, sink, reach) = press_reach(cx, &ranks, &list, button);
     let processed = cx.any_active(&list) || sink.is_some() || detector_under(cx, &list);
     for &id in &receivers {
         cx.i.released_idle.borrow_mut().remove(&id);
@@ -1152,6 +1205,11 @@ fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
 
     // Scroll bar thumbs and dragging (Draggable fires DragBegin before InputBegan, measured)
     if button == 1.0 && !scrolling::press(cx, &list, x, y) && drag::press(cx, &receivers, x, y, cx.engine.options.edit_mode()) {
+        // Measured (P6e): a UIDragDetector drag takes the movement from the objects under the cursor
+        if cx.i.drag.borrow().as_ref().is_some_and(|active| active.detector.is_some()) {
+            let hovered = cx.i.hovered.borrow().clone();
+            cx.i.dropped.borrow_mut().extend(hovered);
+        }
         // Measured: a UIDragDetector on the button that took the press keeps it from being clicked
         let detected = cx.i.drag.borrow().as_ref().is_some_and(|active| active.detector.is_some() && Some(active.target) == sink);
         if detected {
@@ -1176,33 +1234,51 @@ fn button_down(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
     cx.flush_states();
 
     cx.set_last_input_type(type_name);
+    // Measured (a 0.747 client, P6e): the legacy Mouse gets Button1Down / Button2Down only for a press the GUI did not
+    // process, before UserInputService's InputBegan
+    if !processed {
+        legacy_button(cx, button, true)?;
+    }
     cx.fire_uis(n.InputBegan, vec![Value::Instance(object), Value::Bool(processed)]);
     // Measured: a press the GUI processed (a GuiButton or TextBox takes it, an Active object is under it) never
     // reaches an InputAction
     if !processed {
         deliver_to_actions(cx, button_key(cx, button), true);
     }
-    if button == 1.0 {
-        cx.fire_legacy("Button1Down", Vec::new())?;
-    } else if button == 2.0 {
-        cx.fire_legacy("Button2Down", Vec::new())?;
-    }
     Ok(())
+}
+
+/// The legacy Mouse's Button1Down / Up and Button2Down / Up (the middle button has none)
+fn legacy_button(cx: &Cx, button: f64, down: bool) -> LuaResult<()> {
+    match (button as u8, down) {
+        (1, true) => cx.fire_legacy("Button1Down", Vec::new()),
+        (1, false) => cx.fire_legacy("Button1Up", Vec::new()),
+        (2, true) => cx.fire_legacy("Button2Down", Vec::new()),
+        (2, false) => cx.fire_legacy("Button2Up", Vec::new()),
+        _ => Ok(()),
+    }
 }
 
 fn activation_count(cx: &Cx, button: InstanceId) -> f64 {
     let now = cx.now();
+    let serial = cx.engine.state.borrow().dom.get(button).map_or(0, |instance| instance.serial);
     let mut table = cx.i.last_activation.borrow_mut();
-    let count = match table.get(&button) {
-        Some(&(time, count)) if now - time < CLICK_TIMEOUT => count + 1.0,
+    let last = match table.get(&button) {
+        Some(&(seen, time, count)) if seen == serial => Some((time, count)),
+        // never activated: its making counts as an activation with 0 (measured, P6e)
+        _ => cx.i.made.borrow().time(serial, now).map(|time| (time, 0.0)),
+    };
+    let count = match last {
+        Some((time, count)) if now - time < CLICK_TIMEOUT => count + 1.0,
         _ => 0.0,
     };
-    table.insert(button, (now, count));
+    table.insert(button, (serial, now, count));
     count
 }
 
 /// A release's button events on its sink: MouseButton1Click (the press on this button), MouseButton1Up, Activated (the
-/// press taken by this button, not dragged); MB2: Click, SecondaryActivated, Up. MouseButton*Up fires on the button
+/// press taken by this button, not dragged); MB2: Click, SecondaryActivated (an inactive button's too, measured P6e), Up.
+/// MouseButton*Up fires on the button
 /// under the cursor wherever the press began. A 0.747 client (P6d) activates only the button that took the press (a
 /// press on empty space or on a Frame released over a button gives it MouseButton1Up and InputEnded only, where Studio
 /// activated it), and it clicks a button the cursor left and came back to during the press (Studio did not).
@@ -1212,7 +1288,7 @@ fn release_sink(cx: &Cx, button: f64, sink: InstanceId, current: Option<&Press>,
         return;
     }
     let clicked = current.is_some_and(|c| c.button == Some(sink) && c.clickable);
-    let activates = !cx.is_false(sink, n.Active) && current.is_some_and(|c| c.sink == Some(sink) && !c.dragged);
+    let activates = (button == 2.0 || !cx.is_false(sink, n.Active)) && current.is_some_and(|c| c.sink == Some(sink) && !c.dragged);
     cx.i.touch(sink);
     if button == 1.0 {
         if clicked {
@@ -1261,7 +1337,7 @@ fn button_up(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
     // The release reaches the ScreenGuis down to the first with a GuiButton / TextBox or an Active object under the
     // cursor, as the press does (press_reach). Its sink: the first GuiButton / TextBox there, but a TextBox above the
     // button the press took lets that button have the release (measured, P6d)
-    let (_, _, reach) = press_reach(cx, &ranks, &list);
+    let (_, _, reach) = press_reach(cx, &ranks, &list, button);
     let reached = reach.objects();
     let pressed = current.as_ref().and_then(|c| c.button).filter(|b| reached.contains(b));
     let sink = reached
@@ -1311,7 +1387,12 @@ fn button_up(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
 
     // Measured: gameProcessedEvent of the release follows what is under the release point
     cx.set_last_input_type(type_name);
-    let processed = cx.any_active(&list) || sink.is_some() || detector_under(cx, &list);
+    // (a button or TextBox does not process the middle button, measured P6e)
+    let processed = cx.any_active(&list) || (button <= 2.0 && sink.is_some()) || detector_under(cx, &list);
+    // (the legacy Mouse's Button*Up as its Down: a release the GUI did not process, before UserInputService's, P6e)
+    if !processed {
+        legacy_button(cx, button, false)?;
+    }
     cx.fire_uis(n.InputEnded, vec![Value::Instance(object), Value::Bool(processed)]);
     for id in unreached {
         cx.i.released_idle.borrow_mut().insert(id);
@@ -1325,11 +1406,6 @@ fn button_up(cx: &Cx, button: f64, x: f64, y: f64) -> LuaResult<()> {
     }
     cx.flush_states();
     deliver_to_actions(cx, button_key(cx, button), false);
-    if button == 1.0 {
-        cx.fire_legacy("Button1Up", Vec::new())?;
-    } else if button == 2.0 {
-        cx.fire_legacy("Button2Up", Vec::new())?;
-    }
     Ok(())
 }
 
@@ -1715,6 +1791,7 @@ impl Input {
     fn step(self: &Rc<Self>, lua: &Lua, engine: &Rc<Engine>, delta: f64) -> LuaResult<()> {
         let cx = Cx { lua, engine, i: self };
         let now = engine.state.borrow().sched.now;
+        self.made.borrow_mut().note(engine.state.borrow().dom.created(), now);
         self.touches.begin_frame(now, delta);
         // A selected object that left the tree, or can no longer be selected, stops being selected
         if let (Some(selected), Some(gui_service)) = (self.selected.get(), cx.service("GuiService")) {
@@ -1907,6 +1984,9 @@ pub fn install(engine: &Rc<Engine>) {
     let reflection = engine.reflection.clone();
     let input = Rc::new(Input::new(&reflection));
     *engine.input().borrow_mut() = Some(input.clone());
+    if let Ok(state) = engine.state.try_borrow() {
+        input.made.borrow_mut().note(state.dom.created(), state.sched.now);
+    }
     install_hooks(engine, &input);
     install_behaviors(engine, &input);
     let weak = Rc::downgrade(&input);
@@ -1958,6 +2038,8 @@ fn install_hooks(engine: &Rc<Engine>, input: &Rc<Input>) {
         if let Some(input) = weak.upgrade() {
             input.scroll.forget(id);
             input.touches.forget(id);
+            input.last_activation.borrow_mut().remove(&id);
+            input.dropped.borrow_mut().remove(&id);
         }
     }));
 }
