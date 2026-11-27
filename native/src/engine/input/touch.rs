@@ -12,10 +12,12 @@
 //!     on.
 //!   - The legacy Mouse and GetMouseLocation follow the latest finger event; Mouse.Button1Down / Button1Up fire for
 //!     every finger that does not land on a button.
-//!   - Dragging: the topmost ScrollingFrame under a finger that comes down is that finger's while no other finger
-//!     holds it. It starts to scroll once the finger is more than 11 px from where it came down (that move scrolls
-//!     nothing and is the last InputChanged the frame gets from it), then follows the finger 1:1. Past an edge the
-//!     overscroll is min(previous + step, band(max(u, S))), band(x) = (1 - 1 / (0.55 x / d + 1)) d (d the window
+//!   - Dragging: of the topmost ScrollingFrame under a finger that comes down and its ScrollingFrame ancestors, the
+//!     outermost that can scroll is that finger's while no other finger holds it (touch_frame). It starts to scroll
+//!     once the finger is more than 11.5 px from where it came down and the travel's longer axis is one the frame can
+//!     scroll (else never; start_axis decides at once or waits), that move scrolling nothing and being the last
+//!     InputChanged the frame gets from it, then follows the finger 1:1. Past an edge the overscroll is
+//!     min(previous + step, band(max(u, S))), band(x) = (1 - 1 / (0.55 x / d + 1)) d (d the window
 //!     along the axis, u the finger's travel since the canvas was last inside, S its distance from where it came
 //!     down when the drag started).
 //!   - Releasing: past an edge the canvas springs back (a critically damped spring, omega = 6 pi, as the wheel's
@@ -25,7 +27,9 @@
 //!     edge), and the canvas shows whichever of the two is nearer the edge.
 //!   - A finger coming down on the ScrollingFrame stops its coasting (after that frame's step), a touch elsewhere
 //!     does not, and a script write of CanvasPosition does not either. When the finger dragging a frame lifts,
-//!     another finger on it takes the frame over from its next move.
+//!     another finger on it takes the frame over at a move that follows a move of its own in the frame before; its
+//!     release velocity counts from where it was before that move.
+//!   - ScrollingEnabled false ends a coast, holds a spring back and stops a drag from following (Drag::paused / held).
 //! Gestures (TouchTap, TouchPinch, TouchRotate, TouchPan, TouchSwipe, TouchLongPress) never fired from injected
 //! touches, with one finger or two, so none is emulated.
 
@@ -49,8 +53,16 @@ use crate::engine::{GuiEngine, InstanceId, NameId, dom::flags, instance as core,
 pub const MAX_FINGER: u32 = 9;
 
 /// Measured: a drag starts once the finger is more than this far from where it came down (11 px does not start it, 12
-/// does, in 1 to 12 px steps)
-const SLOP: f64 = 11.0;
+/// does, in 1 to 12 px steps; P6c: 11.40 px (3, 11) and (7, 9) do not, 11.70 px (4, 11) does)
+const SLOP: f64 = 11.5;
+/// Past the slop (P6c, measured on Y, X and XY frames in 24 directions): the travel's longer axis decides at once when
+/// it is at least DECIDED times the shorter one ((7, 12), (4, 11), (11, 4) do; (6, 10), (7, 10), (8, 9) wait: the ratio
+/// lies in (1.667, 1.714]); an exact diagonal decides at once too; a drag that waits starts at a move that leaves the
+/// longer axis more than WAIT px from where the finger came down and itself goes more than WAIT_STEP px along it
+/// (whatever the ratio by then: (7, -10) then (7, -15), (7, -20) wait, (7, -25) starts; (8, -21) reached by 2 px waits)
+const DECIDED: f64 = 1.7;
+const WAIT: f64 = 20.0;
+const WAIT_STEP: f64 = 2.0;
 /// The release velocity: GAIN x the mean of the finger's last SAMPLES per-frame velocities
 const GAIN: f64 = 1.305;
 const SAMPLES: usize = 5;
@@ -98,10 +110,40 @@ struct Drag {
     /// Where the finger came down (None: it took the frame over and starts counting at its next move)
     origin: Option<(f64, f64)>,
     dragging: bool,
+    /// Past the slop at an angle that does not decide the axis yet (DECIDED, WAIT)
+    waiting: bool,
+    /// ScrollingEnabled false during the drag (measured, P6c): once the drag has scrolled, moves while the frame is
+    /// disabled are lost and the first move after does not scroll (`paused`); a drag that started but has not scrolled
+    /// yet catches up the finger's whole travel from where it started at the first move after (`held`); before the drag
+    /// starts, the slop counts again from the first move after (`reanchor`)
+    paused: bool,
+    held: bool,
+    reanchor: bool,
+    scrolled: bool,
+    /// Where the finger was when the drag started
+    started_at: (f64, f64),
     /// Its distance from `origin` when the drag started
     start: f64,
     /// Per axis, where the finger was the last time the canvas was inside the range
     inside: (f64, f64),
+}
+
+impl Drag {
+    fn new(frame: InstanceId, origin: Option<(f64, f64)>, at: (f64, f64)) -> Self {
+        Drag {
+            frame,
+            origin,
+            dragging: false,
+            waiting: false,
+            paused: false,
+            held: false,
+            reanchor: false,
+            scrolled: false,
+            started_at: at,
+            start: 0.0,
+            inside: at,
+        }
+    }
 }
 
 /// A finger that is down
@@ -367,14 +409,14 @@ fn process_moves_in(cx: &Cx, frame: u64) -> LuaResult<()> {
 /// it left, MouseEnter + InputBegan on those it entered, then the drag and UIS InputChanged and TouchMoved.
 fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
     let n = &cx.i.n;
-    let Some((object, from, hover, drag_before, button)) = cx
+    let Some((object, from, hover, drag_before, button, moved_before)) = cx
         .i
         .touches
         .fingers
         .borrow()
         .iter()
         .find(|f| f.id == id)
-        .map(|f| (f.object, (f.x, f.y), f.hover.clone(), f.drag, f.press.button))
+        .map(|f| (f.object, (f.x, f.y), f.hover.clone(), f.drag, f.press.button, f.samples.last().is_some_and(|s| s.0 + 1 == frame)))
     else {
         return Ok(());
     };
@@ -389,22 +431,46 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
     // reaches the frame as InputChanged); a dragging finger's moves scroll the frame
     let mut drag = drag_before;
     let mut scroll_to = None;
+    let mut took_over = false;
+    let mut refused = false;
     if let Some(d) = drag.as_mut() {
         match d.origin {
-            None => {
+            // Measured (P6c): a finger takes the frame over at a move that follows a move of its own in the frame
+            // before (a finger that rested since it came down takes it at its second move)
+            None if moved_before => {
                 d.origin = Some((x, y));
                 stop_motion(cx, d.frame, frame);
+                took_over = true;
+            }
+            None => {}
+            Some(_) if !d.dragging && cx.is_false(d.frame, cx.i.n.ScrollingEnabled) => d.reanchor = true,
+            Some(_) if !d.dragging && d.reanchor => {
+                d.origin = Some((x, y));
+                d.reanchor = false;
             }
             Some(origin) if !d.dragging => {
-                let distance = (x - origin.0).hypot(y - origin.1);
-                if distance > SLOP {
-                    d.dragging = true;
-                    d.start = distance;
-                    d.inside = inside_point(cx, d.frame, (x, y));
+                let (tx, ty) = (x - origin.0, y - origin.1);
+                let distance = tx.hypot(ty);
+                if d.waiting || distance > SLOP {
+                    match start_axis(cx, d.frame, tx, ty, (x - from.0, y - from.1), d.waiting) {
+                        Some(true) => {
+                            d.dragging = true;
+                            d.waiting = false;
+                            d.start = distance;
+                            d.started_at = (x, y);
+                            d.inside = inside_point(cx, d.frame, (x, y));
+                        }
+                        Some(false) => d.waiting = true,
+                        None => refused = true,
+                    }
                 }
             }
             Some(_) => scroll_to = Some(d.frame),
         }
+    }
+    if refused {
+        // (the finger lets the frame go: this touch never scrolls it)
+        drag = None;
     }
     let dragged_frame = drag_before.filter(|d| d.dragging).map(|d| d.frame);
     let inside_dragged = |o: InstanceId| {
@@ -455,9 +521,17 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
             if drag.is_some_and(|d| d.dragging) {
                 finger.press.dragged = true;
             }
-            match finger.samples.last_mut() {
-                Some(last) if last.0 == frame => *last = (frame, x, y),
-                _ => finger.samples.push((frame, x, y)),
+            if took_over {
+                // Measured (P6c, IN12b): the release velocity of a finger that took the frame over counts from where
+                // the finger was before that move, at that move's time (its first interval holds two moves: 6 moves
+                // of 10 px from the takeover read 1.2 x a lone drag's velocity, 4 moves 1.33 x, 20 moves 1 x)
+                finger.samples.clear();
+                finger.samples.push((frame, from.0, from.1));
+            } else {
+                match finger.samples.last_mut() {
+                    Some(last) if last.0 == frame => *last = (frame, x, y),
+                    _ => finger.samples.push((frame, x, y)),
+                }
             }
             if finger.samples.len() > 16 {
                 finger.samples.remove(0);
@@ -534,11 +608,7 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
             }
         }
     }
-    let scroller = if grabbed {
-        None
-    } else {
-        list.iter().copied().find(|&o| cx.is_scroller(o) && cx.frame_holder(o).is_none())
-    };
+    let scroller = if grabbed { None } else { touch_frame(cx, &list) };
     for &o in &list {
         cx.i.touches.shown.borrow_mut().insert(o);
         cx.i.touch(o);
@@ -556,7 +626,7 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
         pressed: list.clone(),
         press,
         takes,
-        drag: scroller.map(|frame| Drag { frame, origin: Some((x, y)), dragging: false, start: 0.0, inside: (x, y) }),
+        drag: scroller.map(|frame| Drag::new(frame, Some((x, y)), (x, y))),
         samples: vec![(frame, x, y)],
     });
     cx.refresh_touch_hover();
@@ -650,7 +720,7 @@ pub(crate) fn up(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
         // Another finger on the frame takes it over (it starts counting at its next move)
         let mut fingers = cx.i.touches.fingers.borrow_mut();
         if let Some(next) = fingers.iter_mut().find(|f| f.drag.is_none() && f.hover.contains(&drag.frame)) {
-            next.drag = Some(Drag { frame: drag.frame, origin: None, dragging: false, start: 0.0, inside: (next.x, next.y) });
+            next.drag = Some(Drag::new(drag.frame, None, (next.x, next.y)));
         }
     }
     drop(finger.value);
@@ -674,6 +744,51 @@ fn geometry(cx: &Cx, frame: InstanceId) -> Geometry {
     let direction = cx.enum_name(frame, cx.i.n.ScrollingDirection);
     let elastic = cx.enum_name(frame, cx.i.n.ElasticBehavior) != "Never";
     Geometry { max, window, allow: (direction != "Y" && max.0 > 0.0, direction != "X" && max.1 > 0.0), elastic }
+}
+
+/// The ScrollingFrame a finger coming down drags (P6c, measured): the outermost ScrollingFrame that can scroll among
+/// the topmost one under the finger and its ScrollingFrame ancestors. A frame inside a scrolling frame does not scroll by
+/// touch (its ancestor does, or nothing when the ancestor cannot scroll that way); one inside frames that cannot scroll
+/// does. None when another finger holds that frame or it is not ScrollingEnabled (a disabled ancestor still takes the
+/// finger, so the frame inside it does not scroll either).
+fn touch_frame(cx: &Cx, list: &[InstanceId]) -> Option<InstanceId> {
+    let class = cx.i.c.ScrollingFrame;
+    let topmost = list.iter().copied().find(|&o| cx.class_name_is(o, class))?;
+    let mut chosen = None;
+    let mut current = Some(topmost);
+    while let Some(id) = current {
+        if cx.class_name_is(id, class) {
+            let g = geometry(cx, id);
+            if g.allow.0 || g.allow.1 {
+                chosen = Some(id);
+            }
+        }
+        current = cx.engine.state.borrow().dom.get(id).and_then(|instance| instance.parent);
+    }
+    chosen.filter(|&frame| cx.is_scroller(frame) && cx.frame_holder(frame).is_none())
+}
+
+/// Whether a finger past the slop starts dragging `frame` (Some(true)), waits (Some(false)) or never scrolls it (None),
+/// by its travel (tx, ty) from where it came down and this move's step (P6c, measured in 24 directions on Y, X and XY
+/// frames): the longer axis must be one the frame can scroll (else the touch never scrolls it); past the slop it decides
+/// at once when it is at least DECIDED times the shorter one (an exact diagonal too), else the drag waits until a move
+/// of more than WAIT_STEP px along it leaves it more than WAIT px out.
+fn start_axis(cx: &Cx, frame: InstanceId, tx: f64, ty: f64, step: (f64, f64), waiting: bool) -> Option<bool> {
+    let g = geometry(cx, frame);
+    let (ax, ay) = (tx.abs(), ty.abs());
+    if ax == ay {
+        // (an exact diagonal; one reached while waiting keeps waiting: the 46 degree ray's (14, 14))
+        if !(g.allow.0 || g.allow.1) {
+            return None;
+        }
+        let moved = if g.allow.1 { step.1.abs() } else { step.0.abs() };
+        return Some(!waiting || (ay > WAIT && moved > WAIT_STEP));
+    }
+    let (long, short, moved, can) = if ay > ax { (ay, ax, step.1.abs(), g.allow.1) } else { (ax, ay, step.0.abs(), g.allow.0) };
+    if !can {
+        return None;
+    }
+    Some((long > WAIT && moved > WAIT_STEP) || (!waiting && long >= DECIDED * short))
 }
 
 /// Where the finger counts as last inside when a drag starts: here, or (on an axis already past its edge) as far
@@ -719,6 +834,29 @@ fn drag_frame(cx: &Cx, id: u32, frame: InstanceId, from: (f64, f64), to: (f64, f
         return Ok(());
     }
     let Some(mut drag) = cx.i.touches.fingers.borrow().iter().find(|f| f.id == id).and_then(|f| f.drag) else { return Ok(()) };
+    // Measured (P6c): a frame that is not ScrollingEnabled does not follow the finger (Drag::paused / held)
+    let disabled = cx.is_false(frame, cx.i.n.ScrollingEnabled);
+    let mut from = from;
+    if disabled || drag.paused {
+        if disabled {
+            if drag.scrolled {
+                drag.paused = true;
+            } else {
+                drag.held = true;
+            }
+        } else {
+            drag.paused = false;
+        }
+        if let Some(finger) = cx.i.touches.fingers.borrow_mut().iter_mut().find(|f| f.id == id) {
+            finger.drag = Some(drag);
+        }
+        return Ok(());
+    }
+    if drag.held {
+        from = drag.started_at;
+        drag.held = false;
+    }
+    drag.scrolled = true;
     let g = geometry(cx, frame);
     let canvas = cx.vector2(frame, cx.i.n.CanvasPosition);
     let mut next = canvas;
@@ -770,7 +908,8 @@ fn release_frame(cx: &Cx, frame: InstanceId, samples: &[(u64, f64, f64)]) {
     }
     let g = geometry(cx, frame);
     let canvas = cx.vector2(frame, cx.i.n.CanvasPosition);
-    let (vx, vy) = release_velocity(cx, samples);
+    // Measured (P6c): a release while the frame is not ScrollingEnabled does not coast
+    let (vx, vy) = if cx.is_false(frame, cx.i.n.ScrollingEnabled) { (0.0, 0.0) } else { release_velocity(cx, samples) };
     let coast = |allow: bool, c: f64, max: f64, v: f64| {
         let mut coast = Coast::default();
         if !allow {
@@ -893,8 +1032,22 @@ pub(crate) fn step(cx: &Cx, dt: f64) {
         if motion.began >= frame || motion.stepped >= frame {
             continue;
         }
-        // (a disabled frame holds its coasting, as the wheel's spring pauses: not measured for touch)
+        // Measured (P6c): ScrollingEnabled false ends a coast in that frame (GetScrollVelocity reads 0 and it stays
+        // ended when the frame is enabled again) and holds a spring back, which goes on from where it was once the
+        // frame is enabled again (as the wheel's spring pauses)
         if cx.is_false(id, cx.i.n.ScrollingEnabled) {
+            let mut motions = cx.i.touches.motions.borrow_mut();
+            for axis in [&mut motion.x, &mut motion.y] {
+                axis.velocity = 0.0;
+                axis.handed = false;
+            }
+            if motion.x.active() || motion.y.active() {
+                if let Some(entry) = motions.iter_mut().find(|(f, _)| *f == id) {
+                    entry.1 = motion;
+                }
+            } else {
+                motions.retain(|(f, _)| *f != id);
+            }
             continue;
         }
         advance(cx, id, &mut motion, dt);

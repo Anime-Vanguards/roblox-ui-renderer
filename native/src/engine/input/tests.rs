@@ -3763,3 +3763,376 @@ assert(#Failures == 0, table.concat(Failures, "\n"))
         let _ = std::fs::remove_dir_all(&directory);
     }
 }
+
+/// The scene and plans of P6c's touch probes (a 0.747 touch client, parity backlog probe/rur-P6c-input): fresh 200 x
+/// 300 ScrollingFrames at 100, 100 (canvas 3000, bar 8), touches one event per frame, rows read before each frame's
+/// events. `Run` returns the frame's canvas, its GetScrollVelocity and an inner / overlapping frame's.
+const P6C_SCENE: &str = r##"
+local Players = game:GetService("Players")
+local Root = Instance.new("ScreenGui")
+Root.IgnoreGuiInset = true
+Root.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Root.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+local S
+local Extra = {}
+local function Steps(N)
+	for _ = 1, N do
+		StepDisplay(1 / 60)
+	end
+	Flush()
+end
+local function Make(Parent, Props)
+	local F = Instance.new("ScrollingFrame")
+	for K, V in Props do
+		F[K] = V
+	end
+	F.Parent = Parent
+	return F
+end
+-- Extras: { parent = "root" | nil (inside S), props = {...}, start = Vector2? }
+local function Fresh(Props, Start, Extras)
+	if S then
+		S:Destroy()
+	end
+	for _, O in Extra do
+		O:Destroy()
+	end
+	table.clear(Extra)
+	local P = { Name = "S", Position = UDim2.fromOffset(100, 100), Size = UDim2.fromOffset(200, 300), CanvasSize = UDim2.fromOffset(0, 3000), ScrollBarThickness = 8 }
+	for K, V in Props or {} do
+		P[K] = V
+	end
+	S = Make(Root, P)
+	UpdateAll()
+	if Start then
+		S.CanvasPosition = Start
+	end
+	Steps(4)
+	local Inner
+	for _, E in Extras or {} do
+		local F = Make(E.parent == "root" and Root or S, E.props)
+		table.insert(Extra, F)
+		UpdateAll()
+		if E.start then
+			Steps(2)
+			F.CanvasPosition = E.start
+		end
+		Inner = F
+	end
+	if Extras then
+		Steps(3)
+	end
+	return Inner
+end
+local KINDS = { [1] = "down", [2] = "move", [3] = "up" }
+local BEGIN, CHANGE, FINISH = 1, 2, 3
+local function Add(P, K, E)
+	P[K] = P[K] or {}
+	table.insert(P[K], E)
+end
+local function Drag(P, Finger, Start, X, Y, N, DX, DY, Lift)
+	Add(P, Start, { Finger, BEGIN, X, Y })
+	for I = 1, N do
+		X += DX
+		Y += DY
+		Add(P, Start + I, { Finger, CHANGE, X, Y })
+	end
+	if Lift then
+		Add(P, Start + N + 1, { Finger, FINISH, X, Y })
+	end
+end
+local function Moves(P, X0, Y0, List)
+	Add(P, 1, { 1, BEGIN, X0, Y0 })
+	for I, M in List do
+		Add(P, 1 + I, { 1, CHANGE, M[1], M[2] })
+	end
+	local Last = List[#List]
+	Add(P, 2 + #List, { 1, FINISH, Last[1], Last[2] })
+end
+local function Ray(P, X0, Y0, A, N)
+	local R = math.rad(A)
+	local X, Y
+	Add(P, 1, { 1, BEGIN, X0, Y0 })
+	for I = 1, N do
+		X = X0 + math.round(I * 4 * math.cos(R))
+		Y = Y0 + math.round(I * 4 * math.sin(R))
+		Add(P, 1 + I, { 1, CHANGE, X, Y })
+	end
+	Add(P, 2 + N, { 1, FINISH, X, Y })
+end
+local function Run(P, Rows, Hooks, Inner)
+	local Out = {}
+	for K = 1, Rows do
+		local V = S:GetScrollVelocity()
+		local Row = { y = S.CanvasPosition.Y, x = S.CanvasPosition.X, vy = V.Y, vx = V.X }
+		if Inner then
+			Row.iy = Inner.CanvasPosition.Y
+			Row.ivy = Inner:GetScrollVelocity().Y
+		end
+		table.insert(Out, Row)
+		for _, E in P[K] or {} do
+			Dispatch({ type = KINDS[E[2]], x = E[3], y = E[4], button = 1, finger = E[1] })
+		end
+		if Hooks and Hooks[K] then
+			Hooks[K]()
+		end
+		Flush()
+		StepDisplay(1 / 60)
+	end
+	Flush()
+	return Out
+end
+"##;
+
+/// A finger and the ScrollingFrame it drags, in a 0.747 touch client (P6c, two sessions agreeing on every frame here;
+/// data/studio/touch-drag-cases.luau), replayed frame by frame:
+/// - the slop is more than 11.5 px from where the finger came down; past it the travel's longer axis must be one the
+///   frame can scroll, else the touch never scrolls it (a drag that starts sideways on a vertical frame, or vertically
+///   on a horizontal one); it decides at once when it is at least 1.7 times the shorter one or an exact diagonal, else
+///   the drag starts at a move of more than 2 px along that axis that leaves it more than 20 px out (24 directions on
+///   Y, X and XY frames; XY frames moved vertically are left out: the client never scrolls them, see the notes);
+/// - the rubber band's length is the window along each axis (X frames 250 and 150 wide, Y frames 150 and 400 tall);
+/// - the outermost frame that can scroll takes the finger: a frame inside another scrolls only when its ancestors
+///   cannot; a disabled ancestor still takes it; a sibling drawn above takes it;
+/// - ScrollingEnabled false: a disabled frame does not take a finger that comes down, holds a spring back, and stops
+///   following a drag (a drag that had scrolled loses those moves and the first one after; one that had not catches up
+///   the finger's travel; before the slop, the slop counts again from the first move after); the release coasts as
+///   usual once it is enabled again.
+#[test]
+fn touch_drags_take_their_frame_and_axis_like_a_client() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    let source = format!(
+        "{P6C_SCENE}\nlocal Client = (function()\n{}\nend)()\n{}",
+        include_str!("../../../../data/studio/touch-drag-cases.luau"),
+        r##"
+local XY = Vector2.new
+local Cases = {}
+local function Case(Label, Props, Start, Build, Hooks, Extras)
+	Cases[Label] = { Props, Start, Build, Hooks, Extras }
+end
+local Off = function(...)
+	local T = {}
+	local A = { ... }
+	for I = 1, #A, 2 do
+		local Value = A[I + 1]
+		T[A[I]] = function() S.ScrollingEnabled = Value end
+	end
+	return T
+end
+-- the rubber band along X and for other window sizes
+Case("A1 X 250x150 pull right", { Size = UDim2.fromOffset(250, 150), CanvasSize = UDim2.fromOffset(3000, 0) }, XY(0, 0), function(P) Drag(P, 1, 1, 150, 175, 10, 10, 0, true) end)
+Case("A2 X 150x250 pull right", { Size = UDim2.fromOffset(150, 250), CanvasSize = UDim2.fromOffset(3000, 0) }, XY(0, 0), function(P) Drag(P, 1, 1, 120, 200, 10, 10, 0, true) end)
+Case("A3 X 250x150 pull left at end", { Size = UDim2.fromOffset(250, 150), CanvasSize = UDim2.fromOffset(3000, 0) }, XY(2750, 0), function(P) Drag(P, 1, 1, 300, 175, 10, -10, 0, true) end)
+Case("A4 Y 200x150 pull down", { Size = UDim2.fromOffset(200, 150) }, XY(0, 0), function(P) Drag(P, 1, 1, 200, 120, 10, 0, 10, true) end)
+Case("A5 Y 200x400 pull down", { Size = UDim2.fromOffset(200, 400) }, XY(0, 0), function(P) Drag(P, 1, 1, 200, 120, 10, 0, 10, true) end)
+-- frames inside frames, and a sibling over the frame
+local function Inner(Props)
+	local T = { Name = "I", Position = UDim2.fromOffset(20, 20), Size = UDim2.fromOffset(160, 120), ScrollBarThickness = 6 }
+	for K, V in Props do
+		T[K] = V
+	end
+	return T
+end
+local InnerY = { { props = Inner({ CanvasSize = UDim2.fromOffset(0, 1000) }) } }
+local InnerX = { { props = Inner({ CanvasSize = UDim2.fromOffset(1000, 0) }) } }
+local OuterX = { CanvasSize = UDim2.fromOffset(3000, 0) }
+Case("C1 drag up on inner Y", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 220, 8, 0, -10, true) end, nil, InnerY)
+Case("C3 drag up on inner X", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 220, 8, 0, -10, true) end, nil, InnerX)
+Case("C4 drag left on inner X", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 250, 180, 8, -10, 0, true) end, nil, InnerX)
+Case("C5 drag down on inner Y at its top", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 160, 8, 0, 10, true) end, nil, InnerY)
+Case("N1 inner Y in outer X, drag up", OuterX, XY(1000, 0), function(P) Drag(P, 1, 1, 200, 220, 8, 0, -10, true) end, nil, InnerY)
+Case("N2 inner Y in outer X, drag left", OuterX, XY(1000, 0), function(P) Drag(P, 1, 1, 250, 200, 8, -10, 0, true) end, nil, InnerY)
+Case("N3 inner Y in a fixed outer, drag up", { CanvasSize = UDim2.fromOffset(0, 0) }, nil, function(P) Drag(P, 1, 1, 200, 220, 8, 0, -10, true) end, nil, InnerY)
+Case("N4 inner Y at its end in outer Y, drag up", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 220, 8, 0, -10, true) end, nil, { { props = Inner({ CanvasSize = UDim2.fromOffset(0, 1000) }), start = XY(0, 880) } })
+Case("N5 inner Y disabled outer Y, drag up", { ScrollingEnabled = false }, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 220, 8, 0, -10, true) end, nil, InnerY)
+Case("N6 inner XY in outer Y, drag left", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 250, 200, 8, -10, 0, true) end, nil, { { props = Inner({ CanvasSize = UDim2.fromOffset(1000, 1000) }) } })
+local Over = function(Canvas) return { parent = "root", props = { Name = "O", Position = UDim2.fromOffset(200, 150), Size = UDim2.fromOffset(200, 300), CanvasSize = Canvas, ZIndex = 2, ScrollBarThickness = 8 } } end
+Case("O1 sibling above, drag up in overlap", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 250, 250, 8, 0, -10, true) end, nil, { Over(UDim2.fromOffset(0, 3000)) })
+-- (the client's O2 ran with O1's frame still under it)
+Case("O2 sibling above (X only), drag up in overlap", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 250, 250, 8, 0, -10, true) end, nil, { Over(UDim2.fromOffset(0, 3000)), Over(UDim2.fromOffset(3000, 0)) })
+-- the slop and the axis: a first move, then 10 px steps up
+local function MovesFrom(X0, Y0, List)
+	return function(P) Moves(P, X0, Y0, List) end
+end
+Case("D1 8,8 then y", nil, XY(0, 1000), MovesFrom(200, 350, { { 208, 342 }, { 208, 332 }, { 208, 322 } }))
+Case("D2 x20 then y", nil, XY(0, 1000), MovesFrom(200, 350, { { 220, 350 }, { 220, 340 }, { 220, 330 } }))
+Case("D3 7,8 then y", nil, XY(0, 1000), MovesFrom(200, 350, { { 207, 342 }, { 207, 332 }, { 207, 322 } }))
+Case("D4 6,6 12,12", nil, XY(0, 1000), MovesFrom(200, 350, { { 206, 344 }, { 212, 338 }, { 218, 332 }, { 224, 326 } }))
+Case("D5 x12 only then y", nil, XY(0, 1000), MovesFrom(200, 350, { { 212, 350 }, { 212, 340 }, { 212, 330 } }))
+Case("D6 x11 y1", nil, XY(0, 1000), MovesFrom(200, 350, { { 211, 349 }, { 211, 339 }, { 211, 329 } }))
+for _, D in { { 0, -11 }, { 0, -12 }, { -3, -11 }, { -7, -9 }, { -6, -10 }, { -4, -11 }, { -8, -9 }, { -5, -11 }, { 3, -11 }, { 7, -9 }, { 6, -10 } } do
+	Case(string.format("S %d,%d", D[1], D[2]), nil, XY(0, 1000), MovesFrom(200, 300, { { 200 + D[1], 300 + D[2] }, { 200 + D[1], 290 + D[2] }, { 200 + D[1], 280 + D[2] } }))
+end
+local function Up(X, Y, N)
+	local T = { { 200 + X, 300 + Y } }
+	for I = 1, N do
+		table.insert(T, { 200 + X, 300 + Y - I * 10 })
+	end
+	return T
+end
+for _, D in { { 7, -12 }, { 6, -11 }, { 7, -13 }, { 6, -12 }, { 7, -14 }, { 5, -12 }, { -6, -11 }, { -6, -12 } } do
+	Case(string.format("K %d,%d", D[1], D[2]), nil, XY(0, 1000), MovesFrom(200, 300, Up(D[1], D[2], 3)))
+end
+local function Rel(List)
+	local T = {}
+	for _, M in List do
+		table.insert(T, { 200 + M[1], 300 + M[2] })
+	end
+	return T
+end
+Case("U1 7,-10 then 7,-15 7,-20 7,-25", nil, XY(0, 1000), MovesFrom(200, 300, Rel({ { 7, -10 }, { 7, -15 }, { 7, -20 }, { 7, -25 }, { 7, -35 }, { 7, -45 } })))
+Case("U2 8,-9 then sideways", nil, XY(0, 1000), MovesFrom(200, 300, Rel({ { 8, -9 }, { 16, -10 }, { 24, -11 }, { 32, -12 }, { 32, -22 }, { 32, -32 } })))
+Case("U3 8,-9 then 8,-19 8,-21 8,-31", nil, XY(0, 1000), MovesFrom(200, 300, Rel({ { 8, -9 }, { 8, -19 }, { 8, -21 }, { 8, -31 }, { 8, -41 } })))
+Case("U4 7,-10 then 7,-18 7,-20 7,-22 7,-32", nil, XY(0, 1000), MovesFrom(200, 300, Rel({ { 7, -10 }, { 7, -18 }, { 7, -20 }, { 7, -22 }, { 7, -32 }, { 7, -42 } })))
+local XYP = { CanvasSize = UDim2.fromOffset(3000, 3000) }
+Case("V3 XY left 10", XYP, XY(1000, 1000), MovesFrom(200, 300, Rel({ { -10, 0 }, { -20, 0 }, { -30, 0 }, { -40, 0 }, { -50, 0 }, { -60, 0 }, { -70, 0 }, { -80, 0 } })))
+Case("V8 Y reference up 10", nil, XY(0, 1000), MovesFrom(200, 300, Up(0, -10, 7)))
+-- 24 directions on Y, X and XY frames: 4 px steps along the angle (screen degrees)
+for _, F in { { "Y", nil, XY(0, 1000) }, { "X", { CanvasSize = UDim2.fromOffset(3000, 0) }, XY(1000, 0) }, { "XY", XYP, XY(1000, 1000) } } do
+	for _, A in { 0, 20, 35, 40, 44, 45, 46, 50, 55, 70, 90, 110, 125, 134, 135, 136, 145, 160, 180, 225, 250, 270, 290, 315 } do
+		Case(string.format("R %s %d", F[1], A), F[2], F[3], function(P) Ray(P, 200, 250, A, 8) end)
+	end
+end
+-- ScrollingEnabled false: a spring, a frame disabled throughout, during a drag
+Case("E3 spring, off at 14, on at 30", nil, XY(0, 0), function(P) Drag(P, 1, 1, 200, 150, 10, 0, 10, true) end, Off(14, false, 30, true))
+Case("E4 finger on a disabled frame", { ScrollingEnabled = false }, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 350, 8, 0, -10, true) end)
+Case("E5 off during a drag", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 350, 10, 0, -10, true) end, Off(6, false))
+Case("E6 off during a drag, on before the lift", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 350, 10, 0, -10, true) end, Off(5, false, 8, true))
+Case("E6r off at 5, on at 8", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 350, 10, 0, -10, true) end, Off(5, false, 8, true))
+Case("E7 off at 4, on at 6", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 350, 10, 0, -10, true) end, Off(4, false, 6, true))
+Case("E8 off at 4, on at 9", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 350, 12, 0, -10, true) end, Off(4, false, 9, true))
+Case("E9 off before slop, on after", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 350, 10, 0, -10, true) end, Off(1, false, 5, true))
+Case("E11 off at 6, on at 7", nil, XY(0, 1000), function(P) Drag(P, 1, 1, 200, 350, 10, 0, -10, true) end, Off(6, false, 7, true))
+local Problems = {}
+local Checked = 0
+local function Near(A, B)
+	return math.abs(A - B) <= 2e-3
+end
+for Label, Expected in Client do
+	local C = Cases[Label]
+	if not C then
+		table.insert(Problems, "no case " .. Label)
+		continue
+	end
+	local Inner = Fresh(C[1], C[2], C[5])
+	local P = {}
+	C[3](P)
+	local Rows = Run(P, #Expected.y, C[4], Inner)
+	Checked += 1
+	for K, Y in Expected.y do
+		local X = Expected.x and Expected.x[K] or Expected.x0
+		local Row = Rows[K]
+		if not Near(Row.y, Y) or not Near(Row.x, X) or (Expected.inner and not Near(Row.iy, Expected.inner[K])) then
+			table.insert(Problems, string.format("%s row %d: rur %.4f, %.4f (inner %s), client %.4f, %.4f (inner %s)", Label, K, Row.y, Row.x, tostring(Row.iy), Y, X, tostring(Expected.inner and Expected.inner[K])))
+			break
+		end
+	end
+	-- the release frame: whether the frame (or the inner one) coasts, and which way
+	local V = Expected.v or { 0, 0, 0 }
+	local Last = Rows[#Rows]
+	local function Sign(N)
+		return N > 0 and 1 or N < 0 and -1 or 0
+	end
+	if Sign(Last.vy) ~= Sign(V[1]) or Sign(Last.vx) ~= Sign(V[2]) or Sign(Last.ivy or 0) ~= Sign(V[3]) then
+		table.insert(Problems, string.format("%s release: rur %.1f, %.1f, %.1f, client %s, %s, %s", Label, Last.vy, Last.vx, Last.ivy or 0, V[1], V[2], V[3]))
+	end
+end
+assert(#Problems == 0, Checked .. " cases\n" .. table.concat(Problems, "\n"))
+assert(Checked >= 120, "cases checked: " .. Checked)
+"##
+    );
+    run(&lua, &engine, &source);
+}
+
+/// A finger that takes a dragged ScrollingFrame over, in a 0.747 touch client (P6c): it takes it at a move that
+/// follows a move of its own in the frame before (one that rested since it came down takes it at its second move), and
+/// its release velocity counts from where it was before that move (its first interval holds two moves): finger 1 drags
+/// 6 moves of 10 px and holds, finger 2 moves on the frame, finger 1 lifts; finger 2's release reads 1.2 x a lone
+/// drag's velocity after 6 moves, 1.33 x after 4, 1 x after 20 (client: 1.19 / 1.22, 1.37 / 1.33, 1.00 / 1.03 of its
+/// own session's lone drag).
+#[test]
+fn touch_takeover_release_counts_from_the_move_before() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    let source = format!(
+        "{P6C_SCENE}\n{}",
+        r##"
+local Lone = 1.305 * 600
+local function Takeover(Label, Build, Rows)
+	Fresh(nil, Vector2.new(0, 1000))
+	local P = {}
+	Build(P)
+	local Out = Run(P, Rows)
+	-- the coast of finger 1's release, the frame it stops (finger 2 took over) and finger 2's release velocity
+	local Stopped, Release
+	for K = 17, #Out do
+		if not Stopped and Out[K].vy == 0 then
+			Stopped = K
+		elseif Stopped and not Release and Out[K].vy ~= 0 then
+			Release = K
+		end
+	end
+	assert(Stopped and Release, Label .. ": no takeover / release")
+	return Stopped, -Out[Release].vy / Lone
+end
+local CHANGE, FINISH = 2, 3
+-- moving all along (client T1: the coast stops at row 17, release 1.19 / 1.22 x)
+local Stop, Ratio = Takeover("T1", function(P)
+	Drag(P, 1, 1, 160, 350, 6, 0, -10, false)
+	Drag(P, 2, 9, 260, 380, 12, 0, -10, true)
+	Add(P, 15, { 1, FINISH, 160, 290 })
+end, 40)
+assert(Stop == 17 and math.abs(Ratio - 1.2) < 1e-3, string.format("T1: stopped at %d, ratio %.4f", Stop, Ratio))
+-- 4 moves from the takeover (T7: 1.37 / 1.33)
+Stop, Ratio = Takeover("T7", function(P)
+	Drag(P, 1, 1, 160, 350, 6, 0, -10, false)
+	Drag(P, 2, 9, 260, 380, 10, 0, -10, true)
+	Add(P, 15, { 1, FINISH, 160, 290 })
+end, 40)
+assert(Stop == 17 and math.abs(Ratio - 4 / 3) < 1e-3, string.format("T7: stopped at %d, ratio %.4f", Stop, Ratio))
+-- 20 moves from the takeover (T6: 1.00 / 1.03)
+Stop, Ratio = Takeover("T6", function(P)
+	Drag(P, 1, 1, 160, 350, 6, 0, -10, false)
+	Drag(P, 2, 9, 260, 380, 26, 0, -10, true)
+	Add(P, 15, { 1, FINISH, 160, 290 })
+end, 50)
+assert(Stop == 17 and math.abs(Ratio - 1) < 1e-3, string.format("T6: stopped at %d, ratio %.4f", Stop, Ratio))
+-- a finger that rested since it came down takes the frame at its second move (T2: the coast steps once more, stops at
+-- row 18; release 1.24 x, the model 1.25 x)
+Stop, Ratio = Takeover("T2", function(P)
+	Drag(P, 1, 1, 160, 350, 6, 0, -10, false)
+	Add(P, 9, { 2, 1, 260, 380 })
+	local Y = 380
+	for K = 16, 21 do
+		Y -= 10
+		Add(P, K, { 2, CHANGE, 260, Y })
+	end
+	Add(P, 22, { 2, FINISH, 260, Y })
+	Add(P, 15, { 1, FINISH, 160, 290 })
+end, 40)
+assert(Stop == 18 and math.abs(Ratio - 1.25) < 1e-3, string.format("T2: stopped at %d, ratio %.4f", Stop, Ratio))
+"##
+    );
+    run(&lua, &engine, &source);
+}
+
+/// ScrollingEnabled false during a touch coast, in a 0.747 touch client (P6c E1 / E2): the coast ends in that frame
+/// (GetScrollVelocity reads 0) and stays ended when the frame is enabled again; a spring back is held instead (the
+/// replay test above has E3).
+#[test]
+fn touch_coast_ends_when_scrolling_is_disabled() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    let source = format!(
+        "{P6C_SCENE}\n{}",
+        r##"
+Fresh(nil, Vector2.new(0, 1000))
+local P = {}
+Drag(P, 1, 1, 200, 350, 8, 0, -10, true)
+local Rows = Run(P, 40, { [15] = function() S.ScrollingEnabled = false end, [30] = function() S.ScrollingEnabled = true end })
+assert(Rows[15].vy ~= 0 and Rows[15].y > Rows[14].y, "coasting before")
+for K = 16, 40 do
+	assert(Rows[K].vy == 0 and Rows[K].y == Rows[15].y, string.format("row %d: %.4f, v %.4f", K, Rows[K].y, Rows[K].vy))
+end
+"##
+    );
+    run(&lua, &engine, &source);
+}
