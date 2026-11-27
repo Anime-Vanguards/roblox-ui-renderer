@@ -1347,8 +1347,9 @@ pub fn plan_texture_image(
         scale,
         or_number(&node["scale"], 1.0),
     );
-    let tx = move |e: f64| ((e - space.l) * space.sx - 0.5).ceil();
-    let ty = move |e: f64| ((e - space.t) * space.sy - 0.5).ceil();
+    // A quad's edges on the rasterizer's 1/256 texel grid (geometry.rs texel_edge); a clip, a scissor, in whole texels
+    let tx = move |e: f64| super::geometry::texel_edge((e - space.l) * space.sx);
+    let ty = move |e: f64| super::geometry::texel_edge((e - space.t) * space.sy);
     let (mut x0, mut y0, mut x1, mut y1) = (
         tx(rect.x),
         ty(rect.y),
@@ -1359,10 +1360,12 @@ pub fn plan_texture_image(
         let [cx, cy, cw, ch] = a(&node["clip"], [0.0; 4]);
         let [cl, cr] = device_span(cx, cw, scale);
         let [ct, cb] = device_span(cy, ch, scale);
-        x0 = x0.max(tx(cl));
-        y0 = y0.max(ty(ct));
-        x1 = x1.min(tx(cr));
-        y1 = y1.min(ty(cb));
+        let scissor_x = |e: f64| ((e - space.l) * space.sx - 0.5).ceil();
+        let scissor_y = |e: f64| ((e - space.t) * space.sy - 0.5).ceil();
+        x0 = x0.max(scissor_x(cl));
+        y0 = y0.max(scissor_y(ct));
+        x1 = x1.min(scissor_x(cr));
+        y1 = y1.min(scissor_y(cb));
     }
     x0 = x0.max(0.0);
     y0 = y0.max(0.0);
@@ -1673,6 +1676,26 @@ mod texture_mask_tests {
         let alpha: Vec<u8> = layer.rgba.chunks_exact(4).map(|p| p[3]).collect();
         let expected: Vec<u8> = mask.iter().map(|v| gpu8(*v as f64)).collect();
         assert_eq!(alpha, expected);
+    }
+
+    /// An image whose top edge, scaled into a resampled group texture, lies 0.0016 texel past a texel's centre fills
+    /// that texel: the edge is on the rasterizer's 1/256 texel grid, on the centre. Measured on a client
+    /// (fixtures/group-probe-corner.luau at 3x, Row3.G5.Motor: its snapped top 933 px in a group at 780 px whose 305
+    /// px hold 306 texels; texel 153 half covered under the corner mask, 154 px over 2 levels when it was left out)
+    #[test]
+    fn a_group_textures_image_edge_lies_on_the_rasterizers_grid() {
+        let texture = TextureAsset {
+            id: crate::assets::AssetId("white".into()),
+            width: 4,
+            height: 4,
+            rgba: vec![255; 64].into(),
+        };
+        let node = serde_json::json!({"image":{"uri":"white","scaleType":"Stretch"}});
+        let rect = ImageRect { x: 20., y: 933., w: 139., h: 139., raw: [20., 932.55, 138.99, 138.99], snapped: true };
+        let space = ImageSpace { l: 0., t: 780., sx: 1., sy: 306. / 305., nw: 200, nh: 306 };
+        let mut cache = ImageCache::default();
+        let layer = prepare_texture_image(&node, &texture, rect, [0.; 4], space, 3.0, &mut cache).unwrap();
+        assert_eq!((layer.y, layer.height), (153, 140));
     }
 }
 

@@ -427,6 +427,14 @@ pub fn group_texture_fit(w: f64, h: f64, x: f64, y: f64, scale: f64) -> f64 {
     fit
 }
 
+/// The first texel of a resampled CanvasGroup texture whose centre is at or past a quad's edge `v` (in texels): the
+/// GPU's rasterizer puts the edge on the 1/256 texel grid, and a centre on a top or left edge is the quad's (a
+/// right or bottom edge ends before it). An image 0.0016 texel short of a centre fills it in a client
+/// (fixtures/group-probe-corner.luau at 3x, Row3.G5.Motor; notes/images.md "Edges in a resampled texture").
+pub fn texel_edge(v: f64) -> f64 {
+    ((v * 256.0).round() / 256.0 - 0.5).ceil()
+}
+
 /// The texture size (nw, nh) of an axis-aligned CanvasGroup whose snapped quad is (x, y, w, h) device px.
 pub fn group_texture_dims(x: f64, y: f64, w: f64, h: f64, scale: f64) -> (u32, u32) {
     let fit = group_texture_fit(w, h, x, y, scale);
@@ -442,6 +450,16 @@ mod tests {
         assert_eq!(css_alpha_byte(0.7), 179);
         assert_eq!(css_alpha_byte(0.08431372549019608), 21);
         assert_eq!(mul_div255(128, 128), 64);
+    }
+    /// A quad edge in a resampled group texture, put on the 1/256 texel grid: within 1/512 texel past a centre it lies on
+    /// the centre, which a top or left edge includes and a bottom or right edge leaves out
+    #[test]
+    fn texel_edges_lie_on_the_subtexel_grid() {
+        assert_eq!(texel_edge(153.5016), 153.0);
+        assert_eq!(texel_edge(153.5), 153.0);
+        assert_eq!(texel_edge(153.4984), 153.0);
+        assert_eq!(texel_edge(153.5039), 154.0);
+        assert_eq!(texel_edge(153.0), 153.0);
     }
     #[test]
     fn group_texture_limits() {

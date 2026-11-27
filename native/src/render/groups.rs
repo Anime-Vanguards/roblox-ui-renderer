@@ -627,10 +627,13 @@ impl DrawPreparer {
         let radii = radius(&node["corner"], self.scale);
         let sx = space.nw as f64 / space.w as f64;
         let sy = space.nh as f64 / space.h as f64;
+        // The quad's edges on the rasterizer's 1/256 texel grid (geometry.rs texel_edge); a clip, a scissor, in whole texels
+        let edge_x = |e: f64| super::geometry::texel_edge((e - space.l) * sx);
+        let edge_y = |e: f64| super::geometry::texel_edge((e - space.t) * sy);
         let texel_x = |e: f64| ((e - space.l) * sx - 0.5).ceil();
         let texel_y = |e: f64| ((e - space.t) * sy - 0.5).ceil();
-        let (tx0, ty0) = (texel_x(rect.x), texel_y(rect.y));
-        let (tx1, ty1) = (texel_x(rect.x + rect.w), texel_y(rect.y + rect.h));
+        let (tx0, ty0) = (edge_x(rect.x), edge_y(rect.y));
+        let (tx1, ty1) = (edge_x(rect.x + rect.w), edge_y(rect.y + rect.h));
         let [mut x0, mut y0, mut x1, mut y1] = [tx0, ty0, tx1, ty1];
         if node["clip"].as_array().is_some_and(|v| v.len() >= 4) {
             let [cx, cy, cw, ch] = std::array::from_fn(|i| component(&node["clip"], i, 0.0));
@@ -1271,10 +1274,13 @@ fn texture_group_placement(
     let rect = physical.rect;
     let sx = space.nw as f64 / space.w as f64;
     let sy = space.nh as f64 / space.h as f64;
+    // The quad's edges on the rasterizer's 1/256 texel grid (geometry.rs texel_edge); a clip, a scissor, in whole texels
+    let edge_x = |e: f64| super::geometry::texel_edge((e - space.l) * sx);
+    let edge_y = |e: f64| super::geometry::texel_edge((e - space.t) * sy);
     let texel_x = |e: f64| ((e - space.l) * sx - 0.5).ceil();
     let texel_y = |e: f64| ((e - space.t) * sy - 0.5).ceil();
-    let (tx0, ty0) = (texel_x(rect.x), texel_y(rect.y));
-    let (tx1, ty1) = (texel_x(rect.x + rect.w), texel_y(rect.y + rect.h));
+    let (tx0, ty0) = (edge_x(rect.x), edge_y(rect.y));
+    let (tx1, ty1) = (edge_x(rect.x + rect.w), edge_y(rect.y + rect.h));
     let [mut x0, mut y0, mut x1, mut y1] = [tx0, ty0, tx1, ty1];
     if let Some([cx, cy, cw, ch]) = clip {
         let [cx0, cx1] = device_span(cx, cw, scale);
