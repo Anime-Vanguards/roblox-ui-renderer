@@ -870,11 +870,11 @@ pub(crate) struct LineCache {
 }
 
 /// A line's glyph entries, its rich run segments, and each entry's exact pen from the line's start with
-/// its glyph's pixel size and the steps of a pixel it stops at (4 or 1): a pen exactly halfway between two
-/// steps rounds by where the label is and by the glyph's size (`tie_step`), and rotated text keeps the
-/// exact pens. Last, where every glyph of the line (spaces too) starts in its stretch, exact
+/// its glyph's pixel size, the steps of a pixel it stops at (4 or 1) and where its stretch starts: a pen exactly
+/// halfway between two steps rounds by where the label is, the stretch and the glyph's size (`tie_step`), and
+/// rotated text keeps the exact pens. Last, where every glyph of the line (spaces too) starts in its stretch, exact
 /// (MaxVisibleGraphemes ends the decorations there).
-type CachedLine = (Json, Option<Json>, Vec<(f64, f64, f64)>, Vec<f64>);
+type CachedLine = (Json, Option<Json>, Vec<(f64, f64, f64, f64)>, Vec<f64>);
 
 /// The step (a quarter pixel, or a whole one for glyphs over 32 GUI pixels) of a pen exactly halfway
 /// between two, as Studio 0.747 rounds it: the pen is added to
@@ -895,13 +895,24 @@ type CachedLine = (Json, Option<Json>, Vec<(f64, f64, f64)>, Vec<f64>);
 /// the tied pens of fixtures/text-probe-graphemes.luau LegacyN5 ("x" at 66.375 px of a centred 45 px line:
 /// the fill at 66.5, the right copies at 66.5 + 1, the left copies at 66.25 - 1) and of the 14 legacy
 /// stroke labels of fixtures/text-probe-grouptext.luau (the offset added after the pen gives 26).
-fn tie_step(pen: f64, line_px: f64, anchor: f64, pixel_scale: f64, size: f64, steps: f64, offset: f64) -> f64 {
+///
+/// A glyph of a rich line's later stretch (a run starting at `stretch`, its whole pixel from the line's start) has the
+/// stretch's start added to the line's start first, the same way, and then its pen within the stretch. Measured at
+/// 3x (sim client 0.747, flag on): 177 of 177 tied pens of fixtures/text-probe-richtrunc.luau,
+/// text-probe-graphemes.luau and text-probe-quadties.luau, where the pen from the line's start missed the 11
+/// centred two-run lines' "o" of "not" (264.875 drawn at 265, not 264.75; backlog TX11). A truncation's ellipsis
+/// rounds from its run's stretch too (the 3x W103 line's ellipsis at 265), though its decorations go on from the
+/// exact pen after the text it follows.
+#[allow(clippy::too_many_arguments)]
+fn tie_step(pen: f64, line_px: f64, anchor: f64, pixel_scale: f64, size: f64, steps: f64, offset: f64, stretch: f64) -> f64 {
     let scale = pixel_scale as f32;
     let inverse = (1.0 / pixel_scale) as f32;
     let origin = anchor as f32 / scale - (anchor - line_px) as f32 * inverse;
     let size = size as f32;
     let back = 1.0 / (size * inverse / size);
-    let device = f64::from(((origin + offset as f32 * inverse) + pen as f32 * inverse) * back);
+    let start = origin + offset as f32 * inverse;
+    let start = if stretch != 0.0 { start + stretch as f32 * inverse } else { start };
+    let device = f64::from((start + (pen - stretch) as f32 * inverse) * back);
     (device * steps + 0.5).floor() / steps - line_px - offset
 }
 
@@ -1034,6 +1045,8 @@ fn text_lines(
                 // text's: `TextEngine::ellipsis`) goes on from the exact pen after the text it follows
                 let (mut segment_x, mut segment_pen, mut segment_run, mut last_pen) = (0.0, 0.0, u32::MAX, f64::INFINITY);
                 let mut last_end = 0.0;
+                // Where the run's stretch starts, which a tied pen rounds from (`tie_step`; a truncation's ellipsis too)
+                let mut stretch_x = 0.0;
                 for (glyph_index, glyph) in line.glyphs.iter().enumerate() {
                     if glyph.run != 0 {
                         run_index = glyph.run - 1;
@@ -1059,6 +1072,7 @@ fn text_lines(
                     }
                     if glyph.run != segment_run {
                         (segment_x, segment_pen, segment_run) = (glyph.x, glyph.pen, glyph.run);
+                        stretch_x = segment_x;
                     } else if glyph.pen < last_pen {
                         (segment_x, segment_pen) = (last_end, glyph.pen);
                     }
@@ -1082,7 +1096,7 @@ fn text_lines(
                     // (glyphs over 32 GUI pixels, 48 px at 1.5x and 32 at 1x: at its whole pixel)
                     let steps = if !subpixel || glyph_size > 32.0 * pixel_scale { 1.0 } else { 4.0 };
                     let exact = segment_x + glyph.pen - segment_pen + glyph.offset;
-                    pens.push((exact, glyph_size, steps));
+                    pens.push((exact, glyph_size, steps, stretch_x));
                     entry.push(number(if subpixel { (exact * steps + 0.5).floor() / steps } else { whole_glyph_x(segment_x + glyph.pen - segment_pen, glyph.offset) }));
                     entry.push(number(round(face_ppem, 5)));
                     if rich {
@@ -1114,20 +1128,20 @@ fn text_lines(
                     entry[2] = number(exact);
                 }
             }
-        } else if pixel_scale != 1.0 && pens.iter().any(|&(exact, _, steps)| tied(exact, steps)) {
+        } else if pixel_scale != 1.0 && pens.iter().any(|&(exact, _, steps, _)| tied(exact, steps)) {
             let anchor = super::text::layout::snap_pixel(match alignment {
                 XAlign::Left => content_x,
                 XAlign::Right => content_x + content_w,
                 XAlign::Center => content_x + content_w / 2.0,
             });
             if let Some(list) = glyphs.as_array_mut() {
-                for (index, (entry, &(exact, size, steps))) in list.iter_mut().zip(&pens).enumerate() {
+                for (index, (entry, &(exact, size, steps, stretch))) in list.iter_mut().zip(&pens).enumerate() {
                     if tied(exact, steps) {
-                        let own = tie_step(exact, pen, anchor, pixel_scale, size, steps, 0.0);
+                        let own = tie_step(exact, pen, anchor, pixel_scale, size, steps, 0.0, stretch);
                         entry[2] = number(own);
                         if legacy_stroke {
-                            let left = tie_step(exact, pen, anchor, pixel_scale, size, steps, -1.0);
-                            let right = tie_step(exact, pen, anchor, pixel_scale, size, steps, 1.0);
+                            let left = tie_step(exact, pen, anchor, pixel_scale, size, steps, -1.0, stretch);
+                            let right = tie_step(exact, pen, anchor, pixel_scale, size, steps, 1.0, stretch);
                             if left != own || right != own {
                                 copies.push(json!([index, number(left), number(right)]));
                             }
@@ -2708,16 +2722,25 @@ mod tests {
         assert_eq!(super::whole_glyph_x(29.5, -0.25), 30.0);
     }
 
+    /// A later stretch's start is added to the line's start before its pen (3x, flag on: text-probe-richtrunc's centred
+    /// two-run lines draw the "o" of "not" at 265 where the pen from the line's start gives 264.75)
+    #[test]
+    fn tied_quarter_pens_of_a_later_stretch_round_from_its_start() {
+        assert_eq!(tie_step(264.875, 3221.0, 3494.0, 3.0, 54.0, 4.0, 0.0, 0.0), 264.75);
+        assert_eq!(tie_step(264.875, 3221.0, 3494.0, 3.0, 54.0, 4.0, 0.0, 118.0), 265.0);
+        assert_eq!(tie_step(264.875, 3196.0, 3347.0, 3.0, 54.0, 4.0, 0.0, 118.0), 265.0);
+    }
+
     #[test]
     fn tied_quarter_pens_round_by_the_line_start() {
-        assert_eq!(tie_step(54.625, 30.0, 30.0, 1.5, 30.0, 4.0, 0.0), 54.75);
-        assert_eq!(tie_step(54.625, 551.0, 660.0, 1.5, 30.0, 4.0, 0.0), 54.5);
-        assert_eq!(tie_step(54.625, 538.0, 645.0, 1.5, 30.0, 4.0, 0.0), 54.75);
-        assert_eq!(tie_step(55.875, 772.0, 807.0, 1.5, 30.0, 4.0, 0.0), 56.0);
-        assert_eq!(tie_step(55.875, 1637.0, 1672.0, 1.5, 30.0, 4.0, 0.0), 55.75);
+        assert_eq!(tie_step(54.625, 30.0, 30.0, 1.5, 30.0, 4.0, 0.0, 0.0), 54.75);
+        assert_eq!(tie_step(54.625, 551.0, 660.0, 1.5, 30.0, 4.0, 0.0, 0.0), 54.5);
+        assert_eq!(tie_step(54.625, 538.0, 645.0, 1.5, 30.0, 4.0, 0.0, 0.0), 54.75);
+        assert_eq!(tie_step(55.875, 772.0, 807.0, 1.5, 30.0, 4.0, 0.0, 0.0), 56.0);
+        assert_eq!(tie_step(55.875, 1637.0, 1672.0, 1.5, 30.0, 4.0, 0.0, 0.0), 55.75);
         // whole scales are exact: every tie rounds up
-        assert_eq!(tie_step(54.625, 551.0, 660.0, 1.0, 30.0, 4.0, 0.0), 54.75);
-        assert_eq!(tie_step(54.625, 551.0, 660.0, 2.0, 30.0, 4.0, 0.0), 54.75);
+        assert_eq!(tie_step(54.625, 551.0, 660.0, 1.0, 30.0, 4.0, 0.0, 0.0), 54.75);
+        assert_eq!(tie_step(54.625, 551.0, 660.0, 2.0, 30.0, 4.0, 0.0, 0.0), 54.75);
     }
 
     /// The sum is scaled back by the reciprocal of the glyph's logical size over its pixel size, which at
@@ -2727,13 +2750,13 @@ mod tests {
     /// either way by where the line starts.
     #[test]
     fn tied_quarter_pens_of_25_px_glyphs_fall_by_their_size() {
-        assert_eq!(tie_step(35.875, 1571.0, 1625.0, 1.5, 26.0, 4.0, 0.0), 36.0);
-        assert_eq!(tie_step(35.875, 1571.0, 1625.0, 1.5, 25.0, 4.0, 0.0), 35.75);
-        assert_eq!(tie_step(13.125, 676.0, 751.0, 1.5, 25.0, 4.0, 0.0), 13.0);
-        assert_eq!(tie_step(98.875, 454.0, 510.0, 1.5, 25.0, 4.0, 0.0), 98.75);
-        assert_eq!(tie_step(98.875, 1348.0, 1404.0, 1.5, 25.0, 4.0, 0.0), 99.0);
-        assert_eq!(tie_step(15.125, 9.0, 75.0, 1.5, 25.0, 4.0, 0.0), 15.0);
-        assert_eq!(tie_step(15.125, 6.0, 72.0, 1.5, 25.0, 4.0, 0.0), 15.25);
+        assert_eq!(tie_step(35.875, 1571.0, 1625.0, 1.5, 26.0, 4.0, 0.0, 0.0), 36.0);
+        assert_eq!(tie_step(35.875, 1571.0, 1625.0, 1.5, 25.0, 4.0, 0.0, 0.0), 35.75);
+        assert_eq!(tie_step(13.125, 676.0, 751.0, 1.5, 25.0, 4.0, 0.0, 0.0), 13.0);
+        assert_eq!(tie_step(98.875, 454.0, 510.0, 1.5, 25.0, 4.0, 0.0, 0.0), 98.75);
+        assert_eq!(tie_step(98.875, 1348.0, 1404.0, 1.5, 25.0, 4.0, 0.0, 0.0), 99.0);
+        assert_eq!(tie_step(15.125, 9.0, 75.0, 1.5, 25.0, 4.0, 0.0, 0.0), 15.0);
+        assert_eq!(tie_step(15.125, 6.0, 72.0, 1.5, 25.0, 4.0, 0.0, 0.0), 15.25);
     }
 
     /// Glyphs over 32 GUI pixels stop at whole pixels, and a pen at a half pixel falls by the same sum
@@ -2741,11 +2764,11 @@ mod tests {
     #[test]
     fn legacy_stroke_copies_of_a_tied_pen_round_with_their_offset() {
         // "x" at 66.375 px of a centred 45 px line: the fill and the right copies at 66.5, the left at 66.25
-        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, 0.0), 66.5);
-        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, 1.0), 66.5);
-        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, -1.0), 66.25);
+        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, 0.0, 0.0), 66.5);
+        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, 1.0, 0.0), 66.5);
+        assert_eq!(tie_step(66.375, 734.0, 1005.0, 1.5, 45.0, 4.0, -1.0, 0.0), 66.25);
         // 25 px lines at three places: (fill, left, right)
-        let at = |line: f64, anchor: f64| [0.0, -1.0, 1.0].map(|offset| tie_step(60.125, line, anchor, 1.5, 25.0, 4.0, offset));
+        let at = |line: f64, anchor: f64| [0.0, -1.0, 1.0].map(|offset| tie_step(60.125, line, anchor, 1.5, 25.0, 4.0, offset, 0.0));
         assert_eq!(at(150.0, 222.0), [60.25, 60.0, 60.0]);
         assert_eq!(at(62.0, 134.0), [60.25, 60.0, 60.25]);
         assert_eq!(at(588.0, 660.0), [60.0, 60.25, 60.0]);
@@ -2753,8 +2776,8 @@ mod tests {
 
     #[test]
     fn tied_whole_pixel_pens_round_by_the_line_start() {
-        assert_eq!(tie_step(86.5, 39.0, 157.0, 1.5, 71.0, 1.0, 0.0), 86.0);
-        assert_eq!(tie_step(86.5, 30.0, 30.0, 1.5, 71.0, 1.0, 0.0), 87.0);
+        assert_eq!(tie_step(86.5, 39.0, 157.0, 1.5, 71.0, 1.0, 0.0, 0.0), 86.0);
+        assert_eq!(tie_step(86.5, 30.0, 30.0, 1.5, 71.0, 1.0, 0.0, 0.0), 87.0);
         assert!(tied(86.5, 1.0) && !tied(86.25, 1.0) && tied(86.125, 4.0) && !tied(86.25, 4.0));
     }
 
