@@ -2431,12 +2431,20 @@ impl<'a> Pass<'a> {
 
     /// Gives `record` a new version (and reports it changed) unless it shows the same as `old`;
     /// then the old record stays (stable identity) with the fields the comparison skips.
+    /// Adds a laid-out child's record count to the object being laid out (`Record::count`)
+    fn add_count(&mut self, count: u32) {
+        if let Some(top) = self.l.count_stack.last_mut() {
+            *top = top.saturating_add(count);
+        }
+    }
+
     fn version(&mut self, id: InstanceId, mut record: Record, old: Option<Record>) {
         if let Some(mut old) = old {
             if old.same_output(&record) {
                 old.generation = record.generation;
                 old.place = record.place;
                 old.canvas_place = record.canvas_place;
+                old.count = record.count;
                 self.l.records.set(id, old);
                 return;
             }
@@ -2597,6 +2605,17 @@ impl<'a> Pass<'a> {
             let old = self.l.records.get(id).unwrap();
             if old.same_inputs(&record) {
                 self.l.stats.skipped += 1;
+                let count = old.count.max(1);
+                if let Some(parents) = &self.l.relaying {
+                    // (a client lays it out again after a geometry write in the tree, and walks its subtree; a read lays out
+                    // the written objects' siblings only)
+                    self.l.stats.relaid += 1;
+                    self.l.stats.relaid_under += u64::from(count - 1);
+                    if self.state.dom.at(id).parent.is_some_and(|parent| parents.contains(&parent)) {
+                        self.l.stats.relaid_near += 1;
+                    }
+                }
+                self.add_count(count);
                 cache_counts::hit(Cache::Records);
                 return;
             }
@@ -2604,6 +2623,7 @@ impl<'a> Pass<'a> {
                 // Only moved: keep the record (and everything computed for it), take the new place.
                 let before_moved = self.l.stats.moved;
                 self.l.stats.moved += 1;
+                self.add_count(old.count.max(1));
                 cache_counts::hit(Cache::Records);
                 self.l.stored_stamps.take(id);
                 let kept = self.l.records.get_mut(id).unwrap();
@@ -2691,6 +2711,7 @@ impl<'a> Pass<'a> {
             record.text = Some(info);
         }
 
+        self.l.count_stack.push(0);
         if self.class(id) == self.l.ids.c.ScrollingFrame {
             self.layout_scrolling(id, &mut record);
         } else {
@@ -2698,6 +2719,8 @@ impl<'a> Pass<'a> {
             self.layout_children(id, &record, false, None);
             self.l.open.pop();
         }
+        record.count = 1 + self.l.count_stack.pop().unwrap_or(0);
+        self.add_count(record.count);
 
         self.version(id, record, old);
         // Recorded last with the stamp it was laid out for.
@@ -3072,7 +3095,7 @@ impl<'a> Pass<'a> {
                 width = 800.0;
                 height = 600.0;
             }
-            let record = Record {
+            let mut record = Record {
                 x,
                 y,
                 w: width,
@@ -3088,7 +3111,9 @@ impl<'a> Pass<'a> {
             let n_size = n.AbsoluteSize;
             self.set_absolute_position(root, x, y);
             self.set_vector(root, n_size, width, height);
+            self.l.count_stack.push(0);
             self.layout_children(root, &record, false, None);
+            record.count = 1 + self.l.count_stack.pop().unwrap_or(0);
             self.version(root, record, old);
             self.l.root_stamps.set(root, stamp);
             self.l.root_generations.set(root, self.l.generation);
@@ -3128,9 +3153,15 @@ impl<'a> Pass<'a> {
         if self.l.track_churn {
             self.l.pass_churn.clear();
         }
+        // (a pass after a geometry write in this tree: a client re-lays its unchanged objects too, Stats::relaid)
+        self.l.relaying = self.l.take_relay(root);
+        let relaid_before = (self.l.stats.relaid, self.l.stats.relaid_under);
+        self.l.count_stack.clear();
         self.layout_root(root);
+        self.l.relaying = None;
         if self.l.track_churn {
-            self.attribute_pass_churn(root);
+            let relaid = (self.l.stats.relaid - relaid_before.0, self.l.stats.relaid_under - relaid_before.1);
+            self.attribute_pass_churn(root, relaid);
         }
         let elapsed = super::elapsed(started);
         self.l.stats.time += elapsed;
@@ -3142,8 +3173,9 @@ impl<'a> Pass<'a> {
     /// object(s) in `root`'s tree whose change dirtied the pass (`dirty_sources`), so ancestors
     /// re-stored only because a descendant changed transfer their records to the changed
     /// descendant(s), and reflowed siblings/descendants transfer theirs to the nearest changed
-    /// container/source. Conserves exact totals across all attributed drivers.
-    fn attribute_pass_churn(&mut self, root: InstanceId) {
+    /// container/source. Conserves exact totals across all attributed drivers. `relaid`: the pass's re-laid records (and
+    /// those under them), shared by the pass's sources.
+    fn attribute_pass_churn(&mut self, root: InstanceId, relaid: (u64, u64)) {
         let raw = std::mem::take(&mut self.l.pass_churn);
         let mut sources_in_root: Vec<InstanceId> = Vec::new();
         let mut remove_sources: Vec<InstanceId> = Vec::new();
@@ -3157,6 +3189,15 @@ impl<'a> Pass<'a> {
         }
         for src in remove_sources {
             self.l.dirty_sources.remove(&src);
+        }
+        if relaid != (0, 0) {
+            let targets: Vec<InstanceId> = if sources_in_root.is_empty() { vec![root] } else { sources_in_root.clone() };
+            let share = 1.0 / targets.len() as f64;
+            for src in targets {
+                let entry = self.l.churn.entry(src).or_default();
+                entry.relaid += relaid.0 as f64 * share;
+                entry.relaid_under += relaid.1 as f64 * share;
+            }
         }
         if raw.is_empty() {
             return;

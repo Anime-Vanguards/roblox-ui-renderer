@@ -205,7 +205,7 @@ macro_rules! names {
 }
 
 names!(
-    Size, Position, AnchorPoint, Rotation, Visible, AutomaticSize, SizeConstraint, BorderMode,
+    Size, Position, AnchorPoint, Rotation, Visible, ZIndex, AutomaticSize, SizeConstraint, BorderMode,
     BorderSizePixel, PaddingLeft, PaddingRight, PaddingTop, PaddingBottom, MinSize, MaxSize,
     AspectRatio, AspectType, DominantAxis, Scale, Text, PlaceholderText, RichText, FontFace,
     TextWrapped, TextScaled, TextSize, LineHeight, TextTruncate, TextXAlignment, TextYAlignment,

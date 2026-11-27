@@ -203,7 +203,7 @@ end
 /// AutomaticSize with padding and UIScale, CanvasPosition clamping and physical-pixel canvas
 /// offsets, rotation, UIPageLayout navigation and grids: the Luau runtime's values at DPI 1.5.
 /// A rect read pays the lazy layout a client runs for it (install.rs `ensure`): a canvas moved and read in the same Heartbeat
-/// handler pays the scroll's pass (62 us and 0.312 a record moved); moved in Heartbeat and read in the next frame's PreRender,
+/// handler pays the scroll's pass (123 us and 0.051 a record moved); moved in Heartbeat and read in the next frame's PreRender,
 /// after the frame's layout point, where a client has laid it out already, it pays nothing.
 #[test]
 fn a_rect_read_after_a_change_pays_the_lazy_layout_a_client_runs() {
@@ -254,7 +254,7 @@ fn a_rect_read_after_a_change_pays_the_lazy_layout_a_client_runs() {
         line.rsplit(' ').next().unwrap().parse().unwrap()
     };
     let same = value("same");
-    assert!((64.0..75.0).contains(&same), "a read after a scroll in its handler pays {same:.2} us, a client 62 + 0.31 a card");
+    assert!((120.0..130.0).contains(&same), "a read after a scroll in its handler pays {same:.2} us, a 0.747 client 123 + 0.05 a card");
     let after = value("prerender");
     assert!(after.abs() < 0.05, "a read in PreRender of a scroll made before the frame's layout point pays {after:.3} us");
 }
@@ -892,10 +892,119 @@ fn non_scroll_parent_move_counts_moved_descendants_not_scroll_moved() {
     drop(lua);
 }
 
+/// The objects a client lays out again although they did not change (P11b, measured in a 0.747 client, notes/cost-calibration.md
+/// "Re-laid objects"): after a geometry write its whole tree (the unchanged children of every object the pass lays out, and
+/// what is under them; `relaid`, `relaidUnder`), the written object's own siblings for a script's read (`relaid_near`); a Text
+/// write in a fixed box, LayoutOrder without a layout object and another ScreenGui's tree none; a ZIndex write sorts the tree's
+/// records again (`resorted`) without a pass.
+#[test]
+fn a_geometry_write_relays_its_tree_and_a_text_write_does_not() {
+    let (lua, engine) = start(1.0);
+    let script = {
+        let mut state = engine.state.borrow_mut();
+        let class = engine.reflection.class_id("ModuleScript").unwrap();
+        crate::engine::instance::create_named(&mut state, &engine.reflection, class, "Test")
+    };
+    let env = engine_lua::modules::environment(&lua, &engine, script).expect("environment");
+    let exports = lua.create_table().expect("exports");
+    env.set("Exports", exports.clone()).expect("set Exports");
+    let source = r#"
+        local Gui = Instance.new("ScreenGui")
+        Gui.Name = "Story"
+        Gui.Parent = game:GetService("CoreGui")
+        local Target = Instance.new("Frame")
+        Target.Size = UDim2.fromScale(1, 1)
+        Target.Parent = Gui
+        local C = Instance.new("Frame")
+        C.Size = UDim2.fromScale(1, 1)
+        C.Parent = Target
+        local Kids = {}
+        for I = 1, 50 do
+            local F = Instance.new("Frame")
+            F.Size = UDim2.fromOffset(10, 10)
+            F.Position = UDim2.fromOffset((I % 10) * 12, (I // 10) * 12)
+            F.Parent = C
+            Kids[I] = F
+        end
+        for J = 1, 4 do
+            local G = Instance.new("Frame")
+            G.Size = UDim2.fromScale(0.5, 0.5)
+            G.Parent = Kids[2]
+        end
+        local Label = Instance.new("TextLabel")
+        Label.Size = UDim2.fromOffset(60, 20)
+        Label.Text = "A"
+        Label.Parent = C
+        local Grid = Instance.new("Frame")
+        Grid.Size = UDim2.fromOffset(300, 300)
+        Grid.Parent = Target
+        Instance.new("UIGridLayout").Parent = Grid
+        local Cells = {}
+        for I = 1, 6 do
+            local F = Instance.new("Frame")
+            F.LayoutOrder = I
+            F.Parent = Grid
+            Cells[I] = F
+        end
+        local Other = Instance.new("ScreenGui")
+        Other.Parent = game:GetService("CoreGui")
+        for I = 1, 30 do
+            Instance.new("Frame").Parent = Other
+        end
+        local R = 0
+        Exports.resize = function() R += 1 Kids[1].Size = UDim2.fromOffset(10 + R, 10) end
+        Exports.text = function() R += 1 Label.Text = "A" .. R end
+        Exports.zindex = function() R += 1 Kids[3].ZIndex = 1 + R end
+        Exports.order = function() R += 1 Kids[1].LayoutOrder = R end
+        Exports.cellorder = function() R += 1 Cells[1].LayoutOrder = Cells[1].LayoutOrder == 1 and 0 or 1 end
+    "#;
+    let setup = lua.load(source).set_name("=Test").set_environment(env).into_function().expect("compile");
+    let call = engine_lua::globals::call(&lua, &engine, setup, LuaMultiValue::new()).expect("call");
+    if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+        panic!("setup failed: {message}");
+    }
+    scheduler::run_until(&lua, &engine, 0.1).expect("initial layout");
+    let step = |name: &str| {
+        let f: LuaFunction = exports.get(name).expect("export");
+        let before = super::stats_snapshot(&engine);
+        let call = engine_lua::globals::call(&lua, &engine, f, LuaMultiValue::new()).expect("call");
+        if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+            panic!("{name} failed: {message}");
+        }
+        super::update_all(&engine);
+        super::stats_snapshot(&engine).delta_since(&before)
+    };
+    // A child resized among 49 frames and a label: they are re-laid, with the 4 frames under one of them, and the grid beside
+    // the container (with its 6 cells); the other ScreenGui is not
+    let resize = step("resize");
+    assert_eq!(resize.passes, 1, "{resize:?}");
+    assert_eq!(resize.relaid, 51, "the resized frame's 50 siblings and the grid beside its container: {resize:?}");
+    assert_eq!(resize.relaid_under, 4 + 6, "the frames under a sibling and the grid's cells: {resize:?}");
+    assert_eq!(resize.relaid_near, 50, "a read lays out the written frame's siblings: {resize:?}");
+    let ms = crate::cost::desktop_layout_cpu_ms(resize);
+    let without = crate::cost::desktop_layout_cpu_ms(super::Stats { relaid: 0, relaid_under: 0, ..resize });
+    let priced = 51.0 * crate::cost::CLIENT_LAYOUT_RELAID_MS + 10.0 * crate::cost::CLIENT_LAYOUT_RELAID_UNDER_MS;
+    assert!((ms - without - priced).abs() < 1e-12, "re-laid records are priced: {ms} vs {without} + {priced}");
+    // A Text write in a fixed box: a pass, nothing re-laid
+    let text = step("text");
+    assert_eq!((text.passes, text.texts, text.relaid, text.relaid_under), (1, 1, 0, 0), "{text:?}");
+    // LayoutOrder without a layout object: nothing re-laid; beside a UIGridLayout: the grid's other cells and the tree
+    let order = step("order");
+    assert_eq!(order.relaid, 0, "{order:?}");
+    let cell = step("cellorder");
+    assert!(cell.relaid >= 5, "a grid cell's LayoutOrder re-lays its siblings: {cell:?}");
+    // A ZIndex write: no pass, the tree's records sorted again (the ScreenGui, Target, the container, 50 frames, 4 under one,
+    // the label, the grid and its 6 cells)
+    let z = step("zindex");
+    assert_eq!(z.passes, 0, "{z:?}");
+    assert_eq!(z.resorted, 1 + 1 + 1 + 50 + 4 + 1 + 1 + 6, "{z:?}");
+    drop(lua);
+}
+
 /// Pins `shift_children`'s `stats.moved += 1` feeding `lazy_layout_price` (`install.rs`):
 /// moving a non-scroll parent with 100 nested children and reading a child's `AbsolutePosition`
-/// in the same Heartbeat charges `2.3 + (stored + 101) * 0.312` us (~34 us), not just the
-/// parent (~3 us) and not a 62 us scroll pass.
+/// in the same Heartbeat charges `23 + (stored + 101) * 0.312` us (~55 us), not just the
+/// pass (~24 us) and not a 123 us scroll pass.
 #[test]
 fn lazy_layout_read_after_non_scroll_parent_move_charges_moved_descendants() {
     let output = run(
@@ -952,8 +1061,8 @@ fn lazy_layout_read_after_non_scroll_parent_move_charges_moved_descendants() {
     };
     let same = value("same");
     assert!(
-        (30.0..45.0).contains(&same),
-        "same-Heartbeat read after moving parent + 101 descendants should pay ~34 us (2.3 + ~102 * 0.312), got {same:.2} us"
+        (50.0..62.0).contains(&same),
+        "same-Heartbeat read after moving parent + 101 descendants should pay ~55 us (23 + ~102 * 0.312), got {same:.2} us"
     );
     let after = value("prerender");
     assert!(

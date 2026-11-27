@@ -251,6 +251,16 @@ pub struct Stats {
     pub scroll_passes: u64,
     /// Records a scroll moved (`Pass::moved` while pending scrolls are applied)
     pub scroll_moved: u64,
+    /// Skipped records a client lays out again anyway: in a pass after a geometry write in the tree (`Layout::relay`),
+    /// every unchanged child of every object the pass lays out (`skipped` there)
+    pub relaid: u64,
+    /// The records under those (their subtrees, which a client walks again too)
+    pub relaid_under: u64,
+    /// Of `relaid`, the unchanged siblings of the objects written (children of their parents): what a script's read lays out
+    /// again (install.rs `ensure`), where the frame's layout re-lays the whole tree
+    pub relaid_near: u64,
+    /// The records of trees whose objects a client sorts again after a ZIndex write (each such tree once a frame)
+    pub resorted: u64,
 }
 
 impl Stats {
@@ -266,6 +276,10 @@ impl Stats {
         self.texts += other.texts;
         self.scroll_passes += other.scroll_passes;
         self.scroll_moved += other.scroll_moved;
+        self.relaid += other.relaid;
+        self.relaid_under += other.relaid_under;
+        self.relaid_near += other.relaid_near;
+        self.resorted += other.resorted;
     }
 
     pub fn delta_since(&self, before: &Stats) -> Stats {
@@ -281,6 +295,10 @@ impl Stats {
             texts: self.texts.saturating_sub(before.texts),
             scroll_passes: self.scroll_passes.saturating_sub(before.scroll_passes),
             scroll_moved: self.scroll_moved.saturating_sub(before.scroll_moved),
+            relaid: self.relaid.saturating_sub(before.relaid),
+            relaid_under: self.relaid_under.saturating_sub(before.relaid_under),
+            relaid_near: self.relaid_near.saturating_sub(before.relaid_near),
+            resorted: self.resorted.saturating_sub(before.resorted),
         }
     }
 }
@@ -295,6 +313,9 @@ pub struct ObjectChurn {
     pub moved: f64,
     pub scroll_passes: u64,
     pub scroll_moved: u64,
+    /// `Stats::relaid` / `relaid_under` of the passes this object's geometry writes caused (shared by a pass's sources)
+    pub relaid: f64,
+    pub relaid_under: f64,
 }
 
 /// Resolved per-instance layout churn record emitted per sequence frame for `rur cost`.
@@ -312,6 +333,8 @@ pub struct LayoutChurnEntry {
     pub moved: f64,
     pub scroll_passes: u64,
     pub scroll_moved: u64,
+    pub relaid: f64,
+    pub relaid_under: f64,
 }
 
 /// The layout's persistent state (the module-level tables of runtime/layout/init.luau).
@@ -378,6 +401,15 @@ pub struct Layout {
     /// Raw `(stored, moved)` counts recorded per node during the active `Pass::run`, attributed to
     /// `dirty_sources` when the pass completes.
     pub(crate) pass_churn: FxHashMap<InstanceId, (u64, u64)>,
+    /// Roots whose tree had a geometry write since their last pass (`mark_relay`), each with the parents of the objects
+    /// written: a client lays every object of such a tree out again, the unchanged ones too (`Stats::relaid`)
+    relay: FxHashMap<InstanceId, FxHashSet<InstanceId>>,
+    /// The running pass's entry of `relay` (None: not a pass after a geometry write)
+    pub(crate) relaying: Option<FxHashSet<InstanceId>>,
+    /// Roots whose tree had a ZIndex write since the frame's layout (`Stats::resorted`)
+    resort_roots: FxHashSet<InstanceId>,
+    /// The record counts of the children laid out so far, one entry per object being laid out (`Record::count`)
+    pub(crate) count_stack: Vec<u32>,
 }
 
 impl Layout {
@@ -426,7 +458,47 @@ impl Layout {
             churn: FxHashMap::default(),
             dirty_sources: FxHashSet::default(),
             pass_churn: FxHashMap::default(),
+            relay: FxHashMap::default(),
+            relaying: None,
+            resort_roots: FxHashSet::default(),
+            count_stack: Vec::new(),
         }
+    }
+
+    /// A geometry write in `id`'s tree (`property_changed`, `hierarchy_changed`): measured in a 0.747 client
+    /// (notes/cost-calibration.md "Re-laid objects"), the tree's next layout lays every object of the tree out again
+    /// (its LayerCollector's; another ScreenGui's tree is not), which a write that leaves the geometry alone does not.
+    /// `parent`: the object whose children the write makes a script's read lay out again (the written object's parent).
+    pub fn mark_relay(&mut self, state: &State, reflection: &Reflection, id: InstanceId, parent: Option<InstanceId>) {
+        if state.dom.get(id).is_some() {
+            let root = self.find_root(state, reflection, id);
+            let parents = self.relay.entry(root).or_default();
+            if let Some(parent) = parent {
+                parents.insert(parent);
+            }
+        }
+    }
+
+    /// Whether `root`'s next pass re-lays the unchanged objects too, and the parents of the objects written (forgotten
+    /// here): `Pass::run`
+    pub(crate) fn take_relay(&mut self, root: InstanceId) -> Option<FxHashSet<InstanceId>> {
+        self.relay.remove(&root)
+    }
+
+    /// The frame's ZIndex writes: a client sorts every object of each tree that had one again (measured in a 0.747 client:
+    /// 0.18 us an object, by the tree's size, not the parent's: one ZIndex write among 10 siblings beside 1,000 frames cost
+    /// as much as one among 1,000 siblings). Counted into `Stats::resorted` once a frame (install.rs `update_all`).
+    pub(crate) fn count_resorts(&mut self) {
+        if self.resort_roots.is_empty() {
+            return;
+        }
+        let mut total = 0u64;
+        for root in std::mem::take(&mut self.resort_roots) {
+            if let Some(record) = self.records.get(root) {
+                total += u64::from(record.count.max(1));
+            }
+        }
+        self.stats.resorted += total;
     }
 
     /// `Layout.Records[Proxy]`
@@ -547,34 +619,75 @@ impl Layout {
     /// install.luau's PropertyChanged hook.
     pub fn property_changed(&mut self, state: &State, reflection: &Reflection, id: InstanceId, name: NameId) {
         let Some(instance) = state.dom.get(id) else { return };
-        let ids = &self.ids;
-        let flags = ids.name_flags(name);
+        let (n, c) = (self.ids.n, self.ids.c);
+        let flags = self.ids.name_flags(name);
         if flags & P::COMPUTED != 0 {
             return;
         }
         let class = reflection.class(instance.class);
+        if name == n.ZIndex && class.is_a(c.GuiObject) {
+            let root = self.find_root(state, reflection, id);
+            self.resort_roots.insert(root);
+            return;
+        }
         let appearance = flags & P::APPEARANCE != 0
-            && !(name == ids.n.TextXAlignment
-                && class.is_a(ids.c.GuiObject)
-                && !matches!(state.dom.raw_get(id, ids.n.AutomaticSize), Some(super::Value::EnumItem(item)) if Some(*item) == ids.automatic_none));
+            && !(name == n.TextXAlignment
+                && class.is_a(c.GuiObject)
+                && !matches!(state.dom.raw_get(id, n.AutomaticSize), Some(super::Value::EnumItem(item)) if Some(*item) == self.ids.automatic_none));
         if appearance {
             return;
         }
         // IsRelevant: GuiBase2d / UIComponent / UIBase, except appearance-only components
-        let c = &ids.c;
         if instance.class == c.UICorner || instance.class == c.UIDragDetector || instance.class == c.UIGradient || instance.class == c.UIStroke {
             return;
         }
         if !(class.is_a(c.GuiBase2d) || class.is_a(c.UIComponent) || class.is_a(c.UIBase)) {
             return;
         }
-        if name == ids.n.CanvasPosition && instance.class == c.ScrollingFrame {
+        // (a geometry write, `relays`; a layout object's or modifier's write lays its parent's tree out the same way, measured
+        // for UIPadding and UIScale)
+        if class.is_a(c.GuiObject) && self.relays(state, reflection, class, id, name) {
+            let parent = instance.parent;
+            self.mark_relay(state, reflection, id, parent);
+        } else if class.is_a(c.UIComponent) && instance.class != c.UIShadow {
+            if let Some(parent) = instance.parent {
+                let grand = state.dom.get(parent).and_then(|p| p.parent);
+                self.mark_relay(state, reflection, parent, grand);
+            }
+        }
+        if name == n.CanvasPosition && instance.class == c.ScrollingFrame {
             self.mark_scrolled(id);
         } else if flags & P::PLACEMENT != 0 && class.is_a(c.GuiObject) {
             self.mark_placed(state, reflection, id);
         } else {
             self.mark_changed(state, id);
         }
+    }
+
+    /// Whether a write of `name` on the GuiObject `id` is a geometry write (`mark_relay`). Measured in a 0.747 client, one
+    /// object's write among 1,000 siblings: Size (also of the same absolute size), Position, AnchorPoint, Rotation, Visible,
+    /// SizeConstraint and AutomaticSize lay all 1,000 out again (0.7 to 2 ms a frame), and so does any text input of a text
+    /// object that sizes itself to its text (AutomaticSize; Text also when its width stays, TextSize, Font), and LayoutOrder
+    /// beside a UIGridLayout (300 cards: 0.48 ms); its Text, TextSize, Font or TextWrapped in a fixed box, TextScaled text,
+    /// colours, Name, and LayoutOrder without a layout object do not.
+    fn relays(&self, state: &State, reflection: &Reflection, class: &crate::engine::reflection::ClassInfo, id: InstanceId, name: NameId) -> bool {
+        let n = &self.ids.n;
+        let c = &self.ids.c;
+        if name == n.Size || name == n.Position || name == n.AnchorPoint || name == n.Rotation || name == n.Visible || name == n.SizeConstraint || name == n.AutomaticSize {
+            return true;
+        }
+        if name == n.LayoutOrder {
+            let parent = state.dom.at(id).parent.and_then(|parent| state.dom.get(parent));
+            return parent.is_some_and(|parent| {
+                parent.children.iter().any(|&child| state.dom.get(child).is_some_and(|child| reflection.class(child.class).is_a(c.UIGridStyleLayout)))
+            });
+        }
+        // (Name: placement only to a layout object sorting by name, not measured)
+        if self.ids.name_flags(name) & P::PLACEMENT != 0 {
+            return false;
+        }
+        (class.is_a(c.TextLabel) || class.is_a(c.TextButton) || class.is_a(c.TextBox))
+            && matches!(state.dom.raw_get(id, n.AutomaticSize), Some(super::Value::EnumItem(item)) if Some(*item) != self.ids.automatic_none)
     }
 
     /// Drops every piece of layout state of a freed instance.
@@ -596,16 +709,34 @@ impl Layout {
         self.churn.remove(&id);
         self.dirty_sources.remove(&id);
         self.pass_churn.remove(&id);
+        self.relay.remove(&id);
+        self.resort_roots.remove(&id);
     }
 
     /// install.luau's HierarchyChanged hook.
-    pub fn hierarchy_changed(&mut self, state: &State, id: InstanceId, old_parent: Option<InstanceId>) {
+    pub fn hierarchy_changed(&mut self, state: &State, reflection: &Reflection, id: InstanceId, old_parent: Option<InstanceId>) {
         if self.track_churn {
             if state.dom.get(id).and_then(|i| i.parent).is_some() {
                 self.dirty_sources.insert(id);
             }
             if let Some(old) = old_parent {
                 self.dirty_sources.insert(old);
+            }
+        }
+        // (a GuiObject put in or taken out: a geometry write in both trees, measured as Parent = nil and back among 1,000
+        // siblings)
+        let relevant = state.dom.get(id).is_some_and(|instance| {
+            let class = reflection.class(instance.class);
+            let c = &self.ids.c;
+            let appearance_only = [c.UICorner, c.UIDragDetector, c.UIGradient, c.UIStroke, c.UIShadow].contains(&instance.class);
+            class.is_a(c.GuiObject) || (class.is_a(c.UIComponent) && !appearance_only)
+        });
+        if relevant {
+            if let Some(parent) = state.dom.at(id).parent {
+                self.mark_relay(state, reflection, id, Some(parent));
+            }
+            if let Some(old) = old_parent {
+                self.mark_relay(state, reflection, old, Some(old));
             }
         }
         self.mark_changed_internal(state, id);

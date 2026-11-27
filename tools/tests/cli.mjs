@@ -951,7 +951,7 @@ end
 		assert.equal(cPlay.runMode, "play");
 		assert.equal(cPlay.layout.scrollPasses, 1);
 		assert.equal(cPlay.layout.scrollMoved, 120);
-		assert.ok(Math.abs(cPlay.predicted["desktop-ref"].layoutCpuMs.ms - 0.0702) < 1e-9, `expected 0.0702 ms (a pass's 58.2 us + 120 * 0.1 us), got ${cPlay.predicted["desktop-ref"].layoutCpuMs.ms}`);
+		assert.ok(Math.abs(cPlay.predicted["desktop-ref"].layoutCpuMs.ms - 0.0414) < 1e-9, `expected 0.0414 ms (a pass's 27 us + 120 * 0.12 us), got ${cPlay.predicted["desktop-ref"].layoutCpuMs.ms}`);
 		assert.equal(cPlay.predicted["phone-mid"].layoutCpuMs.factors.liveFrameWeight.value, 0.77);
 		assert.equal(cPlay.predicted["phone-mid"].layoutCpuMs.factors.liveFrameWeight.basis, "recorded_phone_gui_category");
 
@@ -996,7 +996,7 @@ end
 		assert.ok(plainSeqLines.length <= 40, `plain sequence stdout too tall (${plainSeqLines.length} lines)`);
 		assert.ok(Buffer.byteLength(rPlainSeq.stdout, "utf8") <= 4096, `plain sequence stdout too large (${rPlainSeq.stdout.length} bytes)`);
 		assert.match(rPlainSeq.stdout, /mode=play 60 Hz/);
-		assert.match(rPlainSeq.stdout, /0\.0702 ms/);
+		assert.match(rPlainSeq.stdout, /0\.0414 ms/);
 		assert.match(rPlainSeq.stdout, /top layout \(\d+\/\d+, \d+% of churn\):/);
 		assert.match(rPlainSeq.stdout, /ScrollingFrame.*1\.0sp\/120\.0sm/);
 		const seqObjLines = rPlainSeq.stdout.split(/\r?\n/).filter(l => l.startsWith("    ") && l.includes("| quads="));
@@ -1062,13 +1062,13 @@ end
 			const rFps = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "6", "--fps", String(fps), "--out", outFps);
 			assert.equal(rFps.status, 0, rFps.stderr);
 			assert.match(rFps.stdout, /mode=play 60 Hz client/);
-			assert.match(rFps.stdout, /0\.0702 ms/);
+			assert.match(rFps.stdout, /0\.0414 ms/);
 			const cFps = JSON.parse(fs.readFileSync(path.join(outFps, "cost.json"), "utf8"));
 			assert.equal(cFps.sequence.summary.fps, fps);
 			assert.equal(cFps.sequence.summary.clientHz, 60);
 			assert.equal(cFps.layout.scrollPasses, 1);
 			assert.equal(cFps.layout.scrollMoved, 120);
-			assert.ok(Math.abs(cFps.predicted["desktop-ref"].layoutCpuMs.ms - 0.0702) < 1e-9, `fps=${fps} expected 0.0702, got ${cFps.predicted["desktop-ref"].layoutCpuMs.ms}`);
+			assert.ok(Math.abs(cFps.predicted["desktop-ref"].layoutCpuMs.ms - 0.0414) < 1e-9, `fps=${fps} expected 0.0414, got ${cFps.predicted["desktop-ref"].layoutCpuMs.ms}`);
 		}
 		const out120Client = path.join(dir, "counter-client-120");
 		const r120Client = runRur("cost", "--fixture", counterScroll, "--no-snapshots", "--viewport", "800x600", "--scale", "1", "--from", "0.5", "--frames", "6", "--fps", "120", "--client-hz", "120", "--out", out120Client);
@@ -1078,7 +1078,7 @@ end
 		const c120Client = JSON.parse(fs.readFileSync(path.join(out120Client, "cost.json"), "utf8"));
 		assert.equal(c120Client.sequence.summary.clientHz, 120);
 		assert.equal(c120Client.sequence.summary.steadyStateClientFrames, 5);
-		assert.ok(Math.abs(c120Client.predicted["desktop-ref"].layoutCpuMs.ms - 0.0702) < 1e-9);
+		assert.ok(Math.abs(c120Client.predicted["desktop-ref"].layoutCpuMs.ms - 0.0414) < 1e-9);
 
 		// Native binary called directly without Node: --device touch is really run and recorded,
 		// and `rur-native cost compare` refuses desktop vs touch live arms.

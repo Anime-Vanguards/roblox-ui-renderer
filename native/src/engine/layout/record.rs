@@ -92,6 +92,9 @@ pub struct Record {
     pub local_space_w: Option<f64>,
     pub local_space_h: Option<f64>,
     pub text_box: Option<f64>,
+    /// The records of this object's laid-out subtree, itself included (what a client lays out again under an unchanged
+    /// object it re-lays: Stats::relaid_under; not an input or output of the layout)
+    pub count: u32,
 }
 
 #[inline]

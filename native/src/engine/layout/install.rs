@@ -46,19 +46,25 @@ pub fn ensure(engine: &Engine, id: InstanceId) {
         if !pass.is_laid_out(root) {
             let charged = pass.l.changed_since_frame_layout(root);
             let before = pass.l.stats;
+            let version = pass.l.record(id).map(|record| record.version);
             pass.run(root);
-            if charged {
-                price += lazy_layout_price(&before, &pass.l.stats);
+            // (measured: a read of an object the change left alone, after a write that re-lays nothing, such as another
+            // label's Text, lays nothing out for the read: about 1 us over a clean read)
+            let read_changed = pass.l.record(id).map(|record| record.version) != version;
+            let relaid = pass.l.stats.relaid > before.relaid;
+            if charged && (read_changed || relaid) {
+                price += lazy_layout_price(&before, &pass.l.stats, read_changed);
                 if pass.l.print_stats {
                     let (after, before) = (pass.l.stats, before);
                     eprintln!(
-                        "layout-lazy {:.2} us computed={} stored={} moved={} skipped={} memo={}",
+                        "layout-lazy {:.2} us computed={} stored={} moved={} skipped={} memo={} near={}",
                         price * 1e6,
                         after.computed - before.computed,
                         after.stored - before.stored,
                         after.moved - before.moved,
                         after.skipped - before.skipped,
-                        after.memo - before.memo
+                        after.memo - before.memo,
+                        after.relaid_near - before.relaid_near
                     );
                 }
             }
@@ -69,7 +75,7 @@ pub fn ensure(engine: &Engine, id: InstanceId) {
             if !after || moved == 0 {
                 continue;
             }
-            let scroll = LAZY_SCROLL_PASS + LAZY_LAYOUT_OBJECT * moved as f64;
+            let scroll = LAZY_SCROLL_PASS + LAZY_SCROLL_OBJECT * moved as f64;
             if pass.l.print_stats {
                 eprintln!("layout-lazy-scroll {:.2} us moved={moved}", scroll * 1e6);
             }
@@ -87,22 +93,33 @@ pub fn ensure(engine: &Engine, id: InstanceId) {
     }
 }
 
-/// What a client spends laying a changed GUI out for a script's read (`ensure`), by the records the pass stored or moved (one it
-/// skipped, unchanged, costs about nothing).
-fn lazy_layout_price(before: &super::Stats, after: &super::Stats) -> f64 {
+/// What a client spends laying a changed GUI out for a script's read (`ensure`): a pass, the records it stored or moved, the
+/// texts it laid out when the read object is among what changed (`texts_read`: a label's TextBounds after its Text), and
+/// after a geometry write the written objects' unchanged siblings, which the read lays out again (`Stats::relaid_near`; one
+/// it skipped elsewhere, unchanged, costs about nothing).
+fn lazy_layout_price(before: &super::Stats, after: &super::Stats, texts_read: bool) -> f64 {
     let objects = (after.stored - before.stored) + (after.moved - before.moved);
-    LAZY_LAYOUT_PASS + LAZY_LAYOUT_OBJECT * objects as f64
+    let siblings = after.relaid_near - before.relaid_near;
+    let texts = if texts_read { after.texts - before.texts } else { 0 };
+    LAZY_LAYOUT_PASS + LAZY_LAYOUT_OBJECT * objects as f64 + LAZY_LAYOUT_SIBLING * siblings as f64 + LAZY_LAYOUT_TEXT * texts as f64
 }
 
-// A client's lazy layout, measured in a rendered client of a game's lobby (roblox-sim, Studio 0.744; notes/macro layoutprobe, two
-// sessions of 15 rounds): a grid of cards in a ScrollingFrame, its canvas moved and every card's AbsolutePosition read in the same
-// handler, the first read 156 us for 100 cards (301 records the scroll moves here), 334-379 for 300 (901), 998 for 1,000 (3,001):
-// 62 us and 0.312 a record; one card's inner frame resized, or its label's text changed, among 300 (4 records stored, 300 skipped)
-// 3.6-4.0 us. The client lays every changed GUI out once a frame for nothing a script pays, after the render step's bindings and
-// before PreRender: a read there, or later in the frame, of a change made before it costs 2-7 us, as a clean read does.
-const LAZY_LAYOUT_PASS: f64 = 2.3e-6;
+// A client's lazy layout, measured in a rendered Studio 0.747 client (roblox-sim, notes/cost-calibration.md "Lazy reads"): the
+// first computed-property read after a write in Heartbeat, less a first read after no write (about 8 us, which a read costs
+// whatever it lays out), 25 rounds a case, the geometric mean of two sessions (one ran 1.3 to 2.1x slower throughout on a
+// loaded machine). One card's inner frame resized among 100 / 300 / 1,000 cards of a grid (4 records stored, no sibling of
+// the frame re-laid): 23 us, flat; a frame's leaf resized at depth 1 or 32 among 20 siblings: 38 / 35 us (the ancestors cost
+// nothing seen); one child of a plain frame resized among 100 / 300 / 1,000 children: 80 / 205 / 707 us, 0.68 us a sibling
+// (a read lays out the written object's siblings again, not the rest of the tree as the frame's layout does); a label's Text
+// changed and its TextBounds read: 64 us; a ScrollingFrame of 100 / 300 / 1,000 cards scrolled and a card's AbsolutePosition
+// read: 138 / 169 / 276 us, 123 us and 0.051 a moved record. (A Studio 0.744 lobby probe priced 2.3 us a pass, 0.312 a
+// record and 62 a scroll; the record price is kept, the new cases do not tell it apart.)
+const LAZY_LAYOUT_PASS: f64 = 23e-6;
 const LAZY_LAYOUT_OBJECT: f64 = 0.312e-6;
-const LAZY_SCROLL_PASS: f64 = 62e-6;
+const LAZY_LAYOUT_SIBLING: f64 = 0.68e-6;
+const LAZY_LAYOUT_TEXT: f64 = 40e-6;
+const LAZY_SCROLL_PASS: f64 = 123e-6;
+const LAZY_SCROLL_OBJECT: f64 = 0.051e-6;
 
 /// `Layout.Ensure(Proxy)` for a caller that already holds the engine state: a PropertyChanged
 /// hook (runtime/input scrolling.luau refreshes a presented ScrollingFrame when ScrollingEnabled
@@ -139,7 +156,7 @@ pub fn update_all(engine: &Engine) {
                 let before = pass.l.stats;
                 pass.run(root);
                 if owed {
-                    *pass.l.owed.entry(root).or_default() += lazy_layout_price(&before, &pass.l.stats);
+                    *pass.l.owed.entry(root).or_default() += lazy_layout_price(&before, &pass.l.stats, true);
                 }
                 ran = true;
             }
@@ -149,16 +166,17 @@ pub fn update_all(engine: &Engine) {
             for (scrolled, moved, after) in pass.process_scrolls() {
                 if after && moved > 0 {
                     let root = pass.find_root(scrolled);
-                    *pass.l.owed.entry(root).or_default() += LAZY_SCROLL_PASS + LAZY_LAYOUT_OBJECT * moved as f64;
+                    *pass.l.owed.entry(root).or_default() += LAZY_SCROLL_PASS + LAZY_SCROLL_OBJECT * moved as f64;
                 }
             }
             pass.l.stats.time += super::elapsed(started);
             ran = true;
         }
+        pass.l.count_resorts();
         if ran && pass.l.print_stats {
             let stats = pass.l.stats;
             eprintln!(
-                "layout-stats {} passes={} computed={} memo={} measures={} stored={} skipped={} moved={} texts={}",
+                "layout-stats {} passes={} computed={} memo={} measures={} stored={} skipped={} moved={} texts={} relaid={} relaidUnder={}",
                 stats.time * 1000.0,
                 stats.passes,
                 stats.computed,
@@ -167,7 +185,9 @@ pub fn update_all(engine: &Engine) {
                 stats.stored,
                 stats.skipped,
                 stats.moved,
-                stats.texts
+                stats.texts,
+                stats.relaid,
+                stats.relaid_under
             );
             pass.l.cumulative.add(&pass.l.stats);
             pass.l.stats = Default::default();
@@ -287,6 +307,8 @@ pub fn take_churn(engine: &Engine) -> Vec<super::LayoutChurnEntry> {
             moved: churn.moved,
             scroll_passes: churn.scroll_passes,
             scroll_moved: churn.scroll_moved,
+            relaid: churn.relaid,
+            relaid_under: churn.relaid_under,
         });
     }
     entries.sort_by(|a, b| a.id.cmp(&b.id));
@@ -337,7 +359,7 @@ fn ensure_laid_out(engine: &Engine, id: InstanceId) {
             let before = pass.l.stats;
             pass.run(root);
             if charged {
-                price += lazy_layout_price(&before, &pass.l.stats);
+                price += lazy_layout_price(&before, &pass.l.stats, true);
             }
         }
         price
@@ -414,7 +436,7 @@ pub fn install(engine: &Rc<Engine>) {
             let Some(engine) = weak.upgrade() else { return };
             let Ok(mut guard) = engine.layout().try_borrow_mut() else { return };
             if let Some(layout) = guard.as_mut() {
-                layout.hierarchy_changed(state, id, old_parent);
+                layout.hierarchy_changed(state, &engine.reflection, id, old_parent);
             }
         }));
         // (instance GC, lua/raw.rs: a freed slot's layout state goes with it; the generation check

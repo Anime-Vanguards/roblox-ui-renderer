@@ -43,15 +43,23 @@ use crate::{
     story_args::{Args, Context, Failure},
 };
 
-/// What a client's per-frame layout (UpdateUILayouts) costs on the reference desktop: a rendered Studio 0.747
-/// client, LibMP captured and the frame log uncaptured, fitted to rur's per-frame counters over 28 single-factor scenes
-/// (card grids scrolled and edited, frame chains of depth 1 to 32, 20 changed leaves, lists, moved subtrees, text; median
-/// error 13 %) and checked on four held-out animations (median error 45 %); notes/cost-calibration.md "Per-frame layout".
-/// A layout pass and a scroll pass cost the same base.
-pub const CLIENT_LAYOUT_PASS_MS: f64 = 58.2e-3;
-pub const CLIENT_LAYOUT_STORED_MS: f64 = 1.18e-3;
-pub const CLIENT_LAYOUT_MOVED_MS: f64 = 1.16e-3;
-pub const CLIENT_LAYOUT_SCROLL_MOVED_MS: f64 = 0.1e-3;
+/// What a client's per-frame layout (UpdateUILayouts) costs on the reference desktop: a rendered Studio 0.747 client, LibMP
+/// captured and the frame log uncaptured, fitted to rur's per-frame counters over 83 single-factor scenes (P11's card grids
+/// scrolled and edited, frame chains of depth 1 to 32, lists, moved subtrees and text, and P11b's one write among 100 to 3,000
+/// objects of each kind; median error 13 %) and checked on four held-out animations; notes/cost-calibration.md "Per-frame
+/// layout" and "Re-laid objects". A layout pass and a scroll pass cost the same base; a text the pass lays out costs more
+/// than a record.
+pub const CLIENT_LAYOUT_PASS_MS: f64 = 27.0e-3;
+pub const CLIENT_LAYOUT_STORED_MS: f64 = 1.22e-3;
+pub const CLIENT_LAYOUT_MOVED_MS: f64 = 1.30e-3;
+pub const CLIENT_LAYOUT_SCROLL_MOVED_MS: f64 = 0.12e-3;
+pub const CLIENT_LAYOUT_TEXT_MS: f64 = 17.7e-3;
+/// After a geometry write a client lays its tree out again whole (LayerCollector by LayerCollector): every unchanged child
+/// of an object the pass lays out (`relaid`), and the records under those (`relaidUnder`).
+pub const CLIENT_LAYOUT_RELAID_MS: f64 = 0.92e-3;
+pub const CLIENT_LAYOUT_RELAID_UNDER_MS: f64 = 0.19e-3;
+/// A ZIndex write makes a client sort its tree's objects again (`resorted`: the tree's records, once a frame).
+pub const CLIENT_LAYOUT_RESORTED_MS: f64 = 0.19e-3;
 
 /// Phone mid-tier UI main-thread time from the desktop client's uncaptured ms:
 /// - capturedWholeUiPhoneOverDesktop: the phone's captured whole-UI-pass ms over a desktop client's captured ms, 4.09 (range
@@ -1725,7 +1733,7 @@ fn desktop_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_
         "scope": scope,
         "ms": round9(desk_ms),
         "extrapolatedFrom": extrapolated_from,
-        "source": "Studio 0.747 rendered client, per-frame UpdateUILayouts fitted to rur's per-frame counters: 58.2 us a layout or scroll pass + 1.18 us a stored record + 1.16 us a moved record + 0.1 us a record a scroll moves (held-out animations: median error 45 %, mostly priced low)"
+        "source": "Studio 0.747 rendered client, per-frame UpdateUILayouts fitted to rur's per-frame counters: 27 us a layout or scroll pass + 1.22 us a stored record + 1.30 us a moved record + 0.12 us a record a scroll moves + 17.7 us a text laid out + 0.92 us an unchanged object re-laid after a geometry write + 0.19 us a record under one + 0.19 us a record sorted again after a ZIndex write (83 scenes: median error 13 %; held-out animations: median error 42 %)"
     })
 }
 
@@ -1765,6 +1773,9 @@ fn phone_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_from: &'s
                 "range": [PHONE_CAPTURE_FACTOR_LOW, PHONE_CAPTURE_FACTOR_HIGH],
                 "basis": "measured_desktop_ui_work"
             },
+        "relaid": stats.relaid,
+        "relaidUnder": stats.relaid_under,
+        "resorted": stats.resorted,
             "liveFrameWeight": {
                 "value": PHONE_UI_LIVE_WEIGHT,
                 "basis": "recorded_phone_gui_category"
@@ -1781,6 +1792,9 @@ pub fn predicted_sequence_json(desk_ms: f64, scope: &'static str, draw: Option<(
     let (desk_draw, phone_draw) = draw_pass_or_refusal(draw);
     let desk_from = "Studio 0.747 client per-frame UpdateUILayouts (grids, chains, lists, moved subtrees, text) fitted to rur's per-frame counters";
     let phone_from = "desktop-ref extrapolated layoutCpuMs scaled by the derived phone ratio (4.09 * measured 0.88..1.12 capture factor * 0.77)";
+        "relaid": stats.relaid,
+        "relaidUnder": stats.relaid_under,
+        "resorted": stats.resorted,
     json!({
         "desktop-ref": {
             "layoutCpuMs": desktop_layout_extrapolation(desk_ms, scope, desk_from),
@@ -1796,6 +1810,10 @@ pub fn predicted_sequence_json(desk_ms: f64, scope: &'static str, draw: Option<(
 }
 
 pub fn predicted_json(stats: LayoutStats) -> Value {
+        + stats.texts as f64 * CLIENT_LAYOUT_TEXT_MS
+        + stats.relaid as f64 * CLIENT_LAYOUT_RELAID_MS
+        + stats.relaid_under as f64 * CLIENT_LAYOUT_RELAID_UNDER_MS
+        + stats.resorted as f64 * CLIENT_LAYOUT_RESORTED_MS
     predicted_sequence_json(desktop_layout_cpu_ms(stats), "per_frame", None)
 }
 
@@ -3307,7 +3325,7 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         "screenOverdrawViewports",
         "offscreenOverdrawViewports",
     ];
-    const LAYOUT_KEYS: [&str; 6] = ["passes", "computed", "stored", "moved", "scrollPasses", "scrollMoved"];
+    const LAYOUT_KEYS: [&str; 9] = ["passes", "computed", "stored", "moved", "scrollPasses", "scrollMoved", "relaid", "relaidUnder", "resorted"];
 
     let mut before_counts = Map::new();
     let mut after_counts = Map::new();
@@ -3354,7 +3372,10 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         before_layout.insert(key.into(), json!(b));
         after_layout.insert(key.into(), json!(a));
         delta_layout.insert(key.into(), json!(d));
-        if is_sequence && matches!(key, "stored" | "moved" | "scrollPasses" | "scrollMoved") {
+        // (re-laid records drive the verdict only when both reports count them: older reports predate the counters)
+        let counted_in_both = !matches!(key, "relaid" | "relaidUnder" | "resorted")
+            || (before.pointer(&format!("/layout/{key}")).is_some() && after.pointer(&format!("/layout/{key}")).is_some());
+        if is_sequence && counted_in_both && matches!(key, "stored" | "moved" | "scrollPasses" | "scrollMoved" | "relaid" | "relaidUnder" | "resorted") {
             if d < -1e-9 {
                 any_improved = true;
             } else if d > 1e-9 {
@@ -3668,7 +3689,7 @@ impl SequenceAccumulator {
             (round6(mean), round6(peak), round6(p95))
         };
 
-        let fields: [(&str, fn(&FrameMetrics) -> f64); 13] = [
+        let fields: [(&str, fn(&FrameMetrics) -> f64); 16] = [
             ("drawCalls", |m| m.draw_calls),
             ("batchBreaks", |m| m.batch_breaks),
             ("quads", |m| m.quads),
@@ -3727,6 +3748,8 @@ impl SequenceAccumulator {
         } else {
             0.0
         };
+                        acc.relaid += entry.relaid;
+                        acc.relaid_under += entry.relaid_under;
         let steady_desk_ms = if has_steady_client_frames {
             steady_slice.iter().map(|m| desktop_layout_cpu_ms(m.layout)).sum::<f64>() / denom
         } else {
@@ -3822,22 +3845,32 @@ impl SequenceAccumulator {
             obj.insert("status".into(), json!(final_status));
             obj.remove("fullTreeLayout");
             obj.insert("layout".into(), steady_layout_json.clone());
-            let mut raw_drivers: Vec<(f64, f64, engine::layout::LayoutChurnEntry, f64, f64, f64, f64, f64)> = if has_steady_client_frames {
+            let mut raw_drivers: Vec<(f64, f64, engine::layout::LayoutChurnEntry, f64, f64, f64, f64, f64, f64, f64)> = if has_steady_client_frames {
                 self.steady_churn
                     .values()
-                    .filter(|c| c.stored > 1e-9 || c.moved > 1e-9 || c.scroll_passes > 0 || c.scroll_moved > 0)
+                    .filter(|c| c.stored > 1e-9 || c.moved > 1e-9 || c.scroll_passes > 0 || c.scroll_moved > 0 || c.relaid > 1e-9 || c.relaid_under > 1e-9)
                     .map(|c| {
                         let s = c.stored / denom;
                         let anc = c.ancestor_stored / denom;
                         let m = c.moved / denom;
                         let sp = c.scroll_passes as f64 / denom;
                         let sm = c.scroll_moved as f64 / denom;
-                        let records = s + m + sm;
-                        let est_ms = sp * CLIENT_LAYOUT_PASS_MS + s * CLIENT_LAYOUT_STORED_MS + m * CLIENT_LAYOUT_MOVED_MS + sm * CLIENT_LAYOUT_SCROLL_MOVED_MS;
-                        (est_ms, records, c.clone(), s, anc, m, sp, sm)
+                        let r = c.relaid / denom;
+                        let ru = c.relaid_under / denom;
+                        let records = s + m + sm + r + ru;
+                        let est_ms = sp * CLIENT_LAYOUT_PASS_MS
+                            + s * CLIENT_LAYOUT_STORED_MS
+                            + m * CLIENT_LAYOUT_MOVED_MS
+                            + sm * CLIENT_LAYOUT_SCROLL_MOVED_MS
+                            + r * CLIENT_LAYOUT_RELAID_MS
+                            + ru * CLIENT_LAYOUT_RELAID_UNDER_MS;
+                        (est_ms, records, c.clone(), s, anc, m, sp, sm, r, ru)
                     })
                     .collect()
             } else {
+            ("layoutRelaid", |m| m.layout.relaid as f64),
+            ("layoutRelaidUnder", |m| m.layout.relaid_under as f64),
+            ("layoutResorted", |m| m.layout.resorted as f64),
                 Vec::new()
             };
             let total_drivers = raw_drivers.len();
@@ -3861,7 +3894,7 @@ impl SequenceAccumulator {
             let reported_driver_ms: f64 = raw_drivers.iter().map(|(ms, ..)| *ms).sum();
             let drivers_json: Vec<Value> = raw_drivers
                 .into_iter()
-                .map(|(est_ms, _, c, s, anc, m, sp, sm)| {
+                .map(|(est_ms, _, c, s, anc, m, sp, sm, r, ru)| {
                     let share = if total_driver_ms > 1e-12 { est_ms / total_driver_ms } else { 0.0 };
                     json!({
                         "id": c.id,
@@ -3883,6 +3916,21 @@ impl SequenceAccumulator {
                 .collect();
             let reported_drivers = drivers_json.len();
             obj.insert("layoutDrivers".into(), Value::Array(drivers_json));
+        let steady_relaid = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.relaid as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_relaid_under = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.relaid_under as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
+        let steady_resorted = if has_steady_client_frames {
+            steady_slice.iter().map(|m| m.layout.resorted as f64).sum::<f64>() / denom
+        } else {
+            0.0
+        };
             obj.insert(
                 "layoutDriverSummary".into(),
                 json!({
@@ -3911,6 +3959,9 @@ impl SequenceAccumulator {
                     "layoutCpuMs".into(),
                     if !is_play {
                         if play_probe.is_some_and(|p| !p.mounts_in_play_mode) {
+            "relaid": round6(steady_relaid),
+            "relaidUnder": round6(steady_relaid_under),
+            "resorted": round6(steady_resorted),
                             json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz; play mode does not mount this story, so per-frame layoutCpuMs is unavailable as-is)")
                         } else {
                             json!("refused_in_edit_mode (mode=edit fires Heartbeat at 240 Hz, 4 beats per 60 Hz frame; pass --mode play for client per-frame layoutCpuMs)")
@@ -4032,6 +4083,8 @@ pub fn run_sequence_cost(
         let outcome = scene.apply_owned(&mut reply).map_err(|e| format!("frame {index}: {e}"))?;
         acc.record_frame(
             index,
+                        "relaid": round6(r),
+                        "relaidUnder": round6(ru),
             time,
             unchanged,
             outcome.changed_nodes.len(),
@@ -4103,6 +4156,9 @@ fn format_phone_range(range: &[f64; 2], band: &[f64; 2]) -> String {
         format_ms_approx(band[1]),
     )
 }
+                            "relaid": round6(steady_relaid),
+                            "relaidUnder": round6(steady_relaid_under),
+                            "resorted": round6(steady_resorted),
 
 fn pair_at(value: &Value, ptr: &str) -> [f64; 2] {
     let arr = value.pointer(ptr).and_then(Value::as_array);
@@ -4525,12 +4581,12 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
                     .round() as u64;
                 let _ = writeln!(
                     out,
-                    "  caveat:    layout ms is fitted to a desktop client (held-out animations within 45 %, mostly priced low); {anc_pct}% of steady records are ancestors laid out again, which the client pays too; before-vs-after on one story is valid",
+                    "  caveat:    layout ms is fitted to a desktop client (held-out animations: median error 42 %, mostly priced low); {anc_pct}% of steady records are ancestors laid out again, which the client pays too; before-vs-after on one story is valid",
                 );
             } else {
                 let _ = writeln!(
                     out,
-                    "  caveat:    layout ms is fitted to a desktop client (held-out animations within 45 %, mostly priced low); before-vs-after on one story is valid",
+                    "  caveat:    layout ms is fitted to a desktop client (held-out animations: median error 42 %, mostly priced low); before-vs-after on one story is valid",
                 );
             }
             if desk_ms <= 1e-12 && steady["passes"].as_f64().unwrap_or(0.0) <= 1e-12 {
@@ -5798,8 +5854,8 @@ mod tests {
         let play_text = format_one_screen_report(&acc_play.finish(Some("ok")), dest);
         let play_lines = play_text.lines().filter(|l| !l.trim().is_empty()).count();
         assert!(play_lines <= 32 && play_text.len() <= 4096, "play seq summary too large ({play_lines} lines, {} B):\n{play_text}", play_text.len());
-        // one scroll pass moving 120 records: 58.2 + 120 * 0.1 = 70.2 us
-        assert!(play_text.contains("mode=play 60 Hz") && play_text.contains("0.0702 ms"), "{play_text}");
+        // one scroll pass moving 120 records: 27 + 120 * 0.12 = 41.4 us
+        assert!(play_text.contains("mode=play 60 Hz") && play_text.contains("0.0414 ms"), "{play_text}");
         assert!(play_text.contains("derived 2.77x..3.53x"), "sequence phone range line must state the derived ratio:\n{play_text}");
 
         let edit_text = format_one_screen_report(&acc_edit.finish(Some("ok")), dest);
@@ -6034,7 +6090,7 @@ mod tests {
 
     #[test]
     fn calibration_and_refusal_contract() {
-        // Non-scroll: 2 passes * 58.2 us + 10 stored * 1.18 us + 5 moved * 1.16 us = 116.4 + 11.8 + 5.8 = 134 us
+        // Non-scroll: 2 passes * 27 us + 10 stored * 1.22 us + 5 moved * 1.30 us = 54 + 12.2 + 6.5 = 72.7 us
         // phone-mid derived ratio: 4.09 * (0.88..1.12) * 0.77 = 2.771384..3.527216 (~2.77x..3.53x),
         // full band: 2.65 * 0.88 * 0.77 = 1.79564 (~1.80x) .. 8.0 * 1.12 * 0.77 = 6.8992 (~6.90x).
         let stats = LayoutStats {
@@ -6047,7 +6103,7 @@ mod tests {
         };
         let pred = predicted_json(stats);
         assert_eq!(pred["desktop-ref"]["layoutCpuMs"]["basis"], "extrapolated");
-        assert!((pred["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - 0.134).abs() < 1e-9);
+        assert!((pred["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - 0.0727).abs() < 1e-9);
         let phone = &pred["phone-mid"]["layoutCpuMs"];
         assert_eq!(phone["basis"], "derived_extrapolation");
         assert_eq!(phone["ratioBasis"], "derived");
@@ -6056,10 +6112,10 @@ mod tests {
         assert!((phone["ratioRange"][1].as_f64().unwrap() - 3.5272).abs() < 1e-4);
         assert!((phone["bandRatio"][0].as_f64().unwrap() - 1.7956).abs() < 1e-4);
         assert!((phone["bandRatio"][1].as_f64().unwrap() - 6.8992).abs() < 1e-4);
-        assert!((phone["rangeMs"][0].as_f64().unwrap() - 0.3714).abs() < 1e-4);
-        assert!((phone["rangeMs"][1].as_f64().unwrap() - 0.4726).abs() < 1e-4);
-        assert!((phone["bandMs"][0].as_f64().unwrap() - 0.2406).abs() < 1e-4);
-        assert!((phone["bandMs"][1].as_f64().unwrap() - 0.9245).abs() < 1e-4);
+        assert!((phone["rangeMs"][0].as_f64().unwrap() - 0.2015).abs() < 1e-4);
+        assert!((phone["rangeMs"][1].as_f64().unwrap() - 0.2564).abs() < 1e-4);
+        assert!((phone["bandMs"][0].as_f64().unwrap() - 0.1305).abs() < 1e-4);
+        assert!((phone["bandMs"][1].as_f64().unwrap() - 0.5016).abs() < 1e-4);
         assert_eq!(phone["factors"]["capturedWholeUiPhoneOverDesktop"]["central"], 4.09);
         assert_eq!(phone["factors"]["captureOverheadFactor"]["value"], 0.97);
         assert_eq!(phone["factors"]["captureOverheadFactor"]["basis"], "measured_desktop_ui_work");
@@ -6076,30 +6132,30 @@ mod tests {
         assert!(!summary.contains("assumed"), "no phone factor is assumed any more: {summary}");
         assert!(summary.contains("~0.39..0.63 ms") && summary.contains("0.25..1.23 ms"), "{summary}");
 
-        // Scroll 100 cards with 2 children each (+ container = 301 records): a pass's 58.2 us + 301 * 0.1 us
-        // = 88.3 us (the client measured 0.107..0.152 ms)
+        // Scroll 100 cards with 2 children each (+ container = 301 records): a pass's 27 us + 301 * 0.12 us
+        // = 63.12 us (the client measured 0.107..0.152 ms)
         let scroll_100 = LayoutStats {
             scroll_passes: 1,
             scroll_moved: 301,
             ..Default::default()
         };
-        assert!((desktop_layout_cpu_ms(scroll_100) - 0.0883).abs() < 1e-9);
+        assert!((desktop_layout_cpu_ms(scroll_100) - 0.06312).abs() < 1e-9);
 
-        // Scroll 1,000 cards: 58.2 us + 3001 * 0.1 us = 358.3 us (the client measured 0.214..0.352 ms)
+        // Scroll 1,000 cards: 27 us + 3001 * 0.12 us = 387.12 us (the client measured 0.214..0.352 ms)
         let scroll_1000 = LayoutStats {
             scroll_passes: 1,
             scroll_moved: 3001,
             ..Default::default()
         };
-        assert!((desktop_layout_cpu_ms(scroll_1000) - 0.3583).abs() < 1e-9);
+        assert!((desktop_layout_cpu_ms(scroll_1000) - 0.38712).abs() < 1e-9);
 
-        // Two scrolls in one frame charge a pass each plus every moved record: 2 * 58.2 + 602 * 0.1 = 176.6 us
+        // Two scrolls in one frame charge a pass each plus every moved record: 2 * 27 + 602 * 0.12 = 126.24 us
         let two_scrolls = LayoutStats {
             scroll_passes: 2,
             scroll_moved: 602,
             ..Default::default()
         };
-        assert!((desktop_layout_cpu_ms(two_scrolls) - 0.1766).abs() < 1e-9);
+        assert!((desktop_layout_cpu_ms(two_scrolls) - 0.12624).abs() < 1e-9);
 
         // No analysed frame behind predicted_json: the draw pass is refused, and the GPU always is
         for tier in ["desktop-ref", "phone-mid"] {
@@ -6173,7 +6229,7 @@ end
         assert!(single_rep["fullTreeLayout"]["stored"].as_u64().unwrap() >= 301);
 
         // Sequence mode: each steady-state 60 Hz frame applies 1 scroll moving 301 records (not 1204)
-        // and prices it at a pass's 58.2 us + 301 * 0.1 us = 0.0883 ms
+        // and prices it at a pass's 27 us + 301 * 0.12 us = 0.06312 ms
         let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let seq_rep = run_sequence_cost(&args, &spec, &repo).unwrap();
         let frames = seq_rep["sequence"]["frames"].as_array().unwrap();
@@ -6181,7 +6237,7 @@ end
             assert_eq!(f["layout"]["scrollPasses"], 1, "expected 1 scroll pass per 60 Hz frame");
             assert_eq!(f["layout"]["scrollMoved"], 301, "expected 301 records moved per scroll");
             let ms = f["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
-            assert!((ms - 0.0883).abs() < 1e-6, "expected 0.0883 ms, got {ms}");
+            assert!((ms - 0.06312).abs() < 1e-6, "expected 0.06312 ms, got {ms}");
             assert_eq!(f["predicted"]["desktop-ref"]["layoutCpuMs"]["basis"], "extrapolated");
         }
         let _ = std::fs::remove_dir_all(&tmp);
@@ -6196,7 +6252,7 @@ end
 
         // 60 cards x 2 records (Card + Inner) = 120 moved records per scroll.
         // Counter-driven Heartbeat + AbsolutePosition read (prevents coalescing across beats).
-        // Derived 1 client frame: a pass's 58.2 us + 120 * 0.1 us = 70.2 us = 0.0702 ms.
+        // Derived 1 client frame: a pass's 27 us + 120 * 0.12 us = 41.4 us = 0.0414 ms.
         let counter_fixture = tmp.join("counter_scroll.luau");
         let counter_src = "\
 return function(Target)
@@ -6257,7 +6313,7 @@ end
 ";
         std::fs::write(&double_fixture, double_src).unwrap();
 
-        // Two writes with no read between them in one Heartbeat: must coalesce to 1 scroll pass (0.0702 ms).
+        // Two writes with no read between them in one Heartbeat: must coalesce to 1 scroll pass (0.0414 ms).
         let coalesce_fixture = tmp.join("coalesce_scroll.luau");
         let coalesce_src = "\
 return function(Target)
@@ -6299,14 +6355,14 @@ end
         };
         let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
 
-        // 1. Default run (no --mode): runs play mode (1 Heartbeat/frame) and prices 1 scroll pass (0.0702 ms)
+        // 1. Default run (no --mode): runs play mode (1 Heartbeat/frame) and prices 1 scroll pass (0.0414 ms)
         let default_rep = run_sequence_cost(&make_args(&counter_fixture, &[]), &spec, &repo).unwrap();
         assert_eq!(default_rep["runMode"], "play");
         assert_eq!(default_rep["runModeInfo"]["heartbeatsPerFrame"], 1);
         assert_eq!(default_rep["layout"]["scrollPasses"], 1.0);
         assert_eq!(default_rep["layout"]["scrollMoved"], 120.0);
         let desk_ms = default_rep["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
-        assert!((desk_ms - 0.0702).abs() < 1e-9, "expected 0.0702 ms in default play mode, got {desk_ms}");
+        assert!((desk_ms - 0.0414).abs() < 1e-9, "expected 0.0414 ms in default play mode, got {desk_ms}");
 
         // 2. Explicit --mode edit: records runMode="edit" (240 Hz, 4 beats/frame) and refuses per-frame layoutCpuMs
         let edit_rep = run_sequence_cost(&make_args(&counter_fixture, &["--mode", "edit"]), &spec, &repo).unwrap();
@@ -6333,20 +6389,20 @@ end
         assert!(cmp["reason"].as_str().unwrap().contains("runMode"));
         assert!(cmp["remedy"].as_str().unwrap().contains("--mode"));
 
-        // 4. Write-read-write (2 scrolls per frame): 2 * 58.2 + 240 * 0.1 = 140.4 us in default play mode
+        // 4. Write-read-write (2 scrolls per frame): 2 * 27 + 240 * 0.12 = 82.8 us in default play mode
         let double_rep = run_sequence_cost(&make_args(&double_fixture, &[]), &spec, &repo).unwrap();
         assert_eq!(double_rep["runMode"], "play");
         assert_eq!(double_rep["layout"]["scrollPasses"], 2.0);
         assert_eq!(double_rep["layout"]["scrollMoved"], 240.0);
         let double_ms = double_rep["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
-        assert!((double_ms - 0.1404).abs() < 1e-9, "expected 0.1404 ms, got {double_ms}");
+        assert!((double_ms - 0.0828).abs() < 1e-9, "expected 0.0828 ms, got {double_ms}");
 
-        // 5. Write-write without read in one Heartbeat: coalesces to 1 scroll pass (0.0702 ms)
+        // 5. Write-write without read in one Heartbeat: coalesces to 1 scroll pass (0.0414 ms)
         let coal_rep = run_sequence_cost(&make_args(&coalesce_fixture, &[]), &spec, &repo).unwrap();
         assert_eq!(coal_rep["layout"]["scrollPasses"], 1.0, "two writes without a read must coalesce");
         assert_eq!(coal_rep["layout"]["scrollMoved"], 120.0);
         let coal_ms = coal_rep["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
-        assert!((coal_ms - 0.0702).abs() < 1e-9, "expected 0.0702 ms, got {coal_ms}");
+        assert!((coal_ms - 0.0414).abs() < 1e-9, "expected 0.0414 ms, got {coal_ms}");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -6675,7 +6731,7 @@ end
     #[test]
     fn client_cadence_is_one_client_frame_at_30_60_120_fps_and_refuses_zero_client_frames() {
         // Review fixture: 37 cards x 3 records (Card + Inner + Title) = 111 moved records per scroll.
-        // Hand figure for one client frame: a pass's 58.2 us + 0.1 us * 111 = 69.3 us = 0.0693 ms.
+        // Hand figure for one client frame: a pass's 27 us + 0.12 us * 111 = 40.32 us = 0.04032 ms.
         let repo = crate::engine::default_repo();
         let root = repo.join("tools/tests/oracle-root");
         let dir = std::env::temp_dir().join(format!("rur-cost-cadence-{}", std::process::id()));
@@ -6724,10 +6780,10 @@ end
             "--no-snapshots".into(),
         ];
         let args = engine::cli::parse(&argv).unwrap();
-        let expected_ms = 0.0693;
+        let expected_ms = 0.04032;
         let dest = Path::new("out/cost.json");
 
-        // 1. --fps 60 (60 Hz client): 1 client frame per sample -> 1.0 sp / 111.0 sm / 0.0693 ms
+        // 1. --fps 60 (60 Hz client): 1 client frame per sample -> 1.0 sp / 111.0 sm / 0.04032 ms
         let rep60 = run_sequence_cost(
             &args,
             &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
@@ -6745,7 +6801,7 @@ end
         assert_eq!(f60[1]["clientFrames"], 1);
         assert!((f60[1]["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - expected_ms).abs() < 1e-9);
 
-        // 2. --fps 30 (60 Hz client): 2 client frames per sample, normalized per 1 client frame -> 0.0693 ms
+        // 2. --fps 30 (60 Hz client): 2 client frames per sample, normalized per 1 client frame -> 0.04032 ms
         //    Individual 2-client-frame samples refuse per-frame layoutCpuMs so they are never printed as 1 client frame.
         let rep30 = run_sequence_cost(
             &args,
@@ -6766,9 +6822,9 @@ end
         assert!(f30[1]["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].is_null());
         let screen30 = format_one_screen_report(&rep30, dest);
         assert!(screen30.contains("30 fps") && screen30.contains("mode=play 60 Hz client"), "{screen30}");
-        assert!(screen30.contains("0.0693 ms") && !screen30.contains("0.1386 ms"), "{screen30}");
+        assert!(screen30.contains("0.0403 ms") && !screen30.contains("0.0806 ms"), "{screen30}");
 
-        // 3. --fps 120 (60 Hz client): 0 or 1 client frames per sample, normalized per 1 client frame -> 0.0693 ms
+        // 3. --fps 120 (60 Hz client): 0 or 1 client frames per sample, normalized per 1 client frame -> 0.04032 ms
         let rep120 = run_sequence_cost(
             &args,
             &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 120.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
