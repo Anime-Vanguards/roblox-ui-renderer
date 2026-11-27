@@ -11,11 +11,12 @@ return function(Target)
 	local W1 = Width(A)
 	local Six = "one two three four five six"
 	local Three = "one two three four   five six"
-	-- a word of about Target px (narrower letters fill the rest)
+	-- a word of about Target px (narrower letters fill the rest). A letter that adds no width ends it: without Studio's
+	-- fonts (CI's resource suite) every text measures 0 px, and the word grew until the worker ran out of memory
 	local function Word(Target)
 		local S = ""
 		for _, C in { "n", "e", "r", "i", "l" } do
-			while Width(S .. C) <= Target do
+			while Width(S .. C) <= Target and Width(S .. C) > Width(S) do
 				S ..= C
 			end
 		end

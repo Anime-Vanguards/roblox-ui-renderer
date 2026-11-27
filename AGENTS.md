@@ -62,6 +62,9 @@ engine binary frozen while `native/` is being edited; `--no-service` skips the r
   0 differences.
 - **Never put stand-ins into the asset cache.** Draw a local image through a `file://` URI instead.
 - **Fixtures build their own scenes.** Use Studio's `rbxasset://` textures or local files, and generic text.
+- **Fixtures finish without Studio.** CI runs every fixture and probe with Studio hidden, where no font is found and
+  every text measures 0 px wide: a loop that waits for a width to grow never ends there, and its worker's memory grows
+  by gigabytes a second. Check a new one with `node tools/resources/measure.mjs --suite ci --workload golden-fast-cold`.
 - **Bundles stay local.** `tools/web/bundle.mjs` output holds Roblox Studio's fonts: never commit or publish it.
 
 ## Resource budgets
