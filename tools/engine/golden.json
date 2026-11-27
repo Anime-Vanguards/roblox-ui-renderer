@@ -269,15 +269,15 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-aspect-view": {
-			"digest": "47f5f100dbf4050316a9b5ea4ce37c4a2f6232a019c0beffd7fe7a1d7a9bb5aa",
+			"digest": "0083a24127a7c46c0fc4d1e4609898471da6c1b05ecf72550728c56e7bba42b9",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-aspect2": {
-			"digest": "2c1ea22b500122ac971d6ba94046813b214e962cd5523140797c045fc07850b1",
+			"digest": "3a882aded4f746046e0c343231305847986bbaa285f020d669de275742fcbfa2",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-aspect3": {
-			"digest": "7dcaddcb46c1e82f1d725945e465875948d18700599b7468f08a6c4392251ddf",
+			"digest": "081bad7550191190818d062a245af5b9d51bf3f338f369aaeefdb20b76407520",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-aspect4": {
@@ -286,6 +286,22 @@
 		},
 		"fast/edit/layout-autosize-aspect5": {
 			"digest": "02a411df815c32d00ccfe131cebc33f5ecfcf3ea84e27812920b8d78b72475cf",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect6": {
+			"digest": "c33b69208a1b3d0c24324fc0669f93406132dd354fe4dc97b6dc50364e94f35f",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect7": {
+			"digest": "c7648365b7f14bf1f9185602fa40f402f84e06cd2788e41a5751afcabefd8204",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect8": {
+			"digest": "acd99c4e4085345e3573be7ed159d2e6dc0951065a442d7047f1e2d0ca518610",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect9": {
+			"digest": "b56835b0016e9360bc14c8c6faedb2d369fbf858317f5896c303023910b699ab",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-constraint": {
@@ -309,7 +325,7 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-autotext-linefit": {
-			"digest": "023e25e7f9479533019a06076daf86ba134ec5dff7adb20540334655666dc773",
+			"digest": "b7c2976100c62013abd252a4f449ecffbcf1611c67401b5a3bd37b868e81efd3",
 			"status": "ok"
 		},
 		"fast/edit/layout-autotext-matrix": {
@@ -317,15 +333,23 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-dynamic": {
-			"digest": "c922021df8214681e46b96bf955b15b2831799f1340f8958b8ef04cfd9be71d9",
+			"digest": "99b6ac133f39955b2f863719376fae201072888f038f6096d3220916c8010f2b",
+			"status": "ok"
+		},
+		"fast/edit/layout-f32-grids": {
+			"digest": "40176cf9548c89ce800ad95b047bbca27b3a8df3d7fd364cab67142702998a40",
 			"status": "ok"
 		},
 		"fast/edit/layout-f32-lists": {
-			"digest": "47549ccfa45f18c18f7156a6745feefea8333c7659e6bb25c379fb2e68493524",
+			"digest": "73ecc017d68265c77483223b868739756548932a85212276881342fe01b997e2",
+			"status": "ok"
+		},
+		"fast/edit/layout-f32-lists2": {
+			"digest": "f347cd88f9e39bddee9f982a2ac6651e9d42921402e351085d3a5b405e375b5e",
 			"status": "ok"
 		},
 		"fast/edit/layout-flex": {
-			"digest": "4ec027c228eeed3ec7b8e6532739298ac4f0449443e2628290bab1f37e1e13ef",
+			"digest": "d627a97473806bb57170bcdd22a6ea7bf9352077bd2ede1eb48732631ce04eb9",
 			"status": "ok"
 		},
 		"fast/edit/layout-list": {
@@ -701,7 +725,7 @@
 			"status": "ok"
 		},
 		"fast/edit/stories-grid-scroll-padding": {
-			"digest": "fd02a1894c6264487379caaf632b93fed9237d72ac1ffc3b1fd65b13c868b74b",
+			"digest": "98b6c0aa88b14809c831d5353beeffa69d78859d7899ddfa37225c3dca7828ee",
 			"status": "ok"
 		},
 		"fast/edit/stories-rotated-clip": {
@@ -1681,15 +1705,15 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect-view": {
-			"digest": "3291df08ad75e751c34e656578fdaf5854e61d0e8ef418fd6a6a9b6f2ff41d0a",
+			"digest": "419b821e81d41b8325bcaeaad19aaa49779f95357aa26f272121500ca782fdb6",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect2": {
-			"digest": "dd1a1bfa9c4f2161282d7159df25477e7266cc70078b4a8b51dff13ad9fcdc12",
+			"digest": "0e2f2fef6f28e9424c1262e4ea50a9c14bb46727608918e370d38f1a87121928",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect3": {
-			"digest": "3476c8a38e04aced5dde940d0f5ec79e77e99d985dad20feab0fcfc2b21705ca",
+			"digest": "191b6c3e16d37f151edc965692990e8c7d138ab84c7ea1c9b56fdc6e6e053e9b",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect4": {
@@ -1698,6 +1722,22 @@
 		},
 		"fixtures/edit/layout-autosize-aspect5": {
 			"digest": "7324c8ff2a1dd5f206934b2aac4e3a25c11b223094860f53d6340db13ba58701",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect6": {
+			"digest": "50c3fecde886506abe927cd0c945f33d26398aecd30c76d1fa22074520582b08",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect7": {
+			"digest": "2e806ceac3bce1ed49153b80626f19df69a349fdb0261013e614a8907d0c8cf3",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect8": {
+			"digest": "a24e54def4031f9c05a1c4be6445b9370c04167a0c95045a7583ae54dfb92501",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect9": {
+			"digest": "b5a333d3fa3572c45b61c04504a8915e200d7f11b8558471745405b9ae3d76b3",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint": {
@@ -1721,7 +1761,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autotext-linefit": {
-			"digest": "6d6bb383713f66aff16b88aa199ca54f85e54a95282981d00135e1efc69b749f",
+			"digest": "158e367b31349b116e830c3c64c98be826d7d989634ab5dfbb619de17fab5ef3",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autotext-matrix": {
@@ -1729,15 +1769,23 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-dynamic": {
-			"digest": "a3b71bf3506ab3a52ddba9287da0cfbda9228cf53c5b5acd30f28723bcbc93dd",
+			"digest": "3b941d8c087fbfefcff87d57489e275031974c5121c5c3d6147487fe9d63f9c5",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-f32-grids": {
+			"digest": "1fbc7e57b586a1824d46fbad570103cacfa2c04db64565342d905fdd405058a0",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-f32-lists": {
-			"digest": "db8e449f4d26cc363e8df635905fa56dc6dc76a83a2d9e639743b70dec99ab84",
+			"digest": "6f8bb68fb03c78957399ac2566e4d896a7361283f7f620d794a15e6c2decb0cc",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-f32-lists2": {
+			"digest": "36581e0e909dad4b02540db207bc76d2708b5db4cbf3a390e66116bfebc4ba5f",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-flex": {
-			"digest": "c5db6b40f34c07abb64b0e1eb82a9e1d984d8a0ee3bd62d7f4486c839628858d",
+			"digest": "3f161be2958483071b42d29a33c86d99efb12e9258f65842eaf2c9f0137d0dc3",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-list": {
@@ -2113,7 +2161,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/stories-grid-scroll-padding": {
-			"digest": "db432af045362894daaee68d7bf55bb13d8c877364d138c8af2a70a09da80bc0",
+			"digest": "b0f5939860c4df862b15e1ce6e2fa0a7f9f02985c39f3c59f7958b61c6c36963",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-rotated-clip": {
@@ -3081,15 +3129,15 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect-view": {
-			"digest": "de11c62bee4f9cfbec9ab9a2961d3340f1e41eff31c81e4240e7337c6807d18c",
+			"digest": "7e2f18bff4840c2e9c9f082045d82c1f2d9a8a007d3bbd588ba71dac261499f1",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect2": {
-			"digest": "0ee88806a15ff6f2c2ab7044fd8ad77902ea6e4d7e1ffe6044c544d3b7708023",
+			"digest": "73313786768dab5b0da8f75a5dd9e765f46367baa93176694b15943de2de7955",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect3": {
-			"digest": "7c5ae60f9c50ad2d7cde58ea119068a7a65d869daf8a0785d4e9b4cf8c6b9a1a",
+			"digest": "1dacddf83f0eb7cff1aed83284856a76fbe85b7e1f4221decdf1ffbd3f29f69a",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect4": {
@@ -3098,6 +3146,22 @@
 		},
 		"fixtures/play/layout-autosize-aspect5": {
 			"digest": "3749dce1b24267123c152cc9b9f7b04343025f6d803a03dd4a474527bd0abd5f",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect6": {
+			"digest": "12c8c3f46fbd5bebd5c90ad786b217b97093ccae741ccc193921c521e3b287e1",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect7": {
+			"digest": "eabade507c08695ec809d8994db6dd0d38c3f0f8ddfa00e92646194a7a9612b4",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect8": {
+			"digest": "de0910dced5ee4778c2ecdd460aae5811cfb520782746650129f7abf70858acf",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect9": {
+			"digest": "d441a93dee320d2180a643c854ed80b8084603763e750cdfe10137741a18ea7c",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint": {
@@ -3121,7 +3185,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-autotext-linefit": {
-			"digest": "ed52e6e937707fe9ce4a9df0ca700388cc0f9fd2071b604e26bcc9b517edc8bb",
+			"digest": "7e31d401caecf95cdbaad604bbb9020fdcf70068129b81d52fc6776e7fc2b2ba",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autotext-matrix": {
@@ -3129,15 +3193,23 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-dynamic": {
-			"digest": "fee686511c032583ceb34abea65a5a8d05de86df1368b23d12ead892eceb0040",
+			"digest": "4c54ee4e7fbeb844520f30f0bb568ff528b5947cf637a5ebc9016a05024602be",
+			"status": "ok"
+		},
+		"fixtures/play/layout-f32-grids": {
+			"digest": "2840924070abb6ec6443a13dab320236903fdb09814d90e7e26cf9bcecb5eeed",
 			"status": "ok"
 		},
 		"fixtures/play/layout-f32-lists": {
-			"digest": "2a2797fb3bb5a60cf93447d2300958b45d588d27c4acdd88d0b55d483e76e926",
+			"digest": "744e13864ecc6f29371ab284b43e12e099900d322ec51541aecbda47c3860be0",
+			"status": "ok"
+		},
+		"fixtures/play/layout-f32-lists2": {
+			"digest": "a2ce55ea0b6a518b05222ecb5ff4d6e296b7cff1e6379bd2ca52619d28384a48",
 			"status": "ok"
 		},
 		"fixtures/play/layout-flex": {
-			"digest": "935ce982476ae55aba26fdb31d2ab99ceab0b7ec6c3099ecd3cc39223494f97b",
+			"digest": "821507f3b7fbf84ebc4ab43207787d03f64448efc281b1ce533b8688fcc2b05c",
 			"status": "ok"
 		},
 		"fixtures/play/layout-list": {
@@ -3477,7 +3549,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/stories-grid-scroll-padding": {
-			"digest": "dbea3a8c88cbe544b971401b841e818acb0ce418baf9b7e7be29e4f11b49aaa6",
+			"digest": "9f102cda608eee95c2ee1ce88018427fc011c016cfb41813c732eddb2b4cbc74",
 			"status": "ok"
 		},
 		"fixtures/play/stories-rotated-clip": {
@@ -4129,7 +4201,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T13:33:11.402Z",
+	"recorded": "2026-11-27T15:02:30.630Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

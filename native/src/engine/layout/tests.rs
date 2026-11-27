@@ -13,7 +13,16 @@ use crate::engine::{
 };
 
 fn start(pixel_scale: f64) -> (Lua, Rc<Engine>) {
-    let engine = crate::engine::new_engine(Options { pixel_scale, ..crate::engine::options() }).expect("engine");
+    start_in(pixel_scale, None)
+}
+
+/// [`start`] with the viewport `viewport` (logical px) instead of the default one.
+fn start_in(pixel_scale: f64, viewport: Option<(f64, f64)>) -> (Lua, Rc<Engine>) {
+    let mut options = Options { pixel_scale, ..crate::engine::options() };
+    if viewport.is_some() {
+        options.profile.device.viewport = viewport;
+    }
+    let engine = crate::engine::new_engine(options).expect("engine");
     let lua = Lua::new();
     engine_lua::start(&lua, &engine).expect("start");
     (lua, engine)
@@ -27,7 +36,12 @@ fn run(source: &str, pixel_scale: f64, until: f64) -> Vec<String> {
 
 /// [`run`], its text engine reading `fonts` (a test's own font set, engine::cli `own_fonts`) instead of the machine's
 fn run_with_fonts(source: &str, pixel_scale: f64, until: f64, fonts: Option<&crate::engine::text::FontPaths>) -> Vec<String> {
-    let (lua, engine) = start(pixel_scale);
+    run_in(source, pixel_scale, until, fonts, None)
+}
+
+/// [`run_with_fonts`] in the viewport `viewport` (logical px).
+fn run_in(source: &str, pixel_scale: f64, until: f64, fonts: Option<&crate::engine::text::FontPaths>, viewport: Option<(f64, f64)>) -> Vec<String> {
+    let (lua, engine) = start_in(pixel_scale, viewport);
     if let Some(fonts) = fonts {
         use crate::engine::GuiEngine;
         *engine.text().borrow_mut() = Some(crate::engine::text::TextEngine::new(fonts.clone()));
@@ -694,6 +708,107 @@ fn automatic_text_measures_in_the_room_it_has() {
     assert!(compared > 1500, "only {compared} rects compared");
 }
 
+/// Every GuiObject's AbsolutePosition and AbsoluteSize below the target, from the target's origin (`%.9g`: each value
+/// reads back to its float32), and the Text of the labels named T, as the fixture `source` leaves them in `viewport`.
+fn float32_rects(source: &str, viewport: (f64, f64)) -> (std::collections::HashMap<String, [f32; 4]>, std::collections::HashMap<String, String>) {
+    let script = format!(
+        r#"
+        local Fixture = (function() {source} end)()
+        return function(Target)
+            Fixture(Target)
+            task.spawn(function()
+                task.wait(0.1)
+                local function Visit(Node, Path)
+                    for _, Child in Node:GetChildren() do
+                        if Child:IsA("GuiObject") then
+                            local At = Path .. "/" .. Child.Name
+                            local P, S = Child.AbsolutePosition - Target.AbsolutePosition, Child.AbsoluteSize
+                            print(string.format("rect %s %.9g %.9g %.9g %.9g", At, P.X, P.Y, S.X, S.Y))
+                            if Child.Name == "T" and Child:IsA("TextLabel") then
+                                print(string.format("text %s %s", At, Child.Text))
+                            end
+                            Visit(Child, At)
+                        end
+                    end
+                end
+                Visit(Target, "")
+            end)
+        end
+        "#
+    );
+    let lines = run_in(&script, 1.5, 0.5, None, Some(viewport));
+    let (mut rects, mut texts) = (std::collections::HashMap::new(), std::collections::HashMap::new());
+    for line in &lines {
+        if let Some(rest) = line.strip_prefix("print: rect ") {
+            let parts: Vec<&str> = rest.split(' ').collect();
+            let value = |k: usize| parts[k].parse::<f64>().unwrap() as f32;
+            rects.insert(parts[0].to_string(), [value(1), value(2), value(3), value(4)]);
+        } else if let Some(rest) = line.strip_prefix("print: text ") {
+            let (path, text) = rest.split_once(' ').unwrap_or((rest, ""));
+            texts.insert(path.to_string(), text.to_string());
+        }
+    }
+    assert!(!rects.is_empty(), "no rects: {lines:#?}");
+    (rects, texts)
+}
+
+/// The list, grid and canvas fixtures a client was measured on in float32 (data/studio/whole/layout-f32.json), with
+/// their viewports.
+const FLOAT32_FIXTURES: [(&str, &str, (f64, f64)); 3] = [
+    ("layout-f32-lists", include_str!("../../../../fixtures/layout-f32-lists.luau"), (1200.0, 900.0)),
+    ("layout-f32-grids", include_str!("../../../../fixtures/layout-f32-grids.luau"), (2160.0, 1270.0)),
+    ("layout-f32-lists2", include_str!("../../../../fixtures/layout-f32-lists2.luau"), (2160.0, 1270.0)),
+];
+
+/// Not reproduced: children of a ScrollingFrame's canvas, an ulp off in about a fifth of their values (their canvas
+/// basis is neither the canvas size nor its corner-read AbsoluteCanvasSize), and the AbsoluteWindowSize the fixture
+/// reads (an ulp off in 9 of 48 values).
+fn float32_known(path: &str) -> bool {
+    path.contains("_S/") || path.contains("/S/") || (path.starts_with("/s") && path.ends_with("/T"))
+}
+
+/// UIListLayout, UIGridLayout and a ScrollingFrame's canvas against a Roblox 0.747 client bit for bit (float32;
+/// data/studio/whole/layout-f32.json): lists walk their items in float32 local units (the next item at
+/// f32(f32(cursor + size) + gap)), grids size each item f32(f32(cell + pad) - pad) and place it by its cell's centre
+/// with an AnchorPoint of 0.5, AbsoluteCellSize is unscaled, AbsoluteContentSize is f32(content x UIScale), and
+/// AbsoluteCanvasSize reads back through the canvas's far corner.
+#[test]
+fn lists_grids_and_canvases_lay_out_in_a_clients_float32() {
+    let studio: serde_json::Value = serde_json::from_str(include_str!("../../../../data/studio/whole/layout-f32.json")).expect("measurements");
+    // (without Studio's fonts the automatic labels of layout-f32-lists, `H1_T`.., measure 0 px: CI checks the rest)
+    let fonts = crate::engine::text::fonts::discover_content_root().is_some();
+    let (mut compared, mut misses, mut texts_compared) = (0, Vec::new(), 0);
+    for (name, source, viewport) in FLOAT32_FIXTURES {
+        let (rects, texts) = float32_rects(source, viewport);
+        let expected = &studio["fixtures"][name];
+        for (path, want) in expected["rects"].as_object().unwrap() {
+            if float32_known(path) || (!fonts && path.ends_with("_T")) {
+                continue;
+            }
+            let want: Vec<f32> = rect_values(want).iter().map(|v| *v as f32).collect();
+            let got = rects.get(path).unwrap_or_else(|| panic!("{name} {path} missing"));
+            compared += 1;
+            if (0..4).any(|k| want[k].to_bits() != got[k].to_bits()) {
+                misses.push(format!("{name} {path}: client {want:?}, ours {got:?}"));
+            }
+        }
+        for (path, want) in expected["texts"].as_object().unwrap() {
+            if float32_known(path) {
+                continue;
+            }
+            texts_compared += 1;
+            let got = texts.get(path).map(String::as_str).unwrap_or("");
+            if got != want.as_str().unwrap() {
+                misses.push(format!("{name} {path}: client reads {want}, ours {got}"));
+            }
+        }
+    }
+    assert!(misses.is_empty(), "{} of {compared} rects and {texts_compared} reads differ from the client's:
+{}", misses.len(), misses.join("
+"));
+    assert!(compared >= 1300 && texts_compared >= 120, "only {compared} rects and {texts_compared} reads compared");
+}
+
 /// The client's measurements of the AutomaticSize + UIAspectRatioConstraint fixtures
 /// (data/studio/whole/autosize-aspect.json).
 fn aspect_measured() -> serde_json::Value {
@@ -701,7 +816,7 @@ fn aspect_measured() -> serde_json::Value {
 }
 
 /// The AutomaticSize + UIAspectRatioConstraint fixtures the client was measured on.
-const ASPECT_FIXTURES: [(&str, &str); 9] = [
+const ASPECT_FIXTURES: [(&str, &str); 13] = [
     ("layout-autosize-aspect", include_str!("../../../../fixtures/layout-autosize-aspect.luau")),
     ("layout-autosize-aspect2", include_str!("../../../../fixtures/layout-autosize-aspect2.luau")),
     ("layout-autosize-aspect3", include_str!("../../../../fixtures/layout-autosize-aspect3.luau")),
@@ -711,18 +826,24 @@ const ASPECT_FIXTURES: [(&str, &str); 9] = [
     ("layout-autosize-aspect-panels", include_str!("../../../../fixtures/layout-autosize-aspect-panels.luau")),
     ("layout-autosize-prompt", include_str!("../../../../fixtures/layout-autosize-prompt.luau")),
     ("layout-autosize-aspect-view", include_str!("../../../../fixtures/layout-autosize-aspect-view.luau")),
+    ("layout-autosize-aspect6", include_str!("../../../../fixtures/layout-autosize-aspect6.luau")),
+    ("layout-autosize-aspect7", include_str!("../../../../fixtures/layout-autosize-aspect7.luau")),
+    ("layout-autosize-aspect8", include_str!("../../../../fixtures/layout-autosize-aspect8.luau")),
+    ("layout-autosize-aspect9", include_str!("../../../../fixtures/layout-autosize-aspect9.luau")),
 ];
 
-/// Not reproduced: a (1, 1) frame in an automatic frame with a UIAspectRatioConstraint and top and bottom padding
-/// (the client sizes it neither against the ratio's box nor against the grown frame).
-const ASPECT_KNOWN: [&str; 2] = ["/pad10_full_b100x100/H/F", "/pady30_full_b100x40/H/F"];
+/// Not reproduced: a 200 x 60 frame of ratio 2 automatic on X and Y with 10 + 10 px of side and 20 + 20 px of top and
+/// bottom padding around a (1, 1) frame and a 60 x 80 box (the client 200 x 100, here 240 x 120).
+const ASPECT_KNOWN: [&str; 2] = ["/xy_l10r10t20b20_full_b60x80/H", "/xy_l10r10t20b20_full_b60x80/H/F"];
 
 /// Automatic frames with a UIAspectRatioConstraint against a Roblox 0.747 client's rects
 /// (data/studio/whole/autosize-aspect.json): the content's natural size inside the padding, fitted to the ratio, plus
 /// the top and bottom padding, times the ratio is the width, at least the base Size fitted to the ratio and, on an
 /// axis that is not automatic, at most the base Size; the height follows the width; the children lay out in that box
 /// and push the automatic axes further. Automatic children grow into the box the ratio makes of the base width and
-/// the room the frame has. Cells without text (the text cells need Studio's fonts, see the next test).
+/// the room the frame has. On an automatic axis scale children size against the box less the padding or what the
+/// content holds up to the box; a frame's own UIListLayout or UIGridLayout content counts as what it holds. Cells
+/// without text (the text cells need Studio's fonts, see the next test).
 #[test]
 fn aspect_constrained_automatic_frames_fit_their_base_size_first() {
     let studio = aspect_measured();

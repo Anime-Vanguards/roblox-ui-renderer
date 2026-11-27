@@ -165,6 +165,9 @@ pub(crate) struct Sized {
     /// The room an object automatic on one axis with a UIAspectRatioConstraint gives its children to grow into on
     /// that axis (local units, inside its padding); see ComputeSize.
     pub grow: Option<(Option<f64>, Option<f64>)>,
+    /// What the plain children of an automatic object with a UIAspectRatioConstraint size their scale Size against on
+    /// its automatic axes, instead of its box less its padding (local units); see ComputeSize.
+    pub basis: Option<(Option<f64>, Option<f64>)>,
 }
 
 /// ComputeSize's inputs (the memo key; compared with Luau `==`).

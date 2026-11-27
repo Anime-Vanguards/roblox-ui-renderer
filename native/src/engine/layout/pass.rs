@@ -199,6 +199,32 @@ fn aligned_start(alignment: u8, available: f64, used: f64) -> f64 {
     }
 }
 
+/// `aligned_start` in float32 local units, as a client aligns list and grid content (fixtures/layout-f32-lists2.luau,
+/// layout-f32-grids.luau): centred f32(f32(available - used) x 0.5), at the far end f32(available - used).
+fn aligned_start_f32(alignment: u8, available: f64, used: f64) -> f64 {
+    if alignment == E::CENTER {
+        f32r(f32r(available - used) * 0.5)
+    } else if alignment == E::BOTTOM || alignment == E::RIGHT {
+        f32r(available - used)
+    } else {
+        0.0
+    }
+}
+
+/// A UIGridLayout's cells in its container's local units (`Pass::grid_layout`).
+pub(crate) struct GridPlan {
+    /// each flow item's centre from the container's content origin
+    centres: Vec<(f64, f64)>,
+    /// the items' size: the stride less the padding
+    size: (f64, f64),
+    /// AbsoluteContentSize before the container's scale
+    extent: (f64, f64),
+    /// AbsoluteCellSize (a client reports it in local units, without UIScale)
+    cell: (f64, f64),
+    /// AbsoluteCellCount
+    count: (f64, f64),
+}
+
 #[inline]
 fn number_key(value: f64) -> u64 {
     if value.is_nan() { f64::NAN.to_bits() } else { value.to_bits() }
@@ -326,6 +352,7 @@ pub(crate) struct Resolved {
     base_h: f64,
     measure: Option<(f64, f64)>,
     grow: Option<(Option<f64>, Option<f64>)>,
+    basis: Option<(Option<f64>, Option<f64>)>,
 }
 
 type Collect<'c> = &'c mut dyn FnMut(&mut Pass, InstanceId, &Record);
@@ -942,6 +969,7 @@ impl<'a> Pass<'a> {
         let mut text_box = None;
         let mut measured_bounds = None;
         let mut grow = None;
+        let mut basis = None;
         if is_automatic {
             // Measured: when an ancestor's UIAspectRatioConstraint shrank its automatic size,
             // automatic content is still measured against the ancestor's unconstrained size.
@@ -1258,19 +1286,27 @@ impl<'a> Pass<'a> {
             }
             // Measured (layout-probe-autoaspect3, -autoaspect4, an options prompt): with a
             // UIAspectRatioConstraint the stable size is measured from the content on the other axis.
-            let aspect = flow.is_none() && self.first_child_of(id, self.l.ids.c.UIAspectRatioConstraint).is_some() && self.has_gui_children(id);
+            let has_aspect = self.first_child_of(id, self.l.ids.c.UIAspectRatioConstraint).is_some() && self.has_gui_children(id);
+            // Measured (fixtures/layout-autosize-aspect7.luau, -aspect8, -aspect9; a 0.747 client): a holder with a
+            // UIListLayout or UIGridLayout of its own takes the FitWithinMaxSize rule below too, its content being the
+            // layout's content measured in the base Size: a 240 x 60 frame of ratio 3 with two 100 x 30 items 5 px apart
+            // is 180 x 65 (not 195 x 65), with eight 50 x 40 cells (four to a row at 240) 215 x 85.
+            let flow_aspect = has_aspect && (flow_class == Some(c_list) || flow_class == Some(c_grid)) && !self.aspect_scales_with_parent(id);
+            let aspect = (flow.is_none() && has_aspect) || flow_aspect;
             let (aspect_x, aspect_y) = (aspect && !auto_x, aspect && !auto_y);
             let (mut natural_x, mut natural_y): (f64, f64) = (0.0, 0.0);
-            if aspect_x {
-                first.size_w = Some(first.content.w);
+            // (at the base Size itself, not less the padding: a (1, 0.5) frame in a 240 x 60 frame of ratio 3 with 20 + 20 px
+            // of side padding counts 240 wide, so beside a 70 px box the frame is 3 x 70 = 210 wide; aspect9 y_l20r20_*)
+            if aspect_x && !flow_aspect {
+                first.size_w = Some(width * scale);
                 first.sizing_w = Some(0.0);
             }
-            if aspect_y {
-                first.size_h = Some(first.content.h);
+            if aspect_y && !flow_aspect {
+                first.size_h = Some(height * scale);
                 first.sizing_h = Some(0.0);
             }
             let first_content = first.content;
-            let (mut offset_x, mut offset_y) = if aspect {
+            let (mut offset_x, mut offset_y) = if aspect && !flow_aspect {
                 let mut collect = |pass: &mut Pass, child: InstanceId, child_record: &Record| {
                     if !pass.visible(child) {
                         return;
@@ -1288,6 +1324,10 @@ impl<'a> Pass<'a> {
             } else {
                 self.layout_children(id, &first, true, None)
             };
+            if flow_aspect {
+                natural_x = offset_x;
+                natural_y = offset_y;
+            }
             if flow.is_none() {
                 // Descendants below the children (plain containers): sized against the available size.
                 let deep_w = if !auto_x { inner_width } else if inner_available < INF { inner_available } else { 0.0 };
@@ -1369,20 +1409,45 @@ impl<'a> Pass<'a> {
             // 518 x 154). A 60 x 60 frame of ratio 0.5 automatic on X holding a (1, 1) frame and a 20 x 100 box is
             // 50 x 60 (the content 60 x 100 fitted to 50 x 100); the prompt holder of 500 x 158 at 2.87 is 453.46
             // wide whatever its content's height.
+            // Measured (fixtures/layout-autosize-aspect8.luau x_l0r0t30b0_b20x100, -aspect9; a 0.747 client): the top and
+            // bottom padding count only when the height is automatic: a 60 x 120 frame of ratio 0.5 automatic on X with
+            // 30 px of top padding holding a (1, 1) frame and a 20 x 100 box is 60 wide, not 0.5 x (120 + 30) = 75.
+            // (Not reproduced: a 200 x 60 frame of ratio 2 automatic on X and Y with 10 + 10 px of side and 20 + 20 px of
+            // top and bottom padding around a (1, 1) frame and a 60 x 80 box is 200 x 100 in the client, here
+            // 2 x (80 + 40) = 240 wide; frames of a 0 x 0 base take the full width, aspect9 xy_l10r10t20b20_full_b60x80.)
+            // Measured (fixtures/layout-autosize-aspect3.luau, -aspect6, -aspect8, -aspect9): on an automatic axis a
+            // scale child of such an object sizes against the box less the padding or, when the content holds more,
+            // against what it holds up to the box: a (1, 1) frame in a 240 x 60 frame of ratio 3 with 10 + 10 px of top
+            // and bottom padding is 60 tall beside a 20 px box and 80 beside an 80 px one (the frame 240 x 80 either way),
+            // a lone (0.5, 0.5) frame there 20 (half of 60 - 20); likewise on X with the height fixed (a (1, 1) frame in a
+            // 60 x 120 frame of ratio 0.5 with 10 + 10 px of side padding is 60 wide, a (0.5, 1) one 20); automatic on
+            // both axes the width is max(ratio x that height, the box less the side padding).
             let (constrained_w, constrained_h) = if fit_within {
                 let held_x = if auto_x { lmax(content_width, offset_x) } else { lmax(content_width, natural_x) };
                 let held_y = if auto_y { lmax(content_height, offset_y) } else { lmax(content_height, natural_y) };
                 let fitted_h = lmin(held_y, held_x / ratio);
-                let raw_w = ratio * (fitted_h + pad_top + pad_bottom);
+                let pad_y = if auto_y { pad_top + pad_bottom } else { 0.0 };
+                let raw_w = ratio * (fitted_h + pad_y);
                 let fitted_w = if auto_x { lmax(fit_w, raw_w) } else { lmin(width, lmax(fit_w, raw_w)) };
                 let fitted_h = if auto_y { fitted_w / ratio } else { lmin(fitted_w / ratio, height) };
-                // (a MaxSize the ratio's box passes cuts it and the ratio applies again; not measured)
+                // (a MaxSize the ratio's box passes cuts it and the ratio applies again: fixtures/layout-autosize-aspect7.luau
+                // max_*, measured)
                 let (capped_w, capped_h) = self.apply_size_constraint(id, fitted_w, fitted_h);
-                if capped_w != fitted_w || capped_h != fitted_h {
+                let (box_w, box_h) = if capped_w != fitted_w || capped_h != fitted_h {
                     self.apply_aspect_ratio(id, capped_w, capped_h, parent_w, parent_h)
                 } else {
                     (fitted_w, fitted_h)
+                };
+                if flow.is_none() {
+                    let (inner_w, inner_h) = (lmax(box_w - pad_left - pad_right, 0.0), lmax(box_h - pad_top - pad_bottom, 0.0));
+                    let basis_h = lmax(inner_h, lmin(held_y, box_h));
+                    basis = Some(match (auto_x, auto_y) {
+                        (true, true) => (Some(lmax(ratio * basis_h, inner_w)), Some(basis_h)),
+                        (true, false) => (Some(lmax(inner_w, lmin(held_x, box_w))), None),
+                        _ => (None, Some(basis_h)),
+                    });
                 }
+                (box_w, box_h)
             } else {
                 self.apply_aspect_ratio(id, stable_w, stable_h, parent_w, parent_h)
             };
@@ -1400,6 +1465,10 @@ impl<'a> Pass<'a> {
             let mut second = probe(lmax(box_w - pad_left - pad_right, 0.0), lmax(box_h - pad_top - pad_bottom, 0.0), child_measure_w, child_measure_h);
             second.w = box_w * scale;
             second.h = box_h * scale;
+            if let Some((basis_w, basis_h)) = basis {
+                second.size_w = basis_w.map(|v| v * scale);
+                second.size_h = basis_h.map(|v| v * scale);
+            }
             // Measured (fixtures/layout-autolist-scalepad.luau): the second pass resolves a scale list Padding against
             // the box less the whole padding, its scale resolved against the constrained box (a 0.1 scale top pad
             // and a 0.1 gap make 50 px of items 54.5 tall; with MaxSize 40 and 0.1 + 4 and 6 px of padding the gaps
@@ -1422,7 +1491,7 @@ impl<'a> Pass<'a> {
             held_h = if auto_y && asked_h > height { Some(asked_h) } else { None };
         }
 
-        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h, bounds: measured_bounds, grow }
+        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h, bounds: measured_bounds, grow, basis }
     }
 
     /// ComputeSize, memoized for AutomaticSize objects: a result stays valid while the object's
@@ -1487,7 +1556,10 @@ impl<'a> Pass<'a> {
 
     /// Places a child: absolute rect from its unscaled size and the parent content rect. `offset`
     /// (children placed by a layout) is in unscaled local units from the content origin.
-    fn place_child(&mut self, id: InstanceId, parent: &Record, unscaled_w: f64, unscaled_h: f64, offset: Option<(f64, f64)>, base: Option<(f64, f64)>) -> Record {
+    /// `offset`: a layout's placement from the parent's content origin in its local units, instead of Position;
+    /// `centred`: that is the child's centre (AnchorPoint 0.5), as a UIGridLayout places its items.
+    #[allow(clippy::too_many_arguments)]
+    fn place_child(&mut self, id: InstanceId, parent: &Record, unscaled_w: f64, unscaled_h: f64, offset: Option<(f64, f64)>, centred: bool, base: Option<(f64, f64)>) -> Record {
         let n = self.l.ids.n;
         let scale = f32r(parent.scale * self.own_scale(id));
         let (width, height) = (f32r(unscaled_w * scale), f32r(unscaled_h * scale));
@@ -1515,9 +1587,9 @@ impl<'a> Pass<'a> {
         let place = match offset {
             Some((offset_x, offset_y)) => [
                 f32r(offset_x * parent.scale),
-                0.0,
+                if centred { f32r(f32r(0.5 * unscaled_w) * scale) } else { 0.0 },
                 f32r(offset_y * parent.scale),
-                0.0,
+                if centred { f32r(f32r(0.5 * unscaled_h) * scale) } else { 0.0 },
                 f32r(start_x * scale),
                 f32r(start_y * scale),
             ],
@@ -1650,8 +1722,15 @@ impl<'a> Pass<'a> {
     }
 
     /// UIListLayout: lines (Wraps), main-axis flex per line, cross-axis line distribution, item
-    /// alignment inside lines. `sizes` are scaled (updated in place for flexed / stretched items).
-    /// Returns offsets relative to the parent content origin and AbsoluteContentSize.
+    /// alignment inside lines, in the parent's local units: `sizes` are the items' sizes there (their own UIScale
+    /// included; updated in place for flexed / stretched items). Returns offsets from the parent's content origin and
+    /// the content size, both local.
+    /// Measured (fixtures/layout-f32-lists.luau, layout-f32-lists2.luau; a 0.747 client, UIScale 1 / 0.885 / 1.3: 840
+    /// of 840 item positions, 96 of 96 AbsoluteContentSizes bit for bit): a client walks the items in float32, the
+    /// next item at f32(f32(cursor + size) + gap) from 0 with the gap f32(f32(Padding.Scale x main) + Offset), the
+    /// content is where the last item ends, the block starts at f32(f32(main - content) x 0.5) when centred and
+    /// f32(main - content) at the far end, an item at f32(start + cursor), and on the cross axis an item of a single
+    /// line is aligned in the container in one step, f32(f32(cross - size) x 0.5).
     fn list_layout(&self, layout: InstanceId, parent: &Record, items: &[InstanceId], sizes: &mut [[f64; 2]], offsets: &mut Vec<(f64, f64)>, scratch: &mut ListScratch) -> (f64, f64) {
         let n = self.l.ids.n;
         let horizontal = self.code(layout, n.FillDirection) == E::HORIZONTAL;
@@ -1678,15 +1757,15 @@ impl<'a> Pass<'a> {
         let scale = parent.scale;
         // Measured (layout-probe-autolistgap): an AutomaticSize container lays its list out in its
         // stable size (gap, alignment), like its other children, not in the grown size.
-        let (mut content_w, mut content_h) = (parent.sizing_w.unwrap_or(parent.content.w), parent.sizing_h.unwrap_or(parent.content.h));
+        let (mut content_w, mut content_h) = local_content(parent);
         if parent.align_start.is_some() {
-            content_w = parent.content.w;
-            content_h = parent.content.h;
+            content_w = parent.local_w.unwrap_or(parent.content.w / scale);
+            content_h = parent.local_h.unwrap_or(parent.content.h / scale);
         }
         let main_size = if horizontal { content_w } else { content_h };
         let cross_size = if horizontal { content_h } else { content_w };
-        let gap_basis = (if horizontal { parent.gap_w } else { parent.gap_h }).unwrap_or(main_size);
-        let gap = padding_scale * gap_basis + padding_offset * scale;
+        let gap_basis = (if horizontal { parent.gap_w } else { parent.gap_h }).map_or(main_size, |v| v / scale);
+        let gap = f32r(f32r(padding_scale * gap_basis) + padding_offset);
         let main_flex = if horizontal { horizontal_flex } else { vertical_flex };
         let cross_flex = if horizontal { vertical_flex } else { horizontal_flex };
         let main_alignment = if horizontal { horizontal_alignment } else { vertical_alignment };
@@ -1738,13 +1817,18 @@ impl<'a> Pass<'a> {
                 distribute(mains, grow, shrink, main_size - line.main);
             }
             let mut sum = 0.0;
+            // (the content is where the last item ends, walked in float32)
+            let mut used = 0.0;
             for (offset, index) in (line.start..line.end).enumerate() {
                 sizes[index][main_index] = mains[offset];
                 sum += mains[offset];
+                if offset > 0 {
+                    used = f32r(used + gap);
+                }
+                used = f32r(used + mains[offset]);
             }
             line.sum = sum;
-            let count = (line.end - line.start) as f64;
-            line.used = sum + lmax(count - 1.0, 0.0) * gap;
+            line.used = used;
         }
 
         // Cross-axis line distribution. Measured: a line is as thick as its thickest item (also
@@ -1801,6 +1885,13 @@ impl<'a> Pass<'a> {
             };
         }
 
+        // (one line aligned by the layout's own cross alignment: the item is aligned in the container in one step)
+        let one_step = lines.len() == 1
+            && cross_flex != E::FILL
+            && !cross_zero
+            && space_distribution(cross_flex, cross_size, cross_sum, line_count, gap).0.is_none()
+            && (layout_line_alignment == E::AUTOMATIC || layout_line_alignment == E::EMPTY);
+
         offsets.clear();
         offsets.resize(items.len(), (0.0, 0.0));
         let mut content_main: f64 = 0.0;
@@ -1808,12 +1899,12 @@ impl<'a> Pass<'a> {
         for line in lines.iter() {
             let count = (line.end - line.start) as f64;
             let (start, between) = space_distribution(main_flex, main_size, line.sum, count, gap);
-            let mut start = start.unwrap_or_else(|| aligned_start(main_alignment, main_size, line.used));
+            let mut start = start.map_or_else(|| aligned_start_f32(main_alignment, main_size, line.used), f32r);
             if main_zero {
                 start = 0.0;
             }
 
-            let mut cursor = start;
+            let mut cursor = 0.0;
             for index in line.start..line.end {
                 let item = items[index];
                 let flex = self.first_child_of(item, self.l.ids.c.UIFlexItem);
@@ -1826,16 +1917,27 @@ impl<'a> Pass<'a> {
                 }
 
                 let mut cross = 0.0;
+                let item_cross = sizes[index][cross_index];
                 if alignment == E::STRETCH {
                     sizes[index][cross_index] = line.cross;
                 } else if alignment == E::CENTER {
-                    cross = (line.cross - sizes[index][cross_index]) / 2.0;
+                    cross = f32r(f32r(line.cross - item_cross) * 0.5);
                 } else if alignment == E::END {
-                    cross = line.cross - sizes[index][cross_index];
+                    cross = f32r(line.cross - item_cross);
                 }
+                let cross_at = if one_step && alignment == default_line_alignment && alignment != E::STRETCH {
+                    match alignment {
+                        E::CENTER => f32r(f32r(cross_size - item_cross) * 0.5),
+                        E::END => f32r(cross_size - item_cross),
+                        _ => 0.0,
+                    }
+                } else {
+                    f32r(cross_cursor + cross)
+                };
+                let main_at = f32r(start + cursor);
 
-                offsets[index] = if horizontal { (cursor, cross_cursor + cross) } else { (cross_cursor + cross, cursor) };
-                cursor += sizes[index][main_index] + between;
+                offsets[index] = if horizontal { (main_at, cross_at) } else { (cross_at, main_at) };
+                cursor = f32r(f32r(cursor + sizes[index][main_index]) + between);
             }
 
             content_main = lmax(content_main, line.used);
@@ -1850,27 +1952,42 @@ impl<'a> Pass<'a> {
         }
     }
 
-    #[allow(clippy::type_complexity)]
-    fn grid_layout(&self, layout: InstanceId, parent: &Record, items: &[InstanceId]) -> (Vec<(f64, f64)>, Vec<(f64, f64)>, f64, f64, f64, f64, f64, f64) {
+    /// UIGridLayout, in float32 local units as a 0.747 client lays it out (fixtures/layout-f32-grids.luau: 1,008 of
+    /// 1,008 item positions, 504 of 504 sizes and 72 of 72 AbsoluteContentSizes bit for bit under UIScale 1, 0.885 and
+    /// 1.3): cell = f32(f32(CellSize.Scale x W) + Offset) and pad = f32(f32(CellPadding.Scale x W) + Offset) against
+    /// the container's local size; the stride is f32(cell + pad) and each item is f32(stride - pad) (a 14.33309 cell
+    /// with a 3.45337 pad makes 14.33309 - 1 ulp items); the content is f32(f32(n x stride) - pad); cell i starts at
+    /// f32(start + f32(i x stride)), and the item is placed at the cell's centre f32(start_i + f32(size x 0.5)) with
+    /// an AnchorPoint of 0.5 (which also scales a UIScale'd item about the cell centre). AbsoluteCellSize is the cell
+    /// in local units: a client reports 16.837 under UIScale 0.885 as under 1.
+    fn grid_layout(&self, layout: InstanceId, parent: &Record, items: &[InstanceId]) -> GridPlan {
         let n = self.l.ids.n;
         let scale = parent.scale;
         let cell_size = self.udim2(layout, n.CellSize);
         let cell_padding = self.udim2(layout, n.CellPadding);
-        let (content_w, content_h) = (parent.content.w, parent.content.h);
+        // (an automatic container lays its grid out in its stable size, as its list: fixtures/layout-autosize-aspect7.luau
+        // grid_scale_n6, a 226 x 80.33 frame's (0.3, 0.5) cells against its 226 x 75.33 box: 67.8 x 37.67)
+        let (content_w, content_h) = if parent.align_start.is_some() {
+            (parent.local_w.unwrap_or(parent.content.w / scale), parent.local_h.unwrap_or(parent.content.h / scale))
+        } else {
+            local_content(parent)
+        };
 
-        let (item_w, item_h) = (parent.item_w.unwrap_or(content_w), parent.item_h.unwrap_or(content_h));
-        let mut cell_w = cell_size[0] * item_w + cell_size[1] * scale;
-        let mut cell_h = cell_size[2] * item_h + cell_size[3] * scale;
+        let (item_w, item_h) = (parent.item_w.map_or(content_w, |v| v / scale), parent.item_h.map_or(content_h, |v| v / scale));
+        let mut cell_w = f32r(f32r(cell_size[0] * item_w) + cell_size[1]);
+        let mut cell_h = f32r(f32r(cell_size[2] * item_h) + cell_size[3]);
         if let Some(aspect) = self.first_child_of(layout, self.l.ids.c.UIAspectRatioConstraint) {
             let ratio = self.num(aspect, n.AspectRatio).unwrap_or(1.0);
             if cell_w / lmax(cell_h, 1e-9) > ratio {
-                cell_w = cell_h * ratio;
+                cell_w = f32r(cell_h * ratio);
             } else {
-                cell_h = cell_w / ratio;
+                cell_h = f32r(cell_w / ratio);
             }
         }
-        let pad_x = cell_padding[0] * content_w + cell_padding[1] * scale;
-        let pad_y = cell_padding[2] * content_h + cell_padding[3] * scale;
+        let pad_x = f32r(f32r(cell_padding[0] * content_w) + cell_padding[1]);
+        let pad_y = f32r(f32r(cell_padding[2] * content_h) + cell_padding[3]);
+        let (stride_x, stride_y) = (f32r(cell_w + pad_x), f32r(cell_h + pad_y));
+        let size = (f32r(stride_x - pad_x), f32r(stride_y - pad_y));
 
         let horizontal = self.code(layout, n.FillDirection) != E::VERTICAL;
         let max_cells = self.num(layout, n.FillDirectionMaxCells).unwrap_or(0.0);
@@ -1888,22 +2005,18 @@ impl<'a> Pass<'a> {
         let lines = lmax(1.0, (count / per_line).ceil());
         let columns = if horizontal { lmin(per_line, lmax(count, 1.0)) } else { lines };
         let rows = if horizontal { lines } else { lmin(per_line, lmax(count, 1.0)) };
-        let grid_w = columns * cell_w + lmax(columns - 1.0, 0.0) * pad_x;
-        let grid_h = rows * cell_h + lmax(rows - 1.0, 0.0) * pad_y;
+        let grid_w = f32r(f32r(columns * stride_x) - pad_x);
+        let grid_h = f32r(f32r(rows * stride_y) - pad_y);
 
         let horizontal_alignment = self.code(layout, n.HorizontalAlignment);
         let vertical_alignment = self.code(layout, n.VerticalAlignment);
-        let mut start_x = if horizontal_alignment == E::CENTER {
-            (content_w - grid_w) / 2.0
-        } else if horizontal_alignment == E::RIGHT {
-            content_w - grid_w
+        let mut start_x = if horizontal_alignment == E::CENTER || horizontal_alignment == E::RIGHT {
+            aligned_start_f32(horizontal_alignment, content_w, grid_w)
         } else {
             0.0
         };
-        let mut start_y = if vertical_alignment == E::CENTER {
-            (content_h - grid_h) / 2.0
-        } else if vertical_alignment == E::BOTTOM {
-            content_h - grid_h
+        let mut start_y = if vertical_alignment == E::CENTER || vertical_alignment == E::BOTTOM {
+            aligned_start_f32(vertical_alignment, content_h, grid_h)
         } else {
             0.0
         };
@@ -1920,8 +2033,8 @@ impl<'a> Pass<'a> {
         let flip_x = corner == E::TOP_RIGHT || corner == E::BOTTOM_RIGHT;
         let flip_y = corner == E::BOTTOM_LEFT || corner == E::BOTTOM_RIGHT;
 
-        let mut offsets = Vec::with_capacity(items.len());
-        let mut sizes = Vec::with_capacity(items.len());
+        let (half_x, half_y) = (f32r(size.0 * 0.5), f32r(size.1 * 0.5));
+        let mut centres = Vec::with_capacity(items.len());
         for index in 0..items.len() {
             let position = index as f64;
             let line = (position / per_line).floor();
@@ -1934,11 +2047,12 @@ impl<'a> Pass<'a> {
             if flip_y {
                 row = rows - 1.0 - row;
             }
-            offsets.push((start_x + column * (cell_w + pad_x), start_y + row * (cell_h + pad_y)));
-            sizes.push((cell_w, cell_h));
+            let left = f32r(start_x + f32r(column * stride_x));
+            let top = f32r(start_y + f32r(row * stride_y));
+            centres.push((f32r(left + half_x), f32r(top + half_y)));
         }
-        let (cells_x, cells_y) = if count > 0.0 { (columns, rows) } else { (0.0, 0.0) };
-        (offsets, sizes, grid_w, grid_h, cell_w, cell_h, cells_x, cells_y)
+        let count = if count > 0.0 { (columns, rows) } else { (0.0, 0.0) };
+        GridPlan { centres, size, extent: (grid_w, grid_h), cell: (cell_w, cell_h), count }
     }
 
     /// UIPageLayout (layout-probe-page): pages side by side along FillDirection, the current page at
@@ -2198,6 +2312,7 @@ impl<'a> Pass<'a> {
                 base_h,
                 measure: sized.measure_w.map(|w| (w, sized.measure_h.unwrap_or(0.0))),
                 grow: sized.grow,
+                basis: sized.basis,
             };
             // Measured (fixtures/layout-autosize-constraint.luau): an automatic parent measures a child its
             // MaxSize cut at the size the child's content asked for (a 30 px capped frame holding 24 px inside
@@ -2221,17 +2336,21 @@ impl<'a> Pass<'a> {
         let mut offsets = self.l.scratch.pairs.pop().unwrap_or_default();
         offsets.clear();
         offsets.resize(count, None);
+        // (`offsets`: from the content origin in local units; `forced`: the child's own unscaled size; `centred`: placed by
+        // its centre with an AnchorPoint of 0.5, as a grid places its items)
         let mut forced = self.l.scratch.pairs.pop().unwrap_or_default();
         forced.clear();
         forced.resize(count, None);
+        let mut centred: Option<Vec<bool>> = None;
         let mut cell_rects: Option<Vec<Option<Cells>>> = None;
         if layout.is_none() {
             if let Some(cells) = &record.cells {
                 // Cells of a UITableLayout row/column get the rects the table assigned them.
                 for (index, &child) in items.iter().enumerate() {
                     if let Some((_, cell)) = cells.iter().find(|(c, _)| *c == child) {
-                        offsets[index] = Some((cell[0], cell[1]));
-                        forced[index] = Some((cell[2], cell[3]));
+                        let child_scale = scale * self.own_scale(child);
+                        offsets[index] = Some((cell[0] / scale, cell[1] / scale));
+                        forced[index] = Some((cell[2] / child_scale, cell[3] / child_scale));
                     }
                 }
             }
@@ -2254,30 +2373,29 @@ impl<'a> Pass<'a> {
             let c = self.l.ids.c;
             let n = self.l.ids.n;
             if layout_class == c.UIGridLayout {
-                let (grid_offsets, grid_sizes, grid_w, grid_h, cell_w, cell_h, grid_columns, grid_rows) = self.grid_layout(layout, record, &flow);
-                // Measured: a UIScale'd grid item is its cell scaled about the cell centre.
+                let plan = self.grid_layout(layout, record, &flow);
+                // Measured: a UIScale'd grid item is its cell scaled about the cell centre (the centre placement).
+                let mut by_centre = vec![false; count];
                 for (flow_at, &position) in flow_positions.iter().enumerate() {
-                    let child_scale = self.own_scale(flow[flow_at]);
-                    let size = grid_sizes[flow_at];
-                    let offset = grid_offsets[flow_at];
-                    offsets[position] = Some((offset.0 + size.0 * (1.0 - child_scale) / 2.0, offset.1 + size.1 * (1.0 - child_scale) / 2.0));
-                    forced[position] = Some((size.0 * child_scale, size.1 * child_scale));
+                    offsets[position] = Some(plan.centres[flow_at]);
+                    forced[position] = Some(plan.size);
+                    by_centre[position] = true;
                 }
                 // Measured: invisible children get the cell size at the content origin.
                 for (index, &child) in items.iter().enumerate() {
                     if forced[index].is_none() && self.parent(child) == Some(id) {
-                        let child_scale = self.own_scale(child);
-                        forced[index] = Some((cell_w * child_scale, cell_h * child_scale));
+                        forced[index] = Some(plan.cell);
                         offsets[index] = Some((0.0, 0.0));
                     }
                 }
+                centred = Some(by_centre);
                 if !measure {
-                    self.set_vector(layout, n.AbsoluteContentSize, grid_w, grid_h);
-                    self.set_vector(layout, n.AbsoluteCellSize, cell_w, cell_h);
-                    self.set_vector(layout, n.AbsoluteCellCount, grid_columns, grid_rows);
+                    self.set_vector(layout, n.AbsoluteContentSize, f32r(plan.extent.0 * scale), f32r(plan.extent.1 * scale));
+                    self.set_vector(layout, n.AbsoluteCellSize, plan.cell.0, plan.cell.1);
+                    self.set_vector(layout, n.AbsoluteCellCount, plan.count.0, plan.count.1);
                 }
-                extent_x = grid_w / scale;
-                extent_y = grid_h / scale;
+                extent_x = plan.extent.0;
+                extent_y = plan.extent.1;
             } else if layout_class == c.UIPageLayout {
                 let mut page_sizes = Vec::with_capacity(flow.len());
                 for (flow_at, &position) in flow_positions.iter().enumerate() {
@@ -2286,7 +2404,7 @@ impl<'a> Pass<'a> {
                 }
                 let (page_offsets, content_width, content_height) = self.page_layout(layout, record, &flow, &page_sizes);
                 for (flow_at, &position) in flow_positions.iter().enumerate() {
-                    offsets[position] = Some(page_offsets[flow_at]);
+                    offsets[position] = Some((page_offsets[flow_at].0 / scale, page_offsets[flow_at].1 / scale));
                 }
                 if !measure {
                     self.set_vector(layout, n.AbsoluteContentSize, content_width, content_height);
@@ -2302,8 +2420,9 @@ impl<'a> Pass<'a> {
                 let (table_offsets, table_sizes, table_w, table_h, table_cells) = self.table_layout(layout, record, &flow, content_w, content_h);
                 let mut rects: Vec<Option<Cells>> = vec![None; count];
                 for (flow_at, &position) in flow_positions.iter().enumerate() {
-                    offsets[position] = Some(table_offsets[flow_at]);
-                    forced[position] = Some(table_sizes[flow_at]);
+                    let child_scale = scale * self.own_scale(flow[flow_at]);
+                    offsets[position] = Some((table_offsets[flow_at].0 / scale, table_offsets[flow_at].1 / scale));
+                    forced[position] = Some((table_sizes[flow_at].0 / child_scale, table_sizes[flow_at].1 / child_scale));
                     rects[position] = Some(table_cells[flow_at].clone());
                 }
                 cell_rects = Some(rects);
@@ -2320,24 +2439,26 @@ impl<'a> Pass<'a> {
                     || self.code(layout, n.VerticalFlex) != E::NONE
                     || self.code(layout, n.ItemLineAlignment) != E::AUTOMATIC;
                 let horizontal_fill = self.code(layout, n.FillDirection) == E::HORIZONTAL;
-                let mut scaled_sizes = std::mem::take(&mut self.l.list_scratch.sizes);
-                scaled_sizes.clear();
+                // (the items' sizes in this frame's local units, their own UIScale included)
+                let mut local_sizes = std::mem::take(&mut self.l.list_scratch.sizes);
+                local_sizes.clear();
                 for (flow_at, &position) in flow_positions.iter().enumerate() {
                     let child_scale = self.own_scale(flow[flow_at]);
-                    let mut width = resolved[position].w * scale * child_scale;
-                    let mut height = resolved[position].h * scale * child_scale;
+                    let own = |value: f64| if child_scale == 1.0 { value } else { f32r(value * child_scale) };
+                    let mut width = own(resolved[position].w);
+                    let mut height = own(resolved[position].h);
                     if flex_list && child_scale != 1.0 {
                         if horizontal_fill {
-                            height = resolved[position].h * scale;
+                            height = resolved[position].h;
                         } else {
-                            width = resolved[position].w * scale;
+                            width = resolved[position].w;
                         }
                     }
-                    scaled_sizes.push([width, height]);
+                    local_sizes.push([width, height]);
                 }
                 let mut list_scratch = std::mem::take(&mut self.l.list_scratch.list);
                 let mut list_offsets = std::mem::take(&mut self.l.list_scratch.offsets);
-                let (content_width, content_height) = self.list_layout(layout, record, &flow, &mut scaled_sizes, &mut list_offsets, &mut list_scratch);
+                let (content_width, content_height) = self.list_layout(layout, record, &flow, &mut local_sizes, &mut list_offsets, &mut list_scratch);
                 self.l.list_scratch.list = list_scratch;
                 for (flow_at, &position) in flow_positions.iter().enumerate() {
                     offsets[position] = Some(list_offsets[flow_at]);
@@ -2353,19 +2474,20 @@ impl<'a> Pass<'a> {
                     }
                 }
                 for (flow_at, &position) in flow_positions.iter().enumerate() {
-                    let child_scale = scale * self.own_scale(flow[flow_at]);
-                    let size = scaled_sizes[flow_at];
-                    if (size[0] - resolved[position].w * child_scale).abs() > 1e-9 || (size[1] - resolved[position].h * child_scale).abs() > 1e-9 {
-                        forced[position] = Some((size[0], size[1]));
+                    let child_scale = self.own_scale(flow[flow_at]);
+                    let size = local_sizes[flow_at];
+                    let own = |value: f64| if child_scale == 1.0 { value } else { f32r(value * child_scale) };
+                    if (size[0] - own(resolved[position].w)).abs() > 1e-9 || (size[1] - own(resolved[position].h)).abs() > 1e-9 {
+                        forced[position] = Some((size[0] / child_scale, size[1] / child_scale));
                     }
                 }
-                self.l.list_scratch.sizes = scaled_sizes;
+                self.l.list_scratch.sizes = local_sizes;
                 self.l.list_scratch.offsets = list_offsets;
                 if !measure {
-                    self.set_vector(layout, n.AbsoluteContentSize, content_width, content_height);
+                    self.set_vector(layout, n.AbsoluteContentSize, f32r(content_width * scale), f32r(content_height * scale));
                 }
-                extent_x = content_width / scale;
-                extent_y = content_height / scale;
+                extent_x = content_width;
+                extent_y = content_height;
             }
             self.l.give_vec(flow);
             self.l.scratch.indices.push(flow_positions);
@@ -2375,11 +2497,9 @@ impl<'a> Pass<'a> {
         for (index, &child) in items.iter().enumerate() {
             let entry = resolved[index];
             let (mut width, mut height) = (entry.w, entry.h);
-            let child_scale = self.own_scale(child);
             let forced_size = forced[index];
             if let Some(size) = forced_size {
-                width = size.0 / (scale * child_scale);
-                height = size.1 / (scale * child_scale);
+                (width, height) = size;
             }
             let offset = offsets[index];
             let (mut base_w, mut base_h) = (entry.base_w, entry.base_h);
@@ -2387,8 +2507,8 @@ impl<'a> Pass<'a> {
                 base_w = width;
                 base_h = height;
             }
-            // (layout offsets are scaled px from the content origin; PlaceChild takes local units)
-            let mut child_record = self.place_child(child, record, width, height, offset.map(|o| (o.0 / scale, o.1 / scale)), Some((base_w, base_h)));
+            let by_centre = centred.as_ref().is_some_and(|centred| centred[index]);
+            let mut child_record = self.place_child(child, record, width, height, offset, by_centre, Some((base_w, base_h)));
             if let Some((measure_w, measure_h)) = entry.measure {
                 child_record.measure_w = Some(measure_w * child_record.scale);
                 child_record.measure_h = Some(measure_h * child_record.scale);
@@ -2401,6 +2521,11 @@ impl<'a> Pass<'a> {
                 if let Some(grow_h) = grow_h {
                     child_record.available_h = Some(grow_h * child_record.scale);
                 }
+            }
+            // (and its plain children size against the basis its constraint gives them)
+            if let Some((basis_w, basis_h)) = entry.basis {
+                child_record.size_w = basis_w.map(|v| v * child_record.scale);
+                child_record.size_h = basis_h.map(|v| v * child_record.scale);
             }
             if let Some(rects) = &cell_rects {
                 child_record.cells = rects[index].clone();
@@ -2756,8 +2881,10 @@ impl<'a> Pass<'a> {
         let (frame_w, frame_h) = (record.w, record.h);
         let parent_w = record.parent_width.unwrap_or(frame_w);
         let parent_h = record.parent_height.unwrap_or(frame_h);
-        let raw_w = canvas_size[0] * parent_w + scaled_offset(canvas_size[1], scale);
-        let raw_h = canvas_size[2] * parent_h + scaled_offset(canvas_size[3], scale);
+        // (in float32: fixtures/layout-f32-lists2.luau, a 0.747 client's AbsoluteCanvasSize under UIScale 0.885 and 1.3 is
+        // f32(f32(1.7 x 849.6) + 9), 1453.31995)
+        let raw_w = f32r(f32r(canvas_size[0] * parent_w) + scaled_offset(canvas_size[1], scale));
+        let raw_h = f32r(f32r(canvas_size[2] * parent_h) + scaled_offset(canvas_size[3], scale));
 
         let has_flow = self.layout_object(id).is_some();
 
@@ -2906,7 +3033,10 @@ impl<'a> Pass<'a> {
             self.set_vector(id, n_canvas_position, scroll_x, scroll_y);
         }
 
-        self.set_vector(id, n_canvas, canvas_w, canvas_h);
+        // Measured (fixtures/layout-f32-lists2.luau, layout-f32-lists.luau; a 0.747 client, 51 of 51 values): AbsoluteCanvasSize
+        // reads back through the canvas's far corner from the frame's AbsolutePosition, f32(f32(x + canvas) - x) (1643 at
+        // x = 543.20007 reads 1643.00012).
+        self.set_vector(id, n_canvas, f32r(f32r(record.x + canvas_w) - record.x), f32r(f32r(record.y + canvas_h) - record.y));
         self.set_vector(id, n_window, window_w, window_h);
 
         // Measured: the canvas offset is rounded to whole physical pixels (half up). A left bar shifts
@@ -2953,6 +3083,13 @@ impl<'a> Pass<'a> {
             w: if auto_x { min_w } else { lmax(canvas_w - (pad_left + pad_right) * scale, 0.0) },
             h: if auto_y { min_h } else { lmax(canvas_h - (pad_top + pad_bottom) * scale, 0.0) },
         };
+        // (children of a canvas size against it in float32 local units, f32(canvas / scale))
+        if !auto_x {
+            canvas_record.local_w = Some(f32r(canvas_record.content.w / scale));
+        }
+        if !auto_y {
+            canvas_record.local_h = Some(f32r(canvas_record.content.h / scale));
+        }
         if (auto_x || auto_y) && !has_flow {
             canvas_record.size_w = Some(min_w);
             canvas_record.size_h = Some(min_h);
@@ -3134,7 +3271,7 @@ impl<'a> Pass<'a> {
                 full_h: None,
             });
             let parent = Record { scale: 1.0, visible: true, generation: self.l.generation, ..Record::default() };
-            let record = self.place_child(root, &parent, sized.w, sized.h, None, Some((sized.base_w, sized.base_h)));
+            let record = self.place_child(root, &parent, sized.w, sized.h, None, false, Some((sized.base_w, sized.base_h)));
             self.store(root, record, sized.text_box);
         }
         self.l.root_stamps.set(root, stamp);
