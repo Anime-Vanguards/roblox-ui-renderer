@@ -4,20 +4,21 @@
 //! rasterization, or host wall-clock timing fields:
 //! - Non-glyph quads by kind, glyph quads (fill + legacy 4-offset TextStroke + contextual
 //!   UIStroke), and clipped screen / offscreen overdraw in viewport multiples.
-//! - An unmeasured state-transition model for draw calls and batch breaks (by cause: layerPass,
-//!   renderTarget, clip, shader, texture, rotation) — distinct from rur's uber-shader, informational
-//!   only (not calibrated against a client; client UI image atlasing is unmodeled).
+//! - The client's UI batching (measured in RenderDoc captures of a rendered Studio 0.747 client):
+//!   draw calls and batch breaks by cause (renderTarget, clip, ownDraw, shader, texture, constants,
+//!   batchLimit) for a frame that re-renders every CanvasGroup, and for a static frame
+//!   (`staticDrawCalls`), where each group keeps its texture; informational in `rur cost compare`.
 //! - `CanvasGroup` offscreen render-target allocations using exact Studio rectangular RGBA8
 //!   dimensions (`render::geometry::group_texture_dims`: float32 logical size, 2048 px side cap,
 //!   2048 x 1024 px area cap, skipping culled, empty, and fully transparent groups), RT switches,
 //!   and nesting depth.
 //! - Live-DOM hidden-in-shown accounting (`Visible = false` roots and all descendant GuiObjects and
 //!   instances under enabled ScreenGuis), separated from disabled ScreenGuis (`Enabled = false`).
-//! - Deterministic `Layout.Stats` counters, extrapolated desktop layout CPU ms (Studio 0.744 client
-//!   lazy-layout slopes from `engine/layout/install.rs`), derived `phone-mid` layout CPU ms range
-//!   (3.9x..6.3x central, 2.55x..12.32x full band from whole-UI captured ratio * assumed capture
-//!   factor * live frame weight), and explicit refusals (`status: "refused"`, `ms: null`) for
-//!   uncalibrated draw-pass CPU and mobile GPU UI milliseconds.
+//! - Deterministic `Layout.Stats` counters, extrapolated desktop layout and UI draw-pass CPU ms (slopes
+//!   measured on a rendered Studio 0.747 client's UpdateUILayouts and draw-pass scopes), derived
+//!   `phone-mid` ranges (2.77x..3.53x central, 1.80x..6.90x full band: whole-UI captured ratio *
+//!   measured capture factor * recorded live frame weight), and an explicit refusal (`status:
+//!   "refused"`, `ms: null`) for GPU UI milliseconds.
 //! - `rur cost compare <before> <after>` deterministic A/B diff (`rrr-ab/1`).
 
 use std::{
@@ -42,23 +43,29 @@ use crate::{
     story_args::{Args, Context, Failure},
 };
 
-/// Recorded Studio 0.744 client lazy-layout calibration (`native/src/engine/layout/install.rs`).
-pub const STUDIO_LAYOUT_PASS_MS: f64 = 2.3e-3;
-pub const STUDIO_LAYOUT_OBJECT_MS: f64 = 0.312e-3;
-pub const STUDIO_SCROLL_PASS_MS: f64 = 62.0e-3;
+/// What a client's per-frame layout (UpdateUILayouts) costs on the reference desktop: a rendered Studio 0.747
+/// client, LibMP captured and the frame log uncaptured, fitted to rur's per-frame counters over 28 single-factor scenes
+/// (card grids scrolled and edited, frame chains of depth 1 to 32, 20 changed leaves, lists, moved subtrees, text; median
+/// error 13 %) and checked on four held-out animations (median error 45 %); notes/cost-calibration.md "Per-frame layout".
+/// A layout pass and a scroll pass cost the same base.
+pub const CLIENT_LAYOUT_PASS_MS: f64 = 58.2e-3;
+pub const CLIENT_LAYOUT_STORED_MS: f64 = 1.18e-3;
+pub const CLIENT_LAYOUT_MOVED_MS: f64 = 1.16e-3;
+pub const CLIENT_LAYOUT_SCROLL_MOVED_MS: f64 = 0.1e-3;
 
-/// Derived live frame-weighted mobile mid-tier UI main-thread scaling factors for uncaptured
-/// desktop layout timings:
-/// - Whole-UI-pass captured phone/desktop ratio: central 4.09 (range 2.65..8.0)
-/// - Assumed profiler capture-overhead factor (unmeasured for layout): 1.25..2.0
-/// - Live frame weight: 0.77
-/// Central derived range: 4.09 * 1.25 * 0.77 = 3.936625 (~3.9x) .. 4.09 * 2.0 * 0.77 = 6.2986 (~6.3x).
-/// Full uncertainty band: 2.65 * 1.25 * 0.77 = 2.550625 (~2.55x) .. 8.0 * 2.0 * 0.77 = 12.32 (~12.32x).
+/// Phone mid-tier UI main-thread time from the desktop client's uncaptured ms:
+/// - capturedWholeUiPhoneOverDesktop: the phone's captured whole-UI-pass ms over a desktop client's captured ms, 4.09 (range
+///   2.65..8.0; recorded on phones in two match cells against a rendered desktop client)
+/// - captureOverheadFactor: the desktop client's captured over uncaptured UI ms, measured 0.97 (0.88..1.12): UpdateUILayouts against
+///   the frame log's step CPU, and the render call's CPU with and without a capture (notes/cost-calibration.md)
+/// - liveFrameWeight: 0.77, the frame-weighted live / capture-mean factor of the phones' GUI category (recorded in phone telemetry)
+/// Central range: 4.09 * 0.88..1.12 * 0.77 = 2.77x..3.53x; full band: 2.65 * 0.88 * 0.77 = 1.80x .. 8.0 * 1.12 * 0.77 = 6.90x.
 pub const PHONE_UI_CAPTURED_RATIO_CENTRAL: f64 = 4.09;
 pub const PHONE_UI_CAPTURED_RATIO_LOW: f64 = 2.65;
 pub const PHONE_UI_CAPTURED_RATIO_HIGH: f64 = 8.0;
-pub const PHONE_CAPTURE_FACTOR_LOW: f64 = 1.25;
-pub const PHONE_CAPTURE_FACTOR_HIGH: f64 = 2.0;
+pub const PHONE_CAPTURE_FACTOR: f64 = 0.97;
+pub const PHONE_CAPTURE_FACTOR_LOW: f64 = 0.88;
+pub const PHONE_CAPTURE_FACTOR_HIGH: f64 = 1.12;
 pub const PHONE_UI_LIVE_WEIGHT: f64 = 0.77;
 
 pub const PHONE_UI_MAIN_RATIO_LOW: f64 =
@@ -69,6 +76,14 @@ pub const PHONE_UI_MAIN_LOW: f64 =
     PHONE_UI_CAPTURED_RATIO_LOW * PHONE_CAPTURE_FACTOR_LOW * PHONE_UI_LIVE_WEIGHT;
 pub const PHONE_UI_MAIN_HIGH: f64 =
     PHONE_UI_CAPTURED_RATIO_HIGH * PHONE_CAPTURE_FACTOR_HIGH * PHONE_UI_LIVE_WEIGHT;
+
+/// "2.77x..3.53x" and "1.80x..6.90x": the phone ratios as the summary and the reports print them.
+fn phone_ratio_text() -> (String, String) {
+    (
+        format!("{:.2}x..{:.2}x", PHONE_UI_MAIN_RATIO_LOW, PHONE_UI_MAIN_RATIO_HIGH),
+        format!("{:.2}x..{:.2}x", PHONE_UI_MAIN_LOW, PHONE_UI_MAIN_HIGH),
+    )
+}
 
 const MAX_OBJECTS_REPORTED: usize = 200;
 const MAX_HIDDEN_SUBTREES_REPORTED: usize = 100;
@@ -437,18 +452,6 @@ fn has_corner(node: &Value) -> bool {
     }
 }
 
-fn is_rotated(node: &Value) -> bool {
-    let Some(m) = node.get("matrix").and_then(Value::as_array) else { return false };
-    if m.len() < 6 {
-        return false;
-    }
-    let m0 = m[0].as_f64().unwrap_or(1.0);
-    let m1 = m[1].as_f64().unwrap_or(0.0);
-    let m2 = m[2].as_f64().unwrap_or(0.0);
-    let m3 = m[3].as_f64().unwrap_or(1.0);
-    (m0 - 1.0).abs() > 1e-6 || m1.abs() > 1e-6 || m2.abs() > 1e-6 || (m3 - 1.0).abs() > 1e-6
-}
-
 /// Returns the device-space affine transform carrying `node`'s local device rect into the current
 /// render target, or `None` when axis-aligned (identity). Inside a rotated `CanvasGroup`,
 /// `target_unturn` holds `invert(group_screen_matrix)` in logical units so descendants are
@@ -690,33 +693,177 @@ pub fn sort_json(value: Value) -> Value {
     }
 }
 
+/// The client's UI pass fills its vertex buffer in chunks of 10,000 vertices, and a chunk boundary starts a new draw
+/// even when nothing else changed (2,500 plain quads a draw; a label right after 2,490 frames splits into two draws
+/// of 10 glyphs). Measured in RenderDoc captures of a rendered Studio 0.747 client, notes/cost-calibration.md.
+const BATCH_VERTICES: u32 = 10_000;
+
+/// What the client's UI draw pass (Pass2d + fillGuiVertices + UI + compositeUITextures on the main thread) spends per
+/// piece, in microseconds per render frame: a rendered Studio 0.747 client on the reference desktop (LibMP scopes;
+/// the capture did not change the render call's CPU), slopes of the large single-factor scenes averaged over two runs
+/// that agreed within 35 % (notes/cost-calibration.md).
+const PASS_FLOOR_US: f64 = 20.0;
+const PASS_PLAIN_QUAD_US: f64 = 0.116;
+const PASS_IMAGE_QUAD_US: f64 = 0.243;
+const PASS_SLICE_QUAD_US: f64 = 0.45;
+const PASS_GLYPH_QUAD_US: f64 = 0.145;
+const PASS_EDGED_ELEMENT_US: f64 = 0.226;
+const PASS_SHADOW_MESH_US: f64 = 1.5;
+const PASS_DRAW_US: f64 = 0.2;
+/// A frame in which CanvasGroups re-render their textures pays this once more (UITextureRenderer::renderJob and the
+/// composite step's extra work), on top of the re-rendered content's pieces.
+const PASS_GROUP_RERENDER_US: f64 = 70.0;
+
+/// The batch-break causes the client shows, in the order `BatchState::break_cause` tests them.
+const BREAK_CAUSES: [&str; 7] = ["renderTarget", "clip", "ownDraw", "shader", "texture", "constants", "batchLimit"];
+
+/// One draw's state in the client's UI pass (notes/cost-calibration.md): consecutive pieces with equal states share a
+/// draw. `shader` is the pixel shader variant the client binds (`plain` for fills, images, text, shadows, Path2D and
+/// CanvasGroup composites, which differ only by texture; `rounded` for UICorner shapes and border UIStrokes;
+/// `gradient` for UIGradient pieces). `constants` are the rounded shader's per-draw values (the shape's snapped
+/// device size, its four radii and stroke thickness, in 1/64 px): two rounded shapes batch only when all of them are
+/// equal. `own` is non-zero for a piece the client always draws alone (a UIGradient piece, an inset UIShadow).
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct BatchState {
-    pass_id: u8,
     shader: &'static str,
     texture: Option<String>,
+    pixelated: bool,
+    constants: Option<[i64; 7]>,
+    own: u64,
     scissor: Option<[i64; 4]>,
-    rotated: bool,
 }
 
 impl BatchState {
     fn break_cause(prev: &BatchState, next: &BatchState) -> &'static str {
-        if prev.pass_id != next.pass_id {
-            "layerPass"
-        } else if (prev.shader == "group_composite" || next.shader == "group_composite")
-            && (prev.shader != next.shader || prev.texture != next.texture)
-        {
+        let composite = |s: &BatchState| s.texture.as_deref().is_some_and(|t| t.starts_with("group:"));
+        if (composite(prev) || composite(next)) && prev.texture != next.texture {
             "renderTarget"
         } else if prev.scissor != next.scissor {
             "clip"
+        } else if prev.own != 0 || next.own != 0 {
+            "ownDraw"
         } else if prev.shader != next.shader {
             "shader"
-        } else if prev.texture != next.texture {
+        } else if prev.texture != next.texture || prev.pixelated != next.pixelated {
             "texture"
         } else {
-            "rotation"
+            "constants"
         }
     }
+}
+
+/// How a piece's quads sit in the vertex buffer: plain quads (4 vertices each; a chunk boundary can fall between
+/// them), off-axis quads (each drawn with 4 anti-aliased edge quads, 5 quads on 8 vertices kept together), or one
+/// mesh that is never split (a UIShadow: 54 quads on 73 vertices).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Geometry {
+    Quads(u64),
+    Edged(u64),
+    Mesh(u64, u32),
+}
+
+impl Geometry {
+    fn quads(self) -> u64 {
+        match self {
+            Geometry::Quads(n) => n,
+            Geometry::Edged(n) => 5 * n,
+            Geometry::Mesh(quads, _) => quads,
+        }
+    }
+
+    /// `n` quads of an element: off-axis ones get their anti-aliased edges.
+    fn of(n: u64, off_axis: bool) -> Geometry {
+        if off_axis { Geometry::Edged(n) } else { Geometry::Quads(n) }
+    }
+}
+
+/// What a piece costs the client's vertex fill per quad (`PASS_*_US`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fill {
+    Plain,
+    Image,
+    Slice,
+    Glyph,
+}
+
+/// What a piece looks like to the batcher (its `BatchState` without the scissor).
+struct Look {
+    shader: &'static str,
+    texture: Option<String>,
+    pixelated: bool,
+    constants: Option<[i64; 7]>,
+    own: bool,
+}
+
+/// The draw pass's microseconds for a piece of `geometry` filled as `fill` (an off-axis element and a shadow mesh are
+/// priced whole).
+fn pass_piece_us(geometry: Geometry, fill: Fill) -> f64 {
+    match geometry {
+        Geometry::Edged(n) => n as f64 * PASS_EDGED_ELEMENT_US,
+        Geometry::Mesh(..) => PASS_SHADOW_MESH_US,
+        Geometry::Quads(n) => {
+            n as f64
+                * match fill {
+                    Fill::Plain => PASS_PLAIN_QUAD_US,
+                    Fill::Image => PASS_IMAGE_QUAD_US,
+                    Fill::Slice => PASS_SLICE_QUAD_US,
+                    Fill::Glyph => PASS_GLYPH_QUAD_US,
+                }
+        }
+    }
+}
+
+impl Look {
+    fn plain(texture: &str) -> Look {
+        Look { shader: "plain", texture: Some(texture.to_string()), pixelated: false, constants: None, own: false }
+    }
+
+    /// A fill or image piece: a UIGradient makes it a draw of its own, a UICorner a rounded shape.
+    fn styled(texture: &str, gradient: bool, rounded: Option<[i64; 7]>, pixelated: bool) -> Look {
+        if gradient {
+            Look { shader: "gradient", texture: Some(texture.to_string()), pixelated, constants: None, own: true }
+        } else if let Some(constants) = rounded {
+            Look { shader: "rounded", texture: Some(texture.to_string()), pixelated, constants: Some(constants), own: false }
+        } else {
+            Look { shader: "plain", texture: Some(texture.to_string()), pixelated, constants: None, own: false }
+        }
+    }
+}
+
+fn to_64ths(value: f64) -> i64 {
+    (value * 64.0).round() as i64
+}
+
+/// The corner radii of a node's UICorner in device px (the scene's `corner`: one number or four).
+fn corner_radii(node: &Value) -> [f64; 4] {
+    match node.get("corner") {
+        Some(Value::Number(n)) => [n.as_f64().unwrap_or(0.0); 4],
+        Some(Value::Array(items)) => std::array::from_fn(|i| items.get(i).and_then(Value::as_f64).unwrap_or(0.0)),
+        _ => [0.0; 4],
+    }
+}
+
+/// The rounded shader's per-draw constants for a shape of device rect `rect`.
+fn rounded_constants(rect: Rect, radii: [f64; 4], thickness: f64) -> [i64; 7] {
+    [to_64ths(rect.w), to_64ths(rect.h), to_64ths(radii[0]), to_64ths(radii[1]), to_64ths(radii[2]), to_64ths(radii[3]), to_64ths(thickness)]
+}
+
+/// Whether a transform into the render target turns its quads off the pixel axes (a multiple of 90 degrees does not).
+fn off_axis(transform: Option<Transform>) -> bool {
+    transform.is_some_and(|m| m[0].abs() > 1e-6 && m[1].abs() > 1e-6)
+}
+
+/// A border UIStroke's quads for a thickness in device px: 4 edge quads, or 8 (edges and corners) from 2.5 px
+/// (measured: 0.75 to 2.25 px drew 4, 3 px and up 8).
+fn stroke_quads(thickness: f64) -> u64 {
+    if thickness >= 2.5 { 8 } else { 4 }
+}
+
+/// The batcher's state per render target: the open draw's state and the vertices used in the current chunk.
+#[derive(Clone, Debug)]
+struct TargetBatch {
+    state: BatchState,
+    chunk: u32,
 }
 
 #[derive(Default)]
@@ -772,7 +919,12 @@ struct TotalsAccum {
     glyph_quads: u64,
     fill_glyph_quads: u64,
     stroke_glyph_quads: u64,
+    shadow_glyph_quads: u64,
     draw_calls: u64,
+    static_draw_calls: u64,
+    /// The draw pass's microseconds for the pieces drawn onto the screen / into CanvasGroup textures.
+    pass_screen_us: f64,
+    pass_offscreen_us: f64,
     batch_breaks: u64,
     batch_breaks_by_cause: BTreeMap<&'static str, u64>,
     canvas_groups: u64,
@@ -794,7 +946,9 @@ struct Analyzer<'a> {
     /// Total count of nodes sharing each `path` in the scene.
     path_counts: BTreeMap<String, u32>,
     totals: TotalsAccum,
-    last_state_by_target: BTreeMap<u64, BatchState>,
+    last_state_by_target: BTreeMap<u64, TargetBatch>,
+    /// The last `BatchState::own` handed out (pieces drawn alone never share a state).
+    own_draws: u64,
     objects: BTreeMap<u64, ObjectAccum>,
 }
 
@@ -804,7 +958,7 @@ impl<'a> Analyzer<'a> {
             total_nodes: scene.node_count() as u64,
             ..Default::default()
         };
-        for cause in ["layerPass", "renderTarget", "clip", "shader", "texture", "rotation"] {
+        for cause in BREAK_CAUSES {
             totals.batch_breaks_by_cause.insert(cause, 0);
         }
         let mut path_counts: BTreeMap<String, u32> = BTreeMap::new();
@@ -824,6 +978,7 @@ impl<'a> Analyzer<'a> {
             path_counts,
             totals,
             last_state_by_target: BTreeMap::new(),
+            own_draws: 0,
             objects: BTreeMap::new(),
         }
     }
@@ -903,6 +1058,9 @@ impl<'a> Analyzer<'a> {
         })
     }
 
+    /// Adds one piece to `target_id`'s batches: a new draw when its state differs from the open draw's, and one more
+    /// at every 10,000-vertex chunk boundary its geometry crosses. Draws onto the screen also count towards a static
+    /// frame (`staticDrawCalls`); draws into a CanvasGroup's texture happen only when the group re-renders.
     #[allow(clippy::too_many_arguments)]
     fn record_batch(
         &mut self,
@@ -912,25 +1070,68 @@ impl<'a> Analyzer<'a> {
         target_id: u64,
         target_area_scale: f64,
         state: BatchState,
+        geometry: Geometry,
+        fill: Fill,
         area_px: f64,
     ) {
-        match self.last_state_by_target.get(&target_id) {
+        let mut causes: Vec<&'static str> = Vec::new();
+        let mut draws = 0u64;
+        // whether the open draw holds nothing yet (a chunk boundary then moves it instead of adding one)
+        let mut empty = false;
+        let mut chunk = match self.last_state_by_target.get(&target_id) {
             None => {
-                self.totals.draw_calls += 1;
-                sg.draw_calls += 1;
+                draws += 1;
+                empty = true;
+                0
             }
-            Some(prev) if *prev != state => {
-                let cause = BatchState::break_cause(prev, &state);
-                self.totals.draw_calls += 1;
-                self.totals.batch_breaks += 1;
-                *self.totals.batch_breaks_by_cause.entry(cause).or_insert(0) += 1;
-                sg.draw_calls += 1;
-                sg.batch_breaks += 1;
-                self.object_entry(node, nid, &sg.name).batch_breaks += 1;
+            Some(prev) if prev.state != state => {
+                causes.push(BatchState::break_cause(&prev.state, &state));
+                draws += 1;
+                empty = true;
+                prev.chunk
             }
-            Some(_) => {}
+            Some(prev) => prev.chunk,
+        };
+        let (unit, mut left) = match geometry {
+            Geometry::Quads(n) => (4u32, n),
+            Geometry::Edged(n) => (8, n),
+            Geometry::Mesh(_, vertices) => (vertices.clamp(1, BATCH_VERTICES), 1),
+        };
+        while left > 0 {
+            let room = u64::from((BATCH_VERTICES - chunk.min(BATCH_VERTICES)) / unit);
+            if room == 0 {
+                chunk = 0;
+                if !empty {
+                    draws += 1;
+                    causes.push("batchLimit");
+                    empty = true;
+                }
+                continue;
+            }
+            let take = left.min(room);
+            chunk += unit * take as u32;
+            left -= take;
+            empty = false;
         }
-        self.last_state_by_target.insert(target_id, state);
+        self.totals.draw_calls += draws;
+        sg.draw_calls += draws;
+        let piece_us = pass_piece_us(geometry, fill) + draws as f64 * PASS_DRAW_US;
+        if target_id == 0 {
+            self.totals.static_draw_calls += draws;
+            self.totals.pass_screen_us += piece_us;
+        } else {
+            self.totals.pass_offscreen_us += piece_us;
+        }
+        if !causes.is_empty() {
+            let breaks = causes.len() as u64;
+            self.totals.batch_breaks += breaks;
+            sg.batch_breaks += breaks;
+            for cause in causes {
+                *self.totals.batch_breaks_by_cause.entry(cause).or_insert(0) += 1;
+            }
+            self.object_entry(node, nid, &sg.name).batch_breaks += breaks;
+        }
+        self.last_state_by_target.insert(target_id, TargetBatch { state, chunk });
         let scaled_area = area_px * target_area_scale;
         if target_id == 0 {
             self.totals.screen_overdraw_px += scaled_area;
@@ -943,6 +1144,24 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// The batch state of a piece that looks like `look`, scissored by `clip` in a target of `target_bounds`.
+    fn batch_state(&mut self, look: Look, clip: Option<[f64; 4]>, target_bounds: [f64; 4]) -> BatchState {
+        let own = if look.own {
+            self.own_draws += 1;
+            self.own_draws
+        } else {
+            0
+        };
+        BatchState {
+            shader: look.shader,
+            texture: look.texture,
+            pixelated: look.pixelated,
+            constants: look.constants,
+            own,
+            scissor: effective_scissor_key(clip, target_bounds),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn emit_quads(
         &mut self,
@@ -952,26 +1171,19 @@ impl<'a> Analyzer<'a> {
         target_id: u64,
         target_bounds: [f64; 4],
         target_area_scale: f64,
-        pass_id: u8,
         quad_kind: &'static str,
-        shader: &'static str,
-        texture: Option<String>,
+        look: Look,
         clip: Option<[f64; 4]>,
-        rotated: bool,
-        quad_count: u64,
+        geometry: Geometry,
+        fill: Fill,
         area_px: f64,
     ) {
+        let quad_count = geometry.quads();
         if quad_count == 0 {
             return;
         }
-        let state = BatchState {
-            pass_id,
-            shader,
-            texture,
-            scissor: effective_scissor_key(clip, target_bounds),
-            rotated,
-        };
-        self.record_batch(sg, node, nid, target_id, target_area_scale, state, area_px);
+        let state = self.batch_state(look, clip, target_bounds);
+        self.record_batch(sg, node, nid, target_id, target_area_scale, state, geometry, fill, area_px);
         self.totals.quads += quad_count;
         *self.totals.quads_by_kind.entry(quad_kind).or_insert(0) += quad_count;
         sg.quads += quad_count;
@@ -988,26 +1200,27 @@ impl<'a> Analyzer<'a> {
         target_bounds: [f64; 4],
         target_area_scale: f64,
         target_unturn: Option<Transform>,
-        pass_id: u8,
         in_group: bool,
         group_ancestor_clip: Option<[f64; 4]>,
     ) {
-        if node["culled"].as_bool() == Some(true) || node["visible"].as_bool() == Some(false) {
+        // A CanvasGroup's own node draws nothing into its texture: the client's composite quad carries the group's
+        // background, and its border and border UIStrokes are drawn on the parent target after it (draw_group_frame).
+        if in_group || node["culled"].as_bool() == Some(true) || node["visible"].as_bool() == Some(false) {
             return;
         }
         let mut drawn_any = false;
-        let rot = is_rotated(node);
-        let xform = if in_group { None } else { effective_node_transform(node, self.scale, target_unturn) };
+        let xform = effective_node_transform(node, self.scale, target_unturn);
+        let edged = off_axis(xform);
 
         // Path2D
         if let Some(p2d) = node.get("path2d").and_then(Value::as_object) {
             let segs = p2d.get("segments").and_then(Value::as_array).map_or(0, Vec::len) as u64;
             if segs > 0 {
-                let phys = if in_group { flat_physical_rect(node, self.scale) } else { physical_rect(node, self.scale).rect };
-                let clip = self.effective_node_clip(node, nid, target_id, target_bounds, in_group, group_ancestor_clip);
+                let phys = physical_rect(node, self.scale).rect;
+                let clip = self.effective_node_clip(node, nid, target_id, target_bounds, false, group_ancestor_clip);
                 let area = clipped_quad_area(phys, xform, clip, target_bounds);
                 if area > 0.0 {
-                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, "path2d", "path2d", None, clip, false, segs, area);
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, "path2d", Look::plain("path2d"), clip, Geometry::Quads(segs), Fill::Plain, area);
                     drawn_any = true;
                 }
             }
@@ -1018,79 +1231,83 @@ impl<'a> Analyzer<'a> {
             return;
         }
 
-        let phys = if in_group { flat_physical_rect(node, self.scale) } else { physical_rect(node, self.scale).rect };
-        let clip = self.effective_node_clip(node, nid, target_id, target_bounds, in_group, group_ancestor_clip);
+        let phys = physical_rect(node, self.scale).rect;
+        let clip = self.effective_node_clip(node, nid, target_id, target_bounds, false, group_ancestor_clip);
         let clipped_area = clipped_quad_area(phys, xform, clip, target_bounds);
-        let corner = if in_group { false } else { has_corner(node) };
-        let gradient = if in_group { false } else { node.get("gradient").is_some_and(Value::is_object) };
+        let corner = has_corner(node);
+        let radii = corner_radii(node);
+        let gradient = node.get("gradient").is_some_and(Value::is_object);
         let has_text = node.get("text").is_some_and(Value::is_object);
+        let rounded = corner.then(|| rounded_constants(phys, radii, 0.0));
 
-        // Outer shadows
-        if !in_group {
-            if let Some(shadows) = node.get("shadows").and_then(Value::as_array) {
-                for sh in shadows {
-                    if sh.is_object()
-                        && sh["inset"].as_bool() != Some(true)
-                        && alpha8(1.0 - sh["transparency"].as_f64().unwrap_or(0.0)) > 0
-                        && phys.w > 0.0
-                        && phys.h > 0.0
-                    {
-                        self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, "shadow", "shadow", None, clip, rot, 1, clipped_area);
-                        drawn_any = true;
-                    }
+        // Outer UIShadows: one mesh of 54 quads on 73 vertices each, sampling the client's blur profile texture (a
+        // Mode = Text shadow is glyph copies in the text's draw instead, counted with the text below)
+        if let Some(shadows) = node.get("shadows").and_then(Value::as_array) {
+            for sh in shadows {
+                if sh.is_object()
+                    && sh["inset"].as_bool() != Some(true)
+                    && sh["mode"].as_str() != Some("Text")
+                    && alpha8(1.0 - sh["transparency"].as_f64().unwrap_or(0.0)) > 0
+                    && phys.w > 0.0
+                    && phys.h > 0.0
+                {
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, "shadow", Look::plain("shadow"), clip, Geometry::Mesh(54, 73), Fill::Plain, clipped_area);
+                    drawn_any = true;
                 }
             }
         }
 
-        // Background + Border
+        // Background + Border (the border's 4 strips batch with a plain background: both sample the white texture)
         if let Some(bg) = node.get("bg").and_then(Value::as_object) {
             let a = alpha8(1.0 - bg.get("transparency").and_then(Value::as_f64).unwrap_or(0.0));
             if a > 0 && phys.w > 0.0 && phys.h > 0.0 && clipped_area > 0.0 {
-                let shader = if corner || gradient { "styled_fill" } else { "solid" };
-                self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, shader, shader, None, clip, rot, 1, clipped_area);
+                let kind = if corner || gradient { "styled_fill" } else { "solid" };
+                if corner && !gradient && radii.iter().any(|r| *r <= 0.0) {
+                    // Per-corner radii with a square corner: the client draws the four quadrants apart, each with its
+                    // own radius (the plain shader where it is 0); measured, fixtures/corners.luau
+                    let quadrant = Rect::new(phys.x, phys.y, phys.w / 2.0, phys.h / 2.0);
+                    for r in radii {
+                        let look = Look::styled("white", false, (r > 0.0).then(|| rounded_constants(quadrant, [r; 4], 0.0)), false);
+                        self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, kind, look, clip, Geometry::Quads(1), Fill::Plain, clipped_area / 4.0);
+                    }
+                } else {
+                    let look = Look::styled("white", gradient, rounded, false);
+                    let geometry = Geometry::of(1, edged && look.shader == "plain");
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, kind, look, clip, geometry, Fill::Plain, clipped_area);
+                }
                 drawn_any = true;
-                if !in_group && !corner {
+                if !corner {
                     if let Some(border) = node.get("border").and_then(Value::as_object) {
                         if border.get("size").and_then(Value::as_f64).unwrap_or(0.0) > 0.0 {
-                            self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, "border", shader, None, clip, rot, 1, 0.0);
+                            self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, "border", Look::plain("white"), clip, Geometry::of(4, edged), Fill::Plain, 0.0);
                         }
                     }
                 }
             }
         }
 
-        // Image
+        // Image (a sliced image is 9 quads; a Pixelated one uses its own sampler)
         if let Some(img) = node.get("image").and_then(Value::as_object) {
             if let Some(uri) = img.get("uri").and_then(Value::as_str).filter(|u| !u.is_empty()) {
                 let a = alpha8(1.0 - img.get("transparency").and_then(Value::as_f64).unwrap_or(0.0));
                 if a > 0 && phys.w > 0.0 && phys.h > 0.0 && clipped_area > 0.0 {
-                    let shader = if corner || gradient { "styled_image" } else { "image" };
-                    self.emit_quads(
-                        sg,
-                        node,
-                        nid,
-                        target_id,
-                        target_bounds,
-                        target_area_scale,
-                        pass_id,
-                        shader,
-                        shader,
-                        Some(uri.to_string()),
-                        clip,
-                        rot,
-                        1,
-                        clipped_area,
-                    );
+                    let kind = if corner || gradient { "styled_image" } else { "image" };
+                    let pixelated = img.get("resample").and_then(Value::as_str) == Some("Pixelated");
+                    let look = Look::styled(uri, gradient, rounded, pixelated);
+                    let quads = if img.get("scaleType").and_then(Value::as_str) == Some("Slice") { 9 } else { 1 };
+                    let geometry = Geometry::of(quads, edged && look.shader == "plain");
+                    let fill = if quads == 9 { Fill::Slice } else { Fill::Image };
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, kind, look, clip, geometry, fill, clipped_area);
                     drawn_any = true;
                 }
             }
         }
 
-        // Text
+        // Text: one quad per visible glyph in the font atlas, plus the copies its strokes and text shadows draw
         if let Some(text) = node.get("text").and_then(Value::as_object) {
             if let Some(lines) = text.get("lines").and_then(Value::as_array).filter(|l| !l.is_empty()) {
                 let a = alpha8(1.0 - text.get("transparency").and_then(Value::as_f64).unwrap_or(0.0));
-                let tclip = effective_text_clip(node, self.scale, in_group, target_id, clip);
+                let tclip = effective_text_clip(node, self.scale, false, target_id, clip);
                 let mut glyphs = 0u64;
                 let mut line_area = 0.0f64;
                 for line in lines {
@@ -1115,14 +1332,11 @@ impl<'a> Analyzer<'a> {
                         line_area += la;
                     }
                 }
-                if a > 0 && glyphs > 0 {
+                if glyphs > 0 {
+                    // Contextual UIStrokes: glyph copies the client draws before the fill, one piece per stroke (a
+                    // UIGradient on the stroke makes it a draw of its own), also when the text itself is transparent
                     let mut stroke_glyphs = 0u64;
-                    if let Some(tstroke) = text.get("stroke").and_then(Value::as_object) {
-                        let st_a = alpha8(1.0 - tstroke.get("transparency").and_then(Value::as_f64).unwrap_or(1.0));
-                        if st_a > 0 {
-                            stroke_glyphs += 4 * glyphs;
-                        }
-                    }
+                    let mut area_left = line_area;
                     if let Some(strokes) = node.get("strokes").and_then(Value::as_array) {
                         for st in strokes {
                             let mode = st.get("mode").or_else(|| st.get("applyMode")).and_then(Value::as_str);
@@ -1131,57 +1345,79 @@ impl<'a> Analyzer<'a> {
                                 && alpha8(1.0 - st["transparency"].as_f64().unwrap_or(0.0)) > 0
                             {
                                 stroke_glyphs += glyphs;
+                                let stroke_gradient = st.get("gradient").is_some_and(Value::is_object);
+                                let state = self.batch_state(Look::styled("font-atlas", stroke_gradient, None, false), tclip, target_bounds);
+                                self.record_batch(sg, node, nid, target_id, target_area_scale, state, Geometry::Quads(glyphs), Fill::Glyph, area_left);
+                                area_left = 0.0;
+                                drawn_any = true;
                             }
                         }
                     }
-                    let total_g = glyphs + stroke_glyphs;
-                    self.totals.fill_glyph_quads += glyphs;
+                    // The fill, with the legacy TextStroke's 4 copies and a Mode = Text UIShadow's copy per glyph in
+                    // the same draw (all sample the font atlas)
+                    let mut shadow_glyphs = 0u64;
+                    if a > 0 {
+                        let mut fill_quads = glyphs;
+                        if let Some(tstroke) = text.get("stroke").and_then(Value::as_object) {
+                            let st_a = alpha8(1.0 - tstroke.get("transparency").and_then(Value::as_f64).unwrap_or(1.0));
+                            if st_a > 0 {
+                                stroke_glyphs += 4 * glyphs;
+                                fill_quads += 4 * glyphs;
+                            }
+                        }
+                        if let Some(shadows) = node.get("shadows").and_then(Value::as_array) {
+                            for sh in shadows {
+                                if sh.is_object() && sh["mode"].as_str() == Some("Text") && alpha8(1.0 - sh["transparency"].as_f64().unwrap_or(0.0)) > 0 {
+                                    shadow_glyphs += glyphs;
+                                    fill_quads += glyphs;
+                                }
+                            }
+                        }
+                        let state = self.batch_state(Look::styled("font-atlas", gradient, None, false), tclip, target_bounds);
+                        self.record_batch(sg, node, nid, target_id, target_area_scale, state, Geometry::Quads(fill_quads), Fill::Glyph, area_left);
+                        drawn_any = true;
+                    }
+                    let fill_glyphs = if a > 0 { glyphs } else { 0 };
+                    let total_g = fill_glyphs + stroke_glyphs + shadow_glyphs;
+                    self.totals.fill_glyph_quads += fill_glyphs;
                     self.totals.stroke_glyph_quads += stroke_glyphs;
+                    self.totals.shadow_glyph_quads += shadow_glyphs;
                     self.totals.glyph_quads += total_g;
                     sg.glyph_quads += total_g;
                     self.object_entry(node, nid, &sg.name).glyph_quads += total_g;
-                    let state = BatchState {
-                        pass_id,
-                        shader: "text",
-                        texture: Some("font-atlas".to_string()),
-                        scissor: effective_scissor_key(tclip, target_bounds),
-                        rotated: rot,
-                    };
-                    self.record_batch(sg, node, nid, target_id, target_area_scale, state, line_area);
-                    drawn_any = true;
                 }
             }
         }
 
-        // Inset shadows + border UIStrokes
-        if !in_group {
-            if let Some(shadows) = node.get("shadows").and_then(Value::as_array) {
-                for sh in shadows {
-                    if sh.is_object()
-                        && sh["inset"].as_bool() == Some(true)
-                        && alpha8(1.0 - sh["transparency"].as_f64().unwrap_or(0.0)) > 0
-                        && phys.w > 0.0
-                        && phys.h > 0.0
-                        && clipped_area > 0.0
-                    {
-                        self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, "shadow", "shadow", None, clip, rot, 1, clipped_area);
-                        drawn_any = true;
-                    }
+        // Inset UIShadows (74 quads, each a draw of its own) + border UIStrokes (the rounded shader, keyed by the
+        // shape's size, radii and thickness; a UIGradient on the stroke makes it a draw of its own)
+        if let Some(shadows) = node.get("shadows").and_then(Value::as_array) {
+            for sh in shadows {
+                if sh.is_object()
+                    && sh["inset"].as_bool() == Some(true)
+                    && sh["mode"].as_str() != Some("Text")
+                    && alpha8(1.0 - sh["transparency"].as_f64().unwrap_or(0.0)) > 0
+                    && phys.w > 0.0
+                    && phys.h > 0.0
+                    && clipped_area > 0.0
+                {
+                    let look = Look { shader: "plain", texture: Some("shadow".to_string()), pixelated: false, constants: None, own: true };
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, "shadow", look, clip, Geometry::Mesh(74, 296), Fill::Plain, clipped_area);
+                    drawn_any = true;
                 }
             }
-            if let Some(strokes) = node.get("strokes").and_then(Value::as_array) {
-                for st in strokes {
-                    let mode = st.get("mode").or_else(|| st.get("applyMode")).and_then(Value::as_str);
-                    let is_text_stroke = has_text && mode == Some("Contextual");
-                    if !is_text_stroke
-                        && st["thickness"].as_f64().unwrap_or(0.0) > 0.0
-                        && alpha8(1.0 - st["transparency"].as_f64().unwrap_or(0.0)) > 0
-                        && phys.w > 0.0
-                        && phys.h > 0.0
-                    {
-                        self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, "stroke", "stroke", None, clip, rot, 1, 0.0);
-                        drawn_any = true;
-                    }
+        }
+        if let Some(strokes) = node.get("strokes").and_then(Value::as_array) {
+            for st in strokes {
+                let mode = st.get("mode").or_else(|| st.get("applyMode")).and_then(Value::as_str);
+                let is_text_stroke = has_text && mode == Some("Contextual");
+                let thickness = st["thickness"].as_f64().unwrap_or(0.0);
+                if !is_text_stroke && thickness > 0.0 && alpha8(1.0 - st["transparency"].as_f64().unwrap_or(0.0)) > 0 && phys.w > 0.0 && phys.h > 0.0 {
+                    let stroke_gradient = st.get("gradient").is_some_and(Value::is_object);
+                    let look = Look::styled("white", stroke_gradient, Some(rounded_constants(phys, radii, thickness)), false);
+                    let quads = stroke_quads(thickness * self.scale);
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, "stroke", look, clip, Geometry::Quads(quads), Fill::Plain, 0.0);
+                    drawn_any = true;
                 }
             }
         }
@@ -1192,6 +1428,45 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// A CanvasGroup's border and border UIStrokes, drawn on the parent target right after its composite quad
+    /// (the group's texture holds neither).
+    #[allow(clippy::too_many_arguments)]
+    fn draw_group_frame(
+        &mut self,
+        sg: &mut ScreenGuiAccum,
+        gnode: &Value,
+        gid: u64,
+        target_id: u64,
+        target_bounds: [f64; 4],
+        target_area_scale: f64,
+        clip: Option<[f64; 4]>,
+        edged: bool,
+    ) {
+        let phys = physical_rect(gnode, self.scale).rect;
+        if phys.w <= 0.0 || phys.h <= 0.0 {
+            return;
+        }
+        let corner = has_corner(gnode);
+        let radii = corner_radii(gnode);
+        if !corner {
+            let bg_alpha = gnode.get("bg").and_then(Value::as_object).map_or(0, |bg| alpha8(1.0 - bg.get("transparency").and_then(Value::as_f64).unwrap_or(0.0)));
+            let border = gnode.get("border").and_then(Value::as_object).and_then(|b| b.get("size")).and_then(Value::as_f64).unwrap_or(0.0);
+            if bg_alpha > 0 && border > 0.0 {
+                self.emit_quads(sg, gnode, gid, target_id, target_bounds, target_area_scale, "border", Look::plain("white"), clip, Geometry::of(4, edged), Fill::Plain, 0.0);
+            }
+        }
+        if let Some(strokes) = gnode.get("strokes").and_then(Value::as_array) {
+            for st in strokes {
+                let thickness = st["thickness"].as_f64().unwrap_or(0.0);
+                if thickness > 0.0 && alpha8(1.0 - st["transparency"].as_f64().unwrap_or(0.0)) > 0 {
+                    let stroke_gradient = st.get("gradient").is_some_and(Value::is_object);
+                    let look = Look::styled("white", stroke_gradient, Some(rounded_constants(phys, radii, thickness)), false);
+                    let quads = stroke_quads(thickness * self.scale);
+                    self.emit_quads(sg, gnode, gid, target_id, target_bounds, target_area_scale, "stroke", look, clip, Geometry::Quads(quads), Fill::Plain, 0.0);
+                }
+            }
+        }
+    }
     #[allow(clippy::too_many_arguments)]
     fn draw_post(
         &mut self,
@@ -1201,7 +1476,6 @@ impl<'a> Analyzer<'a> {
         target_id: u64,
         target_bounds: [f64; 4],
         target_area_scale: f64,
-        pass_id: u8,
         group_ancestor_clip: Option<[f64; 4]>,
     ) {
         let Some(scroll) = node.get("scroll").and_then(Value::as_object) else { return };
@@ -1210,7 +1484,7 @@ impl<'a> Analyzer<'a> {
             return;
         }
         let clip = self.effective_node_clip(node, nid, target_id, target_bounds, false, group_ancestor_clip);
-        let rot = is_rotated(node);
+        let edged = off_axis(effective_node_transform(node, self.scale, None));
         for horiz in [false, true] {
             let axis_key = if horiz { "horizontal" } else { "vertical" };
             if scroll.get(axis_key).and_then(Value::as_bool) != Some(true) {
@@ -1218,22 +1492,7 @@ impl<'a> Analyzer<'a> {
             }
             for key in ["topImage", "midImage", "bottomImage"] {
                 if let Some(uri) = scroll.get(key).and_then(Value::as_str).filter(|u| !u.is_empty()) {
-                    self.emit_quads(
-                        sg,
-                        node,
-                        nid,
-                        target_id,
-                        target_bounds,
-                        target_area_scale,
-                        pass_id,
-                        "scrollbar",
-                        "image",
-                        Some(uri.to_string()),
-                        clip,
-                        rot,
-                        1,
-                        0.0,
-                    );
+                    self.emit_quads(sg, node, nid, target_id, target_bounds, target_area_scale, "scrollbar", Look::plain(uri), clip, Geometry::of(1, edged), Fill::Image, 0.0);
                 }
             }
         }
@@ -1248,7 +1507,6 @@ impl<'a> Analyzer<'a> {
         target_bounds: [f64; 4],
         target_area_scale: f64,
         target_unturn: Option<Transform>,
-        pass_id: u8,
         depth: u64,
         skip_group: Option<u64>,
         group_ancestor_clip: Option<[f64; 4]>,
@@ -1286,9 +1544,10 @@ impl<'a> Analyzer<'a> {
                     sg.canvas_rt_switches += 2;
                     self.object_entry(gnode, gid, &sg.name).canvas_rt_bytes += rt_bytes;
 
-                    // Recurse into offscreen CanvasGroup render target: background and descendants
-                    // draw into the group's flat texture clipped only by the group's bounds and
-                    // interior clipping ancestors, measured in actual offscreen RT texels.
+                    // Recurse into offscreen CanvasGroup render target: descendants draw into the group's
+                    // flat texture clipped only by the group's bounds and interior clipping ancestors,
+                    // measured in actual offscreen RT texels (the client's composite quad carries the
+                    // group's background, so the texture holds only the descendants).
                     let rt_bounds = flat.bounds();
                     let raw_group_clip = clip_rect(gnode, [0.0, 0.0], self.scale);
                     let child_unturn = if gnode.get("matrix").and_then(Value::as_array).is_some_and(|m| m.len() >= 6) {
@@ -1300,7 +1559,7 @@ impl<'a> Analyzer<'a> {
                     };
                     self.last_state_by_target.remove(&gid);
                     if let Some(sub_draw) = obj.get("draw").and_then(Value::as_array) {
-                        self.walk_entries(sg, sub_draw, gid, rt_bounds, group_area_scale, child_unturn, pass_id, new_depth, Some(gid), raw_group_clip);
+                        self.walk_entries(sg, sub_draw, gid, rt_bounds, group_area_scale, child_unturn, new_depth, Some(gid), raw_group_clip);
                     }
 
                     // Composite offscreen RT onto parent target (parent's interior clip and unturn apply here)
@@ -1309,22 +1568,10 @@ impl<'a> Analyzer<'a> {
                     let clip = self.effective_node_clip(gnode, gid, target_id, target_bounds, false, group_ancestor_clip);
                     let area = clipped_quad_area(phys, xform, clip, target_bounds);
                     if area > 0.0 {
-                        self.emit_quads(
-                            sg,
-                            gnode,
-                            gid,
-                            target_id,
-                            target_bounds,
-                            target_area_scale,
-                            pass_id,
-                            "group_composite",
-                            "group_composite",
-                            Some(format!("group:{gid}")),
-                            clip,
-                            is_rotated(gnode),
-                            1,
-                            area,
-                        );
+                        let edged = off_axis(xform);
+                        let look = Look { shader: "plain", texture: Some(format!("group:{gid}")), pixelated: false, constants: None, own: false };
+                        self.emit_quads(sg, gnode, gid, target_id, target_bounds, target_area_scale, "group_composite", look, clip, Geometry::of(1, edged), Fill::Image, area);
+                        self.draw_group_frame(sg, gnode, gid, target_id, target_bounds, target_area_scale, clip, edged);
                         self.totals.drawn_nodes += 1;
                         sg.drawn_nodes += 1;
                     }
@@ -1342,9 +1589,9 @@ impl<'a> Analyzer<'a> {
                 continue;
             }
             if raw < 0 {
-                self.draw_post(sg, node, nid, target_id, target_bounds, target_area_scale, pass_id, group_ancestor_clip);
+                self.draw_post(sg, node, nid, target_id, target_bounds, target_area_scale, group_ancestor_clip);
             } else {
-                self.draw_node(sg, node, nid, target_id, target_bounds, target_area_scale, target_unturn, pass_id, skip_group == Some(nid), group_ancestor_clip);
+                self.draw_node(sg, node, nid, target_id, target_bounds, target_area_scale, target_unturn, skip_group == Some(nid), group_ancestor_clip);
             }
         }
     }
@@ -1389,27 +1636,86 @@ pub fn desktop_layout_cpu_ms(stats: LayoutStats) -> f64 {
     } else {
         0
     };
-    stats.passes as f64 * STUDIO_LAYOUT_PASS_MS
-        + (stats.stored + stats.moved + stats.scroll_moved) as f64 * STUDIO_LAYOUT_OBJECT_MS
-        + scroll_passes as f64 * STUDIO_SCROLL_PASS_MS
+    (stats.passes + scroll_passes) as f64 * CLIENT_LAYOUT_PASS_MS
+        + stats.stored as f64 * CLIENT_LAYOUT_STORED_MS
+        + stats.moved as f64 * CLIENT_LAYOUT_MOVED_MS
+        + stats.scroll_moved as f64 * CLIENT_LAYOUT_SCROLL_MOVED_MS
 }
 
+/// The UI draw pass's cost of one analysed frame (`PASS_*_US`, microseconds): the pieces drawn onto the screen (all a
+/// static frame draws) and those drawn into CanvasGroup textures (only when the groups re-render).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PassCost {
+    pub screen_us: f64,
+    pub offscreen_us: f64,
+    pub static_draws: u64,
+    pub group_targets: u64,
+}
+
+const DRAW_PASS_SOURCE: &str = "Studio 0.747 rendered client on the reference desktop: LibMP Pass2d + fillGuiVertices + UI + compositeUITextures per render frame (the capture did not change the render call's CPU), per-piece slopes of single-factor scenes averaged over two runs: 20 us once any UI draws, 0.116 us a plain quad, 0.243 an image quad, 0.45 a sliced image quad, 0.145 a glyph, 0.226 an off-axis element, 1.5 a UIShadow, 0.2 a draw; a frame whose CanvasGroups re-render adds 70 us and their content";
+const DRAW_PASS_ACCURACY: &str = "calibration scenes median error 12 %; two runs agreed within 35 % (a busy machine); held-out fixtures in notes/cost-calibration.md";
+
+/// `predicted.*.drawPassCpuMs` for an analysed frame.
+fn draw_pass_json(pass: PassCost) -> (Value, Value) {
+    let desk_ms = if pass.static_draws > 0 { (PASS_FLOOR_US + pass.screen_us) / 1000.0 } else { 0.0 };
+    let mut desk = json!({
+        "status": "extrapolated",
+        "basis": "extrapolated",
+        "scope": "static_frame",
+        "ms": round9(desk_ms),
+        "source": DRAW_PASS_SOURCE,
+        "accuracy": DRAW_PASS_ACCURACY,
+    });
+    let mut phone = phone_extrapolation(
+        desk_ms,
+        "static_frame",
+        "desktop-ref drawPassCpuMs (a static frame: every CanvasGroup keeps its texture)",
+        "Recorded phone timings of the UI draw pass for this screen (the ratio is a whole-UI-pass ratio from two match cells).",
+    );
+    if pass.group_targets > 0 {
+        let rerender_ms = desk_ms.max(PASS_FLOOR_US / 1000.0) + (PASS_GROUP_RERENDER_US + pass.offscreen_us) / 1000.0;
+        desk["groupRerenderMs"] = json!(round9(rerender_ms));
+        phone["groupRerenderRangeMs"] = json!([round4(rerender_ms * PHONE_UI_MAIN_RATIO_LOW), round4(rerender_ms * PHONE_UI_MAIN_RATIO_HIGH)]);
+    }
+    (desk, phone)
+}
+
+/// The draw-pass prices a report's analysis computed (None when it has none: a failed or empty run).
+fn draw_pass_of(report: &Value) -> Option<(Value, Value)> {
+    let desk = report.pointer("/predicted/desktop-ref/drawPassCpuMs")?;
+    let phone = report.pointer("/predicted/phone-mid/drawPassCpuMs")?;
+    (desk["status"] == "extrapolated").then(|| (desk.clone(), phone.clone()))
+}
+
+fn gpu_refusal() -> Value {
+    json!({
+        "status": "refused",
+        "basis": "clock_dependent",
+        "ms": Value::Null,
+        "reason": "Measured on the reference desktop GPU and not a figure to report: RenderDoc replays price a UI draw at about 4 us plus 4.8 us per megapixel shaded at boost clocks, while the live client at 60 Hz spent 8.6x that on the same 40 full-screen layers at its idle clocks, so desktop GPU ms follows the GPU's clock state; a phone's tile-based GPU has no conversion from desktop GPU ms.",
+        "settledBy": "GPU timing captures on the target phones (overdraw viewports and CanvasGroup texture bytes regressed against them)."
+    })
+}
+
+/// The draw-pass and GPU entries of a run with no analysed frame to price (a failed, yielded or empty run, a run whose
+/// frames all span other than one client frame, or an edit-mode sequence).
 fn draw_and_gpu_refusals() -> (Value, Value) {
     let draw_refusal = json!({
         "status": "refused",
-        "basis": "uncalibrated",
+        "basis": "no_analysed_frame",
         "ms": Value::Null,
-        "reason": "No recorded per-element CPU calibration for Roblox Pass2d / fillGuiVertices / TextRender.",
-        "settledBy": "Regress quad, glyph, and batch-break counts against recorded Roblox MicroProfiler UI pass captures."
+        "reason": "drawPassCpuMs prices an analysed frame (a single moment, a --scene, or a play-mode sequence's frames); this entry has none.",
+        "settledBy": "Run a single moment, or a play-mode sequence whose samples each span one client frame."
     });
-    let gpu_refusal = json!({
-        "status": "refused",
-        "basis": "uncalibrated",
-        "ms": Value::Null,
-        "reason": "No recorded mobile GPU UI fill-rate or offscreen render-target calibration backing gpuUiMs.",
-        "settledBy": "Regress overdraw viewports and CanvasGroup RT bytes against recorded GPU timing captures on target devices."
-    });
-    (draw_refusal, gpu_refusal)
+    (draw_refusal, gpu_refusal())
+}
+
+/// The draw-pass entries of an analysed frame, or the refusal.
+fn draw_pass_or_refusal(draw: Option<(Value, Value)>) -> (Value, Value) {
+    draw.unwrap_or_else(|| {
+        let (refusal, _) = draw_and_gpu_refusals();
+        (refusal.clone(), refusal)
+    })
 }
 
 fn desktop_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_from: &'static str) -> Value {
@@ -1419,15 +1725,26 @@ fn desktop_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_
         "scope": scope,
         "ms": round9(desk_ms),
         "extrapolatedFrom": extrapolated_from,
-        "source": "Studio 0.744 client script-triggered lazy-layout slope (native/src/engine/layout/install.rs: 2.3 us/pass + 0.312 us/(stored+moved) + 62 us/scroll + 0.312 us/scrollMoved)"
+        "source": "Studio 0.747 rendered client, per-frame UpdateUILayouts fitted to rur's per-frame counters: 58.2 us a layout or scroll pass + 1.18 us a stored record + 1.16 us a moved record + 0.1 us a record a scroll moves (held-out animations: median error 45 %, mostly priced low)"
     })
 }
 
 fn phone_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_from: &'static str) -> Value {
+    phone_extrapolation(
+        desk_ms,
+        scope,
+        extrapolated_from,
+        "Recorded phone timings of UpdateUILayouts for this layout (the ratio is a whole-UI-pass ratio from two match cells).",
+    )
+}
+
+/// A phone mid-tier figure scaled from the desktop's: central range and full band of the derived ratio.
+fn phone_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_from: &'static str, settled_by: &'static str) -> Value {
     let central_low = round4(desk_ms * PHONE_UI_MAIN_RATIO_LOW);
     let central_high = round4(desk_ms * PHONE_UI_MAIN_RATIO_HIGH);
     let band_low = round4(desk_ms * PHONE_UI_MAIN_LOW);
     let band_high = round4(desk_ms * PHONE_UI_MAIN_HIGH);
+    let (ratio, band) = phone_ratio_text();
     json!({
         "status": "extrapolated",
         "basis": "derived_extrapolation",
@@ -1444,46 +1761,48 @@ fn phone_layout_extrapolation(desk_ms: f64, scope: &'static str, extrapolated_fr
                 "basis": "recorded_whole_ui_pass"
             },
             "captureOverheadFactor": {
+                "value": PHONE_CAPTURE_FACTOR,
                 "range": [PHONE_CAPTURE_FACTOR_LOW, PHONE_CAPTURE_FACTOR_HIGH],
-                "basis": "assumed_unmeasured_for_layout"
+                "basis": "measured_desktop_ui_work"
             },
             "liveFrameWeight": {
                 "value": PHONE_UI_LIVE_WEIGHT,
-                "basis": "assumed_from_match_gui_weight"
+                "basis": "recorded_phone_gui_category"
             },
             "formula": "capturedWholeUiPhoneOverDesktop * captureOverheadFactor * liveFrameWeight"
         },
         "extrapolatedFrom": extrapolated_from,
-        "source": "Derived from desktop-ref: 4.09 (range 2.65..8.0) whole-UI captured phone/desktop ratio * assumed 1.25..2.0 capture overhead factor (unmeasured for layout) * assumed 0.77 live frame weight (from mobile live-gameplay GUI category) -> central ratio 3.94x..6.30x (3.9x..6.3x), full band 2.55x..12.32x",
-        "settledBy": "Record paired captured and uncaptured UpdateUILayouts timings on desktop to measure the layout capture overhead factor, and compare against recorded mobile mid-tier UI layout timings."
+        "source": format!("Derived from desktop-ref: 4.09 (range 2.65..8.0) whole-UI captured phone/desktop ratio * 0.88..1.12 capture overhead factor (measured on the desktop client's UI work) * 0.77 live frame weight (recorded for the phones' GUI category) -> central ratio {ratio}, full band {band}"),
+        "settledBy": settled_by
     })
 }
 
-pub fn predicted_sequence_json(desk_ms: f64, scope: &'static str) -> Value {
-    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
-    let desk_from = "Studio 0.744 script-triggered lazy-layout probe (100-1,000 card scroll and single-card edit slopes) extrapolated to frame layout passes";
-    let phone_from = "desktop-ref extrapolated layoutCpuMs scaled by derived ratio 3.9x..6.3x (4.09 * assumed 1.25..2.0 capture factor * 0.77; full band 2.55x..12.32x)";
+pub fn predicted_sequence_json(desk_ms: f64, scope: &'static str, draw: Option<(Value, Value)>) -> Value {
+    let (desk_draw, phone_draw) = draw_pass_or_refusal(draw);
+    let desk_from = "Studio 0.747 client per-frame UpdateUILayouts (grids, chains, lists, moved subtrees, text) fitted to rur's per-frame counters";
+    let phone_from = "desktop-ref extrapolated layoutCpuMs scaled by the derived phone ratio (4.09 * measured 0.88..1.12 capture factor * 0.77)";
     json!({
         "desktop-ref": {
             "layoutCpuMs": desktop_layout_extrapolation(desk_ms, scope, desk_from),
-            "drawPassCpuMs": draw_refusal,
-            "gpuUiMs": gpu_refusal
+            "drawPassCpuMs": desk_draw,
+            "gpuUiMs": gpu_refusal()
         },
         "phone-mid": {
             "layoutCpuMs": phone_layout_extrapolation(desk_ms, scope, phone_from),
-            "drawPassCpuMs": draw_refusal,
-            "gpuUiMs": gpu_refusal
+            "drawPassCpuMs": phone_draw,
+            "gpuUiMs": gpu_refusal()
         }
     })
 }
 
 pub fn predicted_json(stats: LayoutStats) -> Value {
-    predicted_sequence_json(desktop_layout_cpu_ms(stats), "per_frame")
+    predicted_sequence_json(desktop_layout_cpu_ms(stats), "per_frame", None)
 }
 
-fn predicted_single_live_json(stats: LayoutStats) -> Value {
+fn predicted_single_live_json(stats: LayoutStats, pass: PassCost) -> Value {
     let desk_ms = desktop_layout_cpu_ms(stats);
-    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
+    let (desk_draw, phone_draw) = draw_pass_json(pass);
+    let gpu_refusal = gpu_refusal();
     let frame_refusal = json!({
         "status": "refused",
         "basis": "unmeasured",
@@ -1492,26 +1811,27 @@ fn predicted_single_live_json(stats: LayoutStats) -> Value {
         "reason": "Single-moment mode runs an export full-tree layout pass, not a frame's incremental layout churn; see fullTreeLayoutCpuMs for the one-shot full-tree cost.",
         "settledBy": "Run `rur cost` with --from and --frames (and --fps) to measure per-frame layout churn."
     });
-    let desk_from = "Studio 0.744 script-triggered lazy-layout probe (2.3 us/pass + 0.312 us/record) extrapolated to laying the whole tree out once during export";
-    let phone_from = "desktop-ref fullTreeLayoutCpuMs scaled by derived ratio 3.9x..6.3x (4.09 * assumed 1.25..2.0 capture factor * 0.77; full band 2.55x..12.32x)";
+    let desk_from = "Studio 0.747 client per-frame layout slopes applied to laying the whole tree out once during export (a mount's full-tree layout is not measured against a client)";
+    let phone_from = "desktop-ref fullTreeLayoutCpuMs scaled by the derived phone ratio (4.09 * measured 0.88..1.12 capture factor * 0.77)";
     json!({
         "desktop-ref": {
             "layoutCpuMs": frame_refusal,
             "fullTreeLayoutCpuMs": desktop_layout_extrapolation(desk_ms, "full_tree_export_pass", desk_from),
-            "drawPassCpuMs": draw_refusal,
+            "drawPassCpuMs": desk_draw,
             "gpuUiMs": gpu_refusal
         },
         "phone-mid": {
             "layoutCpuMs": frame_refusal,
             "fullTreeLayoutCpuMs": phone_layout_extrapolation(desk_ms, "full_tree_export_pass", phone_from),
-            "drawPassCpuMs": draw_refusal,
+            "drawPassCpuMs": phone_draw,
             "gpuUiMs": gpu_refusal
         }
     })
 }
 
-fn predicted_scene_only_json() -> Value {
-    let (draw_refusal, gpu_refusal) = draw_and_gpu_refusals();
+fn predicted_scene_only_json(pass: PassCost) -> Value {
+    let (desk_draw, phone_draw) = draw_pass_json(pass);
+    let gpu_refusal = gpu_refusal();
     let layout_refusal = json!({
         "status": "refused",
         "basis": "unmeasured",
@@ -1523,12 +1843,12 @@ fn predicted_scene_only_json() -> Value {
     json!({
         "desktop-ref": {
             "layoutCpuMs": layout_refusal,
-            "drawPassCpuMs": draw_refusal,
+            "drawPassCpuMs": desk_draw,
             "gpuUiMs": gpu_refusal
         },
         "phone-mid": {
             "layoutCpuMs": layout_refusal,
-            "drawPassCpuMs": draw_refusal,
+            "drawPassCpuMs": phone_draw,
             "gpuUiMs": gpu_refusal
         }
     })
@@ -2204,9 +2524,9 @@ fn predicted_edit_mode_sequence_json(run_mode: &str, scope: &'static str, play_p
 
 pub fn unmodeled_list() -> Value {
     json!([
-        "draw_calls_and_batch_breaks: drawCalls and batchBreaks come from an unmeasured state-transition model (distinct image URIs break batches; client UI image atlasing and real draw counts are uncalibrated)",
-        "draw_pass_cpu_ms: Pass2d / fillGuiVertices / TextRender per-element CPU slopes are uncalibrated (refused in predicted.*.drawPassCpuMs)",
-        "gpu_ui_ms: mobile GPU fill-rate, tile-binning, and CanvasGroup offscreen RT bandwidth costs are uncalibrated (refused in predicted.*.gpuUiMs)",
+        "draw_call_residuals: drawCalls follow the client's measured batching; not modelled: a colour emoji's extra layer quads, the cells a SliceCenter leaves empty, and the pieces the client cuts a curved Path2D into (quads only; draws are unaffected)",
+        "draw_pass_cpu_ms_residuals: drawPassCpuMs prices pieces by measured desktop slopes; a curved Path2D's pieces, text shaping and UIScale'd trees cost the client more than their quads",
+        "gpu_ui_ms: desktop GPU ms follows the GPU's clock state and a phone's tile-based GPU has no conversion from it (refused in predicted.*.gpuUiMs)",
         "thermal_throttling_dvfs: device clock scaling and sustained thermal throttling are not modeled",
         "luau_script_cpu_ms: Luau script work is measured separately with --profile work",
         "viewport_frame_3d_pass: 3D rendering inside ViewportFrames is excluded from 2D UI draw counts"
@@ -2297,7 +2617,7 @@ pub fn analyze_scene_with_mode(
             ..Default::default()
         };
         if let Some(draw_list) = layer.get("draw").and_then(Value::as_array) {
-            analyzer.walk_entries(&mut sg, draw_list, 0, screen_bounds, 1.0, None, pass_id, 0, None, None);
+            analyzer.walk_entries(&mut sg, draw_list, 0, screen_bounds, 1.0, None, 0, None, None);
         }
         screen_guis.push(sg);
     }
@@ -2319,6 +2639,12 @@ pub fn analyze_scene_with_mode(
     }
 
     let totals = &analyzer.totals;
+    let pass = PassCost {
+        screen_us: totals.pass_screen_us,
+        offscreen_us: totals.pass_offscreen_us,
+        static_draws: totals.static_draw_calls,
+        group_targets: totals.canvas_group_targets,
+    };
     let totals_json = json!({
         "screenGuis": totals.screen_guis,
         "disabledScreenGuis": hidden.disabled_screen_guis,
@@ -2330,7 +2656,9 @@ pub fn analyze_scene_with_mode(
         "glyphQuads": totals.glyph_quads,
         "fillGlyphQuads": totals.fill_glyph_quads,
         "strokeGlyphQuads": totals.stroke_glyph_quads,
+        "shadowGlyphQuads": totals.shadow_glyph_quads,
         "drawCalls": totals.draw_calls,
+        "staticDrawCalls": totals.static_draw_calls,
         "batchBreaks": totals.batch_breaks,
         "batchBreaksByCause": totals.batch_breaks_by_cause,
         "canvasGroups": totals.canvas_groups,
@@ -2468,12 +2796,12 @@ pub fn analyze_scene_with_mode(
     if dom_hidden.is_some() {
         report.insert("fullTreeLayout".into(), layout_stats_json_scoped(layout, "full_tree_export_pass"));
         if status == "ok" {
-            report.insert("predicted".into(), predicted_single_live_json(layout));
+            report.insert("predicted".into(), predicted_single_live_json(layout, pass));
         } else {
             report.insert("predicted".into(), predicted_non_ok_json(status, None, analyzer.totals.drawn_nodes, None, false, true, None, None));
         }
     } else {
-        report.insert("predicted".into(), predicted_scene_only_json());
+        report.insert("predicted".into(), predicted_scene_only_json(pass));
     }
     if mounted_empty {
         report.insert("failure".into(), json!(EMPTY_MOUNT_MESSAGE));
@@ -2485,8 +2813,8 @@ pub fn analyze_scene_with_mode(
         "fidelity".into(),
         json!({
             "canvasGroupRt": "exact_studio_dimensions (rectangular float32 logical size, 2048 side cap, 2048x1024 area cap, culled/empty/transparent skipped)",
-            "drawCalls": "unmeasured_state_transition_model (estimates batches from pass/shader/texture/clip/rotation transitions; no client capture backs these counts and UI image atlasing is unmodeled)",
-            "batchBreaks": "unmeasured_state_transition_model (layerPass, renderTarget, clip, shader, texture, rotation; not calibrated against a client)",
+            "drawCalls": "client_batch_model (Studio 0.747 RenderDoc captures: shader variant, texture and sampler, rounded-shape constants, scissor, 10,000-vertex chunks; drawCalls re-renders every CanvasGroup, staticDrawCalls keeps their textures)",
+            "batchBreaks": "client_batch_model (renderTarget, clip, ownDraw, shader, texture, constants, batchLimit)",
             "layoutCpuMs": if dom_hidden.is_some() {
                 "single_moment_export_pass_only (fullTreeLayoutCpuMs extrapolates lazy-layout slope; run --from and --frames for per-frame cost)"
             } else {
@@ -2955,13 +3283,14 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
             "remedy": remedies.join(" "),
         })));
     }
-    const COUNT_KEYS: [&str; 12] = [
+    const COUNT_KEYS: [&str; 13] = [
         "screenGuis",
         "disabledScreenGuis",
         "drawnNodes",
         "quads",
         "glyphQuads",
         "drawCalls",
+        "staticDrawCalls",
         "batchBreaks",
         "canvasGroupTargets",
         "canvasRtBytes",
@@ -2969,8 +3298,8 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
         "screenOverdrawViewports",
         "offscreenOverdrawViewports",
     ];
-    // Unmeasured state-transition model counts (`drawCalls`, `batchBreaks`) remain informational in
-    // `counts` and do not drive `verdict`.
+    // The batching model's counts (`drawCalls`, `staticDrawCalls`, `batchBreaks`) stay informational in `counts` and
+    // do not drive `verdict`, so a verdict still compares with reports saved before the model was calibrated.
     const VERDICT_KEYS: [&str; 5] = [
         "quads",
         "glyphQuads",
@@ -3116,7 +3445,7 @@ pub fn compare_reports(before: &Value, after: &Value) -> Result<Value, String> {
     Ok(sort_json(json!({
         "schema": "rrr-ab/1",
         "verdict": verdict,
-        "verdictBasis": "measured_counts_only (quads, glyphQuads, canvasRtBytes, screenOverdrawViewports, offscreenOverdrawViewports, hiddenGuiObjects, and sequence layout churn; unmeasured model drawCalls and batchBreaks are informational only)",
+        "verdictBasis": "measured_counts_only (quads, glyphQuads, canvasRtBytes, screenOverdrawViewports, offscreenOverdrawViewports, hiddenGuiObjects, and sequence layout churn; model drawCalls and batchBreaks are informational only)",
         "equivalence": Value::Object(equivalence),
         "measurementNoise": 0.0,
         "counts": {
@@ -3297,7 +3626,7 @@ impl SequenceAccumulator {
         } else if index == 0 {
             predicted_non_single_client_frame_json(client_frames, self.client_hz, self.fps, true)
         } else if client_frames == 1 {
-            predicted_sequence_json(desktop_layout_cpu_ms(layout), "per_client_frame")
+            predicted_sequence_json(desktop_layout_cpu_ms(layout), "per_client_frame", draw_pass_of(&report))
         } else {
             predicted_non_single_client_frame_json(client_frames, self.client_hz, self.fps, false)
         };
@@ -3485,6 +3814,7 @@ impl SequenceAccumulator {
         } else {
             raw_status
         };
+        let base_draw_pass = draw_pass_of(&base);
         if let Some(obj) = base.as_object_mut() {
             obj.insert("mode".into(), json!("sequence"));
             obj.insert("runMode".into(), json!(self.run_mode));
@@ -3503,7 +3833,7 @@ impl SequenceAccumulator {
                         let sp = c.scroll_passes as f64 / denom;
                         let sm = c.scroll_moved as f64 / denom;
                         let records = s + m + sm;
-                        let est_ms = sp * STUDIO_SCROLL_PASS_MS + records * STUDIO_LAYOUT_OBJECT_MS;
+                        let est_ms = sp * CLIENT_LAYOUT_PASS_MS + s * CLIENT_LAYOUT_STORED_MS + m * CLIENT_LAYOUT_MOVED_MS + sm * CLIENT_LAYOUT_SCROLL_MOVED_MS;
                         (est_ms, records, c.clone(), s, anc, m, sp, sm)
                     })
                     .collect()
@@ -3573,7 +3903,7 @@ impl SequenceAccumulator {
                 } else if !has_steady_client_frames {
                     predicted_no_client_frames_json(count, self.client_hz, self.fps)
                 } else {
-                    predicted_sequence_json(steady_desk_ms, "steady_state_per_client_frame_mean")
+                    predicted_sequence_json(steady_desk_ms, "steady_state_per_client_frame_mean", base_draw_pass.clone())
                 },
             );
             if let Some(fid) = obj.get_mut("fidelity").and_then(Value::as_object_mut) {
@@ -3588,7 +3918,7 @@ impl SequenceAccumulator {
                     } else if !has_steady_client_frames {
                         json!(format!("refused_no_client_frames (0 client frames completed after frame 0 @ {fps_str} fps on {hz_str} Hz client)"))
                     } else {
-                        json!(format!("extrapolated_from_lazy_layout_probe (mode=play, {hz_str} Hz {} cadence, 1 Heartbeat/client frame, sampled @ {fps_str} fps; desktop lazy-layout slope extrapolated to per-client-frame layout passes; phone-mid uses derived 3.9x..6.3x ratio, band 2.55x..12.32x, capture factor 1.25..2.0 unmeasured for layout)", self.cadence_kind))
+                        json!(format!("extrapolated_from_client_per_frame_layout (mode=play, {hz_str} Hz {} cadence, 1 Heartbeat/client frame, sampled @ {fps_str} fps; desktop slopes fitted to a Studio 0.747 client's per-frame UpdateUILayouts; phone-mid uses the derived {} ratio, band {}, capture factor 0.88..1.12 measured)", self.cadence_kind, phone_ratio_text().0, phone_ratio_text().1))
                     },
                 );
             }
@@ -3764,8 +4094,9 @@ fn format_ms_approx(ms: f64) -> String {
 }
 
 fn format_phone_range(range: &[f64; 2], band: &[f64; 2]) -> String {
+    let (ratio, band_ratio) = phone_ratio_text();
     format!(
-        "phone ~{}..{} ms (derived 3.9x..6.3x, 2/3 factors assumed; band {}..{} ms [2.55x..12.32x])",
+        "phone ~{}..{} ms (derived {ratio}; band {}..{} ms [{band_ratio}])",
         format_ms_approx(range[0]),
         format_ms_approx(range[1]),
         format_ms_approx(band[0]),
@@ -4194,12 +4525,12 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
                     .round() as u64;
                 let _ = writeln!(
                     out,
-                    "  caveat:    {anc_pct}% of steady layout records are ancestor bookkeeping (unchecked against a client); before-vs-after on one story is valid",
+                    "  caveat:    layout ms is fitted to a desktop client (held-out animations within 45 %, mostly priced low); {anc_pct}% of steady records are ancestors laid out again, which the client pays too; before-vs-after on one story is valid",
                 );
             } else {
                 let _ = writeln!(
                     out,
-                    "  caveat:    absolute ms on deep trees is unchecked against a client (ancestor bookkeeping); before-vs-after on one story is valid",
+                    "  caveat:    layout ms is fitted to a desktop client (held-out animations within 45 %, mostly priced low); before-vs-after on one story is valid",
                 );
             }
             if desk_ms <= 1e-12 && steady["passes"].as_f64().unwrap_or(0.0) <= 1e-12 {
@@ -4244,7 +4575,7 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
             );
             let _ = writeln!(
                 out,
-                "  caveat:    absolute ms on deep trees is unchecked against a client (ancestor bookkeeping); before-vs-after on one story is valid",
+                "  caveat:    full-tree ms applies the per-frame slopes to a whole-tree layout (a mount is unmeasured against a client); before-vs-after on one story is valid",
             );
         }
     } else {
@@ -4254,11 +4585,23 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
         );
     }
 
-    let _ = writeln!(out, "  refused:   drawPassCpuMs=null, gpuUiMs=null (uncalibrated)");
+    let desk_draw = report.pointer("/predicted/desktop-ref/drawPassCpuMs");
+    if let Some(desk) = desk_draw.filter(|d| d["status"] == "extrapolated") {
+        let rerender = desk["groupRerenderMs"].as_f64().map(|ms| format!(", groups re-rendering {ms:.4} ms")).unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "  drawPass:  desktop-ref {:.4} ms (static frame{rerender}, extrapolated) | {}",
+            desk["ms"].as_f64().unwrap_or(0.0),
+            format_phone_range(&pair_at(report, "/predicted/phone-mid/drawPassCpuMs/rangeMs"), &pair_at(report, "/predicted/phone-mid/drawPassCpuMs/bandMs")),
+        );
+        let _ = writeln!(out, "  refused:   gpuUiMs=null (desktop GPU ms follows the GPU's clock state; no phone GPU calibration)");
+    } else {
+        let _ = writeln!(out, "  refused:   drawPassCpuMs=null (no analysed frame), gpuUiMs=null (desktop GPU ms follows the GPU's clock state)");
+    }
 
     let mut cause_parts: Vec<String> = Vec::new();
     if let Some(causes) = t["batchBreaksByCause"].as_object() {
-        for cause in ["layerPass", "renderTarget", "clip", "shader", "texture", "rotation"] {
+        for cause in BREAK_CAUSES {
             let n = causes.get(cause).and_then(Value::as_u64).unwrap_or(0);
             if n > 0 {
                 cause_parts.push(format!("{cause}={n}"));
@@ -4272,8 +4615,9 @@ pub fn format_one_screen_report(report: &Value, dest: &Path) -> String {
     };
     let _ = writeln!(
         out,
-        "  model:     draws={}, breaks={}{cause_str} [unmeasured, informational]",
+        "  model:     draws={} (static frame {}), breaks={}{cause_str} [client batching, informational]",
         t["drawCalls"].as_u64().unwrap_or(0),
+        t["staticDrawCalls"].as_u64().unwrap_or(0),
         t["batchBreaks"].as_u64().unwrap_or(0),
     );
 
@@ -4453,7 +4797,7 @@ pub fn format_one_screen_compare(diff: &Value, dest: Option<&Path>) -> String {
     }
     let _ = writeln!(
         out,
-        "  model:     draws {} -> {} ({}), breaks {} -> {} ({}) [unmeasured, informational]",
+        "  model:     draws {} -> {} ({}), breaks {} -> {} ({}) [client batching, informational]",
         num("/counts/before/drawCalls") as u64,
         num("/counts/after/drawCalls") as u64,
         format_signed_num(num("/counts/delta/drawCalls")),
@@ -4533,12 +4877,12 @@ fn print_summary(report: &Value, dest: &Path) {
             let phone_range = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-range");
             let phone_band = pair_at(seq, "/steadyStateLayoutCpuMs/phone-mid-band");
             format!(
-                "extrapolated desk {desk_ms:.4} ms, {}; draw/gpu refused",
+                "extrapolated desk {desk_ms:.4} ms, {}; gpu refused",
                 format_phone_range(&phone_range, &phone_band)
             )
         };
         eprintln!(
-            "rur cost: {} ({} samples @ {} fps, {}) | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m/{:.1}sp/{:.1}sm ({}) | model draws={} breaks={} (unmeasured) -> {}",
+            "rur cost: {} ({} samples @ {} fps, {}) | quads={} glyphs={} | rt={} ({} targets) | overdraw={:.3}x screen / {:.3}x rt | steady layout={:.2}p/{:.1}s/{:.1}m/{:.1}sp/{:.1}sm ({}) | model draws={} breaks={} -> {}",
             status,
             frames,
             format_hz(fps),
@@ -4569,12 +4913,12 @@ fn print_summary(report: &Value, dest: &Path) {
             let phone_range = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/rangeMs");
             let phone_band = pair_at(report, "/predicted/phone-mid/fullTreeLayoutCpuMs/bandMs");
             format!(
-                "extrapolated desk {desk_ms:.4} ms, {}; per-frame cost needs --from and --frames; draw/gpu refused",
+                "extrapolated desk {desk_ms:.4} ms, {}; per-frame cost needs --from and --frames; gpu refused",
                 format_phone_range(&phone_range, &phone_band)
             )
         };
         eprintln!(
-            "rur cost: {} (mode={}) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s ({}) | model draws={} breaks={} (unmeasured) -> {}",
+            "rur cost: {} (mode={}) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects | full-tree layout={}p/{}s ({}) | model draws={} breaks={} -> {}",
             status,
             run_mode,
             t["screenGuis"].as_u64().unwrap_or(0),
@@ -4597,7 +4941,7 @@ fn print_summary(report: &Value, dest: &Path) {
         );
     } else {
         eprintln!(
-            "rur cost: {} (scene, mode={}) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects (incomplete) | layout=unavailable (--scene; run live with --from and --frames; draw/gpu refused) | model draws={} breaks={} (unmeasured) -> {}",
+            "rur cost: {} (scene, mode={}) | guis={} (disabled={}) | quads={} glyphs={} | rt={} ({} targets, {} switches) | overdraw={:.3}x screen / {:.3}x rt | hidden={} roots / {} guiObjects (incomplete) | layout=unavailable (--scene; run live with --from and --frames; draw/gpu refused) | model draws={} breaks={} -> {}",
             report["status"].as_str().unwrap_or("?"),
             run_mode,
             t["screenGuis"].as_u64().unwrap_or(0),
@@ -5232,6 +5576,178 @@ mod tests {
         store
     }
 
+    /// A one-layer scene at scale 1 for the batching tests: `nodes` (ids from 2) drawn in order under ScreenGui 1.
+    fn batch_scene(nodes: Vec<Value>, draw: Vec<Value>) -> Value {
+        let mut all = vec![json!({"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 1000, 800], "enabled": true})];
+        all.extend(nodes);
+        let report = analyze_scene(
+            &store_of(json!({
+                "viewport": {"width": 1000, "height": 800, "scale": 1.0},
+                "status": "ok",
+                "nodes": all,
+                "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": draw}],
+                "fonts": [],
+                "images": []
+            })),
+            LayoutStats::default(),
+            None,
+        );
+        report["totals"].clone()
+    }
+
+    fn frame(id: u64, x: f64, extra: Value) -> Value {
+        let mut node = json!({"id": id, "name": format!("F{id}"), "path": format!("G.F{id}"), "class": "Frame", "rect": [x, 10, 40, 40], "bg": {"color": [1, 1, 1], "transparency": 0}});
+        for (k, v) in extra.as_object().unwrap() {
+            node[k] = v.clone();
+        }
+        node
+    }
+
+    #[test]
+    fn client_batching_rules_measured_in_captures() {
+        // RenderDoc captures of a rendered Studio 0.747 client (notes/cost-calibration.md): ten frames alternating
+        // unrotated and rotated 20 degrees are one draw, the rotated ones 5 quads each (anti-aliased edges)
+        let turned = json!({"matrix": [0.94, 0.34, -0.34, 0.94, 0, 0]});
+        let nodes: Vec<Value> = (0..10).map(|i| frame(2 + i, i as f64 * 60.0, if i % 2 == 1 { turned.clone() } else { json!({}) })).collect();
+        let t = batch_scene(nodes, (2..12).map(|i| json!(i)).collect());
+        assert_eq!(t["drawCalls"], 1, "rotation never breaks a batch: {t}");
+        assert_eq!(t["quads"], 5 + 5 * 5);
+        // At 90 degrees there are no edge quads
+        let square = json!({"matrix": [0.0, 1.0, -1.0, 0.0, 50, 10]});
+        let t = batch_scene(vec![frame(2, 0.0, square)], vec![json!(2)]);
+        assert_eq!(t["quads"], 1);
+
+        // Every UIGradient piece is a draw of its own, even next to an identical one
+        let gradient = json!({"gradient": {"color": [], "transparency": [], "rotation": 0}});
+        let nodes: Vec<Value> = (0..4).map(|i| frame(2 + i, i as f64 * 60.0, gradient.clone())).collect();
+        let t = batch_scene(nodes, (2..6).map(|i| json!(i)).collect());
+        assert_eq!(t["drawCalls"], 4);
+        assert_eq!(t["batchBreaksByCause"]["ownDraw"], 3);
+
+        // Rounded shapes batch only with the same snapped size and radii; transparency does not matter
+        let same: Vec<Value> = (0..4).map(|i| frame(2 + i, i as f64 * 60.0, json!({"corner": 8, "bg": {"color": [1, 1, 1], "transparency": i as f64 / 8.0}}))).collect();
+        assert_eq!(batch_scene(same, (2..6).map(|i| json!(i)).collect())["drawCalls"], 1);
+        let sizes: Vec<Value> = (0..4)
+            .map(|i| {
+                let mut f = frame(2 + i, i as f64 * 60.0, json!({"corner": 8}));
+                f["rect"][2] = json!(40 + i * 5);
+                f
+            })
+            .collect();
+        let t = batch_scene(sizes, (2..6).map(|i| json!(i)).collect());
+        assert_eq!(t["drawCalls"], 4);
+        assert_eq!(t["batchBreaksByCause"]["constants"], 3);
+
+        // A border is 4 strips in the background's draw; a border UIStroke is the rounded shader's ring: 4 quads up to
+        // 2.25 device px, 8 from 3 px; consecutive equal strokes batch
+        let t = batch_scene(vec![frame(2, 0.0, json!({"border": {"size": 2, "color": [0, 0, 0]}}))], vec![json!(2)]);
+        assert_eq!((t["drawCalls"].as_u64(), t["quads"].as_u64()), (Some(1), Some(5)));
+        let ring = |id: u64, x: f64, thickness: f64| frame(id, x, json!({"bg": {"color": [1, 1, 1], "transparency": 1}, "strokes": [{"mode": "Border", "thickness": thickness, "transparency": 0}]}));
+        let t = batch_scene(vec![ring(2, 0.0, 3.0), ring(3, 60.0, 3.0), ring(4, 120.0, 1.0)], vec![json!(2), json!(3), json!(4)]);
+        assert_eq!(t["drawCalls"], 2);
+        assert_eq!(t["quadsByKind"]["stroke"], 8 + 8 + 4);
+
+        // A Pixelated image samples with its own sampler; two of them batch
+        let image = |id: u64, x: f64, resample: &str| frame(id, x, json!({"bg": {"color": [1, 1, 1], "transparency": 1}, "image": {"uri": "rbxasset://a.png", "transparency": 0, "resample": resample}}));
+        let t = batch_scene(vec![image(2, 0.0, "Default"), image(3, 60.0, "Pixelated"), image(4, 120.0, "Pixelated"), image(5, 180.0, "Default")], (2..6).map(|i| json!(i)).collect());
+        assert_eq!(t["drawCalls"], 3);
+        assert_eq!(t["batchBreaksByCause"]["texture"], 2);
+
+        // Outer UIShadows are 54-quad meshes sampling the blur profile (consecutive ones batch); a Mode = Text shadow
+        // is a glyph copy in the text's draw
+        let shadowed = |id: u64, x: f64| frame(id, x, json!({"bg": {"color": [1, 1, 1], "transparency": 1}, "shadows": [{"transparency": 0, "inset": false, "mode": "Element"}]}));
+        let t = batch_scene(vec![shadowed(2, 0.0), shadowed(3, 60.0)], vec![json!(2), json!(3)]);
+        assert_eq!((t["drawCalls"].as_u64(), t["quadsByKind"]["shadow"].as_u64()), (Some(1), Some(108)));
+        let label = json!({
+            "id": 2, "name": "L", "path": "G.L", "class": "TextLabel", "rect": [0, 0, 200, 30], "bg": {"color": [1, 1, 1], "transparency": 1},
+            "text": {"transparency": 0, "lines": [{"x": 0, "top": 0, "width": 50, "height": 20, "glyphs": [[0,1,0,14],[0,2,10,14],[0,3,20,14]]}]},
+            "shadows": [{"transparency": 0, "inset": false, "mode": "Text"}]
+        });
+        let t = batch_scene(vec![label], vec![json!(2)]);
+        assert_eq!((t["drawCalls"].as_u64(), t["glyphQuads"].as_u64(), t["shadowGlyphQuads"].as_u64()), (Some(1), Some(6), Some(3)));
+        assert_eq!(t["quadsByKind"].get("shadow"), None);
+
+        // A contextual UIStroke's glyph copies draw before the fill, also when the text itself is transparent
+        let ghost = json!({
+            "id": 2, "name": "L", "path": "G.L", "class": "TextLabel", "rect": [0, 0, 200, 30], "bg": {"color": [1, 1, 1], "transparency": 1},
+            "text": {"transparency": 1, "lines": [{"x": 0, "top": 0, "width": 50, "height": 20, "glyphs": [[0,1,0,14],[0,2,10,14],[0,3,20,14]]}]},
+            "strokes": [{"mode": "Contextual", "thickness": 2, "transparency": 0}]
+        });
+        let t = batch_scene(vec![ghost], vec![json!(2)]);
+        assert_eq!((t["drawCalls"].as_u64(), t["fillGlyphQuads"].as_u64(), t["strokeGlyphQuads"].as_u64()), (Some(1), Some(0), Some(3)));
+    }
+
+    #[test]
+    fn batches_split_at_10000_vertex_chunks() {
+        // 2,500 plain quads fill a draw; the 2,501st starts another (measured: solid-2500 1 draw, solid-2501 2)
+        let nodes: Vec<Value> = (0..2501u64).map(|i| frame(2 + i, (i % 50) as f64 * 20.0, json!({}))).collect();
+        let t = batch_scene(nodes, (2..2503u64).map(|i| json!(i)).collect());
+        assert_eq!(t["drawCalls"], 2);
+        assert_eq!(t["batchBreaksByCause"]["batchLimit"], 1);
+        // The chunk runs on across draws: a 20-glyph label after 2,490 frames splits into 10 + 10 glyphs
+        let mut nodes: Vec<Value> = (0..2490u64).map(|i| frame(2 + i, (i % 50) as f64 * 20.0, json!({}))).collect();
+        let glyphs: Vec<Value> = (0..20).map(|i| json!([0, i + 1, i * 10, 14])).collect();
+        nodes.push(json!({
+            "id": 3000, "name": "L", "path": "G.L", "class": "TextLabel", "rect": [0, 700, 400, 30], "bg": {"color": [1, 1, 1], "transparency": 1},
+            "text": {"transparency": 0, "lines": [{"x": 0, "top": 700, "width": 200, "height": 20, "glyphs": glyphs}]}
+        }));
+        let mut draw: Vec<Value> = (2..2492u64).map(|i| json!(i)).collect();
+        draw.push(json!(3000));
+        let t = batch_scene(nodes, draw);
+        assert_eq!(t["drawCalls"], 3);
+        assert_eq!((t["batchBreaksByCause"]["texture"].as_u64(), t["batchBreaksByCause"]["batchLimit"].as_u64()), (Some(1), Some(1)));
+        // A UIShadow mesh (73 vertices) is never split: 136 fit in a chunk, the 137th starts the next draw
+        let nodes: Vec<Value> = (0..137u64).map(|i| frame(2 + i, (i % 20) as f64 * 50.0, json!({"bg": {"color": [1, 1, 1], "transparency": 1}, "shadows": [{"transparency": 0, "inset": false}]}))).collect();
+        let t = batch_scene(nodes, (2..139u64).map(|i| json!(i)).collect());
+        assert_eq!(t["drawCalls"], 2);
+    }
+
+    #[test]
+    fn canvas_group_static_frame_keeps_its_texture_and_layers_batch() {
+        // A static frame draws each CanvasGroup as its composite quad (the background rides on it) plus its border
+        // strips; a frame that re-renders the group also draws its content into the texture
+        let scene = json!({
+            "viewport": {"width": 800, "height": 600, "scale": 1.0},
+            "status": "ok",
+            "nodes": [
+                {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true},
+                {"id": 2, "name": "Group", "path": "G.Group", "class": "CanvasGroup", "rect": [0, 0, 200, 100], "bg": {"color": [1, 1, 1], "transparency": 0}, "border": {"size": 1, "color": [0, 0, 0]}, "group": {"transparency": 0}},
+                {"id": 3, "name": "A", "path": "G.Group.A", "class": "Frame", "rect": [10, 10, 40, 40], "bg": {"color": [1, 0, 0], "transparency": 0}},
+                {"id": 4, "name": "B", "path": "G.Group.B", "class": "Frame", "rect": [60, 10, 40, 40], "bg": {"color": [0, 1, 0], "transparency": 0}},
+                {"id": 5, "name": "Core", "path": "CoreGui.H.Core", "class": "Frame", "rect": [300, 10, 40, 40], "bg": {"color": [1, 1, 1], "transparency": 0}},
+                {"id": 6, "name": "H", "path": "CoreGui.H", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true}
+            ],
+            "layers": [
+                {"root": 1, "playerGui": true, "displayOrder": 0, "draw": [{"group": 2, "draw": [2, 3, 4]}]},
+                {"root": 6, "playerGui": false, "displayOrder": 0, "draw": [5]}
+            ],
+            "fonts": [],
+            "images": []
+        });
+        let report = analyze_scene(&store_of(scene), LayoutStats::default(), None);
+        let t = &report["totals"];
+        // texture: A + B (1 draw); screen: composite, then the border strips and the CoreGui frame in one draw (the
+        // white texture; PlayerGui and CoreGui layers batch together)
+        assert_eq!(t["drawCalls"], 3, "{t}");
+        assert_eq!(t["staticDrawCalls"], 2, "{t}");
+        assert_eq!(t["batchBreaksByCause"]["renderTarget"], 1);
+        assert_eq!(t["quadsByKind"]["border"], 4);
+        assert_eq!(t["quadsByKind"]["solid"], 3);
+        // The draw pass prices the static frame, and a frame that re-renders the group apart
+        let desk = &report["predicted"]["desktop-ref"]["drawPassCpuMs"];
+        assert_eq!(desk["status"], "extrapolated");
+        assert_eq!(desk["scope"], "static_frame");
+        // 20 us floor + composite (1 image quad) + 4 border quads + 1 frame quad + 2 draws
+        let screen_us = PASS_FLOOR_US + PASS_IMAGE_QUAD_US + 5.0 * PASS_PLAIN_QUAD_US + 2.0 * PASS_DRAW_US;
+        assert!((desk["ms"].as_f64().unwrap() - screen_us / 1000.0).abs() < 1e-9, "{desk}");
+        let rerender_us = screen_us + PASS_GROUP_RERENDER_US + 2.0 * PASS_PLAIN_QUAD_US + PASS_DRAW_US;
+        assert!((desk["groupRerenderMs"].as_f64().unwrap() - rerender_us / 1000.0).abs() < 1e-9, "{desk}");
+        let phone = &report["predicted"]["phone-mid"]["drawPassCpuMs"];
+        assert_eq!(phone["basis"], "derived_extrapolation");
+        assert!((phone["rangeMs"][0].as_f64().unwrap() - round4(screen_us / 1000.0 * PHONE_UI_MAIN_RATIO_LOW)).abs() < 1e-9);
+        assert_eq!(report["predicted"]["desktop-ref"]["gpuUiMs"]["status"], "refused");
+    }
+
     #[test]
     fn one_screen_summary_fits_one_screen_for_single_sequence_and_compare() {
         // Large single-moment report with many objects and hidden subtrees must stay compact (<= 40 lines, <= 4096 bytes)
@@ -5269,8 +5785,7 @@ mod tests {
         assert!(!text.trim_start().starts_with('{'), "plain summary must not dump raw JSON");
         assert!(text.contains("0 B"), "summary must include exact RT bytes: {text}");
         assert!(text.contains("cost.json"), "summary must name report path: {text}");
-        assert!(text.contains("derived 3.9x..6.3x") && text.contains("2.55x..12.32x"), "{text}");
-        assert!(text.contains("assumed"), "phone range line must state assumed factors:\n{text}");
+        assert!(text.contains("derived 2.77x..3.53x") && text.contains("1.80x..6.90x"), "{text}");
 
         // Sequence summary (both play and edit modes) must stay <= 32 lines even for many frames
         let mut acc_play = SequenceAccumulator::new(60.0, "play");
@@ -5283,8 +5798,9 @@ mod tests {
         let play_text = format_one_screen_report(&acc_play.finish(Some("ok")), dest);
         let play_lines = play_text.lines().filter(|l| !l.trim().is_empty()).count();
         assert!(play_lines <= 32 && play_text.len() <= 4096, "play seq summary too large ({play_lines} lines, {} B):\n{play_text}", play_text.len());
-        assert!(play_text.contains("mode=play 60 Hz") && play_text.contains("0.0994 ms"), "{play_text}");
-        assert!(play_text.contains("assumed"), "sequence phone range line must state assumed factors:\n{play_text}");
+        // one scroll pass moving 120 records: 58.2 + 120 * 0.1 = 70.2 us
+        assert!(play_text.contains("mode=play 60 Hz") && play_text.contains("0.0702 ms"), "{play_text}");
+        assert!(play_text.contains("derived 2.77x..3.53x"), "sequence phone range line must state the derived ratio:\n{play_text}");
 
         let edit_text = format_one_screen_report(&acc_edit.finish(Some("ok")), dest);
         let edit_lines = edit_text.lines().filter(|l| !l.trim().is_empty()).count();
@@ -5326,12 +5842,14 @@ mod tests {
         }));
         let report = analyze_scene(&scene, LayoutStats::default(), None);
         let t = &report["totals"];
-        // S1+S2 share 1 solid batch -> shader break to Img1 -> Img2 shares Img1 -> texture break to Img3 -> clip break to Clipped
+        // S1+S2 share 1 draw (the white texture) -> texture break to Img1 (fills and images share the client's plain
+        // shader) -> Img2 shares Img1 -> texture break to Img3 -> clip break to Clipped
         assert_eq!(t["quads"], 6);
         assert_eq!(t["drawCalls"], 4);
+        assert_eq!(t["staticDrawCalls"], 4);
         assert_eq!(t["batchBreaks"], 3);
-        assert_eq!(t["batchBreaksByCause"]["shader"], 1);
-        assert_eq!(t["batchBreaksByCause"]["texture"], 1);
+        assert_eq!(t["batchBreaksByCause"]["shader"], 0);
+        assert_eq!(t["batchBreaksByCause"]["texture"], 2);
         assert_eq!(t["batchBreaksByCause"]["clip"], 1);
         // Clipped frame (200x100) clipped to (100x100) -> 10,000 px instead of 20,000 px
         // Total screen area = 6 * 10,000 = 60,000 out of 500,000 = 0.12
@@ -5391,11 +5909,12 @@ mod tests {
         }));
         let report = analyze_scene(&scene, LayoutStats::default(), None);
         let t = &report["totals"];
-        // Quads: Group bg (1) + InView (1) + OutOfClip (1) + Group composite (1) = 4
-        assert_eq!(t["quads"], 4);
+        // Quads: InView (1) + OutOfClip (1) + Group composite (1) = 3 (the composite quad carries the group's
+        // background, which the client never draws into the texture)
+        assert_eq!(t["quads"], 3);
         assert_eq!(t["canvasRtBytes"], 80_000);
-        // Offscreen overdraw: (20,000 + 2,500 + 2,500) / 480,000 = 0.052083
-        assert_eq!(t["offscreenOverdrawViewports"], 0.052083);
+        // Offscreen overdraw: (2,500 + 2,500) / 480,000 = 0.010417
+        assert_eq!(t["offscreenOverdrawViewports"], 0.010417);
         // Screen overdraw: composite clipped to 100x100 = 10,000 / 480,000 = 0.020833
         assert_eq!(t["screenOverdrawViewports"], 0.020833);
         assert_eq!(t["batchBreaksByCause"]["clip"], 0);
@@ -5416,17 +5935,19 @@ mod tests {
             "nodes": [
                 {"id": 1, "name": "G", "path": "G", "class": "ScreenGui", "rect": [0, 0, 800, 600], "enabled": true},
                 {"id": 3, "name": "Group", "path": "G.Clip.Group", "class": "CanvasGroup", "rect": [0, 0, 200, 100], "clip": [0, 0, 100, 100], "bg": {"color": [1, 1, 1], "transparency": 0}, "group": {"transparency": 0}},
-                {"id": 4, "name": "InnerClipChild", "path": "G.Clip.Group.InnerClip.Child", "class": "Frame", "rect": [10, 10, 60, 60], "clip": [10, 10, 40, 40], "bg": {"color": [0, 1, 0], "transparency": 0}}
+                {"id": 4, "name": "InnerClipChild", "path": "G.Clip.Group.InnerClip.Child", "class": "Frame", "rect": [10, 10, 60, 60], "clip": [10, 10, 40, 40], "bg": {"color": [0, 1, 0], "transparency": 0}},
+                {"id": 5, "name": "Plain", "path": "G.Clip.Group.Plain", "class": "Frame", "rect": [120, 10, 40, 40], "bg": {"color": [1, 0, 0], "transparency": 0}}
             ],
             "layers": [{"root": 1, "playerGui": true, "displayOrder": 0, "draw": [
-                {"group": 3, "draw": [3, 4]}
+                {"group": 3, "draw": [3, 5, 4]}
             ]}],
             "fonts": [],
             "images": []
         }));
         let interior_rep = analyze_scene(&interior, LayoutStats::default(), None);
-        // Group bg (20,000) + InnerClipChild clipped to 40x40 (1,600) = 21,600 / 480,000 = 0.045
-        assert_eq!(interior_rep["totals"]["offscreenOverdrawViewports"], 0.045);
+        // Plain (1,600) + InnerClipChild clipped to 40x40 (1,600) = 3,200 / 480,000 = 0.006667 (the group's background
+        // rides on its composite); the unclipped Plain then the clipped child is one clip break
+        assert_eq!(interior_rep["totals"]["offscreenOverdrawViewports"], 0.006667);
         assert_eq!(interior_rep["totals"]["batchBreaksByCause"]["clip"], 1);
     }
 
@@ -5454,8 +5975,8 @@ mod tests {
         assert_eq!(report["totals"]["drawCalls"], 2);
         let child = report["objects"].as_array().unwrap().iter().find(|o| o["name"] == "PlainChild").unwrap();
         assert_eq!(child["batchBreaks"], 0);
-        assert!(report["fidelity"]["drawCalls"].as_str().unwrap().contains("unmeasured"));
-        assert!(report["fidelity"]["batchBreaks"].as_str().unwrap().contains("unmeasured"));
+        assert!(report["fidelity"]["drawCalls"].as_str().unwrap().contains("client_batch_model"));
+        assert!(report["fidelity"]["batchBreaks"].as_str().unwrap().contains("client_batch_model"));
         assert!(!report["fidelity"]["batchBreaks"].as_str().unwrap().to_ascii_lowercase().contains("roblox"));
     }
 
@@ -5506,16 +6027,16 @@ mod tests {
         assert_eq!(t["fillGlyphQuads"], 3);
         assert_eq!(t["strokeGlyphQuads"], 15);
         assert_eq!(t["glyphQuads"], 18);
-        // Frame: 1 solid fill + 1 border UIStroke (Contextual on Frame applies to Border) = 2 quads
-        assert_eq!(t["quads"], 2);
-        assert_eq!(t["quadsByKind"]["stroke"], 1);
+        // Frame: 1 solid fill + a thin border UIStroke's 4 edge quads (Contextual on Frame applies to Border) = 5 quads
+        assert_eq!(t["quads"], 5);
+        assert_eq!(t["quadsByKind"]["stroke"], 4);
     }
 
     #[test]
     fn calibration_and_refusal_contract() {
-        // Non-scroll: 2 passes * 2.3 us + 15 records * 0.312 us = 4.6 + 4.68 = 9.28 us = 0.00928 ms
-        // phone-mid derived ratio: 4.09 * (1.25..2.0) * 0.77 = 3.936625..6.2986 (~3.9x..6.3x),
-        // full band: 2.65 * 1.25 * 0.77 = 2.550625 (~2.55x) .. 8.0 * 2.0 * 0.77 = 12.32 (~12.32x).
+        // Non-scroll: 2 passes * 58.2 us + 10 stored * 1.18 us + 5 moved * 1.16 us = 116.4 + 11.8 + 5.8 = 134 us
+        // phone-mid derived ratio: 4.09 * (0.88..1.12) * 0.77 = 2.771384..3.527216 (~2.77x..3.53x),
+        // full band: 2.65 * 0.88 * 0.77 = 1.79564 (~1.80x) .. 8.0 * 1.12 * 0.77 = 6.8992 (~6.90x).
         let stats = LayoutStats {
             passes: 2,
             stored: 10,
@@ -5526,61 +6047,61 @@ mod tests {
         };
         let pred = predicted_json(stats);
         assert_eq!(pred["desktop-ref"]["layoutCpuMs"]["basis"], "extrapolated");
-        assert!((pred["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - 0.00928).abs() < 1e-9);
+        assert!((pred["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - 0.134).abs() < 1e-9);
         let phone = &pred["phone-mid"]["layoutCpuMs"];
         assert_eq!(phone["basis"], "derived_extrapolation");
         assert_eq!(phone["ratioBasis"], "derived");
         assert!(phone["ms"].is_null(), "derived phone layout must report a range, not a false-precision single point");
-        assert!((phone["ratioRange"][0].as_f64().unwrap() - 3.9366).abs() < 1e-4);
-        assert!((phone["ratioRange"][1].as_f64().unwrap() - 6.2986).abs() < 1e-4);
-        assert!((phone["bandRatio"][0].as_f64().unwrap() - 2.5506).abs() < 1e-4);
-        assert!((phone["bandRatio"][1].as_f64().unwrap() - 12.32).abs() < 1e-4);
-        assert!((phone["rangeMs"][0].as_f64().unwrap() - 0.0365).abs() < 1e-4);
-        assert!((phone["rangeMs"][1].as_f64().unwrap() - 0.0585).abs() < 1e-4);
-        assert!((phone["bandMs"][0].as_f64().unwrap() - 0.0237).abs() < 1e-4);
-        assert!((phone["bandMs"][1].as_f64().unwrap() - 0.1143).abs() < 1e-4);
+        assert!((phone["ratioRange"][0].as_f64().unwrap() - 2.7714).abs() < 1e-4);
+        assert!((phone["ratioRange"][1].as_f64().unwrap() - 3.5272).abs() < 1e-4);
+        assert!((phone["bandRatio"][0].as_f64().unwrap() - 1.7956).abs() < 1e-4);
+        assert!((phone["bandRatio"][1].as_f64().unwrap() - 6.8992).abs() < 1e-4);
+        assert!((phone["rangeMs"][0].as_f64().unwrap() - 0.3714).abs() < 1e-4);
+        assert!((phone["rangeMs"][1].as_f64().unwrap() - 0.4726).abs() < 1e-4);
+        assert!((phone["bandMs"][0].as_f64().unwrap() - 0.2406).abs() < 1e-4);
+        assert!((phone["bandMs"][1].as_f64().unwrap() - 0.9245).abs() < 1e-4);
         assert_eq!(phone["factors"]["capturedWholeUiPhoneOverDesktop"]["central"], 4.09);
-        assert_eq!(phone["factors"]["captureOverheadFactor"]["basis"], "assumed_unmeasured_for_layout");
+        assert_eq!(phone["factors"]["captureOverheadFactor"]["value"], 0.97);
+        assert_eq!(phone["factors"]["captureOverheadFactor"]["basis"], "measured_desktop_ui_work");
         assert_eq!(phone["factors"]["liveFrameWeight"]["value"], 0.77);
-        assert_eq!(phone["factors"]["liveFrameWeight"]["basis"], "assumed_from_match_gui_weight");
+        assert_eq!(phone["factors"]["liveFrameWeight"]["basis"], "recorded_phone_gui_category");
         assert!(phone["settledBy"].as_str().unwrap().contains("UpdateUILayouts"));
         let phone_src = phone["source"].as_str().unwrap();
         assert!(phone_src.starts_with("Derived"), "phone source must state derived: {phone_src}");
-        assert!(phone_src.contains("2.55x..12.32x"), "phone source must state full 2.55x..12.32x band: {phone_src}");
-        assert!(phone_src.contains("unmeasured for layout"), "phone source must disclose unmeasured capture factor: {phone_src}");
-        // Formatted summary prints derived range + 2.55x..12.32x band without 4-decimal false precision
+        assert!(phone_src.contains("1.80x..6.90x"), "phone source must state the full 1.80x..6.90x band: {phone_src}");
+        assert!(phone_src.contains("measured"), "phone source must say the capture factor was measured: {phone_src}");
+        // Formatted summary prints the derived range + band without 4-decimal false precision
         let summary = format_phone_range(&[0.3915, 0.6263], &[0.2536, 1.2251]);
-        assert!(summary.contains("derived 3.9x..6.3x") && summary.contains("2.55x..12.32x"), "{summary}");
-        assert!(summary.contains("assumed"), "formatted phone range must disclose assumed factors: {summary}");
+        assert!(summary.contains("derived 2.77x..3.53x") && summary.contains("1.80x..6.90x"), "{summary}");
+        assert!(!summary.contains("assumed"), "no phone factor is assumed any more: {summary}");
         assert!(summary.contains("~0.39..0.63 ms") && summary.contains("0.25..1.23 ms"), "{summary}");
 
-        // Scroll 100 cards with 2 children each (+ container = 301 records):
-        // 62 us + 301 * 0.312 us = 155.912 us = 0.155912 ms (~156 us as recorded in install.rs)
+        // Scroll 100 cards with 2 children each (+ container = 301 records): a pass's 58.2 us + 301 * 0.1 us
+        // = 88.3 us (the client measured 0.107..0.152 ms)
         let scroll_100 = LayoutStats {
             scroll_passes: 1,
             scroll_moved: 301,
             ..Default::default()
         };
-        assert!((desktop_layout_cpu_ms(scroll_100) - 0.155912).abs() < 1e-9);
+        assert!((desktop_layout_cpu_ms(scroll_100) - 0.0883).abs() < 1e-9);
 
-        // Scroll 1,000 cards with 2 children each (+ container = 3,001 records):
-        // 62 us + 3001 * 0.312 us = 998.312 us = 0.998312 ms (~998 us as recorded in install.rs)
+        // Scroll 1,000 cards: 58.2 us + 3001 * 0.1 us = 358.3 us (the client measured 0.214..0.352 ms)
         let scroll_1000 = LayoutStats {
             scroll_passes: 1,
             scroll_moved: 3001,
             ..Default::default()
         };
-        assert!((desktop_layout_cpu_ms(scroll_1000) - 0.998312).abs() < 1e-9);
+        assert!((desktop_layout_cpu_ms(scroll_1000) - 0.3583).abs() < 1e-9);
 
-        // Two scrolls in one frame charge the 62 us base per scroll plus every moved record:
-        // 2 * 62 us + 602 * 0.312 us = 311.824 us = 0.311824 ms
+        // Two scrolls in one frame charge a pass each plus every moved record: 2 * 58.2 + 602 * 0.1 = 176.6 us
         let two_scrolls = LayoutStats {
             scroll_passes: 2,
             scroll_moved: 602,
             ..Default::default()
         };
-        assert!((desktop_layout_cpu_ms(two_scrolls) - 0.311824).abs() < 1e-9);
+        assert!((desktop_layout_cpu_ms(two_scrolls) - 0.1766).abs() < 1e-9);
 
+        // No analysed frame behind predicted_json: the draw pass is refused, and the GPU always is
         for tier in ["desktop-ref", "phone-mid"] {
             for metric in ["drawPassCpuMs", "gpuUiMs"] {
                 assert_eq!(pred[tier][metric]["status"], "refused");
@@ -5589,6 +6110,7 @@ mod tests {
                 assert!(pred[tier][metric]["settledBy"].as_str().unwrap().len() >= 12);
             }
         }
+        assert!(pred["desktop-ref"]["gpuUiMs"]["reason"].as_str().unwrap().contains("clock"));
     }
 
     #[test]
@@ -5651,7 +6173,7 @@ end
         assert!(single_rep["fullTreeLayout"]["stored"].as_u64().unwrap() >= 301);
 
         // Sequence mode: each steady-state 60 Hz frame applies 1 scroll moving 301 records (not 1204)
-        // and prices it at 62 us + 301 * 0.312 us = 0.155912 ms
+        // and prices it at a pass's 58.2 us + 301 * 0.1 us = 0.0883 ms
         let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
         let seq_rep = run_sequence_cost(&args, &spec, &repo).unwrap();
         let frames = seq_rep["sequence"]["frames"].as_array().unwrap();
@@ -5659,7 +6181,7 @@ end
             assert_eq!(f["layout"]["scrollPasses"], 1, "expected 1 scroll pass per 60 Hz frame");
             assert_eq!(f["layout"]["scrollMoved"], 301, "expected 301 records moved per scroll");
             let ms = f["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
-            assert!((ms - 0.155912).abs() < 1e-6, "expected 0.155912 ms, got {ms}");
+            assert!((ms - 0.0883).abs() < 1e-6, "expected 0.0883 ms, got {ms}");
             assert_eq!(f["predicted"]["desktop-ref"]["layoutCpuMs"]["basis"], "extrapolated");
         }
         let _ = std::fs::remove_dir_all(&tmp);
@@ -5674,7 +6196,7 @@ end
 
         // 60 cards x 2 records (Card + Inner) = 120 moved records per scroll.
         // Counter-driven Heartbeat + AbsolutePosition read (prevents coalescing across beats).
-        // Derived 1 client frame: 62 us + 120 * 0.312 us = 99.44 us = 0.09944 ms.
+        // Derived 1 client frame: a pass's 58.2 us + 120 * 0.1 us = 70.2 us = 0.0702 ms.
         let counter_fixture = tmp.join("counter_scroll.luau");
         let counter_src = "\
 return function(Target)
@@ -5735,7 +6257,7 @@ end
 ";
         std::fs::write(&double_fixture, double_src).unwrap();
 
-        // Two writes with no read between them in one Heartbeat: must coalesce to 1 scroll pass (0.09944 ms).
+        // Two writes with no read between them in one Heartbeat: must coalesce to 1 scroll pass (0.0702 ms).
         let coalesce_fixture = tmp.join("coalesce_scroll.luau");
         let coalesce_src = "\
 return function(Target)
@@ -5777,14 +6299,14 @@ end
         };
         let spec = engine::cli::SequenceSpec { from: 0.5, frames: 4, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false };
 
-        // 1. Default run (no --mode): runs play mode (1 Heartbeat/frame) and matches client 0.09944 ms
+        // 1. Default run (no --mode): runs play mode (1 Heartbeat/frame) and prices 1 scroll pass (0.0702 ms)
         let default_rep = run_sequence_cost(&make_args(&counter_fixture, &[]), &spec, &repo).unwrap();
         assert_eq!(default_rep["runMode"], "play");
         assert_eq!(default_rep["runModeInfo"]["heartbeatsPerFrame"], 1);
         assert_eq!(default_rep["layout"]["scrollPasses"], 1.0);
         assert_eq!(default_rep["layout"]["scrollMoved"], 120.0);
         let desk_ms = default_rep["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
-        assert!((desk_ms - 0.09944).abs() < 1e-9, "expected 0.09944 ms in default play mode, got {desk_ms}");
+        assert!((desk_ms - 0.0702).abs() < 1e-9, "expected 0.0702 ms in default play mode, got {desk_ms}");
 
         // 2. Explicit --mode edit: records runMode="edit" (240 Hz, 4 beats/frame) and refuses per-frame layoutCpuMs
         let edit_rep = run_sequence_cost(&make_args(&counter_fixture, &["--mode", "edit"]), &spec, &repo).unwrap();
@@ -5811,20 +6333,20 @@ end
         assert!(cmp["reason"].as_str().unwrap().contains("runMode"));
         assert!(cmp["remedy"].as_str().unwrap().contains("--mode"));
 
-        // 4. Write-read-write (2 scrolls per frame): 0.19888 ms in default play mode
+        // 4. Write-read-write (2 scrolls per frame): 2 * 58.2 + 240 * 0.1 = 140.4 us in default play mode
         let double_rep = run_sequence_cost(&make_args(&double_fixture, &[]), &spec, &repo).unwrap();
         assert_eq!(double_rep["runMode"], "play");
         assert_eq!(double_rep["layout"]["scrollPasses"], 2.0);
         assert_eq!(double_rep["layout"]["scrollMoved"], 240.0);
         let double_ms = double_rep["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
-        assert!((double_ms - 0.19888).abs() < 1e-9, "expected 0.19888 ms, got {double_ms}");
+        assert!((double_ms - 0.1404).abs() < 1e-9, "expected 0.1404 ms, got {double_ms}");
 
-        // 5. Write-write without read in one Heartbeat: coalesces to 1 scroll pass (0.09944 ms)
+        // 5. Write-write without read in one Heartbeat: coalesces to 1 scroll pass (0.0702 ms)
         let coal_rep = run_sequence_cost(&make_args(&coalesce_fixture, &[]), &spec, &repo).unwrap();
         assert_eq!(coal_rep["layout"]["scrollPasses"], 1.0, "two writes without a read must coalesce");
         assert_eq!(coal_rep["layout"]["scrollMoved"], 120.0);
         let coal_ms = coal_rep["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap();
-        assert!((coal_ms - 0.09944).abs() < 1e-9, "expected 0.09944 ms, got {coal_ms}");
+        assert!((coal_ms - 0.0702).abs() < 1e-9, "expected 0.0702 ms, got {coal_ms}");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -6153,7 +6675,7 @@ end
     #[test]
     fn client_cadence_is_one_client_frame_at_30_60_120_fps_and_refuses_zero_client_frames() {
         // Review fixture: 37 cards x 3 records (Card + Inner + Title) = 111 moved records per scroll.
-        // Hand figure for one client frame: 62 us + 0.312 us * 111 = 96.632 us = 0.096632 ms.
+        // Hand figure for one client frame: a pass's 58.2 us + 0.1 us * 111 = 69.3 us = 0.0693 ms.
         let repo = crate::engine::default_repo();
         let root = repo.join("tools/tests/oracle-root");
         let dir = std::env::temp_dir().join(format!("rur-cost-cadence-{}", std::process::id()));
@@ -6202,10 +6724,10 @@ end
             "--no-snapshots".into(),
         ];
         let args = engine::cli::parse(&argv).unwrap();
-        let expected_ms = 0.096632;
+        let expected_ms = 0.0693;
         let dest = Path::new("out/cost.json");
 
-        // 1. --fps 60 (60 Hz client): 1 client frame per sample -> 1.0 sp / 111.0 sm / 0.096632 ms
+        // 1. --fps 60 (60 Hz client): 1 client frame per sample -> 1.0 sp / 111.0 sm / 0.0693 ms
         let rep60 = run_sequence_cost(
             &args,
             &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 60.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
@@ -6223,7 +6745,7 @@ end
         assert_eq!(f60[1]["clientFrames"], 1);
         assert!((f60[1]["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].as_f64().unwrap() - expected_ms).abs() < 1e-9);
 
-        // 2. --fps 30 (60 Hz client): 2 client frames per sample, normalized per 1 client frame -> 0.096632 ms
+        // 2. --fps 30 (60 Hz client): 2 client frames per sample, normalized per 1 client frame -> 0.0693 ms
         //    Individual 2-client-frame samples refuse per-frame layoutCpuMs so they are never printed as 1 client frame.
         let rep30 = run_sequence_cost(
             &args,
@@ -6244,9 +6766,9 @@ end
         assert!(f30[1]["predicted"]["desktop-ref"]["layoutCpuMs"]["ms"].is_null());
         let screen30 = format_one_screen_report(&rep30, dest);
         assert!(screen30.contains("30 fps") && screen30.contains("mode=play 60 Hz client"), "{screen30}");
-        assert!(screen30.contains("0.0966 ms") && !screen30.contains("0.1933 ms"), "{screen30}");
+        assert!(screen30.contains("0.0693 ms") && !screen30.contains("0.1386 ms"), "{screen30}");
 
-        // 3. --fps 120 (60 Hz client): 0 or 1 client frames per sample, normalized per 1 client frame -> 0.096632 ms
+        // 3. --fps 120 (60 Hz client): 0 or 1 client frames per sample, normalized per 1 client frame -> 0.0693 ms
         let rep120 = run_sequence_cost(
             &args,
             &engine::cli::SequenceSpec { from: 0.5, frames: 6, fps: 120.0, client_hz: Some(60.0), collect_cost: true, collect_cursor: false },
@@ -6365,10 +6887,12 @@ end
         );
         assert_eq!(nested["totals"]["canvasRtBytes"], 160_000);
         assert_eq!(nested["totals"]["screenOverdrawViewports"], 0.020833);
+        // Inner's composite into Outer clipped by ClipB (7,500) + Child (2,500) = 10,000 / 480,000 (the groups'
+        // backgrounds ride on their composites)
         assert_eq!(
             nested["totals"]["offscreenOverdrawViewports"],
-            0.104167,
-            "nested ClipB composite must be 50,000 / 480,000 = 0.104167, got {:?}",
+            0.020833,
+            "nested ClipB composite + Child must be 10,000 / 480,000 = 0.020833, got {:?}",
             nested["totals"]["offscreenOverdrawViewports"]
         );
     }
@@ -6376,7 +6900,8 @@ end
     #[test]
     fn canvas_group_shared_edge_interior_clip() {
         // Shape 2: ClipA(100x100) -> Group CG(200x100) -> InteriorClip(100x100) -> Child(200x50).
-        // Group bg 20,000 + Child clipped by InteriorClip 5,000 = 25,000 px (not stripped to 30,000).
+        // Child clipped by InteriorClip: 5,000 px (not stripped to 10,000); the group's background rides on its
+        // composite.
         let shared_edge = run_cg_shape_fixture(
             "shared_edge",
             r#"return function(Target)
@@ -6407,8 +6932,8 @@ end
         assert_eq!(shared_edge["totals"]["screenOverdrawViewports"], 0.020833);
         assert_eq!(
             shared_edge["totals"]["offscreenOverdrawViewports"],
-            0.052083,
-            "interior clip sharing edge x=100 with outer clip must keep Child clipped to 5,000 px (25,000 / 480,000 = 0.052083), got {:?}",
+            0.010417,
+            "interior clip sharing edge x=100 with outer clip must keep Child clipped to 5,000 px (5,000 / 480,000 = 0.010417), got {:?}",
             shared_edge["totals"]["offscreenOverdrawViewports"]
         );
     }
@@ -6416,7 +6941,7 @@ end
     #[test]
     fn canvas_group_size_cap_texel_area() {
         // Shape 3: Size-capped CanvasGroup (4096x512 -> 2048x256 RT, texel scale 0.25) with 100x100 child:
-        // RT bg 524,288 + Child 2,500 = 526,788 texels (1.097475x viewport, not 4.3899x).
+        // Child 10,000 px * 0.25 = 2,500 texels (0.005208x viewport, not 0.020833x).
         let size_cap = run_cg_shape_fixture(
             "size_cap",
             r#"return function(Target)
@@ -6435,8 +6960,8 @@ end
         assert_eq!(size_cap["totals"]["screenOverdrawViewports"], 0.853333);
         assert_eq!(
             size_cap["totals"]["offscreenOverdrawViewports"],
-            1.097475,
-            "size-capped 4096x512 -> 2048x256 RT must count 526,788 texels (1.097475x viewport), got {:?}",
+            0.005208,
+            "size-capped 4096x512 -> 2048x256 RT must count the child's 2,500 texels (0.005208x viewport), got {:?}",
             size_cap["totals"]["offscreenOverdrawViewports"]
         );
     }
@@ -6445,9 +6970,9 @@ end
     fn nested_canvas_group_composite_strips_outer_ancestor_clip() {
         // Guards the composite-onto-parent-CanvasGroup rule on both --scene and live DOM:
         // ClipA(100x100) -> Outer CG(200x100) -> Inner CG(200x100) with no interior clip.
-        // Inner composites onto Outer's 200x100 RT unclipped by ClipA (20,000 px), giving
-        // 20,000 (Outer bg) + 20,000 (Inner bg) + 20,000 (Inner composite) = 60,000 / 480,000 = 0.125.
-        // Using Outer's raw ancestor clip on Inner's composite would drop Inner composite to 10,000 (0.104167).
+        // Inner composites onto Outer's 200x100 RT unclipped by ClipA: 20,000 / 480,000 = 0.041667 (the groups'
+        // backgrounds ride on their composites). Using Outer's raw ancestor clip on Inner's composite would drop
+        // it to 10,000 (0.020833).
         let scene = store_of(json!({
             "viewport": {"width": 800, "height": 600, "scale": 1.0},
             "status": "ok",
@@ -6465,7 +6990,7 @@ end
             "images": []
         }));
         let scene_rep = analyze_scene(&scene, LayoutStats::default(), None);
-        assert_eq!(scene_rep["totals"]["offscreenOverdrawViewports"], 0.125);
+        assert_eq!(scene_rep["totals"]["offscreenOverdrawViewports"], 0.041667);
         assert_eq!(scene_rep["totals"]["screenOverdrawViewports"], 0.020833);
 
         // Live DOM path with complete clip_rects / parent_of agrees identically:
@@ -6480,7 +7005,7 @@ end
         hidden.clip_rects.insert(3, [0.0, 0.0, 200.0, 100.0]);
         hidden.clip_rects.insert(4, [0.0, 0.0, 200.0, 100.0]);
         let live_rep = analyze_scene_with_mode(&scene, LayoutStats::default(), Some(&hidden), "edit");
-        assert_eq!(live_rep["totals"]["offscreenOverdrawViewports"], 0.125);
+        assert_eq!(live_rep["totals"]["offscreenOverdrawViewports"], 0.041667);
         assert_eq!(live_rep["totals"]["screenOverdrawViewports"], 0.020833);
     }
 
@@ -7019,12 +7544,12 @@ end
             .iter()
             .find(|o| o["name"] == "Inner")
             .unwrap();
-        // Inner draws 200x100 = 20,000 texels into its own 1x RT + 200x100 * 0.25 = 5,000 texels
-        // composited onto Outer's capped RT -> 25,000 texels total (was 28,125 with bbox).
+        // Inner's 200x100 composite onto Outer's capped RT is 200x100 * 0.25 = 5,000 texels (6,250 with the bbox);
+        // its own texture holds only the label, counted on Title.
         let inner_texels = inner_obj["offscreenOverdrawViewports"].as_f64().unwrap() * vp;
         assert!(
-            (inner_texels - 25_000.0).abs() < 2.0,
-            "Inner CG own RT (20,000) + rotated composite into 0.25x Outer (5,000) must be 25,000 texels, got {inner_texels}"
+            (inner_texels - 5_000.0).abs() < 2.0,
+            "Inner CG rotated composite into 0.25x Outer must be 5,000 texels, got {inner_texels}"
         );
 
         // Overhanging edge: 100x100 @ 45 deg centered at (0, 200) -> exactly half (5,000 px) inside viewport [0..800]
@@ -7156,8 +7681,8 @@ end
         // 1. Non-uniform CanvasGroup size cap (3000x15 @ 1x -> 2048x11 RT):
         //    nw/w = 2048/3000 = 0.682667 vs nh/h = 11/15 = 0.733333 (7.4% apart).
         //    True area scale = (2048/3000)*(11/15) = 0.5006222.
-        //    Group bg (3000x15 = 45,000) + Child (1500x15 = 22,500) = 67,500 -> 33,792.0 texels (0.070400x).
-        //    (nw/w)^2 would give 31,457.28 (0.065536x); (nh/h)^2 would give 36,300.0 (0.075625x).
+        //    Child (1500x15 = 22,500) -> 11,264.0 texels (the group's background rides on its composite).
+        //    (nw/w)^2 would give 10,485.76; (nh/h)^2 would give 12,100.0.
         let vp = 800.0 * 600.0;
         let rep = run_cg_shape_fixture(
             "non_uniform_cap",
@@ -7178,8 +7703,8 @@ end
         assert_eq!(rep["totals"]["canvasRtBytes"], 2048 * 11 * 4);
         let texels = rep["totals"]["offscreenOverdrawViewports"].as_f64().unwrap() * vp;
         assert!(
-            (texels - 33_792.0).abs() < 2.0,
-            "non-uniform 3000x15 -> 2048x11 cap must count 33,792 texels (not (nw/w)^2=31,457 or (nh/h)^2=36,300), got {texels}"
+            (texels - 11_264.0).abs() < 2.0,
+            "non-uniform 3000x15 -> 2048x11 cap must count 11,264 texels (not (nw/w)^2=10,486 or (nh/h)^2=12,100), got {texels}"
         );
 
         // 2. Sequence screen labels headline=last sample, prints peaks beside counts, shows defaults,
@@ -7252,12 +7777,12 @@ end
             acc_play.record_frame(i, f64::from(i) / 60.0, false, 1, 0, 1, &scene, LayoutStats { passes: 1, stored: 4, ..Default::default() }, Vec::new(), if i == 0 { Some(hidden.clone()) } else { None });
         }
         let play_screen = format_one_screen_report(&acc_play.finish(Some("ok")), dest);
-        assert!(play_screen.contains("caveat:") && play_screen.contains("unchecked against a client") && play_screen.contains("before-vs-after"), "{play_screen}");
+        assert!(play_screen.contains("caveat:") && play_screen.contains("fitted to a desktop client") && play_screen.contains("before-vs-after"), "{play_screen}");
 
         // 2. Single-moment live report with extrapolated fullTree prints the caveat
         let single_live = analyze_scene_with_mode(&scene, LayoutStats { passes: 1, stored: 4, ..Default::default() }, Some(&hidden), "edit");
         let single_screen = format_one_screen_report(&single_live, dest);
-        assert!(single_screen.contains("caveat:") && single_screen.contains("unchecked against a client"), "{single_screen}");
+        assert!(single_screen.contains("caveat:") && single_screen.contains("unmeasured against a client"), "{single_screen}");
 
         // 3. Refused reports (edit-mode sequence, --scene) do not print the caveat
         let mut acc_edit = SequenceAccumulator::new(60.0, "edit");
@@ -8077,12 +8602,12 @@ end
                 }
             }
             assert!(total > 0, "{label}: expected non-empty factor entries");
-            let expected = format!("{assumed}/{total} factors assumed");
+            // Every factor is measured or recorded now (the capture factor on the desktop client's UI work, 2026-11-27),
+            // so the screen claims none assumed
+            assert_eq!(assumed, 0, "{label}: no factor may be assumed ({factors:?})");
             let screen = format_one_screen_report(rep, dest);
-            assert!(
-                screen.contains(&expected),
-                "{label} screen must report `{expected}` matching factors ({factors:?}):\n{screen}"
-            );
+            assert!(!screen.contains("assumed"), "{label} screen must not claim assumed factors:\n{screen}");
+            assert!(screen.contains("derived 2.77x..3.53x"), "{label} screen must print the derived ratio:\n{screen}");
         }
     }
 
@@ -8302,7 +8827,7 @@ end
         let deep_pct = (deep_share * 100.0).round() as u64;
         let screen_deep = format_one_screen_report(&rep_deep, Path::new("out/cost.json"));
         assert!(
-            screen_deep.contains(&format!("{deep_pct}% of steady layout records are ancestor bookkeeping")),
+            screen_deep.contains(&format!("{deep_pct}% of steady records are ancestors laid out again")),
             "deep sequence caveat must state ancestor share ({deep_pct}%):\n{screen_deep}"
         );
 

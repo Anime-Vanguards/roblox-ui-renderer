@@ -726,7 +726,7 @@ fn slots_are_guarded_by_generation_and_grow_by_chunks() {
 /// Moving a non-scroll parent shifts its same-shape subtree via `store` -> `moved(id, false)` ->
 /// `shift_children(id, false)`. Every shifted record must count under `stats.moved`, never
 /// `stats.scroll_moved` or `stats.scroll_passes`, so `desktop_layout_cpu_ms` does not charge
-/// the 62 us scroll base.
+/// a second (scroll) pass.
 #[test]
 fn non_scroll_parent_move_counts_moved_descendants_not_scroll_moved() {
     let (lua, engine) = start(1.0);
@@ -791,9 +791,10 @@ fn non_scroll_parent_move_counts_moved_descendants_not_scroll_moved() {
     assert_eq!(delta.scroll_passes, 0, "non-scroll parent move must not increment scroll_passes: {delta:?}");
     assert_eq!(delta.moved, 22, "expected Panel + Wrapper + 20 children moved via same_shape/shift_children: {delta:?}");
     let ms = crate::cost::desktop_layout_cpu_ms(delta);
+    let expected = crate::cost::CLIENT_LAYOUT_PASS_MS + delta.stored as f64 * crate::cost::CLIENT_LAYOUT_STORED_MS + 22.0 * crate::cost::CLIENT_LAYOUT_MOVED_MS;
     assert!(
-        ms > 0.005 && ms < 0.020,
-        "non-scroll parent move must price at ~9 us, not >= 62 us scroll base: got {ms} ms ({delta:?})"
+        (ms - expected).abs() < 1e-12,
+        "non-scroll parent move must price one pass, its stored records and 22 moved records ({expected} ms), not a second scroll pass: got {ms} ms ({delta:?})"
     );
     drop(lua);
 }
