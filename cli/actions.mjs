@@ -2,11 +2,12 @@
 // list is a usage error (exit 64, nothing written) instead of a failed render. The schema is the
 // engine's (native/src/engine/input/actions.rs, which checks it again); docs/stories.md "Timed input".
 //
-//   {t?, type:"move", x, y}   {t?, type:"down"|"up", x?, y?, button?: 1|2|3}   {t?, type:"leave"}
+//   {t?, type:"move", x, y, finger?}   {t?, type:"down"|"up", x?, y?, button?: 1|2|3, finger?}   {t?, type:"leave"}
 //   {t?, type:"wheel", x?, y? (or a node <point>), notches | dy, dx?, shift?}
 //   {t?, type:"key", key, down?, shift?, ctrl?, alt?}   {t?, type:"text"|"paste", text}
-//   {t?, type:"click", <point>, button?, hold?}
-//   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?, steps?, duration?}
+//   {t?, type:"click", <point>, button?, finger?, hold?}
+//   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?, finger?, steps?, duration?}
+//   finger: 0-9 (default 0), a touch device's finger (--device touch); other devices ignore it
 //   <point>: node | target (an `inspect` path or a suffix of one) [+ anchor {x, y}, offset {x, y}], or x, y
 
 import fs from "node:fs";
@@ -88,6 +89,13 @@ function pointValue(value, what) {
 	throw new Error(`${what}: must be a node path or {"node": ..} / {"x": .., "y": ..}, not ${describe(value)}`);
 }
 
+export const MAX_FINGER = 9;
+
+function checkFinger(object) {
+	const finger = optionalNumber(object, "finger");
+	if (finger !== undefined && (!Number.isInteger(finger) || finger < 0 || finger > MAX_FINGER)) throw new Error(`\`finger\` must be a whole number from 0 to ${MAX_FINGER}, not ${finger}`);
+}
+
 function checkButton(object) {
 	const button = optionalNumber(object, "button");
 	if (button !== undefined && ![1, 2, 3].includes(button)) throw new Error(`\`button\` must be 1, 2 or 3, not ${button}`);
@@ -113,6 +121,7 @@ function check(action) {
 			const y = optionalNumber(action, "y");
 			if (action.type === "move" && (x === undefined || y === undefined)) throw new Error("move: needs x and y");
 			if (action.type === "down" || action.type === "up") checkButton(action);
+			if (action.type !== "wheel") checkFinger(action);
 			if (action.type === "wheel") {
 				// A wheel at a node: the point fields of a click (moved there first when it runs)
 				if (["node", "target", "anchor", "offset"].some(name => name in action)) pointFields(action, "wheel");
@@ -134,6 +143,7 @@ function check(action) {
 		case "click": {
 			if (!pointFields(action, "click")) throw new Error("click: needs `node` (or `target`) or x, y");
 			checkButton(action);
+			checkFinger(action);
 			const hold = optionalNumber(action, "hold");
 			if (hold !== undefined && hold < 0) throw new Error(`\`hold\` must be 0 or more, not ${hold}`);
 			break;
@@ -146,6 +156,7 @@ function check(action) {
 			if (!("to" in action)) throw new Error('drag: needs `to` (a node path or {"x": .., "y": ..})');
 			pointValue(action.to, "drag `to`");
 			checkButton(action);
+			checkFinger(action);
 			const steps = optionalNumber(action, "steps");
 			if (steps !== undefined && (steps < 1 || steps > 10000 || !Number.isInteger(steps))) throw new Error(`\`steps\` must be a whole number from 1 to 10000, not ${steps}`);
 			const duration = optionalNumber(action, "duration");

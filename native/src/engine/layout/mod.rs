@@ -331,6 +331,9 @@ pub struct Layout {
     /// ScrollingFrames whose CanvasPosition changed (insertion order)
     scrolled: Vec<InstanceId>,
     scrolled_set: FxHashSet<InstanceId>,
+    /// ScrollingFrames a finger drags or that coast / spring back after a touch drag: their CanvasPosition may lie past
+    /// the scroll range (a touch overscroll, input/touch.rs) and is not clamped to it
+    pub overscroll: FxHashSet<InstanceId>,
     changed: FxHashSet<InstanceId>,
     record_version: u64,
     records: BoxSlots<Record>,
@@ -393,6 +396,7 @@ impl Layout {
             root_generations: Slots::default(),
             scrolled: Vec::new(),
             scrolled_set: FxHashSet::default(),
+            overscroll: FxHashSet::default(),
             changed: FxHashSet::default(),
             record_version: 0,
             records: BoxSlots::default(),
@@ -584,6 +588,7 @@ impl Layout {
             self.carry_maps[index].clear();
         }
         self.unmark_scrolled(id);
+        self.overscroll.remove(&id);
         self.changed.remove(&id);
         self.churn.remove(&id);
         self.dirty_sources.remove(&id);

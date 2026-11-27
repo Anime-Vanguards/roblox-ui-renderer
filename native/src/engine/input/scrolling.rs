@@ -262,7 +262,7 @@ fn with_view_in<R>(engine: &Engine, input: &Input, state: &State, f: impl FnOnce
     f(&View { engine, i: input, state, layout })
 }
 
-fn range(cx: &Cx, id: InstanceId) -> (f64, f64) {
+pub(crate) fn range(cx: &Cx, id: InstanceId) -> (f64, f64) {
     with_view(cx.engine, cx.i, |v| v.range(id))
 }
 
@@ -818,7 +818,12 @@ pub(crate) fn route(cx: &Cx, list: &[InstanceId], notches: f64, shift: bool, tak
 
 /// Studio rounds each operation to float32; regrouping this closed form changes the trajectory.
 pub fn step_axis(axis: &mut Axis, dt: f64) {
-    let omega = omega();
+    spring_step(axis, dt, omega());
+}
+
+/// One step of the critically damped spring with `omega` (the wheel's 9 pi; a touch overscroll's spring back, 6 pi,
+/// touch.rs), snapping within 1 px.
+pub(crate) fn spring_step(axis: &mut Axis, dt: f64, omega: f64) {
     let dt = f32r(dt);
     let offset = f32r(axis.position - axis.target);
     let omega_dt = f32r(omega * dt);
@@ -888,6 +893,7 @@ pub(crate) fn step(cx: &Cx, dt: f64) -> LuaResult<()> {
 pub(crate) fn stop(cx: &Cx, id: InstanceId) {
     let scroll = &cx.i.scroll;
     scroll.remove_motion(id);
+    cx.i.touches.forget(id);
     if scroll.enabled.get() && scroll.presented(id).is_some() && alive(cx.engine, id) {
         reset_presentation(cx.engine, cx.i, &cx.engine.state.borrow(), id);
     }

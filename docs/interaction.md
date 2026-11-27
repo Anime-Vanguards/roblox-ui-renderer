@@ -49,11 +49,15 @@ Measured in a 0.747 client with a gamepad connected (each rule below is the clie
 
 ## Touch
 
-With `--device touch`, pointer button 1 is a finger, following a 0.747 touch client:
-- The finger hovers only while it is down; its `Touch` input object carries both the hover events (`MouseEnter`, `MouseMoved`, `MouseLeave`, `InputBegan` / `InputChanged` / `InputEnded`) and the press. Elements it comes down on show `GuiState.Press`.
-- Down: `MouseButton1Down` on the button it lands on, then `MouseEnter` and `InputBegan`, then `UserInputService.InputBegan` and `TouchStarted`. Moves fire `InputChanged` and `TouchMoved`.
+With `--device touch`, pointer button 1 is a finger, following a 0.747 touch client. Input events name their finger with `finger` (0 to 9, default 0), so several fingers can be down at once.
+- A finger hovers only while it is down. Each touch has an `InputObject` of its own (a new one every time a finger comes down), which carries both its hover events (`MouseEnter`, `MouseMoved`, `MouseLeave`, `InputBegan` / `InputChanged` / `InputEnded`) and its press. Each finger hovers separately: an element under two fingers gets `MouseEnter` and `MouseLeave` from each.
+- Down: `MouseButton1Down` on the button it lands on (else the legacy `Mouse.Button1Down`, then a focused `TextBox` elsewhere loses focus), then `MouseEnter` and `InputBegan`, then `UserInputService.InputBegan` and `TouchStarted`. Moves fire `InputChanged` and `TouchMoved`, once per finger per frame.
 - Up: on the button it came down on `MouseButton1Up`, `Activated`, `MouseButton1Click`; on another button only `MouseButton1Up`. A `TextBox` takes focus at the release. Then `MouseLeave`, `InputEnded`, `UserInputService.InputEnded` and `TouchEnded`.
-- Not emulated: a second finger, touch gestures, and scrolling a `ScrollingFrame` by dragging it.
+- Two fingers: the first finger down on a button takes it, and a second finger on the same button gets `MouseButton1Down` and `MouseButton1Up` but never `Activated` or a click. Elements a finger comes down on show `GuiState.Press`; one goes `Idle` when any finger leaves or lifts from it, and shows `Press` again when a finger moves onto it while a finger that came down on it is still down. The legacy `Mouse` and `GetMouseLocation` follow the latest finger. Events keep their order within a frame.
+- Dragging a `ScrollingFrame`: the topmost one under a finger is that finger's while no other finger holds it. It starts to scroll once the finger is more than 11 px from where it came down (that move scrolls nothing), then follows the finger 1:1; from then on the frame gets no `InputChanged` from that finger, a button the drag started on gets no `Activated` or click, and at the release `UserInputService.InputEnded` comes before the frame's `MouseLeave`. Past an edge the canvas follows a rubber band, `(1 - 1 / (0.55 x / d + 1)) d` for `x` px of pull over a window `d` px long, unless `ElasticBehavior` is `Never`.
+- Letting go past an edge springs back (the wheel's spring with `omega = 6 pi`). Letting go inside coasts at 1.305 times the finger's mean speed over its last 5 frames: each frame the canvas moves `v h` and `v` shrinks by `1 - 2.35 h` (`h = 0.99021 dt`), until `|v|` falls under 17.477 px/s; `GetScrollVelocity` reports `v` (px/s in the finger's direction). A coast past an edge overshoots and springs back. A finger coming down on the frame stops it; a touch elsewhere and a script write of `CanvasPosition` do not. A second finger on a frame another finger drags does not scroll it and is not processed; it takes the frame over once that finger lifts.
+- `gameProcessedEvent` of a touch is true over an `Active` element, a button or `TextBox`, a `UIDragDetector`, or a `ScrollingFrame` no other finger holds; at the release only when the finger dragged the frame (a tap on a `ScrollingFrame` is not processed).
+- Not emulated: touch gestures (`TouchTap`, `TouchLongPress`, `TouchPan`, `TouchPinch`, `TouchRotate`, `TouchSwipe` never fired from injected touches in a client, with one finger or two).
 
 ## Mouse wheel and smooth scrolling
 
@@ -82,6 +86,6 @@ With `--device touch`, pointer button 1 is a finger, following a 0.747 touch cli
 
 ## Driving input
 
-- **Headless CLI renders:** `--actions` ([stories.md](stories.md#timed-input---actions)).
+- **Headless CLI renders:** `--actions` ([stories.md](stories.md#timed-input---actions)); `finger` picks a touch device's finger.
 - **Live sessions:** `events` inside `frame` commands ([live-preview.md](live-preview.md)).
 - **Studio comparison probes (Windows):** `tools/interaction/` injects window messages into Studio's viewport to record reference event streams.

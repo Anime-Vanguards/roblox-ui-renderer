@@ -5,7 +5,8 @@
 //!   install(engine)                once, from Engine.Start after the layout (lua::globals::start)
 //!   dispatch(lua, engine, &event)  one input event in logical viewport pixels (session.rs, story.rs
 //!                                  timelines, UserInputService:CreateVirtualInput):
-//!     {type="move", x, y}  {type="down"|"up", button=1|2|3, x, y}  {type="leave"}
+//!     {type="move", x, y, finger?}  {type="down"|"up", button=1|2|3, x, y, finger?}  {type="leave"}
+//!     (finger: 0-9, a touch device's finger, touch.rs; other devices ignore it)
 //!     {type="wheel", notches (+1 = one notch away from the user) | dy (px, 100 per notch), x, y}
 //!     {type="key", key=<Enum.KeyCode name>, down, shift?, ctrl?, alt?}  {type="text", text}
 //!     {type="paste", text}
@@ -26,6 +27,7 @@ pub mod hit;
 pub mod navigation;
 pub mod scrolling;
 pub mod textbox;
+mod touch;
 
 #[cfg(test)]
 mod tests;
@@ -85,7 +87,7 @@ names!(
     GetBoundActionInfo, GetAllBoundActionInfo, Select, Selectable, SelectionOrder, PreferredInput,
     IsGamepadButtonDown, GetGamepadConnected, GetImageForKeyCode, MouseIcon, MouseIconEnabled,
     MinDragAngle, MaxDragAngle, DragRotation, TouchStarted, TouchMoved, TouchEnded, AutomaticSize,
-    SelectionChanged, GuiNavigationEnabled, AutoSelectGuiEnabled,
+    SelectionChanged, GuiNavigationEnabled, AutoSelectGuiEnabled, ElasticBehavior,
 );
 
 macro_rules! classes {
@@ -183,8 +185,8 @@ pub struct Input {
     /// GuiObjects the cursor is over (MouseEnter fired, MouseLeave not yet), topmost first
     hovered: RefCell<Vec<InstanceId>>,
     hovered_set: RefCell<FxHashSet<InstanceId>>,
-    /// --device touch: the objects the finger came down on (GuiState Press until it leaves them or lifts)
-    finger_pressed: RefCell<FxHashSet<InstanceId>>,
+    /// --device touch: the fingers that are down and the ScrollingFrames coasting after a drag (touch.rs)
+    pub(crate) touches: touch::Touch,
     /// Presses by button number (ascending, like the Luau array)
     presses: RefCell<Vec<(f64, Press)>>,
     last_activation: RefCell<FxHashMap<InstanceId, (f64, f64)>>,
@@ -424,7 +426,7 @@ impl Input {
             mouse: Cell::new(Mouse::default()),
             hovered: RefCell::default(),
             hovered_set: RefCell::default(),
-            finger_pressed: RefCell::default(),
+            touches: touch::Touch::default(),
             presses: RefCell::default(),
             last_activation: RefCell::default(),
             objects: RefCell::default(),
@@ -484,7 +486,7 @@ impl Input {
             }
             (enabled, custom)
         };
-        let pressed = !self.presses.borrow().is_empty() || self.clicked_this_frame.get();
+        let pressed = !self.presses.borrow().is_empty() || self.touches.any_down() || self.clicked_this_frame.get();
         let visible = mouse.positioned && icon_enabled && (!touch || pressed);
         if !visible {
             return PointerState {
@@ -667,10 +669,10 @@ impl Cx<'_> {
         if self.i.key_pressed.get() == Some(id) {
             return "Press";
         }
-        // Measured (a touch client): the objects a finger came down on show Press, Frames too, until it lifts
-        // or leaves them; a finger only passing over shows nothing
+        // Measured (a touch client): the objects a finger came down on show Press, Frames too, until a finger lifts
+        // from or leaves them, and again when a finger moves onto one a finger still down came down on (touch.rs)
         if self.touch_device() {
-            if self.i.finger_pressed.borrow().contains(&id) {
+            if self.i.touches.shown.borrow().contains(&id) {
                 return "Press";
             }
             return if self.i.selected.get() == Some(id) { "Hover" } else { "Idle" };
@@ -778,9 +780,6 @@ fn set_position(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
 /// object under the cursor, InputChanged on those already hovered, MouseLeave + InputEnded on those
 /// left, MouseEnter + InputBegan on those entered; then UserInputService.
 fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
-    if cx.touch_device() {
-        return touch_move(cx, x, y);
-    }
     let n = &cx.i.n;
     let movement = cx.input_object("MouseMovement", "MouseMovement");
     let mut mouse = cx.i.mouse.get();
@@ -858,200 +857,7 @@ fn move_to(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     cx.fire_legacy("Move", Vec::new())
 }
 
-// Touch (--device touch: pointer button 1 is a finger). Measured in a 0.747 client with
-// VirtualInputManager:SendTouchEvent (notes/interaction.md "Touch"): a finger hovers only while it is down
-// and its Touch InputObject is both the hover and the press input; UserInputService's TouchStarted /
-// TouchMoved / TouchEnded follow InputBegan / InputChanged / InputEnded with the same arguments.
-
-/// Processed for a finger: an Active object, a GuiButton / TextBox, a ScrollingFrame or a UIDragDetector under it.
-fn finger_processed(cx: &Cx, list: &[InstanceId]) -> bool {
-    cx.any_active(list) || cx.sink_of(list).0.is_some() || cx.scroller_under(list) || detector_under(cx, list)
-}
-
-fn touch_events(cx: &Cx, began: NameId, touch: NameId, finger: InstanceId, processed: bool) {
-    cx.set_last_input_type("Touch");
-    cx.fire_uis(began, vec![Value::Instance(finger), Value::Bool(processed)]);
-    cx.fire_uis(touch, vec![Value::Instance(finger), Value::Bool(processed)]);
-}
-
-/// The finger moved (once per frame): with no finger down nothing hovers; with one, the hover update with its
-/// Touch input (MouseMoved, the legacy Mouse.Move, InputChanged on the objects it stays on, MouseLeave +
-/// InputEnded on those it left, MouseEnter + InputBegan on those it entered), then InputChanged and TouchMoved.
-fn touch_move(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
-    let n = &cx.i.n;
-    let mut mouse = cx.i.mouse.get();
-    mouse.x = x;
-    mouse.y = y;
-    mouse.processed_x = x;
-    mouse.processed_y = y;
-    mouse.pending = false;
-    mouse.positioned = true;
-    cx.i.mouse.set(mouse);
-    cx.update_legacy_mouse()?;
-    let down = cx.i.presses.borrow().iter().any(|(key, _)| *key == 1.0);
-    if !down {
-        return Ok(());
-    }
-    let finger = cx.input_object("Touch", "Touch");
-    let (position, delta) = position_delta(cx, finger, x, y);
-    cx.set_input(finger, "Change", position, Some(delta));
-    let list = cx.hit_list(x, y);
-    let now: FxHashSet<InstanceId> = list.iter().copied().collect();
-    let position = || vec![Value::Number(x), Value::Number(y)];
-    for &id in &list {
-        cx.fire(id, n.MouseMoved, position());
-    }
-    cx.fire_legacy("Move", Vec::new())?;
-    for &id in &list {
-        if cx.i.hovered_set.borrow().contains(&id) {
-            cx.fire(id, n.InputChanged, vec![Value::Instance(finger)]);
-        }
-    }
-    let previous = cx.i.hovered.borrow().clone();
-    for id in previous {
-        if !now.contains(&id) {
-            cx.i.hovered_set.borrow_mut().remove(&id);
-            cx.i.finger_pressed.borrow_mut().remove(&id);
-            cx.i.touch(id);
-            if cx.alive(id) {
-                cx.fire(id, n.MouseLeave, position());
-                cx.fire(id, n.InputEnded, vec![Value::Instance(finger)]);
-            }
-        }
-    }
-    cx.flush_states();
-    for &id in &list {
-        let entered = cx.i.hovered_set.borrow_mut().insert(id);
-        if entered {
-            cx.fire(id, n.MouseEnter, position());
-            cx.fire(id, n.InputBegan, vec![Value::Instance(finger)]);
-        }
-    }
-    *cx.i.hovered.borrow_mut() = list.clone();
-    for (_, press) in cx.i.presses.borrow_mut().iter_mut() {
-        if press.button.is_some_and(|button| !now.contains(&button)) {
-            press.clickable = false;
-        }
-    }
-    scrolling::drag(cx, x, y)?;
-    drag::move_to(cx, x, y)?;
-    touch_events(cx, n.InputChanged, n.TouchMoved, finger, finger_processed(cx, &list));
-    Ok(())
-}
-
-/// A finger came down: MouseButton1Down on the button it lands on (else the legacy Mouse.Button1Down), then
-/// MouseEnter + InputBegan(Touch Begin) on the objects under it, which show Press, then InputBegan and
-/// TouchStarted.
-fn touch_down(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
-    ensure_at(cx, x, y)?;
-    let mut mouse = cx.i.mouse.get();
-    mouse.processed_x = x;
-    mouse.processed_y = y;
-    mouse.pending = false;
-    cx.i.mouse.set(mouse);
-    cx.i.clicked_this_frame.set(true);
-    let n = &cx.i.n;
-    let finger = cx.input_object("Touch", "Touch");
-    cx.set_input(finger, "Begin", vector3(x, y - cx.inset(), 0.0), Some(vector3(0.0, 0.0, 0.0)));
-    let list = cx.hit_list(x, y);
-    let (sink, _) = cx.sink_of(&list);
-    let processed = finger_processed(cx, &list);
-    let button = sink.filter(|&sink| cx.is(sink, cx.i.c.GuiButton));
-    {
-        let mut presses = cx.i.presses.borrow_mut();
-        presses.retain(|(key, _)| *key != 1.0);
-        presses.push((1.0, Press { button, sink, clickable: button.is_some(), receivers: list.clone(), dragged: false }));
-    }
-    if let Some(focused) = textbox::focused_box(cx) {
-        if sink != Some(focused) {
-            textbox::unfocus(cx, focused, false, Some(finger), true);
-        }
-    }
-    match button {
-        Some(button) => cx.fire(button, n.MouseButton1Down, vec![Value::Number(x), Value::Number(y)]),
-        None => cx.fire_legacy("Button1Down", Vec::new())?,
-    }
-    if !scrolling::press(cx, &list, x, y) && drag::press(cx, &list, x, y, cx.engine.options.edit_mode()) {
-        let detected = cx.i.drag.borrow().as_ref().is_some_and(|active| active.detector.is_some() && Some(active.target) == button);
-        if detected {
-            if let Some((_, press)) = cx.i.presses.borrow_mut().iter_mut().find(|(key, _)| *key == 1.0) {
-                press.clickable = false;
-                press.dragged = true;
-            }
-        }
-    }
-    for &id in &list {
-        cx.i.hovered_set.borrow_mut().insert(id);
-        cx.i.finger_pressed.borrow_mut().insert(id);
-        cx.i.touch(id);
-        cx.fire(id, n.MouseEnter, vec![Value::Number(x), Value::Number(y)]);
-        cx.fire(id, n.InputBegan, vec![Value::Instance(finger)]);
-    }
-    *cx.i.hovered.borrow_mut() = list.clone();
-    cx.flush_states();
-    touch_events(cx, n.InputBegan, n.TouchStarted, finger, processed);
-    if !processed {
-        deliver_to_actions(cx, button_key(cx, 1.0), true);
-    }
-    Ok(())
-}
-
-/// The finger lifted: on the button it came down on MouseButton1Up, Activated(touch, count) and (unless it
-/// left the button) MouseButton1Click; on a button it did not come down on only MouseButton1Up; elsewhere the
-/// legacy Mouse.Button1Up, and a TextBox it came down on takes focus now. Then MouseLeave + InputEnded(Touch
-/// End) on the objects under it (Idle again), InputEnded and TouchEnded.
-fn touch_up(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
-    ensure_at(cx, x, y)?;
-    let n = &cx.i.n;
-    let finger = cx.input_object("Touch", "Touch");
-    cx.set_input(finger, "End", vector3(x, y - cx.inset(), 0.0), Some(vector3(0.0, 0.0, 0.0)));
-    let current = {
-        let mut presses = cx.i.presses.borrow_mut();
-        let index = presses.iter().position(|(key, _)| *key == 1.0);
-        index.map(|index| presses.remove(index).1)
-    };
-    scrolling::release(cx);
-    drag::release(cx, x, y);
-    let list = cx.hit_list(x, y);
-    let (sink, _) = cx.sink_of(&list);
-    match sink.filter(|&sink| cx.is(sink, cx.i.c.GuiButton)) {
-        Some(button) => {
-            cx.i.touch(button);
-            cx.fire(button, n.MouseButton1Up, vec![Value::Number(x), Value::Number(y)]);
-            let taken = current.as_ref().is_some_and(|c| c.button == Some(button) && !c.dragged);
-            if taken && !cx.is_false(button, n.Active) {
-                let count = activation_count(cx, button);
-                cx.fire(button, n.Activated, vec![Value::Instance(finger), Value::Number(count)]);
-            }
-            if taken && current.as_ref().is_some_and(|c| c.clickable) {
-                cx.fire(button, n.MouseButton1Click, Vec::new());
-            }
-        }
-        None => {
-            cx.fire_legacy("Button1Up", Vec::new())?;
-            if let Some(text_box) = sink.filter(|&sink| cx.is(sink, cx.i.c.TextBox)) {
-                if current.as_ref().is_some_and(|c| c.sink == Some(text_box)) {
-                    textbox::press(cx, text_box, x, y, finger)?;
-                    textbox::release(cx);
-                }
-            }
-        }
-    }
-    let hovered = std::mem::take(&mut *cx.i.hovered.borrow_mut());
-    for id in hovered {
-        cx.i.hovered_set.borrow_mut().remove(&id);
-        cx.i.touch(id);
-        if cx.alive(id) {
-            cx.fire(id, n.MouseLeave, vec![Value::Number(x), Value::Number(y)]);
-            cx.fire(id, n.InputEnded, vec![Value::Instance(finger)]);
-        }
-    }
-    cx.i.finger_pressed.borrow_mut().clear();
-    cx.flush_states();
-    touch_events(cx, n.InputEnded, n.TouchEnded, finger, finger_processed(cx, &list));
-    deliver_to_actions(cx, button_key(cx, 1.0), false);
-    Ok(())
-}
+// Touch (--device touch: pointer button 1 is a finger, any number of them): touch.rs
 
 /// A button / wheel event at (X, Y): the mouse position follows, the hover state does not.
 fn ensure_at(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
@@ -1071,6 +877,9 @@ fn ensure_at(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
 
 /// Applies a waiting mouse position (per frame, and before the pointer leaves).
 fn process_move(cx: &Cx) -> LuaResult<()> {
+    if cx.touch_device() {
+        return touch::process_moves(cx);
+    }
     let mouse = cx.i.mouse.get();
     if mouse.pending {
         move_to(cx, mouse.x, mouse.y)?;
@@ -1676,27 +1485,35 @@ impl Input {
         let cx = Cx { lua, engine, i: self };
         let result = (|| -> LuaResult<bool> {
             match event.get("type").and_then(Json::as_str) {
+                // With --device touch, `move` / `down` / `up` (button 1) of `finger` N (0 when left out) are that
+                // finger's; other devices have one pointer and ignore `finger`
+                Some("move") if cx.touch_device() => {
+                    let finger = touch::finger_of(event);
+                    let (x, y) = touch::point(&cx, finger, event);
+                    touch::moved(&cx, finger, x, y)?;
+                }
                 Some("move") => {
                     // Measured: the engine handles a move to the same position like any move
                     let (x, y) = screen_point(&cx, event);
                     set_position(&cx, x, y)?;
                 }
-                Some("down") => {
-                    let (x, y) = screen_point(&cx, event);
+                Some(kind @ ("down" | "up")) => {
                     let button = json_number(event.get("button")).unwrap_or(1.0);
                     if button == 1.0 && cx.touch_device() {
-                        touch_down(&cx, x, y)?;
+                        let finger = touch::finger_of(event);
+                        let (x, y) = touch::point(&cx, finger, event);
+                        if kind == "down" {
+                            touch::down(&cx, finger, x, y)?;
+                        } else {
+                            touch::up(&cx, finger, x, y)?;
+                        }
                     } else {
-                        button_down(&cx, button, x, y)?;
-                    }
-                }
-                Some("up") => {
-                    let (x, y) = screen_point(&cx, event);
-                    let button = json_number(event.get("button")).unwrap_or(1.0);
-                    if button == 1.0 && cx.touch_device() {
-                        touch_up(&cx, x, y)?;
-                    } else {
-                        button_up(&cx, button, x, y)?;
+                        let (x, y) = screen_point(&cx, event);
+                        if kind == "down" {
+                            button_down(&cx, button, x, y)?;
+                        } else {
+                            button_up(&cx, button, x, y)?;
+                        }
                     }
                 }
                 Some("wheel") => wheel(&cx, event)?,
@@ -1725,6 +1542,8 @@ impl Input {
     /// caret blink, hidden hovered objects.
     fn step(self: &Rc<Self>, lua: &Lua, engine: &Rc<Engine>, delta: f64) -> LuaResult<()> {
         let cx = Cx { lua, engine, i: self };
+        let now = engine.state.borrow().sched.now;
+        self.touches.begin_frame(now, delta);
         // A selected object that left the tree, or can no longer be selected, stops being selected
         if let (Some(selected), Some(gui_service)) = (self.selected.get(), cx.service("GuiService")) {
             if !cx.selection_holds(selected) {
@@ -1736,6 +1555,8 @@ impl Input {
             if profiled("presentationApply", || scrolling::flush_presentation(&cx))? {
                 settle_presentation(lua, engine)?;
             }
+            // (a client steps touch coasting before it handles the frame's touches)
+            profiled("scrolling", || touch::step(&cx, delta));
             profiled("pointer", || process_move(&cx))?;
             profiled("scrolling", || scrolling::step(&cx, delta))?;
             profiled("hover", || {
@@ -1798,6 +1619,7 @@ impl Input {
             held.extend(press.sink);
             held.extend(press.receivers.iter().copied());
         }
+        self.touches.held(&mut held);
         for receivers in self.key_receivers.borrow().values() {
             held.extend(receivers.iter().copied());
         }
@@ -1957,6 +1779,7 @@ fn install_hooks(engine: &Rc<Engine>, input: &Rc<Input>) {
     hooks.instance_freed.push(Box::new(move |_, id| {
         if let Some(input) = weak.upgrade() {
             input.scroll.forget(id);
+            input.touches.forget(id);
         }
     }));
 }
@@ -1980,6 +1803,14 @@ pub(crate) fn update_state_in(engine: &Engine, input: &Input, state: &mut State,
             "Idle"
         } else if input.key_pressed.get() == Some(id) {
             "Press"
+        } else if engine.options.profile.device.kind().touch() {
+            if input.touches.shown.borrow().contains(&id) {
+                "Press"
+            } else if input.selected.get() == Some(id) {
+                "Hover"
+            } else {
+                "Idle"
+            }
         } else {
             let hovered = input.hovered_set.borrow().contains(&id);
             if hovered || input.selected.get() == Some(id) {
@@ -2177,7 +2008,7 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
                     other => enum_arg(other).is_some() && enum_arg(other) == item,
                 };
                 if matches {
-                    let pressed = i.presses.borrow().iter().any(|(key, _)| *key == (index + 1) as f64);
+                    let pressed = i.presses.borrow().iter().any(|(key, _)| *key == (index + 1) as f64) || (index == 0 && i.touches.any_down());
                     return Ok(values([LuaValue::Boolean(pressed)]));
                 }
             }
@@ -2187,7 +2018,7 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
         behaviors.add_method(uis, n.GetMouseButtonsPressed, method(move |lua, engine, _, _| {
             let table = lua.create_table()?;
             for (index, type_name) in BUTTON_TYPES.iter().enumerate() {
-                let pressed = i.presses.borrow().iter().any(|(key, _)| *key == (index + 1) as f64);
+                let pressed = i.presses.borrow().iter().any(|(key, _)| *key == (index + 1) as f64) || (index == 0 && i.touches.any_down());
                 if pressed {
                     let cx = Cx { lua, engine, i: &i };
                     let object = cx.input_object(type_name, type_name);
@@ -2445,9 +2276,14 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
             Ok(none())
         }));
         // Studio reports zero throughout wheel interpolation, including reversals and resets. The
-        // spring's internal derivative is not this public inertial velocity.
+        // spring's internal derivative is not this public inertial velocity. A client reports a touch drag's
+        // coasting velocity (px/s in the finger's direction; zero while dragging and springing back, measured).
         for name in [n.GetScrollVelocity, n.GetSampledInertialVelocity] {
-            behaviors.add_method(scrolling_frame, name, method(|lua, _, _, _| Ok(values([vector2_lua(lua, 0.0, 0.0)?]))));
+            let i = input.clone();
+            behaviors.add_method(scrolling_frame, name, method(move |lua, _, id, _| {
+                let (x, y) = i.touches.velocity(id);
+                Ok(values([vector2_lua(lua, x, y)?]))
+            }));
         }
         for name in [n.ResetScrollVelocity, n.ClearInertialScrolling] {
             let i = input.clone();

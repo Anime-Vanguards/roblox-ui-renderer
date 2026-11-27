@@ -2307,3 +2307,1037 @@ assert(Joined == "+ButtonA true, -ButtonA true, +Return false, -Return false, +B
 "##,
     );
 }
+
+/// The touch scene of the P6b captures (a 0.747 touch client, two fingers through VirtualInputManager:SendTouchEvent):
+/// buttons B and B2, a Frame F, a TextBox TB, every event logged with its touch's InputObject (t1, t2, ... per case).
+const TWO_FINGER_SCENE: &str = r##"
+local UIS = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local Root = Instance.new("ScreenGui")
+Root.IgnoreGuiInset = true
+Root.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local Log = {}
+local Ids, NextId = {}, 0
+local function Fmt(V)
+	local K = typeof(V)
+	if K == "Vector3" then
+		return string.format("(%g,%g,%g)", V.X, V.Y, V.Z)
+	elseif K == "number" then
+		return string.format("%g", V)
+	elseif K == "table" then
+		local Parts = {}
+		for _, X in V do
+			table.insert(Parts, Fmt(X))
+		end
+		return "[" .. table.concat(Parts, ",") .. "]"
+	elseif K == "Instance" and V:IsA("InputObject") then
+		if not Ids[V] then
+			NextId += 1
+			Ids[V] = "t" .. NextId
+		end
+		return string.format("%s[%s %s %s d=%s]", Ids[V], V.UserInputType.Name, V.UserInputState.Name, Fmt(V.Position), Fmt(V.Delta))
+	end
+	return tostring(V)
+end
+local function Make(Class, Name, X, Y, W, H)
+	local O = Instance.new(Class)
+	O.Name = Name
+	O.Position = UDim2.fromOffset(X, Y)
+	O.Size = UDim2.fromOffset(W, H)
+	O.Parent = Root
+	return O
+end
+local B = Make("TextButton", "B", 100, 100, 200, 100)
+local F = Make("Frame", "F", 400, 100, 200, 100)
+local TB = Make("TextBox", "TB", 400, 300, 200, 60)
+TB.ClearTextOnFocus = false
+TB.Text = "abc"
+local B2 = Make("TextButton", "B2", 400, 420, 200, 100)
+for _, O in { B, F, TB, B2 } do
+	for _, S in { "MouseEnter", "MouseLeave", "MouseMoved" } do
+		O[S]:Connect(function(...) table.insert(Log, O.Name .. "." .. S .. " " .. Fmt({ ... })) end)
+	end
+	for _, S in { "InputBegan", "InputChanged", "InputEnded" } do
+		O[S]:Connect(function(Input) table.insert(Log, O.Name .. "." .. S .. " " .. Fmt(Input)) end)
+	end
+	O:GetPropertyChangedSignal("GuiState"):Connect(function() table.insert(Log, O.Name .. ".GuiState=" .. O.GuiState.Name) end)
+end
+for _, O in { B, B2 } do
+	for _, S in { "MouseButton1Down", "MouseButton1Up", "MouseButton1Click" } do
+		O[S]:Connect(function(...) table.insert(Log, O.Name .. "." .. S .. " " .. Fmt({ ... })) end)
+	end
+	O.Activated:Connect(function(Input, Count) table.insert(Log, O.Name .. ".Activated " .. Fmt(Input) .. " " .. tostring(Count)) end)
+end
+TB.Focused:Connect(function() table.insert(Log, "TB.Focused") end)
+TB.FocusLost:Connect(function(Enter, Input) table.insert(Log, "TB.FocusLost " .. tostring(Enter) .. " " .. Fmt(Input)) end)
+for _, S in { "InputBegan", "InputChanged", "InputEnded", "TouchStarted", "TouchMoved", "TouchEnded" } do
+	UIS[S]:Connect(function(Input, Processed) table.insert(Log, "UIS." .. S .. " " .. Fmt(Input) .. " gp=" .. tostring(Processed)) end)
+end
+Root.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+local Mouse = Players.LocalPlayer:GetMouse()
+for _, S in { "Button1Down", "Button1Up", "Move" } do
+	Mouse[S]:Connect(function() table.insert(Log, "Mouse." .. S .. " " .. Mouse.X .. "," .. Mouse.Y) end)
+end
+UpdateAll()
+local function Frames(N)
+	for _ = 1, N do
+		StepDisplay(1 / 60)
+	end
+	Flush()
+end
+local BEGIN, CHANGE, FINISH = "down", "move", "up"
+local function Touch(Id, Kind, X, Y, Wait)
+	Dispatch({ type = Kind, x = X, y = Y, button = 1, finger = Id })
+	Flush()
+	if Wait ~= 0 then
+		Frames(Wait or 2)
+	end
+end
+"##;
+
+/// Two fingers as a 0.747 touch client handles them (P6b, two captures that agree event for event): each touch has its
+/// own InputObject and hover; the first finger on a button takes it (a second finger there gets MouseButton1Down and
+/// Up only); GuiState goes Idle where any finger lifts or leaves and back to Press where a finger moves onto an object
+/// a finger still down came down on; the legacy Mouse follows every finger; events in one frame keep their order.
+#[test]
+fn two_fingers_match_a_client() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    let source = format!(
+        "{TWO_FINGER_SCENE}\n{}\n{}",
+        r##"
+local Client = {
+	["B then F, F up first"] = {
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Down 450,150",
+		"F.MouseEnter [450,150]",
+		"F.InputBegan t2[Touch Begin (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchStarted t2[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"Mouse.Button1Up 450,150",
+		"F.MouseLeave [450,150]",
+		"F.InputEnded t2[Touch End (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchEnded t2[Touch End (450,150,0) d=(0,0,0)] gp=false",
+		"B.MouseButton1Up [150,150]",
+		"B.Activated t1[Touch End (150,150,0) d=(0,0,0)] 0",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [150,150]",
+		"B.InputEnded t1[Touch End (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t1[Touch End (150,150,0) d=(0,0,0)] gp=true",
+	},
+	["B then F, B up first"] = {
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Down 450,150",
+		"F.MouseEnter [450,150]",
+		"F.InputBegan t2[Touch Begin (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchStarted t2[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"B.MouseButton1Up [150,150]",
+		"B.Activated t1[Touch End (150,150,0) d=(0,0,0)] 0",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [150,150]",
+		"B.InputEnded t1[Touch End (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t1[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Up 450,150",
+		"F.MouseLeave [450,150]",
+		"F.InputEnded t2[Touch End (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchEnded t2[Touch End (450,150,0) d=(0,0,0)] gp=false",
+	},
+	["both on B, second up first"] = {
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Down [200,160]",
+		"B.MouseEnter [200,160]",
+		"B.InputBegan t2[Touch Begin (200,160,0) d=(0,0,0)]",
+		"UIS.InputBegan t2[Touch Begin (200,160,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t2[Touch Begin (200,160,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Up [200,160]",
+		"B.MouseLeave [200,160]",
+		"B.InputEnded t2[Touch End (200,160,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (200,160,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t2[Touch End (200,160,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Up [150,150]",
+		"B.Activated t1[Touch End (150,150,0) d=(0,0,0)] 0",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [150,150]",
+		"B.InputEnded t1[Touch End (150,150,0) d=(0,0,0)]",
+		"UIS.InputEnded t1[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t1[Touch End (150,150,0) d=(0,0,0)] gp=true",
+	},
+	["both on B, first up first"] = {
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Down [200,160]",
+		"B.MouseEnter [200,160]",
+		"B.InputBegan t2[Touch Begin (200,160,0) d=(0,0,0)]",
+		"UIS.InputBegan t2[Touch Begin (200,160,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t2[Touch Begin (200,160,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Up [150,150]",
+		"B.Activated t1[Touch End (150,150,0) d=(0,0,0)] 0",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [150,150]",
+		"B.InputEnded t1[Touch End (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t1[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Up [200,160]",
+		"B.MouseLeave [200,160]",
+		"B.InputEnded t2[Touch End (200,160,0) d=(0,0,0)]",
+		"UIS.InputEnded t2[Touch End (200,160,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t2[Touch End (200,160,0) d=(0,0,0)] gp=true",
+	},
+	["F held, tap B twice"] = {
+		"Mouse.Button1Down 450,150",
+		"F.MouseEnter [450,150]",
+		"F.InputBegan t1[Touch Begin (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchStarted t1[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t2[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t2[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Up [150,150]",
+		"B.Activated t2[Touch End (150,150,0) d=(0,0,0)] 0",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [150,150]",
+		"B.InputEnded t2[Touch End (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t2[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Down [160,150]",
+		"B.MouseEnter [160,150]",
+		"B.InputBegan t3[Touch Begin (160,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t3[Touch Begin (160,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t3[Touch Begin (160,150,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Up [160,150]",
+		"B.Activated t3[Touch End (160,150,0) d=(0,0,0)] 1",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [160,150]",
+		"B.InputEnded t3[Touch End (160,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t3[Touch End (160,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t3[Touch End (160,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Up 450,150",
+		"F.MouseLeave [450,150]",
+		"F.InputEnded t1[Touch End (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchEnded t1[Touch End (450,150,0) d=(0,0,0)] gp=false",
+	},
+	["moves: B and F, then cross"] = {
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Down 450,150",
+		"F.MouseEnter [450,150]",
+		"F.InputBegan t2[Touch Begin (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchStarted t2[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"B.MouseMoved [160,150]",
+		"Mouse.Move 160,150",
+		"B.InputChanged t1[Touch Change (160,150,0) d=(10,0,0)]",
+		"UIS.InputChanged t1[Touch Change (160,150,0) d=(10,0,0)] gp=true",
+		"UIS.TouchMoved t1[Touch Change (160,150,0) d=(10,0,0)] gp=true",
+		"F.MouseMoved [460,150]",
+		"Mouse.Move 460,150",
+		"F.InputChanged t2[Touch Change (460,150,0) d=(10,0,0)]",
+		"UIS.InputChanged t2[Touch Change (460,150,0) d=(10,0,0)] gp=false",
+		"UIS.TouchMoved t2[Touch Change (460,150,0) d=(10,0,0)] gp=false",
+		"Mouse.Move 350,150",
+		"B.MouseLeave [350,150]",
+		"B.InputEnded t1[Touch Change (350,150,0) d=(190,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputChanged t1[Touch Change (350,150,0) d=(190,0,0)] gp=false",
+		"UIS.TouchMoved t1[Touch Change (350,150,0) d=(190,0,0)] gp=false",
+		"B.MouseMoved [250,150]",
+		"Mouse.Move 250,150",
+		"F.MouseLeave [250,150]",
+		"F.InputEnded t2[Touch Change (250,150,0) d=(-210,0,0)]",
+		"F.GuiState=Idle",
+		"B.MouseEnter [250,150]",
+		"B.InputBegan t2[Touch Change (250,150,0) d=(-210,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputChanged t2[Touch Change (250,150,0) d=(-210,0,0)] gp=true",
+		"UIS.TouchMoved t2[Touch Change (250,150,0) d=(-210,0,0)] gp=true",
+		"F.MouseMoved [500,160]",
+		"Mouse.Move 500,160",
+		"F.MouseEnter [500,160]",
+		"F.InputBegan t1[Touch Change (500,160,0) d=(150,10,0)]",
+		"F.GuiState=Press",
+		"UIS.InputChanged t1[Touch Change (500,160,0) d=(150,10,0)] gp=false",
+		"UIS.TouchMoved t1[Touch Change (500,160,0) d=(150,10,0)] gp=false",
+		"B.MouseButton1Up [250,150]",
+		"B.MouseLeave [250,150]",
+		"B.InputEnded t2[Touch End (250,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (250,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t2[Touch End (250,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Up 500,160",
+		"F.MouseLeave [500,160]",
+		"F.InputEnded t1[Touch End (500,160,0) d=(0,0,0)]",
+		"F.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (500,160,0) d=(0,0,0)] gp=false",
+		"UIS.TouchEnded t1[Touch End (500,160,0) d=(0,0,0)] gp=false",
+	},
+	["same frame downs and ups"] = {
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t1[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Down 450,150",
+		"F.MouseEnter [450,150]",
+		"F.InputBegan t2[Touch Begin (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchStarted t2[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"B.MouseMoved [155,150]",
+		"Mouse.Move 155,150",
+		"B.InputChanged t1[Touch Change (155,150,0) d=(5,0,0)]",
+		"UIS.InputChanged t1[Touch Change (155,150,0) d=(5,0,0)] gp=true",
+		"UIS.TouchMoved t1[Touch Change (155,150,0) d=(5,0,0)] gp=true",
+		"F.MouseMoved [455,150]",
+		"Mouse.Move 455,150",
+		"F.InputChanged t2[Touch Change (455,150,0) d=(5,0,0)]",
+		"UIS.InputChanged t2[Touch Change (455,150,0) d=(5,0,0)] gp=false",
+		"UIS.TouchMoved t2[Touch Change (455,150,0) d=(5,0,0)] gp=false",
+		"Mouse.Button1Up 455,150",
+		"F.MouseLeave [455,150]",
+		"F.InputEnded t2[Touch End (455,150,0) d=(0,0,0)]",
+		"F.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (455,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchEnded t2[Touch End (455,150,0) d=(0,0,0)] gp=false",
+		"B.MouseButton1Up [155,150]",
+		"B.Activated t1[Touch End (155,150,0) d=(0,0,0)] 0",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [155,150]",
+		"B.InputEnded t1[Touch End (155,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (155,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t1[Touch End (155,150,0) d=(0,0,0)] gp=true",
+	},
+	["same frame, reversed ids"] = {
+		"Mouse.Button1Down 450,150",
+		"F.MouseEnter [450,150]",
+		"F.InputBegan t1[Touch Begin (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchStarted t1[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t2[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t2[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Up [150,150]",
+		"B.Activated t2[Touch End (150,150,0) d=(0,0,0)] 0",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [150,150]",
+		"B.InputEnded t2[Touch End (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t2[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Up 450,150",
+		"F.MouseLeave [450,150]",
+		"F.InputEnded t1[Touch End (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchEnded t1[Touch End (450,150,0) d=(0,0,0)] gp=false",
+	},
+	["empty held, tap TB"] = {
+		"Mouse.Button1Down 700,560",
+		"UIS.InputBegan t1[Touch Begin (700,560,0) d=(0,0,0)] gp=false",
+		"UIS.TouchStarted t1[Touch Begin (700,560,0) d=(0,0,0)] gp=false",
+		"Mouse.Button1Down 450,330",
+		"TB.MouseEnter [450,330]",
+		"TB.InputBegan t2[Touch Begin (450,330,0) d=(0,0,0)]",
+		"TB.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (450,330,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t2[Touch Begin (450,330,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Up 450,330",
+		"TB.Focused",
+		"TB.MouseLeave [450,330]",
+		"TB.InputEnded t2[Touch End (450,330,0) d=(0,0,0)]",
+		"TB.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (450,330,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t2[Touch End (450,330,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Up 700,560",
+		"UIS.InputEnded t1[Touch End (700,560,0) d=(0,0,0)] gp=false",
+		"UIS.TouchEnded t1[Touch End (700,560,0) d=(0,0,0)] gp=false",
+	},
+	["TB held, tap B, release TB"] = {
+		"Mouse.Button1Down 450,330",
+		"TB.MouseEnter [450,330]",
+		"TB.InputBegan t1[Touch Begin (450,330,0) d=(0,0,0)]",
+		"TB.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (450,330,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t1[Touch Begin (450,330,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Down [150,150]",
+		"B.MouseEnter [150,150]",
+		"B.InputBegan t2[Touch Begin (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t2[Touch Begin (150,150,0) d=(0,0,0)] gp=true",
+		"B.MouseButton1Up [150,150]",
+		"B.Activated t2[Touch End (150,150,0) d=(0,0,0)] 0",
+		"B.MouseButton1Click []",
+		"B.MouseLeave [150,150]",
+		"B.InputEnded t2[Touch End (150,150,0) d=(0,0,0)]",
+		"B.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t2[Touch End (150,150,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Up 450,330",
+		"TB.Focused",
+		"TB.MouseLeave [450,330]",
+		"TB.InputEnded t1[Touch End (450,330,0) d=(0,0,0)]",
+		"TB.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (450,330,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t1[Touch End (450,330,0) d=(0,0,0)] gp=true",
+	},
+	["TB focused, tap B2 with F held"] = {
+		"Mouse.Button1Down 450,150",
+		"TB.FocusLost false t1[Touch Begin (450,150,0) d=(0,0,0)]",
+		"F.MouseEnter [450,150]",
+		"F.InputBegan t1[Touch Begin (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Press",
+		"UIS.InputBegan t1[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchStarted t1[Touch Begin (450,150,0) d=(0,0,0)] gp=false",
+		"B2.MouseButton1Down [450,470]",
+		"B2.MouseEnter [450,470]",
+		"B2.InputBegan t2[Touch Begin (450,470,0) d=(0,0,0)]",
+		"B2.GuiState=Press",
+		"UIS.InputBegan t2[Touch Begin (450,470,0) d=(0,0,0)] gp=true",
+		"UIS.TouchStarted t2[Touch Begin (450,470,0) d=(0,0,0)] gp=true",
+		"B2.MouseButton1Up [450,470]",
+		"B2.Activated t2[Touch End (450,470,0) d=(0,0,0)] 0",
+		"B2.MouseButton1Click []",
+		"B2.MouseLeave [450,470]",
+		"B2.InputEnded t2[Touch End (450,470,0) d=(0,0,0)]",
+		"B2.GuiState=Idle",
+		"UIS.InputEnded t2[Touch End (450,470,0) d=(0,0,0)] gp=true",
+		"UIS.TouchEnded t2[Touch End (450,470,0) d=(0,0,0)] gp=true",
+		"Mouse.Button1Up 450,150",
+		"F.MouseLeave [450,150]",
+		"F.InputEnded t1[Touch End (450,150,0) d=(0,0,0)]",
+		"F.GuiState=Idle",
+		"UIS.InputEnded t1[Touch End (450,150,0) d=(0,0,0)] gp=false",
+		"UIS.TouchEnded t1[Touch End (450,150,0) d=(0,0,0)] gp=false",
+	},
+}
+"##,
+        r##"
+local Got = {}
+local function Scenario(Label, Fn)
+	table.clear(Log)
+	table.clear(Ids)
+	NextId = 0
+	Fn()
+	Frames(3)
+	Got[Label] = table.clone(Log)
+end
+Touch(1, BEGIN, 150, 150)
+Touch(1, FINISH, 150, 150)
+Frames(40)
+Scenario("B then F, F up first", function()
+	Touch(1, BEGIN, 150, 150)
+	Touch(2, BEGIN, 450, 150)
+	Touch(2, FINISH, 450, 150)
+	Touch(1, FINISH, 150, 150)
+end)
+Frames(40)
+Scenario("B then F, B up first", function()
+	Touch(1, BEGIN, 150, 150)
+	Touch(2, BEGIN, 450, 150)
+	Touch(1, FINISH, 150, 150)
+	Touch(2, FINISH, 450, 150)
+end)
+Frames(40)
+Scenario("both on B, second up first", function()
+	Touch(1, BEGIN, 150, 150)
+	Touch(2, BEGIN, 200, 160)
+	Touch(2, FINISH, 200, 160)
+	Touch(1, FINISH, 150, 150)
+end)
+Frames(40)
+Scenario("both on B, first up first", function()
+	Touch(1, BEGIN, 150, 150)
+	Touch(2, BEGIN, 200, 160)
+	Touch(1, FINISH, 150, 150)
+	Touch(2, FINISH, 200, 160)
+end)
+Frames(40)
+Scenario("F held, tap B twice", function()
+	Touch(1, BEGIN, 450, 150)
+	Touch(2, BEGIN, 150, 150)
+	Touch(2, FINISH, 150, 150)
+	Touch(3, BEGIN, 160, 150)
+	Touch(3, FINISH, 160, 150)
+	Touch(1, FINISH, 450, 150)
+end)
+Frames(40)
+Scenario("moves: B and F, then cross", function()
+	Touch(1, BEGIN, 150, 150)
+	Touch(2, BEGIN, 450, 150)
+	Touch(1, CHANGE, 160, 150)
+	Touch(2, CHANGE, 460, 150)
+	Touch(1, CHANGE, 350, 150)
+	Touch(2, CHANGE, 250, 150)
+	Touch(1, CHANGE, 500, 160)
+	Touch(2, FINISH, 250, 150)
+	Touch(1, FINISH, 500, 160)
+end)
+Frames(40)
+Scenario("same frame downs and ups", function()
+	Touch(1, BEGIN, 150, 150, 0)
+	Touch(2, BEGIN, 450, 150)
+	Touch(1, CHANGE, 155, 150, 0)
+	Touch(2, CHANGE, 455, 150)
+	Touch(2, FINISH, 455, 150, 0)
+	Touch(1, FINISH, 155, 150)
+end)
+Frames(40)
+Scenario("same frame, reversed ids", function()
+	Touch(2, BEGIN, 450, 150, 0)
+	Touch(1, BEGIN, 150, 150)
+	Touch(1, FINISH, 150, 150, 0)
+	Touch(2, FINISH, 450, 150)
+end)
+Frames(40)
+Scenario("empty held, tap TB", function()
+	Touch(1, BEGIN, 700, 560)
+	Touch(2, BEGIN, 450, 330)
+	Touch(2, FINISH, 450, 330)
+	Touch(1, FINISH, 700, 560)
+end)
+TB:ReleaseFocus()
+Frames(45)
+Scenario("TB held, tap B, release TB", function()
+	Touch(1, BEGIN, 450, 330)
+	Touch(2, BEGIN, 150, 150)
+	Touch(2, FINISH, 150, 150)
+	Touch(1, FINISH, 450, 330)
+end)
+Scenario("TB focused, tap B2 with F held", function()
+	Touch(1, BEGIN, 450, 150)
+	Touch(2, BEGIN, 450, 470)
+	Touch(2, FINISH, 450, 470)
+	Touch(1, FINISH, 450, 150)
+end)
+local Problems = {}
+for Label, Expected in Client do
+	local Lines = Got[Label] or {}
+	local Same = #Lines == #Expected
+	for I = 1, math.max(#Lines, #Expected) do
+		if Lines[I] ~= Expected[I] then
+			Same = false
+			table.insert(Problems, Label .. " #" .. I .. "\n  rur:    " .. tostring(Lines[I]) .. "\n  client: " .. tostring(Expected[I]))
+			break
+		end
+	end
+end
+assert(#Problems == 0, table.concat(Problems, "\n"))
+"##
+    );
+    run(&lua, &engine, &source);
+}
+
+/// A fresh ScrollingFrame per case as in the P6b drag captures (200 x 300 at 100, 100, canvas 3000 tall, bar 8) and a
+/// runner that reads CanvasPosition and GetScrollVelocity each frame before that frame's touch event, as the probe read
+/// them at RenderStepped before sending.
+const DRAG_SCENE: &str = r##"
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local Root = Instance.new("ScreenGui")
+Root.IgnoreGuiInset = true
+Root.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Root.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+local S
+local function Fresh(Start, Props)
+	if S then
+		S:Destroy()
+	end
+	S = Instance.new("ScrollingFrame")
+	S.Name = "S"
+	S.Position = UDim2.fromOffset(100, 100)
+	S.Size = UDim2.fromOffset(200, 300)
+	S.CanvasSize = UDim2.fromOffset(0, 3000)
+	S.ScrollBarThickness = 8
+	for K, V in Props or {} do
+		S[K] = V
+	end
+	S.Parent = Root
+	UpdateAll()
+	if Start ~= 0 then
+		S.CanvasPosition = Vector2.new(0, Start)
+	end
+	for _ = 1, 4 do
+		StepDisplay(1 / 60)
+	end
+	Flush()
+end
+-- A plan: per frame false or { kind, y [, x, finger] } (or a list of them)
+local function Plan(Moves, Y0)
+	local Y = Y0 or 350
+	local P = { { "down", Y } }
+	for _, D in Moves do
+		if D == 0 then
+			table.insert(P, false)
+		else
+			Y += D
+			table.insert(P, { "move", Y })
+		end
+	end
+	table.insert(P, { "up", Y })
+	return P
+end
+local function Rep(N, V)
+	local T = {}
+	for I = 1, N do
+		T[I] = V
+	end
+	return T
+end
+local function Cat(...)
+	local T = {}
+	for _, List in { ... } do
+		for _, V in List do
+			table.insert(T, V)
+		end
+	end
+	return T
+end
+local function Send(E)
+	Dispatch({ type = E[1], x = E[3] or 200, y = E[2], button = 1, finger = E[4] or 0 })
+end
+local function Run(P, Rows)
+	local Out = {}
+	for K = 1, Rows do
+		table.insert(Out, { y = S.CanvasPosition.Y, v = S:GetScrollVelocity().Y })
+		local E = P[K]
+		if E then
+			if type(E[1]) == "table" then
+				for _, One in E do
+					Send(One)
+				end
+			else
+				Send(E)
+			end
+		end
+		Flush()
+		StepDisplay(1 / 60)
+	end
+	Flush()
+	return Out
+end
+"##;
+
+/// Pulling a ScrollingFrame past its edges with a finger and letting go, as a 0.747 touch client draws it (P6b, fresh
+/// frames driven one touch event per frame; the two captures agree to the 4th decimal): 1:1 inside the range, past an
+/// edge min(previous + step, band(max(u, S))) with band(x) = (1 - 1 / (0.55 x / 300 + 1)) 300, then the 6 pi spring
+/// back after the release.
+#[test]
+fn touch_pulls_past_the_edge_match_a_client() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    let source = format!(
+        "{DRAG_SCENE}\n{}\n{}",
+        r##"
+local Client = {
+	["edge pull step 2"] = { 0, 0, 0, 0, 0, 0, 0, 0, -2, -4, -6, -6.4579, -6.4579, -6.4579, -7.5073, -8.5492, -9.5837, -10.6109, -11.6309, -12.6437, -13.6494, -14.6481, -15.6398, -16.6247, -17.6028, -18.5741, -19.5388, -20.4969, -21.4485, -22.3936, -23.3323, -24.2647, -25.1908, -26.1108, -27.0246, -27.9323, -28.834, -29.7297, -30.6196, -31.5036, -32.3818, -33.2543, -34.1211, -34.9823, -35.838, -36.6881, -37.5328, -38.3721, -39.206, -40.0347, -40.8581, -41.6762, -41.6762, -40.0036, -36.2037, -31.5451, -26.767, -22.2724, -18.2558, -14.7861, -11.8604, -9.4375, -7.459, -5.8613, -4.583, -3.5679, -2.767, -2.1387, -1.648, -1.2664, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["edge pull step 4"] = { 0, 0, 0, 0, 0, -4, -6.4579, -6.4579, -8.5492, -10.6109, -12.6437, -14.6481, -16.6247, -18.5741, -20.4969, -22.3936, -24.2647, -26.1108, -27.9323, -29.7297, -31.5036, -33.2543, -34.9823, -36.6881, -38.3721, -40.0347, -41.6762, -41.6762, -40.0036, -36.2037, -31.5451, -26.767, -22.2724, -18.2558, -14.7861, -11.8604, -9.4375, -7.459, -5.8613, -4.583, -3.5679, -2.767, -2.1387, -1.648, -1.2664, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["edge pull step 5"] = { 0, 0, 0, 0, 0, -5, -8.0292, -8.0292, -10.6109, -13.1474, -15.6398, -18.0893, -20.4969, -22.8637, -25.1908, -27.4792, -29.7297, -31.9434, -34.1211, -36.2638, -38.3721, -40.447, -40.447, -38.8237, -35.1359, -30.6147, -25.9775, -21.6155, -17.7174, -14.35, -11.5106, -9.1592, -7.239, -5.6884, -4.4478, -3.4627, -2.6854, -2.0756, -1.5994, -1.2291, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["edge pull step 11"] = { 0, 0, 0, 0, -11, -11.6309, -17.1146, -22.3936, -27.4792, -32.3818, -37.1112, -41.6762, -41.6762, -40.0036, -36.2037, -31.5451, -26.767, -22.2724, -18.2558, -14.7861, -11.8604, -9.4375, -7.459, -5.8613, -4.583, -3.5679, -2.767, -2.1387, -1.648, -1.2664, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["edge pull step 12"] = { 0, 0, 0, -6.4579, -12.6437, -18.5741, -24.2647, -29.7297, -34.9823, -40.0347, -44.898, -44.898, -43.096, -39.0023, -33.9836, -28.8362, -23.9942, -19.6671, -15.9292, -12.7773, -10.1671, -8.0356, -6.3144, -4.9373, -3.8437, -2.9809, -2.304, -1.7754, -1.3643, -1.0459, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["inside 15 pull step 4"] = { 15, 15, 15, 15, 15, 11, 7, 3, -1, -5, -6.4579, -8.5492, -10.6109, -12.6437, -14.6481, -16.6247, -18.5741, -20.4969, -22.3936, -24.2647, -26.1108, -27.9323, -29.7297, -31.5036, -33.2543, -34.9823, -36.6881, -38.3721, -40.0347, -41.6762, -43.2972, -43.2972, -41.5595, -37.6118, -32.772, -27.8081, -23.1387, -18.9659, -15.3612, -12.3217, -9.8046, -7.7491, -6.0893, -4.7612, -3.7067, -2.8746, -2.2218, -1.7121, -1.3157, -1.0086, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["inside 5 pull step 10"] = { 5, 5, 5, 5, -5, -10.6109, -15.6398, -20.4969, -25.1908, -29.7297, -34.1211, -38.3721, -42.4893, -42.4893, -40.784, -36.9099, -32.1605, -27.2892, -22.7069, -18.612, -15.0746, -12.0918, -9.6216, -7.6045, -5.9757, -4.6724, -3.6375, -2.821, -2.1804, -1.6801, -1.2912, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["uneven pull 4/10"] = { 0, 0, 0, 0, -4, -7.5073, -9.5837, -14.6481, -16.6247, -21.4485, -23.3323, -27.9323, -29.7297, -34.1211, -34.1211, -32.7517, -29.6406, -25.8265, -21.9146, -18.2349, -14.9464, -12.1057, -9.7103, -7.7267, -6.1068, -4.7988, -3.7522, -2.9211, -2.2654, -1.751, -1.3492, -1.0369, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["fresh top pull 80 release"] = { 0, 0, 0, 0, -10, -10.6109, -15.6398, -20.4969, -25.1908, -29.7297, -34.1211, -38.3721, -38.3721, -36.8321, -33.3334, -29.0442, -24.6449, -20.5067, -16.8085, -13.6139, -10.9201, -8.6893, -6.8676, -5.3966, -4.2196, -3.285, -2.5477, -1.9691, -1.5173, -1.166, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["fresh top pull 80 hold10"] = { 0, 0, 0, 0, -10, -10.6109, -15.6398, -20.4969, -25.1908, -29.7297, -34.1211, -38.3721, -38.3721, -38.3721, -38.3721, -38.3721, -38.3721, -38.3721, -38.3721, -38.3721, -38.3721, -38.3721, -38.3721, -36.8321, -33.3334, -29.0442, -24.6449, -20.5067, -16.8085, -13.6139, -10.9201, -8.6893, -6.8676, -5.3966, -4.2196, -3.285, -2.5477, -1.9691, -1.5173, -1.166, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["fresh top pull 160 release"] = { 0, 0, 0, 0, -10, -10.6109, -15.6398, -20.4969, -25.1908, -29.7297, -34.1211, -38.3721, -42.4893, -46.4789, -50.3467, -54.0984, -57.7389, -61.2732, -61.2732, -58.814, -53.2273, -46.3782, -39.3534, -32.7454, -26.8401, -21.7389, -17.4374, -13.8752, -10.9663, -8.6174, -6.738, -5.2456, -4.0681, -3.1443, -2.4229, -1.862, -1.4274, -1.0918, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	["fresh bottom pull 80 release"] = { 2700, 2700, 2700, 2700, 2710, 2710.6108, 2715.6399, 2720.4968, 2725.1909, 2729.7297, 2734.1211, 2738.3721, 2738.3721, 2736.832, 2733.3335, 2729.0442, 2724.6448, 2720.5066, 2716.8086, 2713.6138, 2710.9202, 2708.6892, 2706.8677, 2705.3967, 2704.2197, 2703.2849, 2702.5476, 2701.969, 2701.5173, 2701.166, 2700, 2700, 2700, 2700, 2700, 2700, 2700, 2700, 2700 },
+	["fresh drag from 30 past top, release"] = { 30, 30, 30, 30, 20, 10, 0, -10, -10.6109, -15.6398, -20.4969, -25.1908, -25.1908, -24.1798, -21.883, -19.0672, -16.1791, -13.4624, -11.0346, -8.9374, -7.1689, -5.7044, -4.5085, -3.5428, -2.7701, -2.1566, -1.6725, -1.2927, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+}
+"##,
+        r##"
+local Uneven = {}
+for I = 1, 6 do
+	table.insert(Uneven, 4)
+	table.insert(Uneven, 10)
+end
+local Cases = {
+	["edge pull step 2"] = { Plan(Rep(50, 2), 120), 0 },
+	["edge pull step 4"] = { Plan(Rep(25, 4), 120), 0 },
+	["edge pull step 5"] = { Plan(Rep(20, 5), 120), 0 },
+	["edge pull step 11"] = { Plan(Rep(10, 11), 120), 0 },
+	["edge pull step 12"] = { Plan(Rep(9, 12), 120), 0 },
+	["inside 15 pull step 4"] = { Plan(Rep(29, 4), 120), 15 },
+	["inside 5 pull step 10"] = { Plan(Rep(11, 10), 120), 5 },
+	["uneven pull 4/10"] = { Plan(Uneven, 120), 0 },
+	["fresh top pull 80 release"] = { Plan(Rep(10, 10), 150), 0 },
+	["fresh top pull 80 hold10"] = { Plan(Cat(Rep(10, 10), Rep(10, 0)), 150), 0 },
+	["fresh top pull 160 release"] = { Plan(Rep(16, 10), 120), 0 },
+	["fresh bottom pull 80 release"] = { Plan(Rep(10, -10)), 2700 },
+	["fresh drag from 30 past top, release"] = { Plan(Rep(10, 10), 150), 30 },
+}
+local Problems = {}
+for Label, Case in Cases do
+	local Expected = Client[Label]
+	assert(Expected, Label)
+	Fresh(Case[2])
+	local Got = Run(Case[1], #Expected)
+	for K, Y in Expected do
+		if math.abs(Got[K].y - Y) > 2e-3 then
+			table.insert(Problems, string.format("%s row %d: rur %.4f, client %.4f", Label, K, Got[K].y, Y))
+			break
+		end
+	end
+end
+assert(#Problems == 0, table.concat(Problems, "\n"))
+"##
+    );
+    run(&lua, &engine, &source);
+}
+
+/// A touch drag's coasting as a 0.747 client runs it (P6b, clock-controlled captures): the release velocity is 1.305 x
+/// the mean of the finger's last 5 per-frame velocities (GetScrollVelocity reports it, zero while dragging), each frame
+/// the canvas moves v x 0.0165035 and v shrinks x 0.9612167, and it stops once |v| would fall under 17.477 px/s. The
+/// drag starts past 10 px (that move scrolls nothing). A finger coming down on the frame stops it after that frame's
+/// step; a touch elsewhere does not, nor does a script write of CanvasPosition.
+#[test]
+fn touch_drag_coasts_like_a_client() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    let source = format!(
+        "{DRAG_SCENE}\n{}",
+        r##"
+local function Near(A, B, Tolerance, What)
+	assert(math.abs(A - B) <= Tolerance, string.format("%s: %.6f vs %.6f", What, A, B))
+end
+-- 12 moves of 10 px up from 1000: the drag starts at the second move, then 1:1
+Fresh(1000)
+local Rows = Run(Plan(Rep(12, -10)), 140)
+for K = 1, 4 do
+	Near(Rows[K].y, 1000, 1e-4, "before the drag " .. K)
+end
+for K = 5, 14 do
+	Near(Rows[K].y, 1000 + 10 * (K - 4), 1e-4, "dragging " .. K)
+	Near(Rows[K].v, 0, 0, "no velocity while dragging " .. K)
+end
+-- The release (sent at row 14) shows at row 15 without a step
+Near(Rows[15].y, 1100, 1e-4, "release frame")
+Near(Rows[15].v, -1.305 * 600, 0.01, "release velocity")
+local Last = 15
+for K = 16, #Rows do
+	local V0, V1 = Rows[K - 1].v, Rows[K].v
+	Near(Rows[K].y - Rows[K - 1].y, -V0 * 0.0165035, 2e-3, "coast step " .. K)
+	if V1 == 0 then
+		Last = K
+		break
+	end
+	Near(V1 / V0, 0.9612167, 1e-6, "coast decay " .. K)
+end
+assert(Last > 15, "the coast never stopped")
+assert(math.abs(Rows[Last - 1].v) >= 17.477 and math.abs(Rows[Last - 1].v * 0.9612167) < 17.477, "stop threshold " .. Rows[Last - 1].v)
+assert(Rows[Last + 1].y == Rows[Last].y, "still after the stop")
+
+-- A drag of 8 moves from 1000, then: a second finger taps inside the frame 5 frames after the release (it stops the
+-- coast after that frame's step), or taps outside it (the coast goes on)
+local function Momentum(Tap)
+	local P = Plan(Rep(8, -10))
+	for I = #P + 1, 14 do
+		P[I] = false
+	end
+	P[15] = { "down", Tap[2], Tap[1], 2 }
+	P[16] = { "up", Tap[2], Tap[1], 2 }
+	return P
+end
+Fresh(1000)
+Rows = Run(Momentum({ 250, 300 }), 30)
+Near(Rows[16].y - Rows[15].y, -Rows[15].v * 0.0165035, 2e-3, "the tap frame's step")
+Near(Rows[16].v, 0, 0, "a tap inside stops the coast")
+for K = 17, 30 do
+	Near(Rows[K].y, Rows[16].y, 0, "stopped " .. K)
+end
+Fresh(1000)
+Rows = Run(Momentum({ 450, 150 }), 30)
+assert(Rows[30].v ~= 0 and Rows[30].y > Rows[20].y, "a tap outside the frame does not stop the coast")
+
+-- A script write during the coast moves it, and the coast goes on from there
+Fresh(1000)
+local P = Plan(Rep(8, -10))
+Rows = Run(P, 16)
+S.CanvasPosition = Vector2.new(0, 500)
+local V = S:GetScrollVelocity().Y
+StepDisplay(1 / 60)
+Near(S.CanvasPosition.Y, 500 - V * 0.0165035, 2e-3, "the coast after a script write")
+
+-- ElasticBehavior Never: a pull past the top does not move the canvas; a fling stops at the edge
+Fresh(0, { ElasticBehavior = Enum.ElasticBehavior.Never })
+Rows = Run(Plan(Rep(10, 10), 150), 20)
+for K = 1, 20 do
+	Near(Rows[K].y, 0, 0, "never pull " .. K)
+end
+Fresh(300, { ElasticBehavior = Enum.ElasticBehavior.Never })
+Rows = Run(Plan(Rep(6, 40), 150), 20)
+Near(Rows[11].y, 0, 0, "never fling stops at the edge")
+Near(Rows[12].v, 0, 0, "never fling velocity (it reads on for the frame it reaches the edge)")
+Near(Rows[20].y, 0, 0, "never fling stays")
+"##
+    );
+    run(&lua, &engine, &source);
+}
+
+/// A fling past an edge as a 0.747 client shows it (P6b): the coast carries on past the edge until a spring from rest
+/// that began at the last frame inside (band(0.1714 |v| - 0.89 p) out) is nearer the edge, then the spring brings it
+/// back. The client's two captures of each fling differ with their release velocities; rur's peak is within 10 % of
+/// them and it settles within a frame of them.
+#[test]
+fn touch_flings_bounce_like_a_client() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    let source = format!(
+        "{DRAG_SCENE}\n{}",
+        r##"
+local function Peak(Rows, Bottom)
+	local Most, At = 0, 0
+	for K, Row in Rows do
+		local Over = Bottom and Row.y - 2700 or -Row.y
+		if Over > Most then
+			Most, At = Over, K
+		end
+	end
+	return Most, At
+end
+local function Settle(Rows, Edge)
+	for K = #Rows, 1, -1 do
+		if Rows[K].y ~= Edge then
+			return K + 1
+		end
+	end
+	return 1
+end
+-- (client captures A and B: peak overscroll and the row it settles at)
+local Cases = {
+	{ "to top", Plan(Rep(6, 20), 150), 300, false, { 49.9967, 50.1326 }, { 38, 39 } },
+	{ "hard to top", Plan(Rep(6, 40), 150), 300, false, { 92.7698, 94.0798 }, { 33, 33 } },
+	{ "to bottom", Plan(Rep(6, -20)), 2400, true, { 48.2676, 43.5349 }, { 39, 39 } },
+}
+for _, Case in Cases do
+	Fresh(Case[3])
+	local Rows = Run(Case[2], 60)
+	-- (rur's release velocity is the model's, the client's varies with its frame timing: 10 % on the peak; the bounce
+	-- itself is checked against the captures from their own velocities in touch.rs)
+	local Most = Peak(Rows, Case[4])
+	local Lo, Hi = math.min(Case[5][1], Case[5][2]), math.max(Case[5][1], Case[5][2])
+	assert(Most >= Lo * 0.9 and Most <= Hi * 1.1, string.format("%s: peak %.4f, client %.4f / %.4f", Case[1], Most, Case[5][1], Case[5][2]))
+	local At = Settle(Rows, Case[4] and 2700 or 0)
+	assert(At >= Case[6][1] - 1 and At <= Case[6][2] + 1, string.format("%s: settles at row %d, client %d / %d", Case[1], At, Case[6][1], Case[6][2]))
+end
+"##
+    );
+    run(&lua, &engine, &source);
+}
+
+/// A second finger and a dragged ScrollingFrame in a 0.747 client (P6b): a finger on the frame while another drags it
+/// neither scrolls it nor counts as processed; when the dragging finger lifts the frame coasts until the other finger's
+/// next move takes it over, and that finger scrolls past its own 10 px. A drag that starts on a button inside the frame
+/// gives it MouseButton1Down and Up but no Click or Activated; a tap on the frame is not processed at the release, a
+/// drag is, and its UIS InputEnded comes before the frame's MouseLeave; the frame gets no InputChanged once it scrolls.
+#[test]
+fn touch_drag_with_two_fingers_matches_a_client() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    let source = format!(
+        "{DRAG_SCENE}\n{}",
+        r##"
+local Log = {}
+local function Watch()
+	S.InputChanged:Connect(function(Input) table.insert(Log, "S.InputChanged " .. Input.Position.Y) end)
+	S.MouseLeave:Connect(function() table.insert(Log, "S.MouseLeave") end)
+end
+local Conns = {}
+for _, Name in { "TouchStarted", "InputEnded", "TouchEnded" } do
+	table.insert(Conns, UIS[Name]:Connect(function(Input, Processed) table.insert(Log, "UIS." .. Name .. " " .. Input.Position.Y .. " " .. tostring(Processed)) end))
+end
+local function Add(P, K, E)
+	if not P[K] then
+		P[K] = {}
+	elseif type(P[K][1]) ~= "table" then
+		P[K] = { P[K] }
+	end
+	table.insert(P[K], E)
+end
+local function Pad(P, N)
+	for I = 1, N do
+		if P[I] == nil then
+			P[I] = false
+		end
+	end
+	return P
+end
+-- (d) finger 2 rests on the frame during finger 1's drag
+Fresh(1000)
+Watch()
+table.clear(Log)
+local P = Plan(Rep(10, -10))
+Add(P, 6, { "down", 380, 260, 2 })
+Add(P, 14, { "up", 380, 260, 2 })
+local Rows = Run(Pad(P, 14), 20)
+for K = 5, 12 do
+	assert(Rows[K].y == 1000 + 10 * (K - 4), "finger 2 does not stop finger 1's drag, row " .. K)
+end
+local Joined = table.concat(Log, ", ")
+assert(string.find(Joined, "UIS.TouchStarted 380 false", 1, true), Joined)
+assert(string.find(Joined, "UIS.TouchEnded 380 false", 1, true), Joined)
+-- (e) finger 1 drags 6 and holds, finger 2 moves on the frame, finger 1 lifts, finger 2 takes over
+Fresh(1000)
+P = {}
+local function Drag(P, Finger, Start, X, Y0, N, D, Lift)
+	Add(P, Start, { "down", Y0, X, Finger })
+	local Y = Y0
+	for I = 1, N do
+		Y += D
+		Add(P, Start + I, { "move", Y, X, Finger })
+	end
+	if Lift then
+		Add(P, Start + N + 1, { "up", Y, X, Finger })
+	end
+	return Y
+end
+local Y1 = Drag(P, 1, 1, 160, 350, 6, -10, false)
+Drag(P, 2, 9, 260, 380, 12, -10, true)
+Add(P, 15, { "up", Y1, 160, 1 })
+Rows = Run(Pad(P, 22), 24)
+for K = 8, 16 do
+	assert(Rows[K].y == 1040, "frozen while finger 1 holds and finger 2 moves, row " .. K)
+end
+assert(Rows[16].v ~= 0, "finger 1's release coasts")
+local Coasted = Rows[17].y
+assert(math.abs(Coasted - (1040 - Rows[16].v * 0.0165035)) < 2e-3, "one coast step before finger 2 takes over")
+assert(Rows[17].v == 0 and Rows[18].y == Coasted and Rows[19].y == Coasted, "finger 2's first move stops the coast")
+for K = 20, 22 do
+	assert(math.abs(Rows[K].y - (Coasted + 10 * (K - 19))) < 1e-3, "finger 2 scrolls from its third move, row " .. K)
+end
+-- A drag from a button inside the frame, and a tap on the frame
+Fresh(500)
+local Inner = Instance.new("TextButton")
+Inner.Position = UDim2.fromOffset(20, 600)
+Inner.Size = UDim2.fromOffset(150, 60)
+Inner.Parent = S
+UpdateAll()
+Watch()
+for _, Name in { "MouseButton1Down", "MouseButton1Up", "MouseButton1Click", "Activated" } do
+	Inner[Name]:Connect(function() table.insert(Log, "Inner." .. Name) end)
+end
+table.clear(Log)
+Run(Pad(Plan(Rep(10, -3), 230), 12), 14)
+Joined = table.concat(Log, ", ")
+assert(string.find(Joined, "Inner.MouseButton1Down", 1, true) and string.find(Joined, "Inner.MouseButton1Up", 1, true), Joined)
+assert(not string.find(Joined, "Inner.MouseButton1Click", 1, true) and not string.find(Joined, "Inner.Activated", 1, true), Joined)
+assert(string.find(Joined, "UIS.InputEnded 200 true, S.MouseLeave", 1, true), Joined)
+assert(string.find(Joined, "S.InputChanged 218", 1, true) and not string.find(Joined, "S.InputChanged 215", 1, true), Joined)
+for _ = 1, 120 do
+	StepDisplay(1 / 60)
+end
+Fresh(0)
+Watch()
+table.clear(Log)
+Run(Pad(Plan({}, 300), 3), 6)
+Joined = table.concat(Log, ", ")
+assert(string.find(Joined, "UIS.TouchStarted 300 true", 1, true) and string.find(Joined, "S.MouseLeave, UIS.InputEnded 300 false", 1, true), Joined)
+for _, C in Conns do
+	C:Disconnect()
+end
+"##
+    );
+    run(&lua, &engine, &source);
+}
+
+/// --actions on a touch device with `finger` (input/actions.rs expands it into the click's and the drag's events): a
+/// finger-0 drag scrolls a ScrollingFrame while finger 1 taps a button beside it, each touch with an InputObject of its
+/// own, and the frame coasts on after the drag.
+#[test]
+fn touch_actions_name_their_fingers() {
+    let (lua, engine) = start_with(800.0, 600.0, "play", Some(roblox_engine_emulator::client_profile::DeviceKind::Touch));
+    run(
+        &lua,
+        &engine,
+        r#"
+local UIS = game:GetService("UserInputService")
+local Root = Instance.new("ScreenGui")
+Root.Name = "Fingers"
+Root.IgnoreGuiInset = true
+Root.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+local S = Instance.new("ScrollingFrame")
+S.Name = "S"
+S.Position = UDim2.fromOffset(100, 100)
+S.Size = UDim2.fromOffset(200, 300)
+S.CanvasSize = UDim2.fromOffset(0, 3000)
+S.Parent = Root
+local B = Instance.new("TextButton")
+B.Name = "B"
+B.Text = "0"
+B.Position = UDim2.fromOffset(400, 100)
+B.Size = UDim2.fromOffset(200, 100)
+B.Parent = Root
+B.Activated:Connect(function() B.Text = tostring(tonumber(B.Text) + 1) end)
+local Seen = {}
+UIS.TouchStarted:Connect(function(Input) table.insert(Seen, Input) end)
+Root:SetAttribute("Seen", 0)
+UIS.TouchEnded:Connect(function() Root:SetAttribute("Distinct", #Seen == 2 and Seen[1] ~= Seen[2]) end)
+"#,
+    );
+    let actions = crate::engine::story::load_actions(
+        &lua,
+        r#"[
+            {"t": 0.1, "type": "drag", "from": {"x": 200, "y": 350}, "to": {"x": 200, "y": 150}, "steps": 10, "duration": 0.1667},
+            {"t": 0.15, "type": "click", "x": 450, "y": 150, "finger": 1}
+        ]"#,
+    )
+    .unwrap();
+    crate::engine::story::run_timeline(&lua, &engine, &actions, 0.5, &mut crate::engine::story::input_dispatch).unwrap();
+    run(
+        &lua,
+        &engine,
+        r#"
+local Root = game:GetService("Players").LocalPlayer.PlayerGui.Fingers
+assert(Root.B.Text == "1", `finger 1's tap: {Root.B.Text}`)
+assert(Root:GetAttribute("Distinct") == true, "two touches, two InputObjects")
+local Y = Root.S.CanvasPosition.Y
+assert(Y > 180, `finger 0's drag scrolled and coasted: {Y}`)
+"#,
+    );
+}

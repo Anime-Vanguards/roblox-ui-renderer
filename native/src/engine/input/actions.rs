@@ -5,12 +5,16 @@
 //! so a layout change does not move the click off its target. cli/actions.mjs checks the same
 //! schema in the JS CLI.
 //!
-//!   {t?, type:"move", x, y}   {t?, type:"down"|"up", x?, y?, button?: 1|2|3}   {t?, type:"leave"}
+//!   {t?, type:"move", x, y, finger?}   {t?, type:"down"|"up", x?, y?, button?: 1|2|3, finger?}   {t?, type:"leave"}
 //!   {t?, type:"wheel", x?, y? (or a node <point>), notches | dy, dx?, shift?}
 //!   {t?, type:"key", key, down?, shift?, ctrl?, alt?}   {t?, type:"text"|"paste", text}
-//!   {t?, type:"click", <point>, button?, hold?: seconds between down and up (0)}
-//!   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?,
+//!   {t?, type:"click", <point>, button?, finger?, hold?: seconds between down and up (0)}
+//!   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?, finger?,
 //!    steps?: moves from `from` to `to` (10), duration?: seconds they take (0.25)}
+//!
+//! `finger` (a whole number from 0 to 9, default 0) names the finger of a touch device (`--device touch`): each
+//! finger is a touch of its own, so two fingers can be down at once. An event without it is finger 0, as before the
+//! field existed; other devices have one pointer and ignore it.
 //!
 //! <point>: `node` / `target` (a path as `inspect` prints it: the full name or a dot-separated
 //! suffix of it, e.g. "StoryTarget.Stack.Button"; a name holding dots is quoted, `["Item.Name"]`),
@@ -178,6 +182,15 @@ pub fn drag_points(action: &Json) -> Result<(Point, Point), String> {
     Ok((from, to))
 }
 
+/// `finger`: a whole number from 0 to [`super::touch::MAX_FINGER`]
+fn check_finger(object: &Map<String, Json>) -> Result<(), String> {
+    match optional_number(object, "finger")? {
+        None => Ok(()),
+        Some(f) if f >= 0.0 && f.fract() == 0.0 && f <= super::touch::MAX_FINGER as f64 => Ok(()),
+        Some(f) => Err(format!("`finger` must be a whole number from 0 to {}, not {f}", super::touch::MAX_FINGER)),
+    }
+}
+
 fn check_button(object: &Map<String, Json>) -> Result<(), String> {
     match optional_number(object, "button")? {
         None => Ok(()),
@@ -212,6 +225,9 @@ fn check(action: &Json) -> Result<(), String> {
             if kind == "down" || kind == "up" {
                 check_button(object)?;
             }
+            if kind != "wheel" {
+                check_finger(object)?;
+            }
             if kind == "wheel" {
                 wheel_point(action)?;
                 let notches = optional_number(object, "notches")?;
@@ -233,6 +249,7 @@ fn check(action: &Json) -> Result<(), String> {
         "click" => {
             click_point(action)?;
             check_button(object)?;
+            check_finger(object)?;
             if let Some(hold) = optional_number(object, "hold")? {
                 if hold < 0.0 {
                     return Err(format!("`hold` must be 0 or more, not {hold}"));
@@ -242,6 +259,7 @@ fn check(action: &Json) -> Result<(), String> {
         "drag" => {
             drag_points(action)?;
             check_button(object)?;
+            check_finger(object)?;
             if let Some(steps) = optional_number(object, "steps")? {
                 if steps < 1.0 || steps > 10000.0 || steps.fract() != 0.0 {
                     return Err(format!("`steps` must be a whole number from 1 to 10000, not {steps}"));
@@ -379,10 +397,13 @@ pub fn resolve(engine: &Engine, point: &Point) -> Result<(f64, f64), String> {
     }
 }
 
-fn event(kind: &str, (x, y): (f64, f64), button: Option<f64>) -> Json {
+fn event(kind: &str, (x, y): (f64, f64), button: Option<f64>, finger: Option<&Json>) -> Json {
     let mut event = json!({ "type": kind, "x": x, "y": y });
     if let Some(button) = button {
         event["button"] = json!(button);
+    }
+    if let Some(finger) = finger {
+        event["finger"] = finger.clone();
     }
     event
 }
@@ -393,35 +414,40 @@ pub fn expand(engine: &std::rc::Rc<Engine>, action: &Json, now: f64) -> Result<V
     super::super::layout::update_all(engine);
     let number = |key: &str| action.get(key).and_then(Json::as_f64);
     let button = number("button").unwrap_or(1.0);
+    let finger = action.get("finger");
     match action.get("type").and_then(Json::as_str) {
         Some("click") => {
             let at = resolve(engine, &click_point(action)?)?;
             let hold = number("hold").unwrap_or(0.0).max(0.0);
-            Ok(vec![(now, event("move", at, None)), (now, event("down", at, Some(button))), (now + hold, event("up", at, Some(button)))])
+            Ok(vec![
+                (now, event("move", at, None, finger)),
+                (now, event("down", at, Some(button), finger)),
+                (now + hold, event("up", at, Some(button), finger)),
+            ])
         }
         Some("drag") => {
             let (from, to) = drag_points(action)?;
             let (a, b) = (resolve(engine, &from)?, resolve(engine, &to)?);
             let steps = number("steps").unwrap_or(10.0).max(1.0) as usize;
             let duration = number("duration").unwrap_or(0.25).max(0.0);
-            let mut events = vec![(now, event("move", a, None)), (now, event("down", a, Some(button)))];
+            let mut events = vec![(now, event("move", a, None, finger)), (now, event("down", a, Some(button), finger))];
             for step in 1..=steps {
                 let f = step as f64 / steps as f64;
-                events.push((now + duration * f, event("move", (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f), None)));
+                events.push((now + duration * f, event("move", (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f), None, finger)));
             }
-            events.push((now + duration, event("up", b, Some(button))));
+            events.push((now + duration, event("up", b, Some(button), finger)));
             Ok(events)
         }
         Some("wheel") => {
             let point = wheel_point(action)?.ok_or("wheel: needs `node` (or `target`)")?;
             let at = resolve(engine, &point)?;
-            let mut wheel = event("wheel", at, None);
+            let mut wheel = event("wheel", at, None, None);
             for key in ["notches", "dy", "dx", "shift"] {
                 if let Some(value) = action.get(key) {
                     wheel[key] = value.clone();
                 }
             }
-            Ok(vec![(now, event("move", at, None)), (now, wheel)])
+            Ok(vec![(now, event("move", at, None, None)), (now, wheel)])
         }
         _ => Err("not a click, drag or wheel at a node".into()),
     }
@@ -445,7 +471,9 @@ mod schema_tests {
             {"type": "click", "x": 10, "y": 20}, {"frame": 3, "type": "click", "x": 10, "y": 20},
             {"type": "drag", "from": "A", "to": {"x": 5, "y": 6}, "steps": 4, "duration": 0.5},
             {"type": "drag", "node": "A", "to": {"node": "B", "anchor": {"x": 1, "y": 1}}},
-            {"type": "wheel", "node": "Scroll", "notches": -1}, {"type": "wheel", "target": "Scroll", "anchor": {"x": 0.2}, "offset": {"x": 1, "y": 2}, "dy": 100, "shift": true}
+            {"type": "wheel", "node": "Scroll", "notches": -1}, {"type": "wheel", "target": "Scroll", "anchor": {"x": 0.2}, "offset": {"x": 1, "y": 2}, "dy": 100, "shift": true},
+            {"type": "down", "x": 1, "y": 2, "finger": 1}, {"type": "move", "x": 3, "y": 4, "finger": 9}, {"type": "up", "finger": 0},
+            {"type": "click", "x": 10, "y": 20, "finger": 2}, {"type": "drag", "from": "A", "to": "B", "finger": 1}
         ]"#;
         validate(&serde_json::from_str(ok).unwrap()).unwrap();
         validate(&json!([])).unwrap();
@@ -485,6 +513,10 @@ mod schema_tests {
         assert_eq!(error(r#"[{"type": "wheel", "target": 5, "notches": 1}]"#), "--actions[0] (wheel): wheel: `target` must be a node path string, not a number");
         assert_eq!(error(r#"[{"type": "wheel", "node": "A"}]"#).split(": ").nth(1), Some("wheel"));
         assert_eq!(error(r#"[{"type": "wheel", "x": 1, "y": 1, "notches": -1, "shift": "yes"}]"#), "--actions[0] (wheel): `shift` must be true or false, not a string");
+        assert_eq!(error(r#"[{"type": "down", "x": 1, "y": 1, "finger": 10}]"#), "--actions[0] (down): `finger` must be a whole number from 0 to 9, not 10");
+        assert_eq!(error(r#"[{"type": "move", "x": 1, "y": 1, "finger": 1.5}]"#), "--actions[0] (move): `finger` must be a whole number from 0 to 9, not 1.5");
+        assert_eq!(error(r#"[{"type": "click", "x": 1, "y": 1, "finger": -1}]"#), "--actions[0] (click): `finger` must be a whole number from 0 to 9, not -1");
+        assert_eq!(error(r#"[{"type": "drag", "from": "A", "to": "B", "finger": "1"}]"#), "--actions[0] (drag): `finger` must be a number, not a string");
     }
 
     #[test]

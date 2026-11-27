@@ -2409,8 +2409,12 @@ impl<'a> Pass<'a> {
         let n_canvas_position = n.CanvasPosition;
         let limits = self.l.records.get(id).and_then(|r| r.scroll_max).unwrap_or([0.0, 0.0]);
         let position = self.vec2(id, n_canvas_position).unwrap_or((0.0, 0.0));
-        let scroll_x = clamp(position.0, 0.0, limits[0]);
-        let scroll_y = clamp(position.1, 0.0, limits[1]);
+        // (a touch overscroll keeps its position past the range, input/touch.rs)
+        let (scroll_x, scroll_y) = if self.l.overscroll.contains(&id) {
+            position
+        } else {
+            (clamp(position.0, 0.0, limits[0]), clamp(position.1, 0.0, limits[1]))
+        };
         if scroll_x != position.0 || scroll_y != position.1 {
             self.set_vector(id, n_canvas_position, scroll_x, scroll_y);
         }
@@ -2773,8 +2777,12 @@ impl<'a> Pass<'a> {
         let max_y = if scrollable_y { lmax(canvas_h - window_h, 0.0) } else { 0.0 };
         record.scroll_max = Some([max_x, max_y]);
         let position = self.vec2(id, n_canvas_position).unwrap_or((0.0, 0.0));
-        let scroll_x = clamp(position.0, 0.0, max_x);
-        let scroll_y = clamp(position.1, 0.0, max_y);
+        // (a touch overscroll keeps its position past the range, input/touch.rs)
+        let (scroll_x, scroll_y) = if self.l.overscroll.contains(&id) {
+            position
+        } else {
+            (clamp(position.0, 0.0, max_x), clamp(position.1, 0.0, max_y))
+        };
         if scroll_x != position.0 || scroll_y != position.1 {
             // (Layout.Writing: the invalidation hook ignores this write)
             self.set_vector(id, n_canvas_position, scroll_x, scroll_y);
