@@ -196,10 +196,13 @@ fn placements(text: &Value, fonts: &Value, rotated: bool, device_scale: f64) -> 
     for line in arr(&text["lines"]) {
         let px = n(line, "px", snap(n(line, "x", 0.0)));
         let ox = if rotated { n(line, "ux", px) } else { px };
+        // An unrotated line's top lands on a whole device pixel as a frame's edge does (snap_device: up to
+        // scale x 4/15 / 256 px below k + 0.5 still goes to k + 1; sim client 0.747, fixtures/text-probe-richscaled.luau
+        // at 3x: a TextScaled label's top at 31.4975 px drawn from row 32, where rounding gave 31)
         let top = if rotated {
             n(line, "top", 0.0)
         } else {
-            snap(n(line, "top", 0.0))
+            crate::render::geometry::snap_device(n(line, "top", 0.0), device_scale)
         };
         let mut local = Vec::new();
         let mut largest = f64::NEG_INFINITY;
@@ -966,10 +969,10 @@ fn image(
         translation_only: false,
         selection_mode: 0,
         selection_rects: Vec::new(),
+        shear: None,
     }
 }
 fn composite(quads: &[Quad]) -> Result<Vec<TextQuad>, TextError> {
-        shear: None,
     let Some(layout) = composite_layout(quads)? else {
         return Ok(Vec::new());
     };
@@ -1525,10 +1528,10 @@ pub(crate) fn layer_quad(layout: TextLayout, rgba: Arc<[u8]>) -> TextQuad {
         translation_only: false,
         selection_mode: 0,
         selection_rects: Vec::new(),
+        shear: None,
     }
 }
 fn moved(layout: TextLayout, by: [f64; 2]) -> TextLayout {
-        shear: None,
     TextLayout {
         x: layout.x + by[0],
         y: layout.y + by[1],
@@ -1536,9 +1539,9 @@ fn moved(layout: TextLayout, by: [f64; 2]) -> TextLayout {
     }
 }
 
-/// A line's pen as placements() computes it for unrotated text: x = px (or snap(x)), top = snap(top)
-fn line_pen(line: &Value) -> [f64; 2] {
-    [n(line, "px", snap(n(line, "x", 0.0))), snap(n(line, "top", 0.0))]
+/// A line's pen as placements() computes it for unrotated text: x = px (or snap(x)), top snapped like a frame edge
+fn line_pen(line: &Value, scale: f64) -> [f64; 2] {
+    [n(line, "px", snap(n(line, "x", 0.0))), crate::render::geometry::snap_device(n(line, "top", 0.0), scale)]
 }
 fn hash_value(value: &Value, hasher: &mut rustc_hash::FxHasher) {
     use std::hash::{Hash, Hasher};
@@ -1596,7 +1599,7 @@ fn node_key(node: &Value, scale: f64) -> Option<(u64, [f64; 2])> {
         return None;
     }
     let lines = arr(&text["lines"]);
-    let anchor = line_pen(lines.first()?);
+    let anchor = line_pen(lines.first()?, scale);
     let whole = |v: f64| v.fract() == 0.0 && v.abs() < 1e9;
     let mut hasher = rustc_hash::FxHasher::default();
     hasher.write_u64(scale.to_bits());
@@ -1609,7 +1612,7 @@ fn node_key(node: &Value, scale: f64) -> Option<(u64, [f64; 2])> {
     }
     hasher.write_usize(lines.len());
     for line in lines {
-        let pen = line_pen(line);
+        let pen = line_pen(line, scale);
         if !pen.iter().all(|v| whole(*v)) {
             return None;
         }
@@ -1640,14 +1643,14 @@ fn same_fixed(a: &Value, b: &Value, moving: fn(&str) -> bool) -> bool {
     }
 }
 /// Whether two texts lay out the same quads up to the translation between their anchors
-fn same_text(a: &Value, a_anchor: [f64; 2], b: &Value, b_anchor: [f64; 2]) -> bool {
+fn same_text(a: &Value, a_anchor: [f64; 2], b: &Value, b_anchor: [f64; 2], scale: f64) -> bool {
     if !same_fixed(a, b, moving_text_key) {
         return false;
     }
     let (a_lines, b_lines) = (arr(&a["lines"]), arr(&b["lines"]));
     a_lines.len() == b_lines.len()
         && a_lines.iter().zip(b_lines).all(|(x, y)| {
-            let (px, py) = (line_pen(x), line_pen(y));
+            let (px, py) = (line_pen(x, scale), line_pen(y, scale));
             px[0] - a_anchor[0] == py[0] - b_anchor[0]
                 && px[1] - a_anchor[1] == py[1] - b_anchor[1]
                 && same_fixed(x, y, moving_line_key)
@@ -1859,7 +1862,7 @@ impl TextLayerCache {
             let strokes = &node["strokes"];
             if let Some(entry) = self.nodes.get_mut(&hash).and_then(|list| {
                 list.iter_mut().find(|e| {
-                    e.strokes == *strokes && same_text(&e.text, e.anchor, text, anchor)
+                    e.strokes == *strokes && same_text(&e.text, e.anchor, text, anchor, scale)
                 })
             }) {
                 entry.used = clock;
@@ -2665,9 +2668,6 @@ mod tests {
         assert_eq!((q.bounds, q.pivot), ([98.0, 39.0, 110.0, 59.0], 0.0));
     }
 
-    #[test]
-    fn a_line_stands_on_the_baseline_of_the_label_face() {
-        let own = serde_json::json!({"unitsPerEm": 1000, "ascender": 974, "descender": -236, "lineGap": 0});
     /// A rotated synthetic italic glyph is its upright padded bitmap drawn under the skew and the rotation (resampled
     /// once, TextQuad::shear), leaning by the exact skew x its depth below the baseline; an unrotated one leans by whole
     /// px (fixtures/text-probe-synth-rotated.luau, text-probe-synth.luau)
@@ -2706,6 +2706,26 @@ mod tests {
         assert_eq!((images[0].width, images[0].height, images[0].shear), (17, 20, None));
     }
 
+    /// An unrotated line's top lands on a whole device pixel as a frame's edge does: up from scale x 4/15 / 256 px below
+    /// k + 0.5 (fixtures/text-probe-toptie.luau, text-probe-richscaled.luau at 3x)
+    #[test]
+    fn a_line_top_just_below_a_half_pixel_snaps_like_a_frame_edge() {
+        let fonts = serde_json::json!([{"file":"Arimo-Regular.ttf","ascender":1854,"descender":-434,"lineGap":67,"sizeUnits":2355,"unitsPerEm":2048,"weight":400}]);
+        let baseline = |top: f64, scale: f64| {
+            let text = serde_json::json!({"size": 30, "lines": [{"x": 0, "px": 0, "top": top, "glyphs": [[0, 43, 0, 26.95074]]}]});
+            super::placements(&text, &fonts, false, scale).0[0].baseline
+        };
+        let top_at = |top: f64, scale: f64| baseline(top, scale) - baseline(0.0, scale);
+        assert_eq!(top_at(31.4975, 3.0), 32.0, "0.0025 px below at 3x");
+        assert_eq!(top_at(31.4965, 3.0), 31.0, "0.0035 px below at 3x");
+        assert_eq!(top_at(31.4986, 1.5), 32.0);
+        assert_eq!(top_at(31.4983, 1.5), 31.0);
+        assert_eq!(top_at(31.5, 1.0), 32.0);
+    }
+
+    #[test]
+    fn a_line_stands_on_the_baseline_of_the_label_face() {
+        let own = serde_json::json!({"unitsPerEm": 1000, "ascender": 974, "descender": -236, "lineGap": 0});
         let emoji = serde_json::json!({"unitsPerEm": 2048, "ascender": 1900, "descender": -500, "lineGap": 0});
         let text = serde_json::json!({"face": own, "runs": [{"metrics": emoji}, {}]});
         // A fallback glyph of a plain line: the label face's metrics at the glyph's pixel size

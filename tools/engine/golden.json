@@ -1264,6 +1264,14 @@
 			"digest": "ef0bb6ae5e8b8f2ab89c2ba8ffcb1b3778a5cb60c0e5e38b2cef403856a63e8f",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-toptie": {
+			"digest": "ab963235f07e344dc4680c2182e8d0bd50d568bb04d9a2269d5ec43ce8d212ec",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-toptie@quarter": {
+			"digest": "743595581165e77a07b1b7d2c85b2186edb97173d763342cc72ff4565eb9e72b",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-uiscale": {
 			"digest": "edd25af4c90b3a4b03d7d3b2166fa5881b2aa65141837f59369827df7fe8b5fc",
 			"status": "ok"
@@ -2596,6 +2604,14 @@
 			"digest": "33abd6f0141a720763caa79bfadbdbb4766f354483f86296fd2091356f92058b",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-toptie": {
+			"digest": "b192be03f6c0543af87941f10d5afa356d8bcbc7b58f26ce314dd1de3fb085dd",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-toptie@quarter": {
+			"digest": "6ec5751a8c0478200724d5ce4bf2fc99a49eea585d2b817d0d89f13be22f6e89",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-uiscale": {
 			"digest": "e8e27ea9fa07ad86de9474dc234a55677abe3ec1fe370cf2f2be29ba406240b9",
 			"status": "ok"
@@ -3630,6 +3646,10 @@
 		},
 		"fixtures/play/text-probe-tie-size": {
 			"digest": "a49ce5a3326232ccbd17bf05c02ae2662dc78ab22431ea045093dc92698e9054",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-toptie": {
+			"digest": "2e87adafd506563cbd3da757d1863fc1164fb1ae41bb6cc01e299108d660df68",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-uiscale": {

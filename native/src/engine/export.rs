@@ -151,6 +151,17 @@ fn round(value: f64, digits: i32) -> f64 {
     (value * factor + 0.5).floor() / factor
 }
 
+/// A text line's `top` as the scene holds it: three decimals, or six where three would land the line on another whole
+/// device pixel than its exact top does. The renderer snaps an unrotated line top as a frame's edge
+/// (render/geometry.rs snap_device: up from scale x 4/15 / 256 px below k + 0.5), and a top 0.0032 px below a half
+/// pixel at 3x is 31.497 in three decimals, inside that window (sim client 0.747, fixtures/text-probe-toptie.luau: the
+/// client rounds up through 0.0030 px below at 3x and 0.0010 at 1x, down from 0.0032 / 0.0012).
+fn exported_top(top: f64, rotated: bool, pixel_scale: f64) -> f64 {
+    let snap = |v: f64| ((v * 256. + pixel_scale * 4. / 15.).floor() + 128.).div_euclid(256.);
+    let short = round(top, 3);
+    if rotated || snap(short) == snap(top) { short } else { round(top, 6) }
+}
+
 /// A number as the Luau JSON encoder writes it: integral values as integers.
 pub fn number(value: f64) -> Json {
     if value.is_finite() && value.fract() == 0.0 && value.abs() < 9.0e15 {
@@ -1131,7 +1142,7 @@ fn text_lines(
         if exact_pen != pen {
             entry.insert("ux".into(), number(exact_pen));
         }
-        entry.insert("top".into(), number(round(line_top, 3)));
+        entry.insert("top".into(), number(exported_top(line_top, rotated, pixel_scale)));
         entry.insert("height".into(), number(line.height));
         entry.insert("width".into(), number(line_width));
         let cut = reveal.as_ref().and_then(|lines| lines[index]);

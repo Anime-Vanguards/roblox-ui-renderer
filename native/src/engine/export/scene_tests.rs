@@ -1115,3 +1115,14 @@ assert(math.abs(Bottom.text.lines[1].top - (Content[2] + Content[4] - 64.35)) < 
     );
     std::fs::remove_dir_all(&directory).unwrap();
 }
+
+/// A text line's top keeps three decimals unless they would snap to another whole device pixel than the exact top
+/// (the renderer's frame-edge rule: up from scale x 4/15 / 256 px below k + 0.5; fixtures/text-probe-toptie.luau)
+#[test]
+fn a_line_top_keeps_the_digits_its_pixel_needs() {
+    assert_eq!(super::exported_top(660.4968, false, 3.0), 660.4968, "660.497 would go up at 3x, the exact top down");
+    assert_eq!(super::exported_top(660.4972, false, 3.0), 660.497);
+    assert_eq!(super::exported_top(928.498486, false, 1.5), 928.498486, "928.498 would go down at 1.5x, the exact top up");
+    assert_eq!(super::exported_top(928.4983, false, 1.5), 928.498);
+    assert_eq!(super::exported_top(660.4968, true, 3.0), 660.497, "rotated text draws its exact top");
+}
