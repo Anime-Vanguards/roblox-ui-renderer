@@ -1448,7 +1448,8 @@ M.Size = UDim2.fromOffset(200, 200)
 UpdateAll()
 Case("ML wrapped End at 2", M, "one two three four five six seven eight nine ten eleven twelve", 2, -1, { { "End" } }, "one two three four five six seven eight nine ten eleven twelve", 19, -1, true)
 Case("ML wrapped Home at 20", M, "one two three four five six seven eight nine ten eleven twelve", 20, -1, { { "Home" } }, "one two three four five six seven eight nine ten eleven twelve", 20, -1, true)
--- (not matched: the client puts the caret at 21, after "f"; the nearest place to the caret's x is 22)
+-- (not matched: the client puts the caret at 21, after "f", because a client TextBox starts this line with the space
+-- that did not fit on the full line above, drawn; rur lays a TextBox out as a label, the space hanging)
 -- Case("ML wrapped Down at 2", M, "one two three four five six seven eight nine ten eleven twelve", 2, -1, { { "Down" } }, "one two three four five six seven eight nine ten eleven twelve", 21, -1, true)
 Case("ML wrapped Up at 20", M, "one two three four five six seven eight nine ten eleven twelve", 20, -1, { { "Up" } }, "one two three four five six seven eight nine ten eleven twelve", 1, -1, true)
 assert(#Failures == 0, table.concat(Failures, "\n"))
@@ -3613,4 +3614,136 @@ assert(#Failures == 0, table.concat(Failures, "\n"))
 "##
         ),
     );
+}
+
+/// Up / Down and clicks in wrapped and unwrapped MultiLine boxes, measured in a 0.747 client from every caret place
+/// (generated from the capture): a wrapped line's places end before the whitespace it wrapped at, places inside that
+/// whitespace and after it are the next line's start, an empty line has its own place, and a click exactly on a
+/// character's 2/3 point stays before it. Lines a client TextBox lays out differently (a wrap space that does not fit
+/// on a full line starts the next line there) are left out. Without Studio's fonts only the unwrapped box with an empty line runs, in the test font.
+#[test]
+fn textbox_wrapped_lines_place_the_caret_like_a_client() {
+    let fonts = crate::engine::text::fonts::discover_content_root().is_some();
+    if !fonts && crate::assets::tests::test_font().is_none() {
+        eprintln!("skipped: no Studio content root and no test font (set RUR_TEST_FONT)");
+        return;
+    }
+    let (lua, engine) = start(800.0, 600.0);
+    let directory = std::env::temp_dir().join(format!(
+        "rur-textbox-places-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    if !fonts {
+        use crate::engine::{GuiEngine, text::TextEngine};
+        std::fs::create_dir_all(&directory).unwrap();
+        let own = crate::engine::cli::own_fonts(&directory, &crate::engine::default_repo());
+        *engine.text().borrow_mut() = Some(TextEngine::new(own));
+    }
+    run(
+        &lua,
+        &engine,
+        &format!(
+            "{}local Fonts = {}\n{}",
+            TEXTBOX_PRELUDE,
+            fonts,
+            r##"
+local Client = {
+	["Q24 down"] = "11,12,13,14,14,15,17,18,19,20,21,23,23,24,25,26,27,28,29,30,36,37,38,41,42,43,43,44,45,46,47,47,48,50,50,51,51,52,53,54,55,56,57,58,59,60,60,60,60,60,51,52,53,54,55,56,57,58,59,60",
+	["Q24 up"] = "1,2,3,4,5,6,7,8,9,10,1,2,3,4,6,7,7,8,9,10,11,11,13,14,15,16,17,18,19,20,20,20,20,20,20,21,22,23,23,24,24,25,27,28,29,30,31,33,33,34,36,37,39,40,41,42,43,44,45,46",
+	["Q24 down2"] = "21,23,23,24,24,25,27,28,29,30,36,38,38,41,42,43,43,44,45,46,51,51,52,55,56,57,57,58,59,60,60,60,60,60,60,51,51,52,53,54,55,56,57,58,59,60,60,60,60,60,51,52,53,54,55,56,57,58,59,60",
+	["Q24 up2"] = "1,2,3,4,5,6,7,8,9,10,1,2,3,4,6,7,7,8,9,10,1,1,3,4,6,7,7,8,9,10,10,10,10,10,10,11,11,13,13,14,14,15,17,18,19,20,20,20,20,20,21,22,23,24,24,25,27,28,29,30",
+	["S2 down"] = "21,22,23,25,25,26,28,31,33,33,34,34,34,34,34,34,34,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34",
+	["S2 up"] = "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,1,1,1,1,1,2,4,5,6,6,7,7,7,8,8,9,12",
+	["L32 down"] = "10,11,12,12,12,12,12,12,12,13,14,15,22,22,22,22,22,22,22,22,22,23,23,24,25,26,27,28,29,30,31,32,33",
+	["L32 up"] = "1,2,3,4,5,6,7,8,9,1,2,3,10,11,12,12,12,12,12,12,12,13,22,22,22,22,22,22,22,22,22,22,22",
+	["L32 down2"] = "13,14,15,15,15,15,15,15,15,22,22,22,23,23,23,23,23,23,23,23,23,23,23,24,25,26,27,28,29,30,31,32,33",
+	["L32 up2"] = "1,2,3,4,5,6,7,8,9,1,2,3,1,2,3,3,3,3,3,3,3,10,13,13,13,13,13,13,13,13,13,13,13",
+	["WL down"] = "11,12,13,14,15,16,16,17,18,19,20,21,22,23,24,25,27,27,27,28,29,30,31,31,31,31,31,28,29,30,31",
+	["WL up"] = "1,2,3,4,5,6,7,8,9,10,1,2,2,4,5,6,8,9,10,11,12,13,14,15,16,17,17,20,21,22,23",
+	["W32 click row 1"] = "1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,9,9,9,9,9,9,9,9,10,10,10,10,10,10,10,10,10,10,10,10,11,11,11,11,11,11,11,11,11,11,11,12,12,12,12,12,12,12,12,12,12,12,13,13,13,13,13,13,13,13,13,13,13,13,13,14,14,14,14,14,14,14,14,15,15,15,15,15,15,16,16,16,16,16,16,16,16,16,16,16,16,17,17,17,17,17,17,17,17,17,17,17,17,17,17,18,18,18,18,18,18,18,18,18,18,18,19,19",
+	["W32 click row 3"] = "35,35,35,35,35,35,35,35,35,36,36,36,36,36,36,36,36,36,37,37,37,37,37,37,37,37,37,37,38,38,38,38,38,38,38,38,38,38,38,38,38,38,39,39,39,39,39,39,39,39,39,39,39,40,40,40,40,40,40,41,41,41,41,41,41,41,41,41,41,41,42,42,42,42,42,42,42,42,42,43,43,43,43,43,43,43,43,43,43,43,44,44,44,44,44,44,44,44,44,44,44,44,44,45,45,45,45,45,45,45,45,46,46,46,46,46,46,46,46,47,47,47,47,47,47,47,47,47,47,47,48,48,48,48,48,48,48,48,48,48,48,48,48,48,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49",
+	["W32C click row 1"] = "1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,9,9,9,9,9,9,9,9,10,10,10,10,10,10,10,10,10,10,10,10,11,11,11,11,11,11,11,11,11,11,11,12,12,12,12,12,12,12,12,12,12,12,13,13,13,13,13,13,13,13,13,13,13,13,13,14,14,14,14,14,14,14,14,15,15,15,15,15,15,16,16,16,16,16,16,16,16,16,16,16,16,17,17,17,17,17,17,17,17,17,17,17,17,17,17,18,18,18,18,18,18,18,18,18,18,18,19,19",
+}
+local function Box(Props, Text)
+	local B = Instance.new("TextBox")
+	B.Position = UDim2.fromOffset(100, 100)
+	B.Size = UDim2.fromOffset(200, 300)
+	B.Font = Enum.Font.SourceSans
+	B.TextSize = 32
+	B.TextXAlignment = Enum.TextXAlignment.Left
+	B.TextYAlignment = Enum.TextYAlignment.Top
+	B.ClearTextOnFocus = false
+	B.MultiLine = true
+	B.TextWrapped = true
+	B.Text = Text
+	for K, V in Props do B[K] = V end
+	B.Parent = Root
+	UpdateAll()
+	B:CaptureFocus()
+	return B
+end
+-- Every start place: one or two presses; Only (the start places to check) or all
+local function Sweep(Label, Props, Text, Only)
+	local B = Box(Props, Text)
+	for _, Spec in { { "down", "Down", 1 }, { "up", "Up", 1 }, { "down2", "Down", 2 }, { "up2", "Up", 2 } } do
+		local Want = Client[Label .. " " .. Spec[1]]
+		if Want then
+			local Expected = string.split(Want, ",")
+			for Start = 1, #Text + 1 do
+				if not Only or Only[Start] then
+					B.Text = Text
+					B.CursorPosition = Start
+					B.SelectionStart = -1
+					UpdateAll()
+					for _ = 1, Spec[3] do Press(Spec[2]); UpdateAll() end
+					if tostring(B.CursorPosition) ~= Expected[Start] then
+						table.insert(Failures, `{Label} {Spec[1]} from {Start}: {B.CursorPosition}, the client {Expected[Start]}`)
+					end
+				end
+			end
+		end
+	end
+	B:ReleaseFocus()
+	B:Destroy()
+end
+local function Clicks(Label, Props, Text, Row, Y)
+	local B = Box(Props, Text)
+	local Expected = string.split(Client[Label .. " click row " .. Row], ",")
+	for X = 100, 299 do
+		-- alternate rows so that no two clicks count as a double click
+		local Other = if Y < 200 then Y + 64 else Y - 64
+		Dispatch({ type = "down", x = X, y = Other })
+		Dispatch({ type = "up", x = X, y = Other })
+		Dispatch({ type = "down", x = X, y = Y })
+		Dispatch({ type = "up", x = X, y = Y })
+		UpdateAll()
+		if tostring(B.CursorPosition) ~= Expected[X - 99] then
+			table.insert(Failures, `{Label} click row {Row} at {X}: {B.CursorPosition}, the client {Expected[X - 99]}`)
+		end
+	end
+	B:ReleaseFocus()
+	B:Destroy()
+end
+local L32 = "abcdefgh\nab\nabcdefgh\n\nabcdefghij"
+if Fonts then
+	local W = "one two three four five six seven eight nine ten eleven twelve"
+	Sweep("Q24", { Font = Enum.Font.Gotham, TextSize = 24, Size = UDim2.fromOffset(170, 300) }, "The quick brown fox jumps over the lazy dog again and again")
+	Sweep("S2", {}, "one  two   three    four     five")
+	Sweep("L32", { TextWrapped = false, Size = UDim2.fromOffset(500, 300) }, L32)
+	Sweep("WL", { Size = UDim2.fromOffset(120, 300) }, "abcdefghijklmnopqrstuvwxyz abc")
+	Clicks("W32", {}, W, 1, 116)
+	Clicks("W32", {}, W, 3, 180)
+	Clicks("W32C", { TextXAlignment = Enum.TextXAlignment.Center }, W, 1, 116)
+else
+	-- without Studio's fonts (the test font): every line is a prefix of the longest, so no glyph width decides these
+	Sweep("L32", { TextWrapped = false, Size = UDim2.fromOffset(500, 300) }, L32)
+end
+assert(#Failures == 0, table.concat(Failures, "\n"))
+"##
+        ),
+    );
+    if !fonts {
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 }

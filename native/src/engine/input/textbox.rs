@@ -15,7 +15,8 @@
 //! Keys, measured in a 0.747 client (keys and typed text injected into a focused box; notes/interaction.md
 //! "TextBox keys"): typed text (newlines kept in a single-line box), Backspace / Delete, arrows, Home / End
 //! on the displayed line, Shift selection, Ctrl word moves and deletions by whitespace-separated words,
-//! Ctrl+A, Up / Down to the nearest place on the next line, Return and Escape. Undo / redo (Ctrl+Z, Ctrl+Y,
+//! Ctrl+A, Up / Down to the nearest place on the next line, Return and Escape. A wrapped line's caret places end
+//! before the whitespace it wrapped at, and an empty line's place is its own. Undo / redo (Ctrl+Z, Ctrl+Y,
 //! Ctrl+Shift+Z) keep a history of snapshots per box ("TextBox undo and redo"). Ctrl+C / X copy the selection as it
 //! is (measured with a clipboard of the probe's own). Ctrl+V pastes rur's own clipboard and the host's paste event
 //! its text; pasting was not measured (the client used for measuring never pasted).
@@ -437,6 +438,8 @@ struct LineBox {
 struct Geometry {
     lines: Vec<LineBox>,
     placeholder: bool,
+    /// The box's Text
+    value: Vec<u8>,
 }
 
 /// Line layout of the box's displayed text in physical px (the scene exporter's placement).
@@ -476,11 +479,11 @@ fn geometry_of(input: &Input, engine: &Engine, state: &State, layout: &Layout, i
             }
         })
         .collect();
-    let text_empty = match state.dom.raw_get(id, input.n.Text) {
-        Some(Value::String(s)) => s.as_bytes().is_empty(),
-        _ => true,
+    let value = match state.dom.raw_get(id, input.n.Text) {
+        Some(Value::String(s)) => s.as_bytes().to_vec(),
+        _ => Vec::new(),
     };
-    Some(Geometry { lines, placeholder: text_empty })
+    Some(Geometry { lines, placeholder: value.is_empty(), value })
 }
 
 fn geometry(cx: &Cx, id: InstanceId) -> Option<Geometry> {
@@ -490,54 +493,115 @@ fn geometry(cx: &Cx, id: InstanceId) -> Option<Geometry> {
     geometry_of(cx.i, cx.engine, &state, guard.as_ref()?, id)
 }
 
+/// A displayed line's caret places. Measured in a 0.747 client (notes/interaction.md "TextBox keys"): a line that
+/// wraps at whitespace ends before that whitespace (a click past the line's end, End and Up / Down land there), the
+/// places inside it after its first character and the place after it belong to the next line at its start, and an
+/// empty line's one place is the position after the newline before it.
+struct Places {
+    /// The line's characters before its trailing wrap whitespace: (x, byte position, advance), physical px
+    glyphs: Vec<(f64, f64, f64)>,
+    /// The place after them: (x, byte position)
+    end: (f64, f64),
+    /// Positions inside the previous line's trailing wrap whitespace, at this line's start
+    carried: Vec<f64>,
+}
+
+fn places(geometry: &Geometry) -> Vec<Places> {
+    let value = &geometry.value;
+    let lines = &geometry.lines;
+    let mut out: Vec<Places> = Vec::with_capacity(lines.len());
+    let mut carried = Vec::new();
+    // Where the paragraph after the lines seen so far starts
+    let mut next_paragraph = 1.0;
+    for (index, line) in lines.iter().enumerate() {
+        let next_first = lines.get(index + 1).and_then(|next| next.glyphs.first()).map(|g| g.cluster);
+        let (Some(first), Some(last)) = (line.glyphs.first(), line.glyphs.last()) else {
+            // An empty paragraph, or the empty first line of a paragraph whose first glyph is wider than the box
+            let position = next_paragraph;
+            if next_first != Some(position) {
+                next_paragraph = position + 1.0;
+            }
+            out.push(Places { glyphs: Vec::new(), end: (line.left, position), carried: std::mem::take(&mut carried) });
+            continue;
+        };
+        let paragraph_end = line_bounds(value, last.cluster).1;
+        next_paragraph = paragraph_end + 1.0;
+        let wrapped = next_first.is_some_and(|next| next > first.cluster && next <= paragraph_end);
+        let mut kept = line.glyphs.len();
+        if wrapped {
+            while kept > 0 && whitespace_at(value, line.glyphs[kept - 1].cluster) {
+                kept -= 1;
+            }
+            if kept == 0 {
+                kept = line.glyphs.len();
+            }
+        }
+        let glyphs = line.glyphs[..kept].iter().map(|g| (line.left + g.x, g.cluster, g.advance)).collect();
+        let this_carried = std::mem::take(&mut carried);
+        let end = match line.glyphs.get(kept) {
+            Some(space) => {
+                carried = line.glyphs[kept + 1..].iter().map(|g| g.cluster).collect();
+                (line.left + space.x, space.cluster)
+            }
+            None => (line.left + last.x + last.advance, next_boundary(value, last.cluster)),
+        };
+        out.push(Places { glyphs, end, carried: this_carried });
+    }
+    out
+}
+
 /// Caret x (physical px) and 1-based line index of byte offset `cursor` in the displayed layout.
 fn caret_place(geometry: &Geometry, cursor: f64) -> (f64, usize) {
     let lines = &geometry.lines;
     if geometry.placeholder || lines.is_empty() {
         return (lines.first().map_or(0.0, |l| l.left), 1);
     }
-    for (index, line) in lines.iter().enumerate() {
-        for glyph in &line.glyphs {
-            if glyph.cluster == cursor {
-                return (line.left + glyph.x, index + 1);
-            }
+    let all = places(geometry);
+    for (index, line) in all.iter().enumerate() {
+        if let Some(&(x, _, _)) = line.glyphs.iter().find(|g| g.1 == cursor) {
+            return (x, index + 1);
+        }
+        if line.carried.contains(&cursor) {
+            return (lines[index].left, index + 1);
         }
     }
-    // After the last glyph of a line (end of a paragraph or of the text)
-    for (index, line) in lines.iter().enumerate().rev() {
-        if let Some(last) = line.glyphs.last() {
-            if last.cluster < cursor {
-                return (line.left + last.x + last.advance, index + 1);
-            }
+    for (index, line) in all.iter().enumerate() {
+        if line.end.1 == cursor {
+            return (line.end.0, index + 1);
+        }
+    }
+    // Past every place (inside a character): the end of the last line that starts before it
+    for (index, line) in all.iter().enumerate().rev() {
+        let start = line.glyphs.first().map_or(line.end.1, |g| g.1);
+        if start <= cursor {
+            return (line.end.0, index + 1);
         }
     }
     (lines[0].left, 1)
 }
 
 /// Byte offset of the character boundary nearest to a screen point (logical px): measured
-/// threshold 2/3 into each character.
+/// threshold 2/3 into each character; a point exactly on it stays before the character (measured on whole-px
+/// glyphs), past a line's last character the line's end place.
 fn cursor_at(cx: &Cx, id: InstanceId, x: f64, y: f64) -> f64 {
     let geo = geometry(cx, id);
-    let value = cx.text(id);
     let Some(geo) = geo.filter(|g| !g.placeholder && !g.lines.is_empty()) else { return 1.0 };
     let pixel_scale = cx.engine.layout().borrow().as_ref().map_or(1.0, |l| l.pixel_scale);
     let (px, py) = (x * pixel_scale, y * pixel_scale);
-    let mut line = &geo.lines[0];
-    for candidate in &geo.lines {
+    let mut line = 0;
+    for (index, candidate) in geo.lines.iter().enumerate() {
         if py >= candidate.top {
-            line = candidate;
+            line = index;
         }
     }
-    for glyph in &line.glyphs {
-        if px < line.left + glyph.x + glyph.advance * (2.0 / 3.0) {
-            return glyph.cluster;
+    let all = places(&geo);
+    let line = &all[line];
+    for &(left, position, advance) in &line.glyphs {
+        if px <= left + advance * (2.0 / 3.0) {
+            return position;
         }
     }
-    // Past the last character of the line: the end of the line's text
-    match line.glyphs.last() {
-        None => 1.0,
-        Some(last) => next_boundary(&value, last.cluster),
-    }
+    line.end.1
 }
 
 // Focus
@@ -724,24 +788,23 @@ fn insert_text(cx: &Cx, typed: &[u8], single_line_strip: bool) -> bool {
     true
 }
 
-/// Line-relative caret moves for MultiLine boxes: the caret position on the next line nearest to the caret's
-/// x, the left one on a tie (measured, SourceSans 32: 10 of 11 moves; a click uses its 2/3 threshold instead).
-/// None on the first line going up or the last going down: a client leaves the caret where it is.
+/// Line-relative caret moves for MultiLine boxes: the caret place on the next line nearest to the caret's x, the
+/// left one on a tie (measured, SourceSans 32 and Gotham 24: every move whose lines rur lays out as the client does; a
+/// click uses its 2/3 threshold instead). The places are the line's characters and its end place; an empty line has
+/// its own. None on the first line going up or the last going down: a client leaves the caret where it is.
 fn vertical_move(cx: &Cx, id: InstanceId, cursor: f64, direction: i64) -> Option<f64> {
     let geo = geometry(cx, id).filter(|g| !g.placeholder)?;
-    let value = cx.text(id);
     let (x, line_index) = caret_place(&geo, cursor);
     let target = line_index as i64 + direction;
-    let line = (target >= 1).then(|| geo.lines.get(target as usize - 1)).flatten()?;
-    let Some(last) = line.glyphs.last() else {
-        // an empty line: where a click on it would put the caret
-        let pixel_scale = cx.engine.layout().borrow().as_ref().map_or(1.0, |l| l.pixel_scale);
-        return Some(cursor_at(cx, id, x / pixel_scale, (line.top + line.height / 2.0) / pixel_scale));
-    };
-    let mut places: Vec<(f64, f64)> = line.glyphs.iter().map(|g| (line.left + g.x, g.cluster)).collect();
-    places.push((line.left + last.x + last.advance, next_boundary(&value, last.cluster)));
-    let mut best = places[0];
-    for &place in &places[1..] {
+    if target < 1 {
+        return None;
+    }
+    let all = places(&geo);
+    let line = all.get(target as usize - 1)?;
+    let mut targets: Vec<(f64, f64)> = line.glyphs.iter().map(|&(x, position, _)| (x, position)).collect();
+    targets.push(line.end);
+    let mut best = targets[0];
+    for &place in &targets[1..] {
         if (place.0 - x).abs() < (best.0 - x).abs() {
             best = place;
         }

@@ -1369,7 +1369,7 @@
 			"status": "ok"
 		},
 		"fast/live/input/60hz-input-probe": {
-			"digest": "1c38de269c8687f5a3fab1038ff036b2c2044a6deff4635a2aacb16b0291d0e4",
+			"digest": "0f10fbf2a3a0dce889c56d45042b53826cfc73757337421dec75f654b63491f1",
 			"status": "live"
 		},
 		"fast/live/interaction-textbox/120hz-click": {
@@ -3805,15 +3805,15 @@
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
-			"digest": "411cdfc328f6acf530b2d93f1b8068e315b19d4c2b3b54678cb724ea1f74bcd1",
+			"digest": "c3376599d6b6b6495aa487b597bcdec1440340983e975a10d832396ec0f7614a",
 			"status": "live"
 		},
 		"live/input/144hz-input-probe": {
-			"digest": "f56e7dba1bf9e95b6c0177ed7b887a36f24e9c502a98a9fbd5af7bac8c7e456b",
+			"digest": "1c1709f8d1edf41fbd0f720b73d884043cd97dd5dd66d8d3d74f1cfa94aaff3b",
 			"status": "live"
 		},
 		"live/input/60hz-input-probe": {
-			"digest": "df57b13a4a378f553a35957585c798892af29c7dc8b02a7a3d285bed9a58d660",
+			"digest": "56992165bbc7a26a3847edf4801a493e363388258c347abeab33226ccabac0f7",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-click": {
