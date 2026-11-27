@@ -358,7 +358,7 @@ assert(Node, "no highlight")
 assert(Same(Node.rect, { 49, 49, 148, 78 }), "rect " .. table.concat(Node.rect, ","))
 assert(Node.clip == nil, "clipped")
 assert(Node.image.uri == "rbxasset://textures/ui/SelectionBox.png" and Node.image.scaleType == "Slice", Node.image.uri)
-assert(Same(Node.image.sliceCenter, { 20, 20, 42, 42 }), "slice")
+assert(Same(Node.image.sliceCenter, { 19, 19, 43, 43 }), "slice")
 local Draw = S.layers[1].draw
 assert(Draw[#Draw] == HL, "not drawn last in its ScreenGui")
 assert(#Check(Root, "unchanged").rebuilt == 0, "an unchanged highlight was sent again")

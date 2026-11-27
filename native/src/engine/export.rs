@@ -2524,10 +2524,11 @@ pub(crate) const SELECTION_NODE: u32 = u32::MAX;
 /// notes/interaction.md "Gamepad selection"): last in the selected object's ScreenGui (over its siblings,
 /// children and every higher ZIndex there, under ScreenGuis with a higher DisplayOrder), clipped by nothing,
 /// faded by no CanvasGroup, turned with the object. By default rbxasset://textures/ui/SelectionBox.png as a
-/// 9-slice (SliceCenter 20, 20, 42, 42) over the object's rect grown by 14 px on every side, in GUI px whatever
-/// a UIScale does; with SelectionImageObject set on the object (else on its PlayerGui), that object's own
-/// background, border, corners and image, placed by its Position and Size inside the object's rect (not its
-/// AnchorPoint; its children and text are not drawn).
+/// 9-slice (SliceCenter 19, 19, 43, 43, which gives the client's band, inner glow and centre at 1x to 3x; 20, 20, 42,
+/// 42 drew the band ~0.3 device px further in at 1.5x and cut the inner glow short) over the object's rect grown by
+/// 14 px on every side, in GUI px whatever a UIScale does; with SelectionImageObject set on the object (else on its
+/// PlayerGui), that object's own background, border, corners and image, placed by its Position and Size inside the
+/// object's rect (not its AnchorPoint; its children and text are not drawn).
 fn selection_highlight(ctx: &Ctx, out: &mut Export, layers: &[Layer]) -> Option<(usize, Json)> {
     let input = super::input::get(ctx.engine)?;
     let selected = input.selected_object()?;
@@ -2591,7 +2592,7 @@ fn selection_highlight(ctx: &Ctx, out: &mut Export, layers: &[Layer]) -> Option<
             image.insert("rectOffset".into(), numbers(&[0.0, 0.0]));
             image.insert("rectSize".into(), numbers(&[0.0, 0.0]));
             image.insert("scaleType".into(), Json::String("Slice".into()));
-            image.insert("sliceCenter".into(), numbers(&[20.0, 20.0, 42.0, 42.0]));
+            image.insert("sliceCenter".into(), numbers(&[19.0, 19.0, 43.0, 43.0]));
             image.insert("sliceScale".into(), number(1.0));
             image.insert("tileSize".into(), numbers(&[1.0, 0.0, 1.0, 0.0]));
             image.insert("resample".into(), Json::String("Default".into()));

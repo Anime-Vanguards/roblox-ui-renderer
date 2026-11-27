@@ -44,8 +44,8 @@ Measured in a 0.747 client with a gamepad connected (each rule below is the clie
 - **Overrides:** `NextSelectionUp` / `Down` / `Left` / `Right` win when they name a selectable object. Inside a `SelectionGroup` a press looks inside the group first and leaves it only with `SelectionBehavior` `Escape`.
 - **Signals:** `SelectionLost` and `SelectionGained` carry the `GuiNavigationDirection` (None for a script's selection); `SelectionChanged` fires on the old object and its ancestors, then on the new one and the ancestors not reached yet. A selection that becomes hidden, unselectable or moves off the screen is dropped.
 - **Buttons:** `ButtonA` activates the selected button like `Return`; on another selected object it does nothing. `ButtonSelect` clears the selection, or with none selects the object with the lowest `SelectionOrder`, then the highest layer, then the topmost and leftmost (`AutoSelectGuiEnabled = false` disables it).
-- **Highlight:** `rbxasset://textures/ui/SelectionBox.png` as a 9-slice (slice center 20, 20, 42, 42) over the selected object grown by 14 px, drawn last in its `ScreenGui`, unclipped and turned with the object; a `SelectionImageObject` on the object or on its `PlayerGui` replaces it (its background, border, corners and image).
-- Not emulated: the thumbstick, the analog selection cursor, and selection in `SurfaceGui` / `BillboardGui`.
+- **Highlight:** `rbxasset://textures/ui/SelectionBox.png` as a 9-slice (slice center 19, 19, 43, 43) over the selected object grown by 14 px, drawn last in its `ScreenGui`, unclipped and turned with the object; a `SelectionImageObject` on the object or on its `PlayerGui` replaces it (its background, border, corners and image).
+- Not emulated: the thumbstick (in a client a push of 0.6 or more on either axis moves the selection once, towards the button nearest the stick's angle; the input format has no stick axes), the analog selection cursor, and selection in `SurfaceGui` / `BillboardGui`.
 
 ## Touch
 
