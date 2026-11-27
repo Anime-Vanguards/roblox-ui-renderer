@@ -1760,6 +1760,9 @@ fn install_hooks(engine: &Rc<Engine>, input: &Rc<Input>) {
         if name == n.Text && input.class_is(class, input.c.TextBox) {
             textbox::text_changed(&engine, &input, state, id);
         }
+        if name == n.SelectionStart && input.class_is(class, input.c.TextBox) {
+            textbox::selection_changed(&input, id);
+        }
         scrolling::property_changed(&engine, &input, state, id, name);
         let gui = input.class_is(class, input.c.GuiBase2d)
             || input.class_is(class, input.c.UIComponent)

@@ -15,11 +15,14 @@
 //! Keys, measured in a 0.747 client (keys and typed text injected into a focused box; notes/interaction.md
 //! "TextBox keys"): typed text (newlines kept in a single-line box), Backspace / Delete, arrows, Home / End
 //! on the displayed line, Shift selection, Ctrl word moves and deletions by whitespace-separated words,
-//! Ctrl+A, Up / Down to the nearest place on the next line, Return and Escape. Not emulated: undo / redo.
-//! Ctrl+C / X / V use an internal clipboard (the client's machine clipboard was not measured).
+//! Ctrl+A, Up / Down to the nearest place on the next line, Return and Escape. Undo / redo (Ctrl+Z, Ctrl+Y,
+//! Ctrl+Shift+Z) keep a history of snapshots per box ("TextBox undo and redo"). Ctrl+C / X copy the selection as it
+//! is (measured with a clipboard of the probe's own). Ctrl+V pastes rur's own clipboard and the host's paste event
+//! its text; pasting was not measured (the client used for measuring never pasted).
 
 use std::{
     cell::{Cell, RefCell},
+    collections::HashMap,
     rc::Rc,
 };
 
@@ -64,6 +67,166 @@ pub struct TextState {
     pub(crate) last_click: RefCell<Option<Click>>,
     /// Selection drag: the press anchor while the mouse button is held after pressing in the box
     drag_anchor: Cell<Option<f64>>,
+    /// Undo histories by box: they outlive focus and reparenting
+    history: RefCell<HashMap<InstanceId, History>>,
+    /// Nonzero while this module writes a box's properties (a script's writes break undo runs, these do not)
+    pub(crate) internal: Cell<u32>,
+}
+
+// Undo and redo, measured in a 0.747 client (keys injected into a focused box, every case in a fresh box and twice;
+// notes/interaction.md "TextBox undo and redo"). A box keeps a list of snapshots (Text, CursorPosition,
+// SelectionStart) with a current one; it has something to undo while its Text differs from the current snapshot's:
+//   - Focusing a box whose Text differs from its current snapshot (or that has none yet) records one, dropping any
+//     redo: an unfocused script write is undone as one step with the edits before it.
+//   - Input edits (typing, Backspace / Delete, cuts, Return in a MultiLine box) make a run. A selection made with
+//     the keyboard (Shift with a caret key, Ctrl+A), a click in the box or a script write of CursorPosition or
+//     SelectionStart ends the run at the next input edit: the state before that edit is recorded first. Caret keys
+//     without Shift and pauses (3 s) do not end a run; script writes of Text join it.
+//   - Ctrl+Z records the current state if it has something to undo and goes back to the current snapshot, else to
+//     the one before. Ctrl+Y and Ctrl+Shift+Z go to the next snapshot even after new edits (which are then lost).
+//     Neither looks at TextEditable. No limit was reached in 300 steps.
+
+/// One state of a box's history
+#[derive(Clone)]
+struct Snapshot {
+    text: Vec<u8>,
+    cursor: f64,
+    selection: f64,
+}
+
+#[derive(Default)]
+struct History {
+    states: Vec<Snapshot>,
+    index: usize,
+    /// A script caret / selection write or a click since the last input edit: the next input edit starts a step
+    pending: bool,
+}
+
+impl History {
+    /// Records `state` after the current snapshot, dropping the redo after it
+    fn record(&mut self, state: Snapshot) {
+        self.states.truncate(self.index + 1);
+        self.states.push(state);
+        self.index = self.states.len() - 1;
+    }
+
+    fn changed(&self, text: &[u8]) -> bool {
+        self.states.get(self.index).is_none_or(|current| current.text != text)
+    }
+}
+
+fn snapshot(cx: &Cx, id: InstanceId) -> Snapshot {
+    let n = &cx.i.n;
+    Snapshot {
+        text: cx.text(id),
+        cursor: cx.number(id, n.CursorPosition).unwrap_or(-1.0),
+        selection: cx.number(id, n.SelectionStart).unwrap_or(-1.0),
+    }
+}
+
+fn with_history<R>(cx: &Cx, id: InstanceId, f: impl FnOnce(&mut History) -> R) -> R {
+    let mut histories = cx.i.text.history.borrow_mut();
+    if histories.len() > 32 && !histories.contains_key(&id) {
+        let state = cx.engine.state.borrow();
+        histories.retain(|box_id, _| state.dom.get(*box_id).is_some_and(|i| !i.has(flags::DESTROYED)));
+    }
+    f(histories.entry(id).or_default())
+}
+
+/// Runs `f` with this module's own property writes marked as such
+fn internally<R>(cx: &Cx, f: impl FnOnce() -> R) -> R {
+    cx.i.text.internal.set(cx.i.text.internal.get() + 1);
+    let result = f();
+    cx.i.text.internal.set(cx.i.text.internal.get() - 1);
+    result
+}
+
+/// Focus gained: a box whose Text changed since its current snapshot (or that has none) records its state
+fn history_focus(cx: &Cx, id: InstanceId) {
+    let current = snapshot(cx, id);
+    with_history(cx, id, |history| {
+        if history.changed(&current.text) {
+            history.record(current);
+        }
+        history.pending = false;
+    });
+}
+
+/// Before an input edit: a run ended by a selection, a click or a script caret write is recorded
+fn history_edit(cx: &Cx, id: InstanceId) {
+    let current = snapshot(cx, id);
+    with_history(cx, id, |history| {
+        if history.states.is_empty() || (history.pending && history.changed(&current.text)) {
+            history.record(current);
+        }
+        history.pending = false;
+    });
+}
+
+/// A keyboard selection, a click in the focused box or a script write of CursorPosition
+fn history_break(cx: &Cx, id: InstanceId) {
+    if let Some(history) = cx.i.text.history.borrow_mut().get_mut(&id) {
+        history.pending = true;
+    }
+}
+
+/// From the input's PropertyChanged hook: SelectionStart changed (a script's write unless this module made it)
+pub(crate) fn selection_changed(input: &Input, id: InstanceId) {
+    if input.text.internal.get() == 0 && input.text.focused.get() == Some(id) {
+        if let Some(history) = input.text.history.borrow_mut().get_mut(&id) {
+            history.pending = true;
+        }
+    }
+}
+
+fn restore(cx: &Cx, id: InstanceId, state: Snapshot) {
+    let n = &cx.i.n;
+    internally(cx, || {
+        cx.set(id, n.Text, Value::String(Str::new(&state.text)));
+        cx.set(id, n.CursorPosition, Value::Number(state.cursor));
+        cx.set(id, n.SelectionStart, Value::Number(state.selection));
+    });
+    reset_blink(cx, id);
+}
+
+/// Ctrl+Z
+fn undo(cx: &Cx, id: InstanceId) {
+    let current = snapshot(cx, id);
+    let target = with_history(cx, id, |history| {
+        history.pending = false;
+        if history.states.is_empty() {
+            return None;
+        }
+        if history.changed(&current.text) {
+            let index = history.index;
+            history.record(current);
+            history.index = index;
+            return Some(history.states[index].clone());
+        }
+        if history.index == 0 {
+            return None;
+        }
+        history.index -= 1;
+        Some(history.states[history.index].clone())
+    });
+    if let Some(state) = target {
+        restore(cx, id, state);
+    }
+}
+
+/// Ctrl+Y / Ctrl+Shift+Z
+fn redo(cx: &Cx, id: InstanceId) {
+    let target = with_history(cx, id, |history| {
+        history.pending = false;
+        if history.index + 1 >= history.states.len() {
+            return None;
+        }
+        history.index += 1;
+        Some(history.states[history.index].clone())
+    });
+    if let Some(state) = target {
+        restore(cx, id, state);
+    }
 }
 
 /// TextBox.FocusedBox
@@ -117,12 +280,14 @@ fn set_cursor_with(cx: &Cx, id: InstanceId, cursor: f64, selection: Option<f64>,
         }
     }
     let n = &cx.i.n;
-    if cursor_value(cx, id, n.CursorPosition) != Some(cursor) {
-        cx.set(id, n.CursorPosition, Value::Number(cursor));
-    }
-    if cursor_value(cx, id, n.SelectionStart) != Some(start) {
-        cx.set(id, n.SelectionStart, Value::Number(start));
-    }
+    internally(cx, || {
+        if cursor_value(cx, id, n.CursorPosition) != Some(cursor) {
+            cx.set(id, n.CursorPosition, Value::Number(cursor));
+        }
+        if cursor_value(cx, id, n.SelectionStart) != Some(start) {
+            cx.set(id, n.SelectionStart, Value::Number(start));
+        }
+    });
     reset_blink(cx, id);
 }
 
@@ -394,10 +559,12 @@ pub(crate) fn focus(cx: &Cx, id: InstanceId, capture: bool, input_object: Option
         cx.fire(uis, n.TextBoxFocused, vec![Value::Instance(id)]);
     }
     if !cx.is_false(id, n.ClearTextOnFocus) && !cx.is_false(id, n.TextEditable) {
-        cx.set(id, n.Text, Value::String(Str::default()));
+        internally(cx, || cx.set(id, n.Text, Value::String(Str::default())));
     }
     let length = cx.text(id).len() as f64;
     set_cursor(cx, id, length + 1.0, Some(-1.0));
+    // Measured: the state after ClearTextOnFocus is the one an undo returns to
+    history_focus(cx, id);
 }
 
 /// `released` (ReleaseFocus, a click elsewhere, Return): UIS.TextBoxFocusReleased fires and the
@@ -418,8 +585,10 @@ pub(crate) fn unfocus(cx: &Cx, id: InstanceId, enter_pressed: bool, input_object
         if let Some(uis) = cx.service("UserInputService") {
             cx.fire(uis, n.TextBoxFocusReleased, vec![Value::Instance(id)]);
         }
-        cx.set(id, n.CursorPosition, Value::Number(-1.0));
-        cx.set(id, n.SelectionStart, Value::Number(-1.0));
+        internally(cx, || {
+            cx.set(id, n.CursorPosition, Value::Number(-1.0));
+            cx.set(id, n.SelectionStart, Value::Number(-1.0));
+        });
     }
     cx.repaint(id);
 }
@@ -456,6 +625,8 @@ pub(crate) fn press(cx: &Cx, id: InstanceId, x: f64, y: f64, input_object: Insta
         set_cursor(cx, id, cursor, Some(-1.0));
         cx.i.text.drag_anchor.set(Some(cursor));
     }
+    // Measured: a click in the box ends the undo run (the next input edit starts a step)
+    history_break(cx, id);
     Ok(())
 }
 
@@ -465,6 +636,7 @@ pub(crate) fn drag(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     let Some(anchor) = cx.i.text.drag_anchor.get() else { return Ok(()) };
     let cursor = cursor_at(cx, id, x, y);
     set_cursor(cx, id, cursor, Some(anchor));
+    history_break(cx, id);
     Ok(())
 }
 
@@ -506,12 +678,14 @@ fn lua_sub(s: &[u8], i: f64, j: Option<f64>) -> &[u8] {
     &s[(i as usize - 1)..(j as usize)]
 }
 
+/// An input edit
 fn replace(cx: &Cx, id: InstanceId, from: f64, to: f64, insert: &[u8]) {
+    history_edit(cx, id);
     let value = cx.text(id);
     let mut new_text = lua_sub(&value, 1.0, Some(from - 1.0)).to_vec();
     new_text.extend_from_slice(insert);
     new_text.extend_from_slice(lua_sub(&value, to, None));
-    cx.set(id, cx.i.n.Text, Value::String(Str::new(&new_text)));
+    internally(cx, || cx.set(id, cx.i.n.Text, Value::String(Str::new(&new_text))));
     set_cursor(cx, id, from + insert.len() as f64, Some(-1.0));
 }
 
@@ -632,6 +806,18 @@ pub(crate) fn key(cx: &Cx, key_name: &str, modifiers: &Modifiers, input_object: 
     let move_to = |target: f64| {
         if shift {
             set_cursor(cx, id, target, Some(if start != -1.0 { start } else { cursor }));
+            // Measured: a selection made with the keyboard ends the undo run
+            history_break(cx, id);
+        } else {
+            set_cursor(cx, id, target, Some(-1.0));
+        }
+    };
+    // Measured: Shift+Home / End onto the selection's start keeps SelectionStart (= CursorPosition), where a
+    // character or word step onto it clears it
+    let move_line_end = |target: f64| {
+        if shift {
+            set_cursor_keeping(cx, id, target, if start != -1.0 { start } else { cursor });
+            history_break(cx, id);
         } else {
             set_cursor(cx, id, target, Some(-1.0));
         }
@@ -684,11 +870,11 @@ pub(crate) fn key(cx: &Cx, key_name: &str, modifiers: &Modifiers, input_object: 
             Ok(true)
         }
         "Home" => {
-            move_to(if ctrl { 1.0 } else { line_ends(cx, id, &value, cursor).0 });
+            move_line_end(if ctrl { 1.0 } else { line_ends(cx, id, &value, cursor).0 });
             Ok(true)
         }
         "End" => {
-            move_to(if ctrl { len + 1.0 } else { line_ends(cx, id, &value, cursor).1 });
+            move_line_end(if ctrl { len + 1.0 } else { line_ends(cx, id, &value, cursor).1 });
             Ok(true)
         }
         "Up" | "Down" => {
@@ -697,7 +883,10 @@ pub(crate) fn key(cx: &Cx, key_name: &str, modifiers: &Modifiers, input_object: 
                 Some(target) => move_to(target),
                 // Measured: no line to go to (a single-line box, the first or last line) leaves the caret; the
                 // selection goes, and with Shift it starts at the caret (SelectionStart = CursorPosition)
-                None if shift => set_cursor_keeping(cx, id, cursor, if start != -1.0 { start } else { cursor }),
+                None if shift => {
+                    set_cursor_keeping(cx, id, cursor, if start != -1.0 { start } else { cursor });
+                    history_break(cx, id);
+                }
                 None => set_cursor(cx, id, cursor, Some(-1.0)),
             }
             Ok(true)
@@ -709,17 +898,33 @@ pub(crate) fn key(cx: &Cx, key_name: &str, modifiers: &Modifiers, input_object: 
         }
         "A" if ctrl => {
             set_cursor(cx, id, len + 1.0, Some(1.0));
+            history_break(cx, id);
             Ok(true)
         }
         "C" | "X" if ctrl => {
-            if let Some((from, to)) = range {
+            // Measured: the selection's text as it is (newlines, tabs and carriage returns kept); a SelectionStart equal
+            // to the caret copies an empty text; no SelectionStart copies nothing; a read-only box copies but keeps it
+            if start != -1.0 {
+                let (from, to) = (start.min(cursor), start.max(cursor));
                 let copied = lua_sub(&value, from, Some(to - 1.0)).to_vec();
                 *cx.i.text.clipboard.borrow_mut() = copied.clone();
                 *cx.i.text.pending_clipboard.borrow_mut() = Some(copied);
-                if key_name == "X" && edit {
+                if key_name == "X" && edit && from < to {
                     replace(cx, id, from, to, b"");
                 }
             }
+            Ok(true)
+        }
+        "Z" if ctrl => {
+            if shift {
+                redo(cx, id);
+            } else {
+                undo(cx, id);
+            }
+            Ok(true)
+        }
+        "Y" if ctrl => {
+            redo(cx, id);
             Ok(true)
         }
         "V" if ctrl => {
@@ -823,7 +1028,9 @@ pub(crate) fn text_changed(engine: &Engine, input: &Input, state: &mut State, id
         let value = state.dom.raw_get(id, name).and_then(Value::as_number);
         if value.is_some_and(|v| v > limit) {
             let hooks = engine.hooks.borrow();
+            input.text.internal.set(input.text.internal.get() + 1);
             core::raw_set(state, &engine.reflection, &hooks, id, name, Value::Number(limit));
+            input.text.internal.set(input.text.internal.get() - 1);
         }
     }
     if input.text.focused.get() == Some(id) {
@@ -880,6 +1087,8 @@ pub(crate) fn install(behaviors: &mut Behaviors, text_box: ClassId, input: &Rc<I
         cx.set(id, i.n.CursorPosition, Value::Number(number));
         if focused_box(&cx) == Some(id) {
             reset_blink(&cx, id);
+            // Measured: a script's caret write ends the undo run, an unchanged value too
+            history_break(&cx, id);
         }
         Ok(())
     });

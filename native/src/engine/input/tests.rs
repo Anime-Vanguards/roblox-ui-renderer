@@ -118,6 +118,10 @@ fn hooks(lua: &Lua, engine: &Rc<Engine>, env: &LuaTable) -> LuaResult<()> {
         Ok(())
     });
     hook!(engine, input, "Serial", |_lua, object: LuaValue| Ok(engine.state.borrow().dom.at(id_of(&object)?).serial));
+    hook!(engine, input, "TakeClipboard", |lua, _a: ()| match input.take_clipboard() {
+        Some(bytes) => Ok(LuaValue::String(lua.create_string(&bytes)?)),
+        None => Ok(LuaValue::Nil),
+    });
     Ok(())
 }
 
@@ -3339,5 +3343,274 @@ assert(Root:GetAttribute("Distinct") == true, "two touches, two InputObjects")
 local Y = Root.S.CanvasPosition.Y
 assert(Y > 180, `finger 0's drag scrolled and coasted: {Y}`)
 "#,
+    );
+}
+
+const FAILURES_ASSERT: &str = "\nassert(#Failures == 0, table.concat(Failures, \"\\n\"))\n";
+
+/// Steps for the undo tests: typed text, { key, shift?, ctrl? }, or a script action on `Target`
+const UNDO_PRELUDE: &str = r##"
+local Z = { "Z", ctrl = true }
+local Y = { "Y", ctrl = true }
+local SZ = { "Z", ctrl = true, shift = true }
+local Target
+local function Cur(N) return function() Target.CursorPosition = N end end
+local function Sel(N) return function() Target.SelectionStart = N end end
+local function SetText(S) return function() Target.Text = S end end
+local function Release() Target:ReleaseFocus() end
+local function Focus() Target:CaptureFocus() end
+-- (the client waited 1 or 3 s here; rur's history has no clock)
+local function Wait() end
+local function Editable(On) return function() Target.TextEditable = On end end
+local function Click(X, Yp)
+	return function()
+		Dispatch({ type = "move", x = X, y = Yp })
+		Dispatch({ type = "down", x = X, y = Yp })
+		Dispatch({ type = "up", x = X, y = Yp })
+	end
+end
+local function Run(Label, Steps, Expected, Format)
+	for Index, Step in Steps do
+		if type(Step) == "string" then
+			Dispatch({ type = "text", text = Step })
+		elseif type(Step) == "function" then
+			Step()
+		else
+			Press(Step[1], Step.shift, Step.ctrl)
+		end
+		UpdateAll()
+		Flush()
+		local Got = Format()
+		if Got ~= Expected[Index] then
+			table.insert(Failures, `{Label}, step {Index}: {Got}, the client {Expected[Index]}`)
+			return
+		end
+	end
+end
+"##;
+
+/// TextBox undo and redo, measured in a 0.747 client: every case in a fresh box (SourceSans 48 single-line, focused by
+/// CaptureFocus), checked after each step against the client's Text, CursorPosition and SelectionStart (generated from
+/// the capture). Runs without Studio's fonts (the one click lands before the first character in any font).
+#[test]
+fn textbox_undo_matches_a_client() {
+    let (lua, engine) = start(900.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        &format!(
+            "{}{}{}{}{}",
+            TEXTBOX_PRELUDE,
+            UNDO_PRELUDE,
+            r##"
+local function U(Label, Text, Props, Steps, States)
+	if Target then Target:Destroy() end
+	Target = Instance.new("TextBox")
+	Target.Position = UDim2.fromOffset(100, 100)
+	Target.Size = UDim2.fromOffset(600, 80)
+	Target.Font = Enum.Font.SourceSans
+	Target.TextSize = 48
+	Target.TextXAlignment = Enum.TextXAlignment.Left
+	Target.ClearTextOnFocus = false
+	Target.Text = Text
+	for K, V in Props or {} do Target[K] = V end
+	Target.Parent = Root
+	UpdateAll()
+	Target:CaptureFocus()
+	UpdateAll()
+	Flush()
+	Run(Label, Steps, States, function()
+		return string.format("%q %d/%d%s", Target.Text, Target.CursorPosition, Target.SelectionStart, if Target:IsFocused() then "" else " U")
+	end)
+end
+"##,
+            UNDO_CASES,
+            FAILURES_ASSERT,
+        ),
+    );
+}
+
+const UNDO_CASES: &str = r######"
+U("F1 type ab, Z Z Y Y", "", nil, { "a", "b", Z, Z, Y, Y }, { [==["a" 2/-1]==], [==["ab" 3/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["ab" 3/-1]==], [==["ab" 3/-1]==] })
+U("F2 initial text, type, Z Z Y Y", "abc", nil, { "d", Z, Z, Y, Y }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==], [==["abcd" 5/-1]==] })
+U("F3 caret keys before the edit", "abcdef", nil, { { "Left" }, { "Left" }, { "Backspace" }, Z, Y }, { [==["abcdef" 6/-1]==], [==["abcdef" 5/-1]==], [==["abcef" 4/-1]==], [==["abcdef" 7/-1]==], [==["abcef" 4/-1]==] })
+U("F4 click before the edit", "hello world", nil, { Click(112, 140), "x", Z, Y }, { [==["hello world" 1/-1]==], [==["xhello world" 2/-1]==], [==["hello world" 12/-1]==], [==["xhello world" 2/-1]==] })
+U("F5 click between runs", "hello world", nil, { "x", Wait, Click(112, 140), "y", Z, Z, Y, Y }, { [==["hello worldx" 13/-1]==], [==["hello worldx" 13/-1]==], [==["hello worldx" 1/-1]==], [==["yhello worldx" 2/-1]==], [==["hello worldx" 1/-1]==], [==["hello world" 12/-1]==], [==["hello worldx" 1/-1]==], [==["yhello worldx" 2/-1]==] })
+U("F6 script caret between runs", "", nil, { "ab", Cur(1), "x", Z, Z, Y, Y }, { [==["ab" 3/-1]==], [==["ab" 1/-1]==], [==["xab" 2/-1]==], [==["ab" 1/-1]==], [==["" 1/-1]==], [==["ab" 1/-1]==], [==["xab" 2/-1]==] })
+U("F7 script caret, no open run", "abc", nil, { Cur(2), "x", Z, Y }, { [==["abc" 2/-1]==], [==["axbc" 3/-1]==], [==["abc" 4/-1]==], [==["axbc" 3/-1]==] })
+U("F8 script caret after undo", "abc", nil, { "d", Z, Cur(2), "x", Z, Z, Y, Y }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" 2/-1]==], [==["axbc" 3/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["axbc" 3/-1]==], [==["axbc" 3/-1]==] })
+U("F9 script SelectionStart between runs", "abcd", nil, { "e", Sel(1), "x", Z, Z, Y, Y }, { [==["abcde" 6/-1]==], [==["abcde" 6/1]==], [==["x" 2/-1]==], [==["abcde" 6/1]==], [==["abcd" 5/-1]==], [==["abcde" 6/1]==], [==["x" 2/-1]==] })
+U("F10 script Text between runs", "", nil, { "ab", SetText("zz"), "c", Z, Z, Z, Y, Y, Y }, { [==["ab" 3/-1]==], [==["zz" 3/-1]==], [==["zzc" 4/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["zzc" 4/-1]==], [==["zzc" 4/-1]==], [==["zzc" 4/-1]==] })
+U("F11 two script Text writes", "s0", nil, { SetText("s1"), SetText("s2"), Z, Z, Y, Y }, { [==["s1" 3/-1]==], [==["s2" 3/-1]==], [==["s0" 3/-1]==], [==["s0" 3/-1]==], [==["s2" 3/-1]==], [==["s2" 3/-1]==] })
+U("F12 script Text, caret, Text", "s0", nil, { SetText("s1"), Cur(1), SetText("s2"), Z, Z, Z, Y, Y, Y }, { [==["s1" 3/-1]==], [==["s1" 1/-1]==], [==["s2" 1/-1]==], [==["s0" 3/-1]==], [==["s0" 3/-1]==], [==["s0" 3/-1]==], [==["s2" 1/-1]==], [==["s2" 1/-1]==], [==["s2" 1/-1]==] })
+U("F13 script Text then typing", "s0", nil, { SetText("s1"), "x", Z, Z, Y, Y }, { [==["s1" 3/-1]==], [==["s1x" 4/-1]==], [==["s0" 3/-1]==], [==["s0" 3/-1]==], [==["s1x" 4/-1]==], [==["s1x" 4/-1]==] })
+U("F14 script Text of the same value mid run", "ab", nil, { "c", SetText("abc"), "d", Z, Z, Y }, { [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==], [==["ab" 3/-1]==], [==["ab" 3/-1]==], [==["abcd" 5/-1]==] })
+U("F15 redo kept after new typing", "", nil, { "x", Z, "y", Y, Y, Z, Z, Z }, { [==["x" 2/-1]==], [==["" 1/-1]==], [==["y" 2/-1]==], [==["x" 2/-1]==], [==["x" 2/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+U("F16 undo, type, undo, redo", "", nil, { "a", Z, "b", Z, Y, Y, Y }, { [==["a" 2/-1]==], [==["" 1/-1]==], [==["b" 2/-1]==], [==["" 1/-1]==], [==["b" 2/-1]==], [==["b" 2/-1]==], [==["b" 2/-1]==] })
+U("F17 Ctrl+Shift+Z redoes", "", nil, { "a", Z, SZ, SZ }, { [==["a" 2/-1]==], [==["" 1/-1]==], [==["a" 2/-1]==], [==["a" 2/-1]==] })
+U("F19 caret moves only, Z", "abc", nil, { { "Left" }, { "Left" }, Z, Y }, { [==["abc" 3/-1]==], [==["abc" 2/-1]==], [==["abc" 2/-1]==], [==["abc" 2/-1]==] })
+U("F20 Shift selection, Delete, Z", "hello world", nil, { { "Left", shift = true }, { "Left", shift = true }, { "Left", shift = true }, { "Delete" }, Z, Y }, { [==["hello world" 11/12]==], [==["hello world" 10/12]==], [==["hello world" 9/12]==], [==["hello wo" 9/-1]==], [==["hello world" 12/-1]==], [==["hello wo" 9/-1]==] })
+U("F21 read-only box", "abc", { TextEditable = false }, { Z, Y, { "Left" }, Z }, { [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abc" 3/-1]==], [==["abc" 3/-1]==] })
+U("F21b edit, then read-only, Z", "abc", nil, { "d", Editable(false), Z, Y, Editable(true), Z }, { [==["abcd" 5/-1]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==] })
+U("F22 release, unfocused write, focus, Z", "abc", nil, { "d", Release, SetText("xyz"), Focus, Z, Z, Z, Y, Y, Y }, { [==["abcd" 5/-1]==], [==["abcd" -1/-1 U]==], [==["xyz" -1/-1 U]==], [==["xyz" 4/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["xyz" 4/-1]==], [==["xyz" 4/-1]==], [==["xyz" 4/-1]==] })
+U("F23 release, unfocused write, focus, type", "abc", nil, { "d", Release, SetText("xyz"), Focus, "e", Z, Z, Z, Y, Y, Y }, { [==["abcd" 5/-1]==], [==["abcd" -1/-1 U]==], [==["xyz" -1/-1 U]==], [==["xyz" 4/-1]==], [==["xyze" 5/-1]==], [==["xyz" 4/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["xyz" 4/-1]==], [==["xyze" 5/-1]==], [==["xyze" 5/-1]==] })
+U("F24 release, focus, type", "abc", nil, { "d", Release, Focus, "e", Z, Z, Z, Y, Y }, { [==["abcd" 5/-1]==], [==["abcd" -1/-1 U]==], [==["abcd" 5/-1]==], [==["abcde" 6/-1]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==], [==["abcde" 6/-1]==] })
+U("F25 Return submits, refocus, Z", "abc", nil, { "d", { "Return" }, Focus, Z, Y }, { [==["abcd" 5/-1]==], [==["abcd" -1/-1 U]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==] })
+U("F26 ClearTextOnFocus", "abc", { ClearTextOnFocus = true }, { "x", Z, Z, Y, Y }, { [==["x" 2/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["x" 2/-1]==], [==["x" 2/-1]==] })
+U("F27 undone, unfocused write, focus, Y", "abc", nil, { "d", Z, Release, SetText("q"), Focus, Y, Y, Z }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" -1/-1 U]==], [==["q" -1/-1 U]==], [==["q" 2/-1]==], [==["q" 2/-1]==], [==["q" 2/-1]==], [==["abc" 4/-1]==] })
+U("F29 Ctrl+Backspace then typing", "one two", nil, { { "Backspace", ctrl = true }, "x", Z, Y }, { [==["one " 5/-1]==], [==["one x" 6/-1]==], [==["one two" 8/-1]==], [==["one x" 6/-1]==] })
+U("F31 Escape releases, refocus, Z", "abc", nil, { "d", { "Escape" }, Focus, Z, Y }, { [==["abcd" 5/-1]==], [==["abcd" -1/-1 U]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==] })
+U("F33 select after typing, Z", "abc", nil, { "d", { "Left", shift = true }, { "Left", shift = true }, Z, Y }, { [==["abcd" 5/-1]==], [==["abcd" 4/5]==], [==["abcd" 3/5]==], [==["abc" 4/-1]==], [==["abcd" 3/5]==] })
+U("F34 Z, caret key, Y", "abc", nil, { "d", Z, { "Left" }, Y }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" 3/-1]==], [==["abcd" 5/-1]==] })
+U("F35 Z, script caret, Y", "abc", nil, { "d", Z, Cur(1), Y }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" 1/-1]==], [==["abcd" 5/-1]==] })
+U("F36 Z, type, Z Z, Y Y Y", "abc", nil, { "d", Z, "e", Z, Z, Y, Y, Y }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abce" 5/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abce" 5/-1]==], [==["abce" 5/-1]==], [==["abce" 5/-1]==] })
+U("F37 two runs, Z Z, type, Y Y Y, Z x4", "", nil, { "a", Cur(1), "b", Z, Z, "c", Y, Y, Y, Z, Z, Z, Z }, { [==["a" 2/-1]==], [==["a" 1/-1]==], [==["ba" 2/-1]==], [==["a" 1/-1]==], [==["" 1/-1]==], [==["c" 2/-1]==], [==["a" 1/-1]==], [==["ba" 2/-1]==], [==["ba" 2/-1]==], [==["a" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+U("F38 three runs, Z, type, Z Z Z", "", nil, { "a", Cur(1), "b", Cur(1), "c", Z, "x", Z, Z, Z, Y, Y, Y, Y }, { [==["a" 2/-1]==], [==["a" 1/-1]==], [==["ba" 2/-1]==], [==["ba" 1/-1]==], [==["cba" 2/-1]==], [==["ba" 1/-1]==], [==["xba" 2/-1]==], [==["ba" 1/-1]==], [==["a" 1/-1]==], [==["" 1/-1]==], [==["a" 1/-1]==], [==["ba" 1/-1]==], [==["xba" 2/-1]==], [==["xba" 2/-1]==] })
+U("F39 Z Z, Y, type, Y, Z Z Z", "", nil, { "a", Cur(1), "b", Z, Z, Y, "c", Y, Z, Z, Z }, { [==["a" 2/-1]==], [==["a" 1/-1]==], [==["ba" 2/-1]==], [==["a" 1/-1]==], [==["" 1/-1]==], [==["a" 1/-1]==], [==["ca" 2/-1]==], [==["ba" 2/-1]==], [==["a" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+U("F40 script caret write ends run, same value", "ab", nil, { "c", Cur(4), "d", Z, Z }, { [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["ab" 3/-1]==] })
+U("F41 script write equal text while undone", "abc", nil, { "d", Z, SetText("abc"), Y }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==] })
+U("F42 Ctrl+Z with Shift released first", "", nil, { "a", Z, { "Y", ctrl = true, shift = true } }, { [==["a" 2/-1]==], [==["" 1/-1]==], [==["a" 2/-1]==] })
+U("F43 Backspace no-op between", "", nil, { "a", { "Left" }, { "Backspace" }, "b", Z, Y }, { [==["a" 2/-1]==], [==["a" 1/-1]==], [==["a" 1/-1]==], [==["ba" 2/-1]==], [==["" 1/-1]==], [==["ba" 2/-1]==] })
+U("F44 Ctrl+A then typing", "hello", nil, { { "A", ctrl = true }, "x", "y", Z, Y }, { [==["hello" 6/1]==], [==["x" 2/-1]==], [==["xy" 3/-1]==], [==["hello" 6/-1]==], [==["xy" 3/-1]==] })
+U("G6 script caret then script Text, Z", "", nil, { "ab", Cur(1), SetText("zz"), Z, Y, Y }, { [==["ab" 3/-1]==], [==["ab" 1/-1]==], [==["zz" 1/-1]==], [==["" 1/-1]==], [==["zz" 1/-1]==], [==["zz" 1/-1]==] })
+U("G7 script caret away and back, type", "", nil, { "ab", Cur(1), Cur(3), "x", Z, Z, Y, Y }, { [==["ab" 3/-1]==], [==["ab" 1/-1]==], [==["ab" 3/-1]==], [==["abx" 4/-1]==], [==["ab" 3/-1]==], [==["" 1/-1]==], [==["ab" 3/-1]==], [==["abx" 4/-1]==] })
+U("G11 refocus with the same text, other caret", "ab", nil, { "c", Cur(1), "x", Z, Release, Focus, Y, Z, Z }, { [==["abc" 4/-1]==], [==["abc" 1/-1]==], [==["xabc" 2/-1]==], [==["abc" 1/-1]==], [==["abc" -1/-1 U]==], [==["abc" 4/-1]==], [==["xabc" 2/-1]==], [==["abc" 1/-1]==], [==["ab" 3/-1]==] })
+U("G12 3 s pause", "", nil, { "a", Wait, "b", Z, Y }, { [==["a" 2/-1]==], [==["a" 2/-1]==], [==["ab" 3/-1]==], [==["" 1/-1]==], [==["ab" 3/-1]==] })
+U("G13 Backspace back to the start text", "ab", nil, { { "Left" }, "x", { "Backspace" }, Z, Y, Y }, { [==["ab" 2/-1]==], [==["axb" 3/-1]==], [==["ab" 2/-1]==], [==["ab" 2/-1]==], [==["ab" 2/-1]==], [==["ab" 2/-1]==] })
+U("G14 script caret write mid run, typing at the same place", "ab", nil, { "c", Cur(4), "d", Z, Z, Y, Y }, { [==["abc" 4/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["ab" 3/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==] })
+U("G15 refocus not dirty, same text", "abc", nil, { "d", Z, Release, Focus, Y, Z }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" -1/-1 U]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==] })
+U("G16 type, BS to start text, release, focus, type, Z Z Y Y", "", nil, { "a", { "Backspace" }, Release, Focus, "c", Z, Z, Y, Y }, { [==["a" 2/-1]==], [==["" 1/-1]==], [==["" -1/-1 U]==], [==["" 1/-1]==], [==["c" 2/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["c" 2/-1]==], [==["c" 2/-1]==] })
+U("G17 script Text while undone", "abc", nil, { "d", Z, SetText("q"), Y, Z, Z }, { [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["q" 2/-1]==], [==["abcd" 5/-1]==], [==["abc" 4/-1]==], [==["abc" 4/-1]==] })
+U("G18 script Text then caret then type", "s0", nil, { SetText("s1"), Cur(1), "x", Z, Z, Z, Y, Y, Y }, { [==["s1" 3/-1]==], [==["s1" 1/-1]==], [==["xs1" 2/-1]==], [==["s1" 1/-1]==], [==["s0" 3/-1]==], [==["s0" 3/-1]==], [==["s1" 1/-1]==], [==["xs1" 2/-1]==], [==["xs1" 2/-1]==] })
+U("G19 click without an open run", "hello world", nil, { Click(112, 140), "x", Z, Z }, { [==["hello world" 1/-1]==], [==["xhello world" 2/-1]==], [==["hello world" 12/-1]==], [==["hello world" 12/-1]==] })
+U("G20 Up/Down/Home/End keys mid run", "abc", nil, { "d", { "Home" }, "e", { "End" }, "f", Z, Y }, { [==["abcd" 5/-1]==], [==["abcd" 1/-1]==], [==["eabcd" 2/-1]==], [==["eabcd" 6/-1]==], [==["eabcdf" 7/-1]==], [==["abc" 4/-1]==], [==["eabcdf" 7/-1]==] })
+U("G21 Ctrl+Z on Shift+Z (Shift first)", "", nil, { "a", { "Z", shift = true, ctrl = true }, Z }, { [==["a" 2/-1]==], [==["a" 2/-1]==], [==["" 1/-1]==] })
+U("F45 typed run then Delete run after a caret write", "abcdef", nil, { "x", Cur(2), { "Delete" }, { "Delete" }, Z, Z, Y, Y }, { [==["abcdefx" 8/-1]==], [==["abcdefx" 2/-1]==], [==["acdefx" 2/-1]==], [==["adefx" 2/-1]==], [==["abcdefx" 2/-1]==], [==["abcdef" 7/-1]==], [==["abcdefx" 2/-1]==], [==["adefx" 2/-1]==] })
+U("G22 type, Shift+Left, type over it, Z Z", "hello", nil, { "a", { "Left", shift = true }, "b", Z, Z, Y, Y }, { [==["helloa" 7/-1]==], [==["helloa" 6/7]==], [==["hellob" 7/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==], [==["helloa" 6/7]==], [==["hellob" 7/-1]==] })
+U("G23 type, Shift+Left, Backspace, Z Z", "hello", nil, { "a", { "Left", shift = true }, { "Backspace" }, Z, Z, Y, Y }, { [==["helloa" 7/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==] })
+U("G24 type, Ctrl+A, type, Z Z", "hello", nil, { "a", { "A", ctrl = true }, "b", Z, Z, Y }, { [==["helloa" 7/-1]==], [==["helloa" 7/1]==], [==["b" 2/-1]==], [==["helloa" 7/1]==], [==["hello" 6/-1]==], [==["helloa" 7/1]==] })
+U("G25 type, Shift+Left, Ctrl+C, Right, type, Z Z", "hello", nil, { "a", { "Left", shift = true }, { "C", ctrl = true }, { "Right" }, "b", Z, Z }, { [==["helloa" 7/-1]==], [==["helloa" 6/7]==], [==["helloa" 6/7]==], [==["helloa" 7/-1]==], [==["helloab" 8/-1]==], [==["helloa" 7/-1]==], [==["hello" 6/-1]==] })
+U("G26 type, Ctrl+X with nothing selected, type, Z Z", "hello", nil, { "a", { "X", ctrl = true }, "b", Z, Z }, { [==["helloa" 7/-1]==], [==["helloa" 7/-1]==], [==["helloab" 8/-1]==], [==["hello" 6/-1]==], [==["hello" 6/-1]==] })
+U("G27 type, Shift+Left, Ctrl+X, Z Z Y Y", "hello", nil, { "a", { "Left", shift = true }, { "X", ctrl = true }, Z, Z, Y, Y }, { [==["helloa" 7/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==] })
+U("G28 Ctrl+X first, type, Z Z", "hello", nil, { { "Left", shift = true }, { "X", ctrl = true }, "b", Z, Z, Y, Y }, { [==["hello" 5/6]==], [==["hell" 5/-1]==], [==["hellb" 6/-1]==], [==["hello" 6/-1]==], [==["hello" 6/-1]==], [==["hellb" 6/-1]==], [==["hellb" 6/-1]==] })
+U("G29 type, Shift+Left, Delete, type, Z Z", "hello", nil, { "a", { "Left", shift = true }, { "Delete" }, "b", Z, Z }, { [==["helloa" 7/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==], [==["hellob" 7/-1]==], [==["helloa" 6/7]==], [==["hello" 6/-1]==] })
+U("G30 type, Ctrl+Backspace, type, Z Z", "hello world", nil, { "a", { "Backspace", ctrl = true }, "b", Z, Z }, { [==["hello worlda" 13/-1]==], [==["hello " 7/-1]==], [==["hello b" 8/-1]==], [==["hello world" 12/-1]==], [==["hello world" 12/-1]==] })
+U("G31 two cuts, Z Z Z", "hello", nil, { { "Left", shift = true }, { "X", ctrl = true }, { "Left", shift = true }, { "X", ctrl = true }, Z, Z, Z }, { [==["hello" 5/6]==], [==["hell" 5/-1]==], [==["hell" 4/5]==], [==["hel" 4/-1]==], [==["hell" 4/5]==], [==["hello" 6/-1]==], [==["hello" 6/-1]==] })
+U("G32 type, Shift+Left, Right, type, Z Z", "hello", nil, { "a", { "Left", shift = true }, { "Right" }, "b", Z, Z }, { [==["helloa" 7/-1]==], [==["helloa" 6/7]==], [==["helloa" 7/-1]==], [==["helloab" 8/-1]==], [==["helloa" 7/-1]==], [==["hello" 6/-1]==] })
+U("G33 type, Ctrl+A, Right, type, Z Z", "hello", nil, { "a", { "A", ctrl = true }, { "Right" }, "b", Z, Z }, { [==["helloa" 7/-1]==], [==["helloa" 7/1]==], [==["helloa" 7/-1]==], [==["helloab" 8/-1]==], [==["helloa" 7/-1]==], [==["hello" 6/-1]==] })
+U("G35 type, Shift+Left, Shift+Right, type, Z Z", "hello", nil, { "a", { "Left", shift = true }, { "Right", shift = true }, "b", Z, Z }, { [==["helloa" 7/-1]==], [==["helloa" 6/7]==], [==["helloa" 7/-1]==], [==["helloab" 8/-1]==], [==["helloa" 7/-1]==], [==["hello" 6/-1]==] })
+U("G36 type, Shift+Left, Left, type, Z Z", "hello", nil, { "a", { "Left", shift = true }, { "Left" }, "b", Z, Z }, { [==["helloa" 7/-1]==], [==["helloa" 6/7]==], [==["helloa" 6/-1]==], [==["helloba" 7/-1]==], [==["helloa" 6/-1]==], [==["hello" 6/-1]==] })
+U("G37 type, Shift+Home, Shift+End, type, Z Z", "hello", nil, { "a", { "Home", shift = true }, { "End", shift = true }, "b", Z, Z }, { [==["helloa" 7/-1]==], [==["helloa" 1/7]==], [==["helloa" 7/7]==], [==["helloab" 8/-1]==], [==["helloa" 7/7]==], [==["hello" 6/-1]==] })
+U("G38 no edit before: Shift+Left, Right, type, Z", "hello", nil, { { "Left", shift = true }, { "Right" }, "b", Z, Z }, { [==["hello" 5/6]==], [==["hello" 6/-1]==], [==["hellob" 7/-1]==], [==["hello" 6/-1]==], [==["hello" 6/-1]==] })
+"######;
+
+/// P8's chained capture: one single-line and one MultiLine box across 17 cases, each case releasing the box, writing
+/// its Text unfocused and focusing it again, so the history carries from case to case (redo kept after new typing,
+/// the snapshot an unfocused write leaves at the next focus, focused script writes as one step).
+#[test]
+fn textbox_undo_history_carries_across_focus_like_a_client() {
+    let (lua, engine) = start(900.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        &format!(
+            "{}{}{}{}{}",
+            TEXTBOX_PRELUDE,
+            UNDO_PRELUDE,
+            r##"
+local function C(Label, B, Text, Steps, Start, States)
+	Target = B
+	local function State() return string.format("%q %d/%d", B.Text, B.CursorPosition, B.SelectionStart) end
+	B:ReleaseFocus()
+	B.Text = Text
+	B:CaptureFocus()
+	UpdateAll()
+	Flush()
+	if State() ~= Start then
+		table.insert(Failures, `{Label}, start: {State()}, the client {Start}`)
+		return
+	end
+	Run(Label, Steps, States, State)
+end
+"##,
+            CHAIN_CASES,
+            FAILURES_ASSERT,
+        ),
+    );
+}
+
+const CHAIN_CASES: &str = r######"
+C("chars then Z x4", T, "", { "a", "b", " ", "c", "d", Z, Z, Z, Z }, [==["" 1/-1]==], { [==["a" 2/-1]==], [==["ab" 3/-1]==], [==["ab " 4/-1]==], [==["ab c" 5/-1]==], [==["ab cd" 6/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+C("word space word", T, "", { "ab", " ", "cd", Z, Z, Z }, [==["" 1/-1]==], { [==["ab" 3/-1]==], [==["ab " 4/-1]==], [==["ab cd" 6/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+C("type, Left, type", T, "", { "ab", { "Left" }, "x", Z, Z, Z }, [==["" 1/-1]==], { [==["ab" 3/-1]==], [==["ab" 2/-1]==], [==["axb" 3/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+C("type, Backspace, type", T, "", { "abc", { "Backspace" }, "d", Z, Z, Z, Z }, [==["" 1/-1]==], { [==["abc" 4/-1]==], [==["ab" 3/-1]==], [==["abd" 4/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+C("Backspace x3 then Delete x2", T, "abcdefgh", { { "Left" }, { "Left" }, { "Left" }, { "Backspace" }, { "Backspace" }, { "Delete" }, { "Delete" }, Z, Z, Z }, [==["abcdefgh" 9/-1]==], { [==["abcdefgh" 8/-1]==], [==["abcdefgh" 7/-1]==], [==["abcdefgh" 6/-1]==], [==["abcdfgh" 5/-1]==], [==["abcfgh" 4/-1]==], [==["abcgh" 4/-1]==], [==["abch" 4/-1]==], [==["abcdefgh" 9/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+C("Backspace, Left, Backspace", T, "abcdefgh", { { "Backspace" }, { "Left" }, { "Backspace" }, Z, Z, Z }, [==["abcdefgh" 9/-1]==], { [==["abcdefg" 8/-1]==], [==["abcdefg" 7/-1]==], [==["abcdeg" 6/-1]==], [==["abcdefgh" 9/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+C("Ctrl+Backspace x2", T, "one two three", { { "Backspace", ctrl = true }, { "Backspace", ctrl = true }, Z, Z }, [==["one two three" 14/-1]==], { [==["one two " 9/-1]==], [==["one " 5/-1]==], [==["one two three" 14/-1]==], [==["" 1/-1]==] })
+C("select-all replace", T, "hello", { { "A", ctrl = true }, "x", Z, Z }, [==["hello" 6/-1]==], { [==["hello" 6/1]==], [==["x" 2/-1]==], [==["hello" 6/-1]==], [==["" 1/-1]==] })
+C("Z then Y x3", T, "", { "a", { "Left" }, "b", Z, Z, Y, Y, Y }, [==["" 1/-1]==], { [==["a" 2/-1]==], [==["a" 1/-1]==], [==["ba" 2/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["ba" 2/-1]==], [==["ba" 2/-1]==], [==["ba" 2/-1]==] })
+C("Y with nothing undone", T, "abc", { "d", Y }, [==["abc" 4/-1]==], { [==["abcd" 5/-1]==], [==["abcd" 5/-1]==] })
+C("undo past focus start", T, "start", { "x", Z, Z }, [==["start" 6/-1]==], { [==["startx" 7/-1]==], [==["start" 6/-1]==], [==["abc" 4/-1]==] })
+C("release focus keeps history?", T, "start", { "x", Release, Focus, Z }, [==["start" 6/-1]==], { [==["startx" 7/-1]==], [==["startx" -1/-1]==], [==["startx" 7/-1]==], [==["start" 6/-1]==] })
+C("script write while focused", T, "s0", { SetText("s1"), SetText("s2"), Z, Z, Z }, [==["s0" 3/-1]==], { [==["s1" 3/-1]==], [==["s2" 3/-1]==], [==["s0" 3/-1]==], [==["start" 6/-1]==], [==["abc" 4/-1]==] })
+C("script cursor move between typing", T, "", { "ab", Cur(1), "x", Z, Z }, [==["" 1/-1]==], { [==["ab" 3/-1]==], [==["ab" 1/-1]==], [==["xab" 2/-1]==], [==["ab" 1/-1]==], [==["" 1/-1]==] })
+C("ML Return groups", M, "", { "ab", { "Return" }, "cd", Z, Z, Z }, [==["" 1/-1]==], { [==["ab" 3/-1]==], [==["ab\
+" 4/-1]==], [==["ab\
+cd" 6/-1]==], [==["" 1/-1]==], [==["" 1/-1]==], [==["" 1/-1]==] })
+C("long typing run", T, "", { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", Z, Z }, [==["" 1/-1]==], { [==["a" 2/-1]==], [==["ab" 3/-1]==], [==["abc" 4/-1]==], [==["abcd" 5/-1]==], [==["abcde" 6/-1]==], [==["abcdef" 7/-1]==], [==["abcdefg" 8/-1]==], [==["abcdefgh" 9/-1]==], [==["abcdefghi" 10/-1]==], [==["abcdefghij" 11/-1]==], [==["abcdefghijk" 12/-1]==], [==["abcdefghijkl" 13/-1]==], [==["abcdefghijklm" 14/-1]==], [==["abcdefghijklmn" 15/-1]==], [==["abcdefghijklmno" 16/-1]==], [==["abcdefghijklmnop" 17/-1]==], [==["abcdefghijklmnopq" 18/-1]==], [==["abcdefghijklmnopqr" 19/-1]==], [==["abcdefghijklmnopqrs" 20/-1]==], [==["abcdefghijklmnopqrst" 21/-1]==], [==["abcdefghijklmnopqrstu" 22/-1]==], [==["abcdefghijklmnopqrstuv" 23/-1]==], [==["abcdefghijklmnopqrstuvw" 24/-1]==], [==["abcdefghijklmnopqrstuvwx" 25/-1]==], [==["abcdefghijklmnopqrstuvwxy" 26/-1]==], [==["abcdefghijklmnopqrstuvwxyz" 27/-1]==], [==["" 1/-1]==], [==["abc" 4/-1]==] })
+C("slow typing (1 s pause)", T, "", { "a", Wait, "b", Z, Z }, [==["" 1/-1]==], { [==["a" 2/-1]==], [==["a" 2/-1]==], [==["ab" 3/-1]==], [==["" 1/-1]==], [==["abc" 4/-1]==] })
+"######;
+
+/// What Ctrl+C / Ctrl+X put on the clipboard, measured in a 0.747 client with a clipboard of the probe's own (copied
+/// text read back after each case): the selection as it is, nothing without a selection, an empty text when
+/// SelectionStart equals the caret; Shift+Delete deletes without copying and Ctrl+Insert does nothing.
+#[test]
+fn textbox_copy_and_cut_match_a_client() {
+    let (lua, engine) = start(900.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        &format!(
+            "{}{}",
+            TEXTBOX_PRELUDE,
+            r##"
+local function Copy(Label, B, Text, Cursor, Selection, Keys, WantClipboard, WantState, Props)
+	B:ReleaseFocus()
+	for K, V in Props or {} do B[K] = V end
+	B:CaptureFocus()
+	B.Text = Text
+	B.CursorPosition = Cursor
+	B.SelectionStart = Selection
+	UpdateAll()
+	TakeClipboard()
+	for _, Key in Keys do Press(Key[1], Key.shift, Key.ctrl) end
+	Flush()
+	local Clipboard = TakeClipboard()
+	local State = string.format("%q %d/%d", B.Text, B.CursorPosition, B.SelectionStart)
+	if Clipboard ~= WantClipboard or State ~= WantState then
+		table.insert(Failures, `{Label}: {Clipboard} {State}, the client {WantClipboard} {WantState}`)
+	end
+	for K in Props or {} do B[K] = not B[K] end
+end
+local C, X = { "C", ctrl = true }, { "X", ctrl = true }
+Copy("copy LF", M, "a\nb", 4, 1, { C }, "a\nb", "\"a\\\nb\" 4/1")
+Copy("copy CRLF", M, "a\r\nb", 5, 1, { C }, "a\r\nb", "\"a\\r\\\nb\" 5/1")
+Copy("copy CR", M, "a\rb", 4, 1, { C }, "a\rb", "\"a\\rb\" 4/1")
+Copy("copy, caret before the start", M, "hello world", 1, 6, { C }, "hello", "\"hello world\" 1/6")
+Copy("copy without a selection", M, "hello", 3, -1, { C }, nil, "\"hello\" 3/-1")
+Copy("cut without a selection", M, "hello", 3, -1, { X }, nil, "\"hello\" 3/-1")
+Copy("cut in a read-only box", M, "hello world", 6, 1, { X }, "hello", "\"hello world\" 6/1", { TextEditable = false })
+Copy("copy in a read-only box", M, "hello world", 6, 1, { C }, "hello", "\"hello world\" 6/1", { TextEditable = false })
+Copy("Shift+Delete", M, "hello world", 6, 1, { { "Delete", shift = true } }, nil, "\" world\" 1/-1")
+Copy("Ctrl+Insert", M, "hello world", 6, 1, { { "Insert", ctrl = true } }, nil, "\"hello world\" 6/1")
+Copy("copy UTF-8", M, "\195\169\240\159\152\128z", 8, 1, { C }, "\195\169\240\159\152\128z", "\"\195\169\240\159\152\128z\" 8/1")
+Copy("copy a tab and VT", M, "a\tb\11c", 6, 1, { C }, "a\tb\11c", "\"a\tb\11c\" 6/1")
+Copy("cut", M, "hello world", 6, 1, { X }, "hello", "\" world\" 1/-1")
+Copy("Ctrl+Shift+C", M, "hello world", 6, 1, { { "C", ctrl = true, shift = true } }, "hello", "\"hello world\" 6/1")
+Copy("Ctrl+A, copy", T, "one two", 8, -1, { { "A", ctrl = true }, C }, "one two", "\"one two\" 8/1")
+Copy("copy SelectionStart = caret", M, "hello", 3, 3, { C }, "", "\"hello\" 3/3")
+assert(#Failures == 0, table.concat(Failures, "\n"))
+"##
+        ),
     );
 }
