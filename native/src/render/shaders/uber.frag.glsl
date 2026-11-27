@@ -335,6 +335,11 @@ int cornerMask(ivec2 P, vec4 rect, vec4 radii) {
 	float fw = abs(dx - origin) + abs(dy - origin);
 	// Three of the four pixels of a quad are one of its derivative samples: reuse identical inputs
 	float d = ij == q ? origin : ij == qx ? dx : ij == qy ? dy : maskDistance(ij, halfSize, radii);
+	// A pixel inside the rect in a quadrant of radius 0 keeps full coverage: a client leaves that corner square
+	// (coverage.rs square_corner)
+	if (d < 0.0 && quadrantRadius(ij + 0.5 - halfSize, radii) <= 0.0) {
+		return 255;
+	}
 	float t = fw > 0.0 ? clamp(0.5 - d / fw, 0.0, 1.0) : (d < 0.0 ? 1.0 : 0.0);
 	return int(floor(t * t * (3.0 - 2.0 * t) * 255.0 + 0.5));
 }

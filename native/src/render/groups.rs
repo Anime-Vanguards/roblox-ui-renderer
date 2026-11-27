@@ -1208,16 +1208,10 @@ fn texture_corner_coverage(
     let hh = size[1] / 2.0;
     let limit = hw.min(hh);
     let radii = radii.map(|r| r.min(limit).max(0.0));
+    let place = |i: i64, j: i64| ((i as f64 + off[0]) / s[0] - hw, (j as f64 + off[1]) / s[1] - hh);
     let sd = |i: i64, j: i64| {
-        let px = (i as f64 + off[0]) / s[0] - hw;
-        let py = (j as f64 + off[1]) / s[1] - hh;
-        let r = radii[if py < 0.0 {
-            if px < 0.0 { 0 } else { 1 }
-        } else if px < 0.0 {
-            3
-        } else {
-            2
-        }];
+        let (px, py) = place(i, j);
+        let r = super::coverage::quadrant_radius(px, py, radii);
         let qx = px.abs() - hw + r;
         let qy = py.abs() - hh + r;
         qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r
@@ -1232,7 +1226,10 @@ fn texture_corner_coverage(
             let origin = sd(qi, qj);
             let fw = (sd(qi + 1, qj) - origin).abs() + (sd(qi, qj + 1) - origin).abs();
             let d = sd(i, j);
-            let t = if fw > 0.0 {
+            let (px, py) = place(i, j);
+            let t = if super::coverage::square_corner(d, super::coverage::quadrant_radius(px, py, radii)) {
+                1.0
+            } else if fw > 0.0 {
                 (0.5 - d / fw).clamp(0.0, 1.0)
             } else if d < 0.0 {
                 1.0

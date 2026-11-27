@@ -691,16 +691,11 @@ pub fn corner_mask_region(grid: MaskGrid, radii: [f64; 4], ox: i64, oy: i64, reg
     let (hw, hh) = (sw / 2.0, sh / 2.0);
     let [kx, ky] = grid.step;
     let [fx, fy] = grid.first;
-    let [tl, tr, br, bl] = radii.map(|r| r.max(0.0));
+    let radii = radii.map(|r| r.max(0.0));
+    let place = |i: i64, j: i64| (fx + i as f64 * kx - hw, fy + j as f64 * ky - hh);
     let sd = |i: i64, j: i64| {
-        let (px, py) = (fx + i as f64 * kx - hw, fy + j as f64 * ky - hh);
-        let r = if py < 0.0 {
-            if px < 0.0 { tl } else { tr }
-        } else if px < 0.0 {
-            bl
-        } else {
-            br
-        };
+        let (px, py) = place(i, j);
+        let r = super::coverage::quadrant_radius(px, py, radii);
         let (qx, qy) = (px.abs() - hw + r, py.abs() - hh + r);
         if qx > 0.0 && qy > 0.0 { qx.hypot(qy) - r } else { qx.max(qy) - r }
     };
@@ -712,7 +707,10 @@ pub fn corner_mask_region(grid: MaskGrid, radii: [f64; 4], ox: i64, oy: i64, reg
             let origin = sd(qi, qj);
             let fw = (sd(qi + 1, qj) - origin).abs() + (sd(qi, qj + 1) - origin).abs();
             let d = sd(i, j);
-            let t = if fw > 0.0 {
+            let (px, py) = place(i, j);
+            let t = if super::coverage::square_corner(d, super::coverage::quadrant_radius(px, py, radii)) {
+                1.0
+            } else if fw > 0.0 {
                 (0.5 - d / fw).clamp(0.0, 1.0)
             } else if d < 0.0 {
                 1.0
@@ -1632,6 +1630,21 @@ mod slice_scale_tests {
         let tiny = quads([32, 32], [480., 555., 96., 96.], stone, 1e-6, 1.);
         assert_eq!(tiny.len(), 9);
         assert_eq!(tiny[4].1, [8., 8., 24., 24.]);
+    }
+}
+
+#[cfg(test)]
+mod square_corner_tests {
+    use super::*;
+    /// fixtures/image-corner.luau MotorPerCorner (1.5x: a 210 x 150 px image at (15, 225), radii 60, 6, 30 and a square
+    /// bottom-left corner): the client covers the corner pixel fully (the texel's own colour), where the rounded box's
+    /// distance gave 0.98 (3 levels in blue)
+    #[test]
+    fn an_images_square_corner_pixel_is_fully_covered() {
+        let mask = quad_corner_mask(210, 150, [210., 150.], [60., 6., 30., 0.], 15, 225);
+        assert_eq!(mask[149 * 210], 1.0);
+        // The rounded corners keep their coverage
+        assert!(mask[0] < 0.01 && mask[209] < 0.5 && mask[149 * 210 + 209] < 0.5);
     }
 }
 

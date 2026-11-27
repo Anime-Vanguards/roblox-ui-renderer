@@ -1,6 +1,25 @@
 //! Measured UICorner, UIStroke and UIShadow coverage rules, evaluated in device space.
 use super::geometry::{Rect, Transform, apply, invert};
 
+/// The UICorner radius of the quadrant holding the rect-centred point (px, py): radii are (tl, tr, br, bl)
+pub fn quadrant_radius(px: f64, py: f64, radii: [f64; 4]) -> f64 {
+    radii[if py < 0.0 {
+        if px < 0.0 { 0 } else { 1 }
+    } else if px < 0.0 {
+        3
+    } else {
+        2
+    }]
+}
+
+/// A pixel inside the rect (d < 0) in a quadrant whose radius is 0 keeps full coverage: a client leaves such a corner
+/// square, where the rounded box's distance would soften the corner pixel whose 2 x 2 derivative quad reaches past both
+/// edges (0.84 or 0.98). Measured on images, Frames and CanvasGroups beside rounded corners, at 1x, 1.5x, 2x and 3x
+/// (fixtures/image-probe-squarecorner.luau); a 1 px corner keeps the distance's coverage.
+pub fn square_corner(d: f64, r: f64) -> bool {
+    d < 0.0 && r <= 0.0
+}
+
 pub fn corner_coverage(w: u32, h: u32, radii: [f64; 4], ox: i32, oy: i32) -> Vec<f64> {
     corner_coverage_raw(w, h, radii, ox, oy, w as f64, h as f64)
 }
@@ -47,16 +66,10 @@ pub fn corner_coverage_region_limited(
     let radii = radii.map(|r| r.max(0.0).min(limit));
     let px2 = ox.rem_euclid(2);
     let py2 = oy.rem_euclid(2);
+    let place = |i: i32, j: i32| (i as f64 + 0.5 - hw, j as f64 + 0.5 - hh);
     let sd = |i: i32, j: i32| {
-        let px = i as f64 + 0.5 - hw;
-        let py = j as f64 + 0.5 - hh;
-        let r = radii[if py < 0.0 {
-            if px < 0.0 { 0 } else { 1 }
-        } else if px < 0.0 {
-            3
-        } else {
-            2
-        }];
+        let (px, py) = place(i, j);
+        let r = quadrant_radius(px, py, radii);
         let qx = px.abs() - hw + r;
         let qy = py.abs() - hh + r;
         qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r
@@ -77,7 +90,8 @@ pub fn corner_coverage_region_limited(
         for dx in 0..pw {
             let i = x0 + dx as i32;
             let d = sd(i, j);
-            if d < -1.25 {
+            let (px, py) = place(i, j);
+            if d < -1.25 || square_corner(d, quadrant_radius(px, py, radii)) {
                 data[(dy * pw + dx) as usize] = 1.0;
                 continue;
             }
@@ -141,16 +155,10 @@ pub fn corner_coverage_window(
     let radii = radii.map(|r| r.max(0.0).min(limit));
     let px2 = ox.rem_euclid(2);
     let py2 = oy.rem_euclid(2);
+    let place = |i: i32, j: i32| ((i as f64 + 0.5) * kx - hw, (j as f64 + 0.5) * ky - hh);
     let sd = |i: i32, j: i32| {
-        let px = (i as f64 + 0.5) * kx - hw;
-        let py = (j as f64 + 0.5) * ky - hh;
-        let r = radii[if py < 0.0 {
-            if px < 0.0 { 0 } else { 1 }
-        } else if px < 0.0 {
-            3
-        } else {
-            2
-        }];
+        let (px, py) = place(i, j);
+        let r = quadrant_radius(px, py, radii);
         let qx = px.abs() - hw + r;
         let qy = py.abs() - hh + r;
         qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r
@@ -163,7 +171,8 @@ pub fn corner_coverage_window(
     let mut quad_fw = vec![(i32::MIN, 0.0f64); w as usize + 1];
     let mut at = |i: i32, j: i32| {
         let d = sd(i, j);
-        if d < deep {
+        let (px, py) = place(i, j);
+        if d < deep || square_corner(d, quadrant_radius(px, py, radii)) {
             return 1.0;
         }
         let qi = i - (i + px2) % 2;
@@ -828,6 +837,29 @@ mod tests {
         }
         assert!(corner_coverage_region(57, 43, [3.0; 4], 0, 0, 4, 4, 0, 8).is_empty());
     }
+    /// A corner of radius 0 beside rounded ones is square in a client: every pixel of a Frame's or a group composite's
+    /// zero-radius quadrant is covered, at every parity of the derivative quads (fixtures/image-probe-squarecorner.luau:
+    /// the client's 255 where the rounded box's distance gave 215 at a bottom-right and 250 at a top-right or
+    /// bottom-left corner); a 1.5 px corner keeps the distance's coverage
+    #[test]
+    fn a_square_corner_beside_rounded_ones_is_fully_covered() {
+        for corner in 0..4 {
+            let mut radii = [15.0; 4];
+            radii[corner] = 0.0;
+            for (ox, oy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                for (w, h) in [(66, 60), (67, 61)] {
+                    let frame = corner_coverage(w, h, radii, ox, oy);
+                    let group = corner_coverage_raw(w, h, radii, ox, oy, w as f64, h as f64);
+                    let (i, j) = [(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)][corner];
+                    let at = (j * w + i) as usize;
+                    assert_eq!((frame[at], group[at]), (1.0, 1.0), "corner {corner}, parity {ox},{oy}, {w}x{h}");
+                }
+            }
+        }
+        // A 1.5 px corner is rounded as before (the client within 2 levels of the distance's coverage on every such corner)
+        let small = corner_coverage(66, 60, [15.0, 15.0, 1.5, 15.0], 0, 0);
+        assert!((small[59 * 66 + 65] - 0.564).abs() < 0.01);
+    }
     #[test]
     fn shadow_fields_match_javascript_reference() {
         // Frozen alpha-byte hashes recorded from the retired JS reference (shadow mesh, profile, vertex alpha)
@@ -886,31 +918,32 @@ mod tests {
     #[test]
     fn rounded_and_stroke_masks_match_javascript_reference() {
         // Frozen 8-bit mask hashes from cornerCoverage / SceneRenderer.borderStrokeAlpha; the ring strokes at
-        // scales other than 1 are this renderer's own since their ramp stopped taking the scale (Studio 0.747).
+        // scales other than 1 are this renderer's own since their ramp stopped taking the scale (Studio 0.747), and
+        // corner cases 4, 10, 16 and 22 since a corner of radius 0 stays square (square_corner).
         let corners = [
             4054628274u32,
             2025123922,
             3849570539,
             853292376,
-            1901630666,
+            462113401,
             1519488559,
             1721615550,
             3708805196,
             3520324440,
             2321926979,
-            958468560,
+            555805704,
             1010210618,
             281864109,
             1377374589,
             4045949094,
             339789231,
-            4205879582,
+            211985889,
             3220501143,
             2658888581,
             4126212392,
             3269546905,
             1138318262,
-            1208204907,
+            1610867763,
             693515872,
         ];
         let strokes = [
@@ -962,7 +995,16 @@ mod tests {
                 w as f64 + (seed % 3) as f64 * 0.15,
                 h as f64 - (seed % 2) as f64 * 0.125,
             );
-            assert_eq!(hash(mask), corners[seed], "corner case {seed}");
+            let corner_hash = hash(mask);
+            // RUR_RECORD_GOLDEN_FIELDS=<file> lists the corner hashes as they are now ("c<case> hash") instead of
+            // comparing: for re-recording them after a corner rule changed
+            if let Some(out) = std::env::var_os("RUR_RECORD_GOLDEN_FIELDS") {
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new().create(true).append(true).open(out).expect("the list");
+                writeln!(file, "c{seed} {corner_hash}").unwrap();
+            } else {
+                assert_eq!(corner_hash, corners[seed], "corner case {seed}");
+            }
             let angle = (seed % 4) as f64 * 13.0 * std::f64::consts::PI / 180.0;
             let c = super::super::trig::cos(angle);
             let s = super::super::trig::sin(angle);
