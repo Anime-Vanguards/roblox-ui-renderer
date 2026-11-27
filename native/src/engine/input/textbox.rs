@@ -40,6 +40,7 @@ use crate::engine::{
     layout::Layout,
     lua::{none, raise, values},
     services::{Behaviors, SetterFn},
+    text::layout::{XAlign, line_pen},
     text::utf8::codepoints,
     value::{Str, Value},
 };
@@ -72,6 +73,9 @@ pub struct TextState {
     history: RefCell<HashMap<InstanceId, History>>,
     /// Nonzero while this module writes a box's properties (a script's writes break undo runs, these do not)
     pub(crate) internal: Cell<u32>,
+    /// A caret on the place of whitespace a wrapped line carried to the next line (`Places::opens`) that Up / Down or a
+    /// click put there: it shows at that next line's start, where any other move shows it at the previous line's end
+    opener: Cell<Option<(InstanceId, f64)>>,
 }
 
 // Undo and redo, measured in a 0.747 client (keys injected into a focused box, every case in a fresh box and twice;
@@ -281,6 +285,7 @@ fn set_cursor_with(cx: &Cx, id: InstanceId, cursor: f64, selection: Option<f64>,
         }
     }
     let n = &cx.i.n;
+    cx.i.text.opener.set(None);
     internally(cx, || {
         if cursor_value(cx, id, n.CursorPosition) != Some(cursor) {
             cx.set(id, n.CursorPosition, Value::Number(cursor));
@@ -462,15 +467,14 @@ fn geometry_of(input: &Input, engine: &Engine, state: &State, layout: &Layout, i
         "Bottom" => content_y + content_h - result.height,
         _ => content_y + (content_h - result.height) / 2.0,
     };
+    // The pen the line is drawn from (measured, P8b's W32C box in a 0.747 client: a centred line 141 px wide in a 200 px
+    // box starts at 130, not 129.5)
+    let alignment = XAlign::from_name(&x_align);
     let lines = result
         .lines
         .iter()
         .map(|line| {
-            let left = match x_align.as_str() {
-                "Left" => content_x,
-                "Right" => content_x + content_w - line.width,
-                _ => content_x + (content_w - line.width) / 2.0,
-            };
+            let left = line_pen(alignment, content_x, content_w, line.width, result.rich, false, pixel_scale);
             LineBox {
                 top: top + line.top,
                 height: line.height,
@@ -504,6 +508,11 @@ struct Places {
     end: (f64, f64),
     /// Positions inside the previous line's trailing wrap whitespace, at this line's start
     carried: Vec<f64>,
+    /// The position of the whitespace this line opens with when the line before had no room for it (a TextBox's wrap,
+    /// text/layout.rs `wrap_paragraph`) and ends right before it. Measured (P8b's W32 box, 0.747 client): a click on
+    /// it and Up / Down land on it at this line's start (Down again goes on from there), while a caret put there
+    /// otherwise shows at the previous line's end (Up from it stays on the first line)
+    opens: Option<f64>,
 }
 
 fn places(geometry: &Geometry) -> Vec<Places> {
@@ -521,7 +530,7 @@ fn places(geometry: &Geometry) -> Vec<Places> {
             if next_first != Some(position) {
                 next_paragraph = position + 1.0;
             }
-            out.push(Places { glyphs: Vec::new(), end: (line.left, position), carried: std::mem::take(&mut carried) });
+            out.push(Places { glyphs: Vec::new(), end: (line.left, position), carried: std::mem::take(&mut carried), opens: None });
             continue;
         };
         let paragraph_end = line_bounds(value, last.cluster).1;
@@ -538,6 +547,7 @@ fn places(geometry: &Geometry) -> Vec<Places> {
         }
         let glyphs = line.glyphs[..kept].iter().map(|g| (line.left + g.x, g.cluster, g.advance)).collect();
         let this_carried = std::mem::take(&mut carried);
+        let opens = (whitespace_at(value, first.cluster) && out.last().is_some_and(|previous| previous.end.1 == first.cluster)).then_some(first.cluster);
         let end = match line.glyphs.get(kept) {
             Some(space) => {
                 carried = line.glyphs[kept + 1..].iter().map(|g| g.cluster).collect();
@@ -545,20 +555,21 @@ fn places(geometry: &Geometry) -> Vec<Places> {
             }
             None => (line.left + last.x + last.advance, next_boundary(value, last.cluster)),
         };
-        out.push(Places { glyphs, end, carried: this_carried });
+        out.push(Places { glyphs, end, carried: this_carried, opens });
     }
     out
 }
 
-/// Caret x (physical px) and 1-based line index of byte offset `cursor` in the displayed layout.
-fn caret_place(geometry: &Geometry, cursor: f64) -> (f64, usize) {
+/// Caret x (physical px) and 1-based line index of byte offset `cursor` in the displayed layout. `opener`: a caret on a
+/// line's `Places::opens` shows at that line's start.
+fn caret_place(geometry: &Geometry, cursor: f64, opener: bool) -> (f64, usize) {
     let lines = &geometry.lines;
     if geometry.placeholder || lines.is_empty() {
         return (lines.first().map_or(0.0, |l| l.left), 1);
     }
     let all = places(geometry);
     for (index, line) in all.iter().enumerate() {
-        if let Some(&(x, _, _)) = line.glyphs.iter().find(|g| g.1 == cursor) {
+        if let Some(&(x, _, _)) = line.glyphs.iter().find(|g| g.1 == cursor && (opener || line.opens != Some(cursor))) {
             return (x, index + 1);
         }
         if line.carried.contains(&cursor) {
@@ -582,10 +593,10 @@ fn caret_place(geometry: &Geometry, cursor: f64) -> (f64, usize) {
 
 /// Byte offset of the character boundary nearest to a screen point (logical px): measured
 /// threshold 2/3 into each character; a point exactly on it stays before the character (measured on whole-px
-/// glyphs), past a line's last character the line's end place.
-fn cursor_at(cx: &Cx, id: InstanceId, x: f64, y: f64) -> f64 {
+/// glyphs), past a line's last character the line's end place. Also whether that is the line's `Places::opens`.
+fn cursor_at(cx: &Cx, id: InstanceId, x: f64, y: f64) -> (f64, bool) {
     let geo = geometry(cx, id);
-    let Some(geo) = geo.filter(|g| !g.placeholder && !g.lines.is_empty()) else { return 1.0 };
+    let Some(geo) = geo.filter(|g| !g.placeholder && !g.lines.is_empty()) else { return (1.0, false) };
     let pixel_scale = cx.engine.layout().borrow().as_ref().map_or(1.0, |l| l.pixel_scale);
     let (px, py) = (x * pixel_scale, y * pixel_scale);
     let mut line = 0;
@@ -598,10 +609,20 @@ fn cursor_at(cx: &Cx, id: InstanceId, x: f64, y: f64) -> f64 {
     let line = &all[line];
     for &(left, position, advance) in &line.glyphs {
         if px <= left + advance * (2.0 / 3.0) {
-            return position;
+            return (position, line.opens == Some(position));
         }
     }
-    line.end.1
+    (line.end.1, false)
+}
+
+/// Records that the caret just put at `cursor` shows at the start of the line it opens (`TextState::opener`).
+fn set_opener(cx: &Cx, id: InstanceId, cursor: f64, opener: bool) {
+    cx.i.text.opener.set(opener.then_some((id, cursor)));
+}
+
+/// Whether the caret of box `id` at `cursor` shows at the start of the line it opens.
+fn on_opener(text: &TextState, id: InstanceId, cursor: f64) -> bool {
+    text.opener.get() == Some((id, cursor))
 }
 
 // Focus
@@ -676,7 +697,7 @@ pub(crate) fn press(cx: &Cx, id: InstanceId, x: f64, y: f64, input_object: Insta
 
     focus(cx, id, false, Some(input_object));
     let value = cx.text(id);
-    let cursor = cursor_at(cx, id, x, y);
+    let (cursor, opener) = cursor_at(cx, id, x, y);
     let len = value.len() as f64;
     if count == 2 {
         let (start, finish) = run_around(&value, cursor.min(len));
@@ -687,6 +708,7 @@ pub(crate) fn press(cx: &Cx, id: InstanceId, x: f64, y: f64, input_object: Insta
         cx.i.text.drag_anchor.set(None);
     } else {
         set_cursor(cx, id, cursor, Some(-1.0));
+        set_opener(cx, id, cursor, opener);
         cx.i.text.drag_anchor.set(Some(cursor));
     }
     // Measured: a click in the box ends the undo run (the next input edit starts a step)
@@ -698,8 +720,9 @@ pub(crate) fn press(cx: &Cx, id: InstanceId, x: f64, y: f64, input_object: Insta
 pub(crate) fn drag(cx: &Cx, x: f64, y: f64) -> LuaResult<()> {
     let Some(id) = focused_box(cx) else { return Ok(()) };
     let Some(anchor) = cx.i.text.drag_anchor.get() else { return Ok(()) };
-    let cursor = cursor_at(cx, id, x, y);
+    let (cursor, opener) = cursor_at(cx, id, x, y);
     set_cursor(cx, id, cursor, Some(anchor));
+    set_opener(cx, id, cursor, opener);
     history_break(cx, id);
     Ok(())
 }
@@ -792,9 +815,9 @@ fn insert_text(cx: &Cx, typed: &[u8], single_line_strip: bool) -> bool {
 /// left one on a tie (measured, SourceSans 32 and Gotham 24: every move whose lines rur lays out as the client does; a
 /// click uses its 2/3 threshold instead). The places are the line's characters and its end place; an empty line has
 /// its own. None on the first line going up or the last going down: a client leaves the caret where it is.
-fn vertical_move(cx: &Cx, id: InstanceId, cursor: f64, direction: i64) -> Option<f64> {
+fn vertical_move(cx: &Cx, id: InstanceId, cursor: f64, direction: i64) -> Option<(f64, bool)> {
     let geo = geometry(cx, id).filter(|g| !g.placeholder)?;
-    let (x, line_index) = caret_place(&geo, cursor);
+    let (x, line_index) = caret_place(&geo, cursor, on_opener(&cx.i.text, id, cursor));
     let target = line_index as i64 + direction;
     if target < 1 {
         return None;
@@ -809,7 +832,7 @@ fn vertical_move(cx: &Cx, id: InstanceId, cursor: f64, direction: i64) -> Option
             best = place;
         }
     }
-    Some(best.1)
+    Some((best.1, line.opens == Some(best.1)))
 }
 
 /// Home / End: the caret's displayed line, so a wrapped paragraph's lines each have their own ends
@@ -818,11 +841,17 @@ fn vertical_move(cx: &Cx, id: InstanceId, cursor: f64, direction: i64) -> Option
 fn line_ends(cx: &Cx, id: InstanceId, value: &[u8], cursor: f64) -> (f64, f64) {
     let (paragraph_start, paragraph_end) = line_bounds(value, cursor);
     let Some(geo) = geometry(cx, id).filter(|g| !g.placeholder) else { return (paragraph_start, paragraph_end) };
-    // The paragraph's displayed lines by the byte position of their first character
+    // The paragraph's displayed lines by the byte position of their first character; a line that opens with whitespace
+    // the previous line carried starts after it (measured: Home after that space stays there)
+    let all = places(&geo);
     let mut starts: Vec<f64> = geo
         .lines
         .iter()
-        .filter_map(|line| line.glyphs.iter().map(|g| g.cluster).reduce(f64::min))
+        .zip(&all)
+        .filter_map(|(line, places)| {
+            let first = line.glyphs.iter().map(|g| g.cluster).reduce(f64::min)?;
+            Some(if places.opens == Some(first) { next_boundary(value, first) } else { first })
+        })
         .filter(|&start| start > paragraph_start && start <= paragraph_end)
         .collect();
     starts.sort_by(f64::total_cmp);
@@ -943,7 +972,10 @@ pub(crate) fn key(cx: &Cx, key_name: &str, modifiers: &Modifiers, input_object: 
         "Up" | "Down" => {
             let target = if cx.is_true(id, n.MultiLine) { vertical_move(cx, id, cursor, if key_name == "Up" { -1 } else { 1 }) } else { None };
             match target {
-                Some(target) => move_to(target),
+                Some((target, opener)) => {
+                    move_to(target);
+                    set_opener(cx, id, target, opener);
+                }
                 // Measured: no line to go to (a single-line box, the first or last line) leaves the caret; the
                 // selection goes, and with Shift it starts at the caret (SelectionStart = CursorPosition)
                 None if shift => {
@@ -1017,7 +1049,7 @@ pub(crate) fn visual(input: &Input, engine: &Engine, state: &State, layout: &Lay
     };
     let pixel_scale = layout.pixel_scale;
     let cursor = state.dom.raw_get(id, input.n.CursorPosition).and_then(Value::as_number).unwrap_or(value_len + 1.0);
-    let (x, line_index) = caret_place(&geo, cursor);
+    let (x, line_index) = caret_place(&geo, cursor, on_opener(&input.text, id, cursor));
     let line = geo.lines.get(line_index.wrapping_sub(1));
     let color = state
         .dom
@@ -1045,8 +1077,8 @@ pub(crate) fn visual(input: &Input, engine: &Engine, state: &State, layout: &Lay
     if start != -1.0 && start != cursor_raw && !geo.placeholder {
         let (from, to) = (start.min(cursor_raw), start.max(cursor_raw));
         let mut rects = Vec::new();
-        let (start_x, start_line) = caret_place(&geo, from);
-        let (end_x, end_line) = caret_place(&geo, to);
+        let (start_x, start_line) = caret_place(&geo, from, from == cursor_raw && on_opener(&input.text, id, from));
+        let (end_x, end_line) = caret_place(&geo, to, to == cursor_raw && on_opener(&input.text, id, to));
         for index in start_line..=end_line {
             let Some(current) = geo.lines.get(index - 1) else { continue };
             let line_end = current.left + current.glyphs.last().map_or(0.0, |g| g.x + g.advance);
@@ -1147,6 +1179,8 @@ pub(crate) fn install(behaviors: &mut Behaviors, text_box: ClassId, input: &Rc<I
         if number != -1.0 {
             number = clamp(number, 1.0, cx.text(id).len() as f64 + 1.0);
         }
+        // (measured: a caret a script puts on a carried whitespace's place shows at the previous line's end)
+        cx.i.text.opener.set(None);
         cx.set(id, i.n.CursorPosition, Value::Number(number));
         if focused_box(&cx) == Some(id) {
             reset_blink(&cx, id);

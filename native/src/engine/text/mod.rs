@@ -70,6 +70,8 @@ pub(crate) struct MeasureKey<'a> {
     pub box_width: u64,
     pub line_factor: u64,
     pub truncate: Truncate,
+    /// A plain TextBox's wrap (`LayoutParams::box_wrap`)
+    pub box_wrap: bool,
     pub empty_height: u64,
     pub min_line: u64,
     pub cache_key: &'a str,
@@ -81,7 +83,7 @@ pub(crate) struct MeasureEntry {
     style: Box<str>,
     cache_key: Box<str>,
     text: Box<[u8]>,
-    numbers: [u64; 8],
+    numbers: [u64; 9],
     truncate: Truncate,
     value: Arc<TextLayout>,
 }
@@ -185,8 +187,8 @@ impl TextEngine {
         self.fonts.face(id)
     }
 
-    fn measure_numbers(key: &MeasureKey) -> [u64; 8] {
-        [key.weight, key.size, key.max_width, key.max_height, key.box_width, key.line_factor, key.empty_height, key.min_line]
+    fn measure_numbers(key: &MeasureKey) -> [u64; 9] {
+        [key.weight, key.size, key.max_width, key.max_height, key.box_width, key.line_factor, key.empty_height, key.min_line, u64::from(key.box_wrap)]
     }
 
     pub(crate) fn measure_lookup(&self, hash: u64, key: &MeasureKey) -> Option<Arc<TextLayout>> {

@@ -34,6 +34,8 @@ pub struct TextObject<'a> {
     pub line_height: f64,
     pub truncate: Truncate,
     pub constraint: Option<SizeConstraint>,
+    /// A TextBox laid out as plain text: wrap whitespace that does not fit starts the next line (`LayoutParams::box_wrap`).
+    pub box_wrap: bool,
 }
 
 /// `LayoutText`'s result.
@@ -114,7 +116,7 @@ impl Box {
     }
 
     fn fits(&self, full: &TextLayout) -> bool {
-        full.natural_width <= (if self.rich { self.box_width } else { self.strict_width }) + 1e-6
+        full.fit_width <= (if self.rich { self.box_width } else { self.strict_width }) + 1e-6
             && self.logical(full.height) <= self.logical_height
             && (self.rich || !full.broken)
     }
@@ -177,6 +179,7 @@ impl TextEngine {
                 scale: Some(scale),
                 pixel_size,
                 effective_size,
+                box_wrap: object.box_wrap,
             };
             if rich { engine.layout_rich(&params) } else { engine.layout_plain(&params) }
         };

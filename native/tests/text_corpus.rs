@@ -346,6 +346,7 @@ fn run_case(engine: &mut TextEngine, faces: &mut Faces, case: &Map<String, Value
                 scale: opt(params, "sc"),
                 pixel_size: opt(params, "px"),
                 effective_size: opt(params, "es"),
+                box_wrap: false,
             };
             let result = engine.layout(&layout, boolean(case, "rich"));
             canon_layout(engine, faces, &result)
@@ -370,6 +371,7 @@ fn run_case(engine: &mut TextEngine, faces: &mut Faces, case: &Map<String, Value
                 line_height: opt(params, "lh").unwrap(),
                 truncate: Truncate::from_name(string(params, "tr")),
                 constraint,
+                box_wrap: false,
             };
             let info = engine.layout_text(
                 &object,
@@ -696,6 +698,7 @@ fn replay_corpus(subpixel: bool, recorded: &str) {
                 scale: opt(params, "sc"),
                 pixel_size: opt(params, "px"),
                 effective_size: opt(params, "es"),
+                box_wrap: false,
             };
             (layout, *rich)
         })

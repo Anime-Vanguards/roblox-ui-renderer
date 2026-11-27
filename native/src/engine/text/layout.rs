@@ -77,6 +77,8 @@ pub struct TextLayout {
     pub lines: Vec<Line>,
     pub fits: bool,
     pub natural_width: f64,
+    /// The width TextScaled fits to the box: `natural_width` with the whitespace each paragraph ends with hanging.
+    pub fit_width: f64,
     pub broken: bool,
     /// TextBounds.X in physical px.
     pub width: f64,
@@ -147,6 +149,9 @@ pub struct LayoutParams<'a> {
     pub scale: Option<f64>,
     pub pixel_size: Option<f64>,
     pub effective_size: Option<f64>,
+    /// A plain TextBox's wrap (`wrap_paragraph`): whitespace that does not fit starts the next line. Rich
+    /// layouts ignore it.
+    pub box_wrap: bool,
 }
 
 impl<'a> LayoutParams<'a> {
@@ -166,6 +171,7 @@ impl<'a> LayoutParams<'a> {
             scale: None,
             pixel_size: None,
             effective_size: None,
+            box_wrap: false,
         }
     }
 }
@@ -565,22 +571,28 @@ pub fn shape_paragraph(fonts: &mut FontRegistry, codepoints: &[Codepoint], face:
     }
 }
 
-/// `MakeLine` over glyphs[start..end] (0-based), with 1-based first / last like the Luau.
-fn make_line(glyphs: &[Glyph], start: usize, end: usize, trim_trailing: bool) -> Line {
+/// `MakeLine` over glyphs[start..end] (0-based), with 1-based first / last like the Luau. `carried`: the line starts with
+/// the whitespace a TextBox's previous line had no room for, drawn at the line's start but not counted in its width
+/// (`wrap_paragraph`).
+fn make_line(glyphs: &[Glyph], start: usize, end: usize, trim_trailing: bool, carried: bool) -> Line {
     let mut last_counted = end;
     if trim_trailing {
         while last_counted > start && is_space(glyphs[last_counted - 1].code) {
             last_counted -= 1;
         }
     }
+    let mut pen = 0.0;
     let mut width = 0.0;
     let mut out = Vec::with_capacity(end - start);
     for (index, glyph) in glyphs.iter().enumerate().take(end).skip(start) {
         let mut copy = *glyph;
-        copy.x = width;
+        copy.x = pen;
         out.push(copy);
         if index < last_counted {
-            width += glyph.advance;
+            pen += glyph.advance;
+            if !(carried && index == start) {
+                width += glyph.advance;
+            }
         }
     }
     Line::new(out, width, start + 1, end)
@@ -617,14 +629,26 @@ fn prefer_word_break(glyphs: &[Glyph], line_start: usize, break_at: usize, max_w
 /// Whitespace never breaks a line by itself; lines ended at a break opportunity drop their trailing
 /// whitespace, lines broken inside a word keep it (measured: "a " in a box narrower than "b").
 /// Pushes (line, has source) pairs.
-fn wrap_paragraph(glyphs: &[Glyph], max_width: Option<f64>, out: &mut Vec<(Line, bool)>) {
+///
+/// `box_wrap` (a plain TextBox), measured in a 0.747 client (fixtures/text-probe-boxwrap.luau): whitespace stays on the
+/// line only while it fits; the first that does not ends the line (at a paragraph's end too) and starts the next
+/// one. There it is drawn first but not counted: the line's width (alignment, TextBounds) and what else fits on it
+/// leave it out, and it is no break opportunity. The whitespace after it counts and wraps again when it does not fit
+/// ("abc", 50 spaces and "def" in a 100 px box are four lines). TextLabels, TextButtons and rich TextBoxes hang all of
+/// it on the line.
+///
+/// `carry_end` (a wrapped rich paragraph a newline follows), measured in a 0.747 client
+/// (fixtures/text-probe-trailspace.luau): the whitespace it ends with stays on its last line while it fits; the rest
+/// is a line of its own below, carried as above ("A \nfive" with "A" as wide as the box is three lines). Plain text
+/// hangs it, and so does rich text at its end.
+fn wrap_paragraph(glyphs: &[Glyph], max_width: Option<f64>, box_wrap: bool, carry_end: bool, out: &mut Vec<(Line, bool)>) {
     let count = glyphs.len();
     if count == 0 {
         out.push((Line::new(Vec::new(), 0.0, 1, 0), false));
         return;
     }
     let Some(max_width) = max_width else {
-        out.push((make_line(glyphs, 0, count, false), true));
+        out.push((make_line(glyphs, 0, count, false, false), true));
         return;
     };
 
@@ -637,23 +661,34 @@ fn wrap_paragraph(glyphs: &[Glyph], max_width: Option<f64>, out: &mut Vec<(Line,
     }
 
     let mut line_start = 0;
+    // Whether the line starts with whitespace carried from the line before (box_wrap)
+    let mut carried = false;
     while line_start < count {
         let mut width = 0.0;
         let mut last_break: Option<usize> = None;
         // 0-based index of the last glyph that fit, None = line_start - 1.
         let mut last_fit: Option<usize> = None;
         let mut index = line_start;
+        if carried {
+            last_fit = Some(index);
+            index += 1;
+        }
+        // The line's first counted glyph, which goes on it whatever its width
+        let counted_start = index;
         while index < count {
             let glyph = &glyphs[index];
             let code = glyph.code;
             if is_space(code) {
+                if box_wrap && width + glyph.advance > max_width + 1e-6 && index > counted_start {
+                    break;
+                }
                 last_break = Some(index);
                 width += glyph.advance;
                 last_fit = Some(index);
                 index += 1;
                 continue;
             }
-            if width + glyph.advance > max_width + 1e-6 && index > line_start {
+            if width + glyph.advance > max_width + 1e-6 && index > counted_start {
                 break;
             }
             width += glyph.advance;
@@ -665,23 +700,52 @@ fn wrap_paragraph(glyphs: &[Glyph], max_width: Option<f64>, out: &mut Vec<(Line,
         }
 
         if index >= count {
-            out.push((make_line(glyphs, line_start, count, false), true));
+            let mut end = count;
+            if carry_end {
+                // the first of the trailing whitespace that ends past the box
+                let mut first = count;
+                let mut trailing = 0.0;
+                while first > counted_start && is_space(glyphs[first - 1].code) {
+                    first -= 1;
+                    trailing += glyphs[first].advance;
+                }
+                let mut right = width - trailing;
+                for (at, glyph) in glyphs.iter().enumerate().take(count).skip(first) {
+                    right += glyph.advance;
+                    if right > max_width + 1e-6 && at > counted_start {
+                        end = at;
+                        break;
+                    }
+                }
+            }
+            out.push((make_line(glyphs, line_start, end, false, carried), true));
+            if end < count {
+                out.push((make_line(glyphs, end, count, false, true), true));
+            }
             break;
         }
 
+        if box_wrap && is_space(glyphs[index].code) {
+            out.push((make_line(glyphs, line_start, index, true, carried), true));
+            line_start = index;
+            carried = true;
+            continue;
+        }
+
         match last_break {
-            Some(break_at) if break_at >= line_start && prefer_word_break(glyphs, line_start, break_at, max_width) => {
-                out.push((make_line(glyphs, line_start, break_at + 1, true), true));
+            Some(break_at) if break_at >= counted_start && prefer_word_break(glyphs, counted_start, break_at, max_width) => {
+                out.push((make_line(glyphs, line_start, break_at + 1, true, carried), true));
                 line_start = break_at + 1;
             }
             _ => {
                 let break_at = last_fit.map_or(line_start, |fit| fit.max(line_start));
-                let mut line = make_line(glyphs, line_start, break_at + 1, false);
+                let mut line = make_line(glyphs, line_start, break_at + 1, false, carried);
                 line.split = true;
                 out.push((line, true));
                 line_start = break_at + 1;
             }
         }
+        carried = false;
     }
 }
 
@@ -698,6 +762,11 @@ fn last_space_run(line: &Line) -> f64 {
         index -= 1;
     }
     run
+}
+
+/// Width of the whitespace a line ends with (0 when it ends in a glyph).
+fn trailing_space(line: &Line) -> f64 {
+    line.glyphs.iter().rev().take_while(|glyph| is_space(glyph.code)).map(|glyph| glyph.advance).sum()
 }
 
 /// Measured: an unwrapped line wider than its box reports its width without the last whitespace run
@@ -722,7 +791,7 @@ fn concat(prefix: &[Glyph], suffix: Option<&[Glyph]>, trim: bool) -> Line {
         glyphs.extend_from_slice(suffix);
     }
     let count = glyphs.len();
-    make_line(&glyphs, 0, count, trim)
+    make_line(&glyphs, 0, count, trim, false)
 }
 
 fn trimmed_count(glyphs: &[Glyph]) -> usize {
@@ -1090,6 +1159,8 @@ impl TextEngine {
         let truncate = params.truncate;
         let line_factor = params.line_height.unwrap_or(1.0);
         let cache_key = prepared.map_or("", |prepared| prepared.cache_key);
+        // (measured: a rich TextBox wraps as a label)
+        let box_wrap = params.box_wrap && prepared.is_none() && max_width.is_some();
         let empty_height = prepared.and_then(|prepared| prepared.empty_height);
 
         let mut hasher = KeyHasher::new();
@@ -1102,6 +1173,7 @@ impl TextEngine {
         hasher.u64(opt_bits(box_width));
         hasher.u64(line_factor.to_bits());
         hasher.u64(truncate as u64);
+        hasher.u64(u64::from(box_wrap));
         hasher.u64(opt_bits(empty_height));
         let min_line = prepared.map_or(0.0, |prepared| prepared.min_line);
         hasher.u64(min_line.to_bits());
@@ -1117,6 +1189,7 @@ impl TextEngine {
             box_width: opt_bits(box_width),
             line_factor: line_factor.to_bits(),
             truncate,
+            box_wrap,
             empty_height: opt_bits(empty_height),
             min_line: min_line.to_bits(),
             cache_key,
@@ -1152,7 +1225,8 @@ impl TextEngine {
                 None => size,
             };
             wrapped.clear();
-            wrap_paragraph(shaped, max_width, &mut wrapped);
+            let carry_end = prepared.is_some() && index + 1 < paragraphs.len();
+            wrap_paragraph(shaped, max_width, box_wrap, carry_end, &mut wrapped);
             if let Some(last) = wrapped.last_mut() {
                 last.0.paragraph_end = true;
             }
@@ -1221,10 +1295,15 @@ impl TextEngine {
         // however far it overflows its box (the last line of a wrapped rich paragraph drops it like
         // plain text does).
         let trim_box = if rich && !params.wrapped { None } else { bounds_box };
+        // Measured (fixtures/text-probe-trailspace.luau, 0.747 client): a wrapped paragraph's trailing whitespace hangs when
+        // TextScaled tries a size ("one two three four " fits a box as wide as its words at that size; unwrapped text is
+        // not measured and keeps it)
         let mut natural_width: f64 = 0.0;
+        let mut fit_width: f64 = 0.0;
         let mut broken = false;
         for line in &lines {
             natural_width = lmax(natural_width, line.width);
+            fit_width = lmax(fit_width, if line.paragraph_end && max_width.is_some() { line.width - trailing_space(line).min(line.width) } else { line.width });
             if line.split {
                 broken = true;
             }
@@ -1240,9 +1319,13 @@ impl TextEngine {
         // Measured (layout-probe-richclip): wrapped rich text keeps (and counts) the lines below the box
         // unless it is truncated, and its truncated TextBounds.X still spans every line.
         let rich_wrapped = rich && params.wrapped;
+        // Measured (fixtures/text-probe-trailspace.luau, 0.747 client): only the text's last line drops its whitespace that
+        // way; a paragraph a newline follows counts its trailing spaces ("one two three four \nfive" in a box as wide as
+        // the words: one space more)
         let mut all_width: f64 = 0.0;
-        for line in &lines {
-            all_width = lmax(all_width, if line.paragraph_end { bounds_width(line, trim_box) } else { line.width });
+        let last = lines.len().saturating_sub(1);
+        for (index, line) in lines.iter().enumerate() {
+            all_width = lmax(all_width, if line.paragraph_end && index == last { bounds_width(line, trim_box) } else { line.width });
         }
         let keep = |mut replacement: Line, original: &Line| -> Line {
             replacement.top = original.top;
@@ -1334,7 +1417,7 @@ impl TextEngine {
                 }
                 width = lmax(width, if truncate == Truncate::SplitWord { displayed } else { line.width });
             } else {
-                width = lmax(width, if line.paragraph_end { bounds_width(line, trim_box) } else { line.width });
+                width = lmax(width, if line.paragraph_end && index + 1 == lines.len() { bounds_width(line, trim_box) } else { line.width });
             }
         }
         if rich_wrapped {
@@ -1355,6 +1438,7 @@ impl TextEngine {
             lines,
             fits,
             natural_width,
+            fit_width,
             broken,
             width,
             height,
@@ -1415,7 +1499,7 @@ mod truncation_tests {
     #[test]
     fn rich_lines_are_drawn_with_an_ellipsis_in_a_box_counted_to_its_next_pixel() {
         let faces: [FaceId; 2] = [1, 2];
-        let line = make_line(&glyphs("Relax. This is", 10.0, 0..0, faces), 0, 14, false);
+        let line = make_line(&glyphs("Relax. This is", 10.0, 0..0, faces), 0, 14, false, false);
         let dots = ellipsis(20.0, faces[0]);
         let at = |_: usize| dots.clone();
         // "Rel" and the ellipsis are 50 px: drawn from 49.2 px on (plain text needs 50)
@@ -1442,13 +1526,51 @@ mod truncation_tests {
         let faces: [FaceId; 2] = [1, 2];
         // "ab" regular (10 px each), "cdefgh" bold (12 px each); the ellipsis after a bold glyph counts
         // 24 px, after a regular one 20
-        let line = make_line(&glyphs("abcdefgh", 10.0, 2..8, faces), 0, 8, false);
+        let line = make_line(&glyphs("abcdefgh", 10.0, 2..8, faces), 0, 8, false, false);
         let (regular, bold) = (ellipsis(20.0, faces[0]), ellipsis(24.0, faces[0]));
         let at = |count: usize| if count > 2 { bold.clone() } else { regular.clone() };
         // 20 + 3 x 12 + 24 = 80 fits 80 px; with a 20 px ellipsis a fourth bold glyph would fit 88
         assert_eq!(shown(&truncate_rich_drawn(&line, 80.0, Truncate::SplitWord, &at)), "abcde\u{2026}");
         assert_eq!(shown(&truncate_rich_drawn(&line, 88.0, Truncate::SplitWord, &at)), "abcde\u{2026}");
         assert_eq!(shown(&truncate_rich_drawn(&line, 92.0, Truncate::SplitWord, &at)), "abcdef\u{2026}");
+    }
+
+    /// A TextBox's wrap (a 0.747 client, fixtures/text-probe-boxwrap.luau, here with 10 px glyphs): whitespace stays on
+    /// a line while it fits; the first that does not starts the next line, drawn first and not counted.
+    #[test]
+    fn a_text_box_carries_the_whitespace_a_line_has_no_room_for() {
+        let faces: [FaceId; 2] = [1, 2];
+        let wrap = |text: &str, width: f64, box_wrap: bool| {
+            let mut out = Vec::new();
+            wrap_paragraph(&glyphs(text, 10.0, 0..0, faces), Some(width), box_wrap, false, &mut out);
+            out.into_iter().map(|(line, _)| (shown(&line), line.width, line.glyphs.iter().map(|g| g.x).collect::<Vec<_>>())).collect::<Vec<_>>()
+        };
+        let texts = |lines: &[(String, f64, Vec<f64>)]| lines.iter().map(|line| line.0.clone()).collect::<Vec<_>>();
+        // A label hangs the space; a TextBox starts line 2 with it, 'c' 10 px in, the line counted 20 px
+        assert_eq!(texts(&wrap("ab cd", 20.0, false)), ["ab ", "cd"]);
+        let boxed = wrap("ab cd", 20.0, true);
+        assert_eq!(texts(&boxed), ["ab", " cd"]);
+        assert_eq!((boxed[1].1, boxed[1].2.clone()), (20.0, vec![0.0, 10.0, 20.0]));
+        // what fits stays: two of three spaces in a 40 px box
+        assert_eq!(texts(&wrap("ab   cd", 40.0, true)), ["ab  ", " cd"]);
+        // a paragraph's last space opens a line of its own
+        assert_eq!(texts(&wrap("ab ", 20.0, true)), ["ab", " "]);
+        // the carried space is neither counted nor a break opportunity: "cd" still fits beside it, then the next space
+        // that does not fit is carried again
+        assert_eq!(texts(&wrap("ab cd ef", 20.0, true)), ["ab", " cd", " ef"]);
+        // a run of spaces wider than the box wraps again ("abc", 50 spaces and "def" in 100 px: four lines)
+        let long = wrap(&format!("ab{}cd", " ".repeat(8)), 40.0, true);
+        assert_eq!(texts(&long), ["ab  ", "     ", " cd"]);
+        assert_eq!(long.iter().map(|line| line.1).collect::<Vec<_>>(), [20.0, 0.0, 20.0]);
+        // a rich paragraph a newline follows carries the end of its whitespace that does not fit; at the text's end it hangs
+        let rich = |text: &str, width: f64, carry_end: bool| {
+            let mut out = Vec::new();
+            wrap_paragraph(&glyphs(text, 10.0, 0..0, faces), Some(width), false, carry_end, &mut out);
+            out.into_iter().map(|(line, _)| (shown(&line), line.width)).collect::<Vec<_>>()
+        };
+        assert_eq!(rich("ab  ", 30.0, true), [("ab ".to_string(), 30.0), (" ".to_string(), 0.0)]);
+        assert_eq!(rich("ab  ", 30.0, false), [("ab  ".to_string(), 40.0)]);
+        assert_eq!(rich("ab ", 30.0, true), [("ab ".to_string(), 30.0)]);
     }
 }
 

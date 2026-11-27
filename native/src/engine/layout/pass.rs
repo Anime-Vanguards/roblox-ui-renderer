@@ -282,6 +282,9 @@ fn text_object<'s>(state: &'s State, ids: &Ids, reflection: &Reflection, id: Ins
         line_height: number(id, n.LineHeight).unwrap_or(1.0),
         truncate,
         constraint,
+        // Measured (fixtures/text-probe-boxwrap.luau, 0.747 client): a TextBox wraps its plain text (its placeholder too)
+        // keeping only the whitespace that fits on a line; rich text wraps as in a label
+        box_wrap: reflection.class(state.dom.at(id).class).is_a(ids.c.TextBox) && !lays_out_rich(state, ids, reflection, id),
     }
 }
 
