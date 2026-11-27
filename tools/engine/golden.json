@@ -493,7 +493,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-errors": {
-			"digest": "793d4da96d5f8b263cba51858cea412144699af1776d88e187ad49d11d5464cc",
+			"digest": "9843084b14529e4b7f54c5843d947aefc48c53ab9ffcf2d3fca03e44f51bddb0",
 			"status": "ok"
 		},
 		"fast/edit/probe-ids": {
@@ -509,7 +509,7 @@
 			"status": "ok"
 		},
 		"fast/edit/probe-services": {
-			"digest": "dd4636cd22aa8c605fad9f0804c241cf0415385b4bc46a996a7f8a8b09ae79d1",
+			"digest": "ac0aaeebf431a92d1de105a4ec773cb0b1bd625c5120094cddc0d35ebd9dcfff",
 			"status": "ok"
 		},
 		"fast/edit/rects": {
@@ -1929,7 +1929,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-errors": {
-			"digest": "c52c547efd3f31dec76e31c22b2a14d8acf51cddcd5befbd8672cfc395f996ce",
+			"digest": "cbe34bdd4edf3a7b8d2a8a76d786389bd9ae9fff4d19c469c7f9d396e3bf89a8",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-ids": {
@@ -1945,7 +1945,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
-			"digest": "911d0f1ee9acabf673c92d315272c9c0304023ccf49449df2871bbfff932848c",
+			"digest": "cd7b55c2f3d65767f77b0d4712c1830d08a4f0fe6dd899f94e03e93f51702875",
 			"status": "ok"
 		},
 		"fixtures/edit/rects": {
@@ -3317,7 +3317,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-errors": {
-			"digest": "a103a95afc0ee0b6c723628314999a5f6f5728807dc34c55d59617e65208e7fd",
+			"digest": "bf38289ce847499d9622ace4705e9a0461f541e33465c0f97a3624d09aa4365c",
 			"status": "ok"
 		},
 		"fixtures/play/probe-ids": {
@@ -3333,7 +3333,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "d5a6afd52708dbb18665e252a1810882078062106ff3005818ce3e90657e96ea",
+			"digest": "c1ffe36a10a8f00ed3817a8c7a090ee224a8ef373420c1a327d1683a895ccb8a",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
@@ -4201,7 +4201,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T15:27:58.906Z",
+	"recorded": "2026-11-27T16:24:58.249Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

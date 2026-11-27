@@ -2067,11 +2067,15 @@ Dispatch({ type = "key", key = "DPadDown", down = false })
 Flush()
 assert(GuiService.SelectedObject == B.B10, GuiService.SelectedObject.Name)
 -- GuiNavigationEnabled false: no move, nothing processed; AutoSelectGuiEnabled false: ButtonSelect does nothing
+-- (both read true until written, as on a client, and read what was written)
+assert(GuiService.GuiNavigationEnabled == true and GuiService.AutoSelectGuiEnabled == true, "navigation defaults")
 GuiService.GuiNavigationEnabled = false
+assert(GuiService.GuiNavigationEnabled == false, "GuiNavigationEnabled written")
 local Off = Key("DPadDown")
 assert(Off == "+DPadDown false, -DPadDown false" and GuiService.SelectedObject == B.B10, Off)
 GuiService.GuiNavigationEnabled = true
 GuiService.AutoSelectGuiEnabled = false
+assert(GuiService.GuiNavigationEnabled == true and GuiService.AutoSelectGuiEnabled == false, "AutoSelectGuiEnabled written")
 local NoAuto = Key("ButtonSelect")
 assert(NoAuto == "+ButtonSelect false, -ButtonSelect false" and GuiService.SelectedObject == B.B10, NoAuto)
 "##,

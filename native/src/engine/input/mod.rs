@@ -212,7 +212,8 @@ pub struct Input {
     /// GuiService.SelectedObject and a selected button held by Return
     selected: Cell<Option<InstanceId>>,
     key_pressed: Cell<Option<InstanceId>>,
-    /// GuiService.GuiNavigationEnabled and AutoSelectGuiEnabled (true in a client until a script writes them)
+    /// GuiService.GuiNavigationEnabled and AutoSelectGuiEnabled as a script last wrote them (the engine answers
+    /// both true until then, as a client does)
     navigation_enabled: Cell<bool>,
     auto_select_enabled: Cell<bool>,
     /// Objects that "have" the wheel input
@@ -2358,18 +2359,13 @@ fn install_behaviors(engine: &Rc<Engine>, input: &Rc<Input>) {
         behaviors.add_setter(gui_service, n.SelectedObject, setter);
     }
 
-    // GuiService.GuiNavigationEnabled / AutoSelectGuiEnabled: a 0.747 client reads both true (the engine's
-    // GuiService starts with false); a script's write switches navigation / ButtonSelect's toggle off and on
+    // GuiService.GuiNavigationEnabled / AutoSelectGuiEnabled: the engine answers them (true until a script writes
+    // them, as a 0.747 client reads); a script's write also switches navigation / ButtonSelect's toggle off and on
     if let Some(gui_service) = c.GuiService {
         for (name, label, which) in [(n.GuiNavigationEnabled, "GuiNavigationEnabled", true), (n.AutoSelectGuiEnabled, "AutoSelectGuiEnabled", false)] {
             if !valid(name) {
                 continue;
             }
-            let i = input.clone();
-            let getter: GetterFn = Rc::new(move |_, _, _| {
-                Ok(LuaValue::Boolean(if which { i.navigation_enabled.get() } else { i.auto_select_enabled.get() }))
-            });
-            behaviors.add_getter(gui_service, name, getter);
             let i = input.clone();
             let setter: SetterFn = Rc::new(move |_, engine, id, value| {
                 let LuaValue::Boolean(on) = value else {
