@@ -1188,6 +1188,14 @@
 			"digest": "0b042759494b7e248fafea52fd9703a7ed54e9e0f2fb4366fcf22fd119201334",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-selfclip-turned": {
+			"digest": "49e3208caa31dbf98687d33726cb035a2ad5d623f69047429f0d3320a9bcbba8",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-selfclip-turned@quarter": {
+			"digest": "8addc02e4910cecf3389233958057b2812f94e76dd1ebb67f5afd31d0438bf21",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-selfclip@quarter": {
 			"digest": "98796895a28c3bb92d36e71f0c1a0e96fae720dbd64ae9f41aed32ab830cd6be",
 			"status": "ok"
@@ -2512,6 +2520,14 @@
 			"digest": "2100a6dfd29839e4729895f48312b4a8ee708fe6e04a7d27437109c723cc97cd",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-selfclip-turned": {
+			"digest": "88984361fd6904999211911bd0831960a5e35bb48df707540363198478ffa8ac",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-selfclip-turned@quarter": {
+			"digest": "4521d2bcadac6002775009643d4901218ecca6e4c51f7d9ebac1f88e4741338a",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-selfclip@quarter": {
 			"digest": "c3cba51e46840c8ab495eff3732bd9edea19bae5bd2aedf343189cebe8505cbd",
 			"status": "ok"
@@ -3578,6 +3594,10 @@
 		},
 		"fixtures/play/text-probe-selfclip": {
 			"digest": "bcce86133e11c99021974dea9a63dca558cf7493b5b914b6b82c8f3fa0995f83",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-selfclip-turned": {
+			"digest": "d2ca68b11faa00e15b865289c55dc4b28a1e0aad31869455eff194af824e88f3",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-strokequad": {

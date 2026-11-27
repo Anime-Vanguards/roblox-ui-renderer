@@ -316,19 +316,32 @@ pub fn clip_rect(node: &Value, origin: [f64; 2], scale: f64) -> Option<[f64; 4]>
 }
 /// The clip of a node's text: its clip, cut by its own rect when the object clips its descendants
 /// (`text.clip`, measured on fixtures/text-probe-selfclip.luau: the own rect, axis-aligned in screen space
-/// at `absolute` when present, also for rotated labels; a zero-size own rect draws nothing).
+/// at `absolute` when present, also for rotated labels; a zero-size own rect draws nothing). Under a turn (a node with
+/// `absolute`) the cut keeps the pixels whose centres lie in it, so an edge on a pixel centre keeps that pixel at the
+/// left and top and drops it at the right and bottom (sim client 0.747, fixtures/text-probe-selfclip-turned.luau:
+/// labels in a frame turned 90 degrees, cut at 757.5 and 802.5 device px, draw rows 757 to 801 where rounding the
+/// edges like a frame's gives 758 to 802).
 pub fn text_clip_rect(node: &Value, origin: [f64; 2], scale: f64) -> Option<[f64; 4]> {
     let clip = clip_rect(node, origin, scale);
     if node["text"]["clip"] != Value::Bool(true) {
         return clip;
     }
     let rect = &node["rect"];
-    let (x, y) = match node["absolute"].as_array() {
-        Some(a) if a.len() >= 2 => (number(&a[0], 0.), number(&a[1], 0.)),
-        _ => (number(&rect[0], 0.), number(&rect[1], 0.)),
+    let absolute = node["absolute"].as_array().filter(|a| a.len() >= 2);
+    let (x, y) = match absolute {
+        Some(a) => (number(&a[0], 0.), number(&a[1], 0.)),
+        None => (number(&rect[0], 0.), number(&rect[1], 0.)),
     };
-    let [l, r] = device_span(x, number(&rect[2], 0.), scale);
-    let [t, b] = device_span(y, number(&rect[3], 0.), scale);
+    let span = |position: f64, size: f64| {
+        if absolute.is_none() {
+            return device_span(position, size, scale);
+        }
+        let start = f32_round(f32_round(position) * f32_round(scale));
+        let end = f32_round(start + f32_round(f32_round(size) * f32_round(scale)));
+        [(start - 0.5).ceil(), (end - 0.5).ceil()]
+    };
+    let [l, r] = span(x, number(&rect[2], 0.));
+    let [t, b] = span(y, number(&rect[3], 0.));
     let own = [l - origin[0], t - origin[1], l.max(r) - origin[0], t.max(b) - origin[1]];
     Some(match clip {
         None => own,
@@ -483,6 +496,9 @@ mod tests {
         // Rotated under an ancestor: the axis-aligned rect at `absolute`
         let rotated = serde_json::json!({"rect":[10,20,60,30],"absolute":[40,50],"matrix":[0.9,0.4,-0.4,0.9,0,0],"text":{"clip":true}});
         assert_eq!(text_clip_rect(&rotated, [4., 0.], 1.5), Some([56., 75., 146., 120.]));
+        // Under a turn an edge on a pixel centre keeps that pixel at the top and left, drops it at the bottom and right
+        let tie = serde_json::json!({"rect":[10,20,100,30],"absolute":[1250,505],"matrix":[0,1,-1,0,0,0],"text":{"clip":true}});
+        assert_eq!(text_clip_rect(&tie, [0., 0.], 1.5), Some([1875., 757., 2025., 802.]));
     }
     #[test]
     fn inverse_roundtrip() {
