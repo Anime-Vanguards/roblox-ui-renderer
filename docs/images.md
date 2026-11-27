@@ -98,4 +98,4 @@ Fixtures: `scrollbars`, `image-probe-scroll*`, `image-probe-hscroll`.
 ## Draw order and layers
 
 - Respects `ZIndex`, sibling order, and both `Sibling` and `Global` `ZIndexBehavior`.
-- With `--all-layers`, every enabled `ScreenGui` in `PlayerGui` renders beneath `CoreGui`, sorted by `DisplayOrder` and then by most recently parented or enabled (`fixtures/screen-layers.luau`, `cargo test --release layer_tests`).
+- With `--all-layers`, every enabled `ScreenGui` in `PlayerGui` renders beneath `CoreGui`, sorted by `DisplayOrder` and then by when each came into the `PlayerGui` or was last enabled (`fixtures/screen-layers.luau`, `cargo test --release layer_tests`). A `ScreenGui` inside a `GuiObject` is a layer of its own, drawn over the whole screen.
