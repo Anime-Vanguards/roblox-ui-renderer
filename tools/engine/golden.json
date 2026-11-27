@@ -284,6 +284,10 @@
 			"digest": "0083a24127a7c46c0fc4d1e4609898471da6c1b05ecf72550728c56e7bba42b9",
 			"status": "ok"
 		},
+		"fast/edit/layout-autosize-aspect10": {
+			"digest": "93cecb6ba35263ffa01f3ee6a9018bad5cf075f33e4731fa6a72188b2a33a45a",
+			"status": "ok"
+		},
 		"fast/edit/layout-autosize-aspect2": {
 			"digest": "3a882aded4f746046e0c343231305847986bbaa285f020d669de275742fcbfa2",
 			"status": "ok"
@@ -313,7 +317,7 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-aspect9": {
-			"digest": "b56835b0016e9360bc14c8c6faedb2d369fbf858317f5896c303023910b699ab",
+			"digest": "15b3ef63aa62e6b574d85e1150555ac0018b3b01afcc05fb67c24eb6df9a95dd",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-constraint": {
@@ -344,6 +348,10 @@
 			"digest": "7baf46590b889bf01c0ca81db6b1da047114343560bbdb9d09e3ffa5cadde200",
 			"status": "ok"
 		},
+		"fast/edit/layout-canvas-unparented": {
+			"digest": "7ac9204d3bbcb53469f8b31da06a702b02ff8ee05d536d6b7fdb519420411315",
+			"status": "ok"
+		},
 		"fast/edit/layout-dynamic": {
 			"digest": "99b6ac133f39955b2f863719376fae201072888f038f6096d3220916c8010f2b",
 			"status": "ok"
@@ -366,6 +374,10 @@
 		},
 		"fast/edit/layout-list": {
 			"digest": "2a3a568f39db01c7bb24a41298cee97a31303dad51672b07f594d5150e15a2a5",
+			"status": "ok"
+		},
+		"fast/edit/layout-nested-screengui": {
+			"digest": "4c05b39fbccf1f8a5b930da56c51729f2afcd76c0e0d9a9a2b32a5a4cbb9f2f2",
 			"status": "ok"
 		},
 		"fast/edit/layout-probe-scrollgap": {
@@ -1732,6 +1744,10 @@
 			"digest": "419b821e81d41b8325bcaeaad19aaa49779f95357aa26f272121500ca782fdb6",
 			"status": "ok"
 		},
+		"fixtures/edit/layout-autosize-aspect10": {
+			"digest": "d01d95fd157fae9b3a1ea6e53c70148dfabc4801f0956dc20381394cd309be7b",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-autosize-aspect2": {
 			"digest": "0e2f2fef6f28e9424c1262e4ea50a9c14bb46727608918e370d38f1a87121928",
 			"status": "ok"
@@ -1761,7 +1777,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect9": {
-			"digest": "b5a333d3fa3572c45b61c04504a8915e200d7f11b8558471745405b9ae3d76b3",
+			"digest": "9507e28f94854ebd5e1178531fbbca07c5cc3278bc4db77f4f4ed9255e4ec89d",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint": {
@@ -1792,6 +1808,10 @@
 			"digest": "969543b90a68def03477629ce8ce8ff3d1471d7984e97c68d70c7ec7aa975d34",
 			"status": "ok"
 		},
+		"fixtures/edit/layout-canvas-unparented": {
+			"digest": "8ba4efddcd422f083e6ba9d7d38d6c2d2db1a4a68f7c821aaa93824fdd7269dc",
+			"status": "ok"
+		},
 		"fixtures/edit/layout-dynamic": {
 			"digest": "3b941d8c087fbfefcff87d57489e275031974c5121c5c3d6147487fe9d63f9c5",
 			"status": "ok"
@@ -1814,6 +1834,10 @@
 		},
 		"fixtures/edit/layout-list": {
 			"digest": "1ef783b6273110838daba049516ef2a2898ba9dbb2243029cb343ca2813a326c",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-nested-screengui": {
+			"digest": "713a48cd759885a3b3b0be9a45251992da75d9c2476a494a6f26a10f25b5356f",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-probe-scrollgap": {
@@ -3168,6 +3192,10 @@
 			"digest": "7e2f18bff4840c2e9c9f082045d82c1f2d9a8a007d3bbd588ba71dac261499f1",
 			"status": "ok"
 		},
+		"fixtures/play/layout-autosize-aspect10": {
+			"digest": "b8204da397337c5e39ce6b74aacf2aae81c7199f2f1125c3e117f01aed8a6e4c",
+			"status": "ok"
+		},
 		"fixtures/play/layout-autosize-aspect2": {
 			"digest": "73313786768dab5b0da8f75a5dd9e765f46367baa93176694b15943de2de7955",
 			"status": "ok"
@@ -3197,7 +3225,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect9": {
-			"digest": "d441a93dee320d2180a643c854ed80b8084603763e750cdfe10137741a18ea7c",
+			"digest": "d14e18bbfa120b86a6cec7edc3268fb52e68d6b3f445c8f6b47ba5892f7bf293",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint": {
@@ -3228,6 +3256,10 @@
 			"digest": "8b711024bdd488590f8dadd6e463c68630116a3ca7f606663e5d7de19b768f03",
 			"status": "ok"
 		},
+		"fixtures/play/layout-canvas-unparented": {
+			"digest": "644179fa4ccdab50f072c18440f24a03183c533b7bbc5cb3d82f5a3860f09436",
+			"status": "ok"
+		},
 		"fixtures/play/layout-dynamic": {
 			"digest": "4c54ee4e7fbeb844520f30f0bb568ff528b5947cf637a5ebc9016a05024602be",
 			"status": "ok"
@@ -3250,6 +3282,10 @@
 		},
 		"fixtures/play/layout-list": {
 			"digest": "e72fbf20308b0e222d3791367a9ebf6112c4cb2826ab2c0e979f2a27a7f6bc1b",
+			"status": "ok"
+		},
+		"fixtures/play/layout-nested-screengui": {
+			"digest": "84931074f9a359fcea1ce0ea3cdafedde8463f4fe4557bdc1a18c8c952d520f2",
 			"status": "ok"
 		},
 		"fixtures/play/layout-probe-scrollgap": {
@@ -4235,18 +4271,6 @@
 		"live/stories-autosize-cull/60hz-presentation": {
 			"digest": "a817ac643280f850731f6b8b6092926b73cb09b03f61ad5cd482276195a56a5c",
 			"status": "live"
-		},
-		"fast/edit/layout-nested-screengui": {
-			"digest": "4c05b39fbccf1f8a5b930da56c51729f2afcd76c0e0d9a9a2b32a5a4cbb9f2f2",
-			"status": "ok"
-		},
-		"fixtures/edit/layout-nested-screengui": {
-			"digest": "713a48cd759885a3b3b0be9a45251992da75d9c2476a494a6f26a10f25b5356f",
-			"status": "ok"
-		},
-		"fixtures/play/layout-nested-screengui": {
-			"digest": "84931074f9a359fcea1ce0ea3cdafedde8463f4fe4557bdc1a18c8c952d520f2",
-			"status": "ok"
 		}
 	},
 	"recorded": "2026-11-27T21:35:54.977Z",

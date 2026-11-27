@@ -756,10 +756,11 @@ fn float32_rects(source: &str, viewport: (f64, f64)) -> (std::collections::HashM
 
 /// The list, grid and canvas fixtures a client was measured on in float32 (data/studio/whole/layout-f32.json), with
 /// their viewports.
-const FLOAT32_FIXTURES: [(&str, &str, (f64, f64)); 4] = [
+const FLOAT32_FIXTURES: [(&str, &str, (f64, f64)); 5] = [
     ("layout-f32-lists", include_str!("../../../../fixtures/layout-f32-lists.luau"), (1200.0, 900.0)),
     ("layout-f32-grids", include_str!("../../../../fixtures/layout-f32-grids.luau"), (2160.0, 1270.0)),
     ("layout-f32-lists2", include_str!("../../../../fixtures/layout-f32-lists2.luau"), (2160.0, 1270.0)),
+    ("layout-canvas-unparented", include_str!("../../../../fixtures/layout-canvas-unparented.luau"), (1600.0, 880.0)),
     ("layout-nested-screengui", include_str!("../../../../fixtures/layout-nested-screengui.luau"), (1600.0, 1000.0)),
 ];
 
@@ -768,14 +769,18 @@ const FLOAT32_FIXTURES: [(&str, &str, (f64, f64)); 4] = [
 /// layout-f32-lists2 reads (an ulp off in 9 of 48 values).
 fn float32_known(name: &str, path: &str) -> bool {
     (name.starts_with("layout-f32-") && (path.contains("_S/") || path.contains("/S/") || (path.starts_with("/s") && path.ends_with("/T"))))
+        || (name == "layout-canvas-unparented" && path.starts_with("/cell_scaled_over/S/C"))
 }
 
 /// UIListLayout, UIGridLayout and a ScrollingFrame's canvas against a Roblox 0.747 client bit for bit (float32;
 /// data/studio/whole/layout-f32.json): lists walk their items in float32 local units (the next item at
 /// f32(f32(cursor + size) + gap)), grids size each item f32(f32(cell + pad) - pad) and place it by its cell's centre
 /// with an AnchorPoint of 0.5, AbsoluteCellSize is unscaled, AbsoluteContentSize is f32(content x UIScale), and
-/// AbsoluteCanvasSize reads back through the canvas's far corner. P4d: a ScreenGui inside a GuiObject is laid out over the
-/// whole screen, unclipped, unturned and unscaled by what holds it (layout-nested-screengui).
+/// AbsoluteCanvasSize reads back through the canvas's far corner. P4d: a ScrollingFrame with no GUI above it takes its
+/// CanvasSize's scale against its own size (so a CanvasPosition written before parenting clamps there), a negative
+/// AbsoluteWindowSize reads as its size, the canvas scrolls by the float32 CanvasPosition rounded to device pixels
+/// (layout-canvas-unparented); a ScreenGui inside a GuiObject is laid out over the whole screen, unclipped, unturned and
+/// unscaled by what holds it (layout-nested-screengui).
 #[test]
 fn lists_grids_and_canvases_lay_out_in_a_clients_float32() {
     let studio: serde_json::Value = serde_json::from_str(include_str!("../../../../data/studio/whole/layout-f32.json")).expect("measurements");
@@ -820,7 +825,7 @@ fn aspect_measured() -> serde_json::Value {
 }
 
 /// The AutomaticSize + UIAspectRatioConstraint fixtures the client was measured on.
-const ASPECT_FIXTURES: [(&str, &str); 13] = [
+const ASPECT_FIXTURES: [(&str, &str); 14] = [
     ("layout-autosize-aspect", include_str!("../../../../fixtures/layout-autosize-aspect.luau")),
     ("layout-autosize-aspect2", include_str!("../../../../fixtures/layout-autosize-aspect2.luau")),
     ("layout-autosize-aspect3", include_str!("../../../../fixtures/layout-autosize-aspect3.luau")),
@@ -834,11 +839,20 @@ const ASPECT_FIXTURES: [(&str, &str); 13] = [
     ("layout-autosize-aspect7", include_str!("../../../../fixtures/layout-autosize-aspect7.luau")),
     ("layout-autosize-aspect8", include_str!("../../../../fixtures/layout-autosize-aspect8.luau")),
     ("layout-autosize-aspect9", include_str!("../../../../fixtures/layout-autosize-aspect9.luau")),
+    ("layout-autosize-aspect10", include_str!("../../../../fixtures/layout-autosize-aspect10.luau")),
 ];
 
-/// Not reproduced: a 200 x 60 frame of ratio 2 automatic on X and Y with 10 + 10 px of side and 20 + 20 px of top and
-/// bottom padding around a (1, 1) frame and a 60 x 80 box (the client 200 x 100, here 240 x 120).
-const ASPECT_KNOWN: [&str; 2] = ["/xy_l10r10t20b20_full_b60x80/H", "/xy_l10r10t20b20_full_b60x80/H/F"];
+/// Not reproduced (LA9d): the children of an XY frame of a 0-wide base whose ratio box is shorter than its top and bottom
+/// padding (0 x 0 of ratio 2 with 20 + 20 px around a 60 x 80 box: the frame is 60 x 80 as in the client, its box 60 x 30)
+/// start 10 px down in the client (the box less the bottom padding), 20 here, and a (1, 1) frame there is 50 tall (to the
+/// frame's height less the bottom padding), 30 here.
+const ASPECT_KNOWN: [&str; 5] = [
+    "/b0x0_r2_t20b20_b60x80/H/B",
+    "/b0x0_r2_t20b20_full_b60x80/H/B",
+    "/b0x0_r2_t20b20_full_b60x80/H/F",
+    "/b0x60_r2_t20b20_full_b60x80/H/B",
+    "/b0x60_r2_t20b20_full_b60x80/H/F",
+];
 
 /// Automatic frames with a UIAspectRatioConstraint against a Roblox 0.747 client's rects
 /// (data/studio/whole/autosize-aspect.json): the content's natural size inside the padding, fitted to the ratio, plus

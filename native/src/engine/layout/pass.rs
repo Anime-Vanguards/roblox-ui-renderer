@@ -1412,9 +1412,11 @@ impl<'a> Pass<'a> {
             // Measured (fixtures/layout-autosize-aspect8.luau x_l0r0t30b0_b20x100, -aspect9; a 0.747 client): the top and
             // bottom padding count only when the height is automatic: a 60 x 120 frame of ratio 0.5 automatic on X with
             // 30 px of top padding holding a (1, 1) frame and a 20 x 100 box is 60 wide, not 0.5 x (120 + 30) = 75.
-            // (Not reproduced: a 200 x 60 frame of ratio 2 automatic on X and Y with 10 + 10 px of side and 20 + 20 px of
-            // top and bottom padding around a (1, 1) frame and a 60 x 80 box is 200 x 100 in the client, here
-            // 2 x (80 + 40) = 240 wide; frames of a 0 x 0 base take the full width, aspect9 xy_l10r10t20b20_full_b60x80.)
+            // Measured (fixtures/layout-autosize-aspect10.luau, -aspect8, -aspect9; a 0.747 client, 55 of 55 XY cells):
+            // automatic on both axes, the top and bottom padding push the width up to the base width, or past it only as
+            // far as the ratio times the content's fitted height plus the side padding: a 200 x 60 frame of ratio 2 with
+            // 10 + 10 px of side and 20 + 20 px of top and bottom padding around a (1, 1) frame and a 60 x 80 box is
+            // 200 x 100 (not 2 x (80 + 40) = 240 wide); a 0 x 0 base around a 60 x 80 box is 60 x 80 (2 x 30 + 0).
             // Measured (fixtures/layout-autosize-aspect3.luau, -aspect6, -aspect8, -aspect9): on an automatic axis a
             // scale child of such an object sizes against the box less the padding or, when the content holds more,
             // against what it holds up to the box: a (1, 1) frame in a 240 x 60 frame of ratio 3 with 10 + 10 px of top
@@ -1428,6 +1430,7 @@ impl<'a> Pass<'a> {
                 let fitted_h = lmin(held_y, held_x / ratio);
                 let pad_y = if auto_y { pad_top + pad_bottom } else { 0.0 };
                 let raw_w = ratio * (fitted_h + pad_y);
+                let raw_w = if auto_x && auto_y { lmin(raw_w, lmax(width, ratio * fitted_h + pad_left + pad_right)) } else { raw_w };
                 let fitted_w = if auto_x { lmax(fit_w, raw_w) } else { lmin(width, lmax(fit_w, raw_w)) };
                 let fitted_h = if auto_y { fitted_w / ratio } else { lmin(fitted_w / ratio, height) };
                 // (a MaxSize the ratio's box passes cuts it and the ratio applies again: fixtures/layout-autosize-aspect7.luau
@@ -2646,9 +2649,10 @@ impl<'a> Pass<'a> {
         if scroll_x != position.0 || scroll_y != position.1 {
             self.set_vector(id, n_canvas_position, scroll_x, scroll_y);
         }
+        // (from the float32 CanvasPosition, as `layout_scrolling`)
         let dpi = self.l.pixel_scale;
-        let offset_x = (scroll_x * dpi + 0.5).floor() / dpi;
-        let offset_y = (scroll_y * dpi + 0.5).floor() / dpi;
+        let offset_x = (f32r(scroll_x) * dpi + 0.5).floor() / dpi;
+        let offset_y = (f32r(scroll_y) * dpi + 0.5).floor() / dpi;
         let Some(record) = self.l.records.get_mut(id) else { return false };
         let place = record.canvas_place.unwrap();
         if place[2] == offset_x && place[3] == offset_y {
@@ -3037,13 +3041,17 @@ impl<'a> Pass<'a> {
         // reads back through the canvas's far corner from the frame's AbsolutePosition, f32(f32(x + canvas) - x) (1643 at
         // x = 543.20007 reads 1643.00012).
         self.set_vector(id, n_canvas, f32r(f32r(record.x + canvas_w) - record.x), f32r(f32r(record.y + canvas_h) - record.y));
-        self.set_vector(id, n_window, window_w, window_h);
+        // (measured, layout-canvas-unparented.luau U_*: a window the bars leave negative reads as its size, 3 - 7 - 1 as 5;
+        // the clamp above keeps the sign, 11 + 5 = 16)
+        self.set_vector(id, n_window, window_w.abs(), window_h.abs());
 
-        // Measured: the canvas offset is rounded to whole physical pixels (half up). A left bar shifts
-        // the canvas only when the vertical axis is inset; the content clip always excludes bars.
+        // Measured: the canvas offset is rounded to whole physical pixels (half up), from the float32 CanvasPosition (a
+        // clamp to 444.99998 reads 445 and scrolls 668 device px at 1.5x, as 445 does: fixtures/layout-canvas-unparented.luau
+        // cell_scaled_over). A left bar shifts the canvas only when the vertical axis is inset; the content clip always
+        // excludes bars.
         let dpi = self.l.pixel_scale;
-        let offset_x = (scroll_x * dpi + 0.5).floor() / dpi;
-        let offset_y = (scroll_y * dpi + 0.5).floor() / dpi;
+        let offset_x = (f32r(scroll_x) * dpi + 0.5).floor() / dpi;
+        let offset_y = (f32r(scroll_y) * dpi + 0.5).floor() / dpi;
         let left_width = if left_bar && show_vertical { gutter } else { 0.0 };
         let canvas_shift = if inset_x { left_width } else { 0.0 };
 
@@ -3273,7 +3281,12 @@ impl<'a> Pass<'a> {
                 full_h: None,
             });
             let parent = Record { scale: 1.0, visible: true, generation: self.l.generation, ..Record::default() };
-            let record = self.place_child(root, &parent, sized.w, sized.h, None, false, Some((sized.base_w, sized.base_h)));
+            let mut record = self.place_child(root, &parent, sized.w, sized.h, None, false, Some((sized.base_w, sized.base_h)));
+            // Measured (fixtures/layout-canvas-unparented.luau U_*, a 0.747 client): a ScrollingFrame with no GUI above it
+            // (unparented, or in a Folder of ReplicatedStorage) takes its CanvasSize's scale against its own size, not
+            // against the empty parent its Size's scale reads (100 x 80 with a (2, 3) canvas is 200 x 240).
+            record.parent_width = None;
+            record.parent_height = None;
             self.store(root, record, sized.text_box);
         }
         self.l.root_stamps.set(root, stamp);
