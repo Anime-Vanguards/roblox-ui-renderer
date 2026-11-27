@@ -4136,3 +4136,253 @@ end
     );
     run(&lua, &engine, &source);
 }
+
+// ContextActionService's unbinding and warnings (IN4), against client logs: data/studio/touch-buttons.json holds the
+// log lines a 0.747 client wrote for the same cases (the sim kit's prelude; frame numbers dropped).
+
+/// The sim kit's logging and helpers, over the test hooks (VirtualInputManager:SendTouchEvent becomes a finger event)
+const TOUCH_BUTTON_PRELUDE: &str = r##"
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local LogService = game:GetService("LogService")
+local CAS = game:GetService("ContextActionService")
+local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+local Log = {}
+local Conns = {}
+local function fmt(v)
+	local k = typeof(v)
+	if k == "Vector2" then
+		return string.format("(%g,%g)", v.X, v.Y)
+	elseif k == "number" then
+		return string.format("%g", v)
+	elseif k == "EnumItem" then
+		return v.Name
+	elseif k == "Instance" then
+		return v:GetFullName()
+	elseif k == "UDim2" then
+		return string.format("{%g,%g,%g,%g}", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset)
+	elseif k == "Color3" then
+		return string.format("rgb(%d,%d,%d)", math.round(v.R * 255), math.round(v.G * 255), math.round(v.B * 255))
+	end
+	return tostring(v)
+end
+local function log(...)
+	local parts = {}
+	for i = 1, select("#", ...) do
+		local v = select(i, ...)
+		table.insert(parts, type(v) == "string" and v or fmt(v))
+	end
+	table.insert(Log, table.concat(parts, " "))
+end
+local function frames(n)
+	for _ = 1, n or 1 do
+		StepDisplay(1 / 60)
+		Flush()
+	end
+	UpdateAll()
+end
+local function problems(since, width)
+	local found = {}
+	local hist = LogService:GetLogHistory()
+	for i = since + 1, #hist do
+		if hist[i].messageType == Enum.MessageType.MessageError or hist[i].messageType == Enum.MessageType.MessageWarning then
+			table.insert(found, hist[i].messageType.Name .. " " .. string.sub(hist[i].message, 1, width or 160))
+		end
+	end
+	return found
+end
+local PROPS = { "Position", "Size", "AbsolutePosition", "AbsoluteSize", "Visible", "ZIndex", "BackgroundTransparency", "Active",
+	"Image", "ImageTransparency", "ImageColor3", "ScaleType", "AutoButtonColor", "Text", "Font", "TextSize", "TextColor3",
+	"TextTransparency", "TextWrapped", "TextStrokeTransparency", "TextStrokeColor3", "TextXAlignment", "TextYAlignment",
+	"Enabled", "ResetOnSpawn", "ZIndexBehavior", "DisplayOrder", "IgnoreGuiInset", "ScreenInsets" }
+local function dumpAll(o, depth, out)
+	local parts = { o.ClassName, o.Name }
+	for _, name in PROPS do
+		local ok, v = pcall(function()
+			return o[name]
+		end)
+		if ok and v ~= nil then
+			table.insert(parts, name .. "=" .. fmt(v))
+		end
+	end
+	table.insert(out, string.rep("  ", depth) .. table.concat(parts, " "))
+	for _, c in o:GetChildren() do
+		dumpAll(c, depth + 1, out)
+	end
+	return out
+end
+local function startTouchScript() end
+local function buttons()
+	local root = PlayerGui:FindFirstChild("ContextActionGui")
+	if not root then
+		return "nogui"
+	end
+	local frame = root:FindFirstChild("ContextButtonFrame")
+	if not frame then
+		return "gui,noframe"
+	end
+	local list = {}
+	for _, b in frame:GetChildren() do
+		local t = b:FindFirstChild("ActionTitle")
+		local i = b:FindFirstChild("ActionIcon")
+		table.insert(list, string.format("[%s|%s|%s|%s|%s]", b.Name, t and t.Text or "-", i and i.Image or "-", fmt(b.Position), fmt(b.Size)))
+	end
+	return "gui " .. #frame:GetChildren() .. " " .. table.concat(list, " ")
+end
+local function screenPoint(o, dx, dy)
+	local c = o.AbsolutePosition + o.AbsoluteSize / 2 + GuiService:GetGuiInset()
+	return c.X + (dx or 0), c.Y + (dy or 0)
+end
+local VIM = {}
+function VIM:SendTouchEvent(id, state, x, y)
+	Dispatch({ type = if state == 0 then "down" elseif state == 2 then "up" else "move", x = x, y = y, button = 1, finger = id })
+end
+local function Check(Client)
+	for _, c in Conns do
+		c:Disconnect()
+	end
+	local Got = table.concat(Log, "\n")
+	if Got == Client then
+		return
+	end
+	local A, B = string.split(Got, "\n"), string.split(Client, "\n")
+	for I = 1, math.max(#A, #B) do
+		if A[I] ~= B[I] then
+			error(`line {I} differs:\n rur:    {A[I]}\n client: {B[I]}\n--- rur's log:\n{Got}`)
+		end
+	end
+end
+"##;
+
+/// The client's log of `case` (data/studio/touch-buttons.json), one string
+fn touch_button_client(case: &str) -> String {
+    let data: Json = serde_json::from_str(include_str!("../../../../data/studio/touch-buttons.json")).expect("touch-buttons.json");
+    data[case].as_array().expect(case).iter().map(|line| line.as_str().unwrap()).collect::<Vec<_>>().join("\n")
+}
+
+/// Runs a case (the kit prelude + `body`) and checks its log against the client's log of `case`.
+fn touch_button_case(lua: &Lua, engine: &Rc<Engine>, case: &str, body: &str) {
+    let client = touch_button_client(case);
+    assert!(!client.contains("]===]"));
+    run(lua, engine, &format!("{TOUCH_BUTTON_PRELUDE}\n{body}\nCheck([===[{client}]===])\n"));
+}
+
+/// UnbindAction calls the handler with Cancel and a new InputObject inside the call, a rebind calls the old handler that
+/// way twice, UnbindAllActions calls none (a desktop client; touch clients do the same).
+#[test]
+fn unbinding_cancels_like_a_client() {
+    let (lua, engine) = start(800.0, 600.0);
+    touch_button_case(
+        &lua,
+        &engine,
+        "cancel",
+        r##"
+local seenIo = {}
+local function make(tag, yields)
+	return function(name, state, io)
+		local fresh = io and not seenIo[io]
+		if io then
+			seenIo[io] = true
+		end
+		log("  handler", tag, name, state.Name, io and io.UserInputType.Name or "-", io and io.UserInputState.Name or "-",
+			"fresh io", fresh, "pos", io and fmt(io.Position) or "-", "delta", io and fmt(io.Delta) or "-")
+		if yields then
+			task.wait()
+			log("  handler", tag, "resumed")
+		end
+		return Enum.ContextActionResult.Sink
+	end
+end
+CAS:BindAction("A", make("a1"), false, Enum.KeyCode.F1)
+log("unbind A: before")
+CAS:UnbindAction("A")
+log("unbind A: after")
+frames(2)
+CAS:BindAction("B", make("b1"), false, Enum.KeyCode.F2)
+log("rebind B: before")
+CAS:BindAction("B", make("b2"), false, Enum.KeyCode.F2)
+log("rebind B: after")
+frames(2)
+log("rebind B again: before")
+CAS:BindAction("B", make("b3"), false, Enum.KeyCode.F2)
+log("rebind B again: after")
+frames(2)
+log("unbind B: before")
+CAS:UnbindAction("B")
+log("unbind B: after")
+frames(2)
+CAS:BindActionAtPriority("C", make("c1"), false, 100, Enum.KeyCode.F3)
+log("rebind C at priority: before")
+CAS:BindActionAtPriority("C", make("c2"), false, 200, Enum.KeyCode.F3)
+log("rebind C at priority: after")
+frames(2)
+CAS:BindAction("C", make("c3"), false, Enum.KeyCode.F3)
+log("rebind C plain: after")
+frames(2)
+CAS:UnbindAction("C")
+frames(2)
+CAS:BindAction("Y", make("y1", true), false, Enum.KeyCode.F4)
+log("unbind yielding Y: before")
+CAS:UnbindAction("Y")
+log("unbind yielding Y: after")
+frames(3)
+CAS:BindAction("Z", make("z1"), true, Enum.KeyCode.F5)
+log("rebind Z without button: before")
+CAS:BindAction("Z", make("z2"), false, Enum.KeyCode.F5)
+log("rebind Z without button: after")
+frames(2)
+CAS:UnbindAllActions()
+frames(2)
+log("unbind all done")
+"##,
+    );
+}
+
+/// SetTitle / SetImage / SetDescription / SetPosition / GetButton of a name that is not bound warn as a client does
+/// (UnbindAction of one does not); GetButton returns nil (a desktop client; touch clients do the same).
+#[test]
+fn unbound_setters_warn_like_a_client() {
+    let (lua, engine) = start(800.0, 600.0);
+    touch_button_case(
+        &lua,
+        &engine,
+        "unbound",
+        r##"
+local before = #LogService:GetLogHistory()
+local seen = before
+local function step(tag, fn)
+	local ok, err = pcall(fn)
+	frames(2)
+	local hist = #LogService:GetLogHistory()
+	local found = problems(seen, 300)
+	log(tag, ok, tostring(err), "warnings", #found)
+	for _, line in found do
+		log("  " .. line)
+	end
+	seen = hist
+end
+local function handler()
+	return Enum.ContextActionResult.Sink
+end
+step("SetTitle unbound", function() CAS:SetTitle("Nope", "x") end)
+step("SetImage unbound", function() CAS:SetImage("Nope", "x") end)
+step("SetDescription unbound", function() CAS:SetDescription("Nope", "x") end)
+step("SetPosition unbound", function() CAS:SetPosition("Nope", UDim2.new()) end)
+step("UnbindAction unbound", function() CAS:UnbindAction("Nope") end)
+CAS:BindAction("Plain", handler, false, Enum.KeyCode.F1)
+step("SetTitle no button", function() CAS:SetTitle("Plain", "x") end)
+step("SetImage no button", function() CAS:SetImage("Plain", "x") end)
+step("SetDescription no button", function() CAS:SetDescription("Plain", "x") end)
+step("SetPosition no button", function() CAS:SetPosition("Plain", UDim2.new()) end)
+CAS:BindAction("Touchy", handler, true, Enum.KeyCode.F2)
+step("SetTitle button", function() CAS:SetTitle("Touchy", "x") end)
+step("SetImage button", function() CAS:SetImage("Touchy", "x") end)
+step("SetDescription button", function() CAS:SetDescription("Touchy", "x") end)
+step("SetPosition button", function() CAS:SetPosition("Touchy", UDim2.new()) end)
+step("GetButton button", function() log("GetButton", tostring(CAS:GetButton("Touchy"))) end)
+step("GetButton unbound", function() log("GetButton", tostring(CAS:GetButton("Nope"))) end)
+CAS:UnbindAllActions()
+"##,
+    );
+}

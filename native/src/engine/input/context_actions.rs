@@ -20,6 +20,15 @@
 //!   - GetBoundActionInfo returns {} when unbound, else { inputTypes, priorityLevel, stackOrder,
 //!     createTouchButton? (only when true), title?, image?, description? }. Rebinding the same
 //!     name clears title / image / description / position and increments stackOrder.
+//!
+//! Measured in 0.747 clients, desktop and touch alike (each case in two sessions; notes/interaction.md "Touch
+//! buttons"):
+//!   - UnbindAction calls the action's handler once with Cancel and a new InputObject (UserInputType None,
+//!     UserInputState Cancel, KeyCode None, Position and Delta 0), inside the call (a handler that yields lets it
+//!     return); binding a bound name again calls the old handler that way twice. UnbindAllActions calls none.
+//!   - SetTitle / SetImage / SetDescription / SetPosition / GetButton on a name that is not bound warn
+//!     "ContextActionService could not find the function passed in, doing nothing." (UnbindAction of one does not).
+//!     GetButton returns nil.
 
 use std::{
     cell::{Cell, RefCell},
@@ -32,6 +41,7 @@ use rbx_dom_weak::types as dom;
 use super::{Cx, Input, enum_arg, method};
 use super::super::{
     ClassId, Engine, InstanceId,
+    instance as core,
     lua::{convert, enum_item_value, instance_value, none, raise, values},
     reflection::EnumItemId,
     scheduler,
@@ -62,11 +72,12 @@ pub struct Actions {
 }
 
 impl Actions {
-    fn bind(&self, name: String, handler: LuaFunction, create_touch_button: bool, priority: f64, inputs: Vec<EnumItemId>) {
+    /// Binds `name`; the handler it replaced, if the name was bound
+    fn bind(&self, name: String, handler: LuaFunction, create_touch_button: bool, priority: f64, inputs: Vec<EnumItemId>) -> Option<LuaFunction> {
         let order = self.next_order.get() + 1;
         self.next_order.set(order);
         let mut bound = self.bound.borrow_mut();
-        bound.retain(|action| action.name != name);
+        let replaced = bound.iter().position(|action| action.name == name).map(|index| bound.remove(index).handler);
         bound.push(Bound {
             name,
             handler,
@@ -79,38 +90,50 @@ impl Actions {
             description: None,
             position: None,
         });
+        replaced
     }
 
-    fn unbind(&self, name: &str) {
-        self.bound.borrow_mut().retain(|action| action.name != name);
+    /// Unbinds `name`; its handler, if it was bound
+    fn unbind(&self, name: &str) -> Option<LuaFunction> {
+        let mut bound = self.bound.borrow_mut();
+        let index = bound.iter().position(|action| action.name == name)?;
+        Some(bound.remove(index).handler)
+    }
+
+    fn is_bound(&self, name: &str) -> bool {
+        self.bound.borrow().iter().any(|a| a.name == name)
     }
 
     fn clear(&self) {
         self.bound.borrow_mut().clear();
     }
 
-    fn set_title(&self, name: &str, title: String) {
-        if let Some(action) = self.bound.borrow_mut().iter_mut().find(|a| a.name == name) {
-            action.title = Some(title);
-        }
+    fn set_title(&self, name: &str, title: String) -> bool {
+        let mut bound = self.bound.borrow_mut();
+        let Some(action) = bound.iter_mut().find(|a| a.name == name) else { return false };
+        action.title = Some(title);
+        true
     }
 
-    fn set_image(&self, name: &str, image: String) {
-        if let Some(action) = self.bound.borrow_mut().iter_mut().find(|a| a.name == name) {
-            action.image = Some(image);
-        }
+    fn set_image(&self, name: &str, image: String) -> bool {
+        let mut bound = self.bound.borrow_mut();
+        let Some(action) = bound.iter_mut().find(|a| a.name == name) else { return false };
+        action.image = Some(image);
+        true
     }
 
-    fn set_description(&self, name: &str, description: String) {
-        if let Some(action) = self.bound.borrow_mut().iter_mut().find(|a| a.name == name) {
-            action.description = Some(description);
-        }
+    fn set_description(&self, name: &str, description: String) -> bool {
+        let mut bound = self.bound.borrow_mut();
+        let Some(action) = bound.iter_mut().find(|a| a.name == name) else { return false };
+        action.description = Some(description);
+        true
     }
 
-    fn set_position(&self, name: &str, position: dom::UDim2) {
-        if let Some(action) = self.bound.borrow_mut().iter_mut().find(|a| a.name == name) {
-            action.position = Some(position);
-        }
+    fn set_position(&self, name: &str, position: dom::UDim2) -> bool {
+        let mut bound = self.bound.borrow_mut();
+        let Some(action) = bound.iter_mut().find(|a| a.name == name) else { return false };
+        action.position = Some(position);
+        true
     }
 
     fn info_table(&self, lua: &Lua, engine: &Rc<Engine>, name: &str) -> LuaResult<LuaTable> {
@@ -223,19 +246,61 @@ fn string_arg(args: &super::Args, index: usize) -> String {
     args.string(index).map(|s| s.to_string_lossy()).unwrap_or_default()
 }
 
+/// Measured (0.747, desktop and touch): what a setter or GetButton warns for a name that is not bound
+const NOT_BOUND: &str = "ContextActionService could not find the function passed in, doing nothing.";
+
+/// Runs `handler` for action `name` in a thread of its own (resumed at once, as the client calls it inside the call):
+/// (name, UserInputState `state`, `object`)
+fn call(lua: &Lua, engine: &Rc<Engine>, name: &str, handler: &LuaFunction, state: &str, object: LuaValue) -> LuaResult<()> {
+    let Some(state_item) = engine.reflection.enum_item("UserInputState", state) else { return Ok(()) };
+    let thread = lua.create_thread(handler.clone())?;
+    let args = (name, enum_item_value(lua, engine, state_item)?, object).into_lua_multi(lua)?;
+    scheduler::resume(lua, engine, &thread, args);
+    Ok(())
+}
+
+/// The Cancel an unbind or rebind hands the action's handler: a new InputObject with UserInputType None, state Cancel,
+/// KeyCode None and a zero Position and Delta (measured, 0.747)
+fn cancel(lua: &Lua, engine: &Rc<Engine>, input: &Input, name: &str, handler: &LuaFunction) -> LuaResult<()> {
+    let Some(class) = input.c.InputObject else { return Ok(()) };
+    let n = &input.n;
+    let object = {
+        let mut state = engine.state.borrow_mut();
+        let id = core::create(&mut state, &engine.reflection, class);
+        let zero = super::vector3(0.0, 0.0, 0.0);
+        for (property, value) in [
+            (n.Name, Value::String(super::super::value::Str::from("InputObject"))),
+            (n.UserInputType, item_value(engine, "UserInputType", "None")),
+            (n.UserInputState, item_value(engine, "UserInputState", "Cancel")),
+            (n.KeyCode, item_value(engine, "KeyCode", "None")),
+            (n.Position, zero.clone()),
+            (n.Delta, zero),
+        ] {
+            core::raw_set_silent(&mut state, &engine.reflection, id, property, value);
+        }
+        id
+    };
+    call(lua, engine, name, handler, "Cancel", instance_value(lua, engine, object)?)
+}
+
+fn item_value(engine: &Engine, enum_name: &str, item: &str) -> Value {
+    engine.reflection.enum_item(enum_name, item).map_or(Value::Nil, Value::EnumItem)
+}
+
 pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: ClassId) {
     let n = &input.n;
     let i = input.clone();
-    behaviors.add_method(class, n.BindAction, method(move |_, engine, _, args| {
+    behaviors.add_method(class, n.BindAction, method(move |lua, engine, _, args| {
         let name = args.get(1).to_string().unwrap_or_default();
         let LuaValue::Function(handler) = args.get(2).clone() else { return Ok(none()) };
         let create_touch_button = !matches!(args.get(3), LuaValue::Nil | LuaValue::Boolean(false));
         let inputs = collect_inputs(args.0.iter().skip(4).cloned());
-        i.actions.bind(name, handler, create_touch_button, default_priority(engine), inputs);
+        let replaced = i.actions.bind(name.clone(), handler, create_touch_button, default_priority(engine), inputs);
+        bound(lua, engine, &i, &name, replaced)?;
         Ok(none())
     }));
     let i = input.clone();
-    behaviors.add_method(class, n.BindActionAtPriority, method(move |_, engine, _, args| {
+    behaviors.add_method(class, n.BindActionAtPriority, method(move |lua, engine, _, args| {
         let name = args.get(1).to_string().unwrap_or_default();
         let LuaValue::Function(handler) = args.get(2).clone() else { return Ok(none()) };
         let create_touch_button = !matches!(args.get(3), LuaValue::Nil | LuaValue::Boolean(false));
@@ -245,12 +310,16 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
             _ => default_priority(engine),
         };
         let inputs = collect_inputs(args.0.iter().skip(5).cloned());
-        i.actions.bind(name, handler, create_touch_button, priority, inputs);
+        let replaced = i.actions.bind(name.clone(), handler, create_touch_button, priority, inputs);
+        bound(lua, engine, &i, &name, replaced)?;
         Ok(none())
     }));
     let i = input.clone();
-    behaviors.add_method(class, n.UnbindAction, method(move |_, _, _, args| {
-        i.actions.unbind(&args.get(1).to_string().unwrap_or_default());
+    behaviors.add_method(class, n.UnbindAction, method(move |lua, engine, _, args| {
+        let name = args.get(1).to_string().unwrap_or_default();
+        if let Some(handler) = i.actions.unbind(&name) {
+            cancel(lua, engine, &i, &name, &handler)?;
+        }
         Ok(none())
     }));
     let i = input.clone();
@@ -259,18 +328,24 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
         Ok(none())
     }));
     let i = input.clone();
-    behaviors.add_method(class, n.SetTitle, services::strings(FIRST_TWO, method(move |_, _, _, args| {
-        i.actions.set_title(&string_arg(args, 1), string_arg(args, 2));
+    behaviors.add_method(class, n.SetTitle, services::strings(FIRST_TWO, method(move |_, engine, _, args| {
+        if !i.actions.set_title(&string_arg(args, 1), string_arg(args, 2)) {
+            engine.warn(NOT_BOUND);
+        }
         Ok(none())
     })));
     let i = input.clone();
-    behaviors.add_method(class, n.SetImage, services::strings(FIRST_TWO, method(move |_, _, _, args| {
-        i.actions.set_image(&string_arg(args, 1), string_arg(args, 2));
+    behaviors.add_method(class, n.SetImage, services::strings(FIRST_TWO, method(move |_, engine, _, args| {
+        if !i.actions.set_image(&string_arg(args, 1), string_arg(args, 2)) {
+            engine.warn(NOT_BOUND);
+        }
         Ok(none())
     })));
     let i = input.clone();
-    behaviors.add_method(class, n.SetDescription, services::strings(FIRST_TWO, method(move |_, _, _, args| {
-        i.actions.set_description(&string_arg(args, 1), string_arg(args, 2));
+    behaviors.add_method(class, n.SetDescription, services::strings(FIRST_TWO, method(move |_, engine, _, args| {
+        if !i.actions.set_description(&string_arg(args, 1), string_arg(args, 2)) {
+            engine.warn(NOT_BOUND);
+        }
         Ok(none())
     })));
     let i = input.clone();
@@ -285,7 +360,9 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
         };
         let cast = services::cast_strings(lua, engine, args, FIRST)?;
         let args = cast.as_ref().unwrap_or(args);
-        i.actions.set_position(&string_arg(args, 1), position);
+        if !i.actions.set_position(&string_arg(args, 1), position) {
+            engine.warn(NOT_BOUND);
+        }
         Ok(none())
     }));
     let i = input.clone();
@@ -296,6 +373,23 @@ pub(super) fn install(behaviors: &mut Behaviors, input: &Rc<Input>, class: Class
     behaviors.add_method(class, n.GetAllBoundActionInfo, method(move |lua, engine, _, _| {
         Ok(values([LuaValue::Table(i.actions.all_info_table(lua, engine)?)]))
     }));
+    // Measured (0.747, desktop and touch clients): nil at once, also for an action with a touch button
+    let i = input.clone();
+    behaviors.add_method(class, n.GetButton, services::strings(FIRST, method(move |_, engine, _, args| {
+        if !i.actions.is_bound(&string_arg(args, 1)) {
+            engine.warn(NOT_BOUND);
+        }
+        Ok(values([LuaValue::Nil]))
+    })));
+}
+
+/// After a BindAction: the replaced handler's two Cancels
+fn bound(lua: &Lua, engine: &Rc<Engine>, input: &Input, name: &str, replaced: Option<LuaFunction>) -> LuaResult<()> {
+    if let Some(old) = replaced {
+        cancel(lua, engine, input, name, &old)?;
+        cancel(lua, engine, input, name, &old)?;
+    }
+    Ok(())
 }
 
 /// Runs the chain for one input state. Returns whether a handler sank it.

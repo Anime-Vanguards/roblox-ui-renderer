@@ -87,7 +87,7 @@ names!(
     GetBoundActionInfo, GetAllBoundActionInfo, Select, Selectable, SelectionOrder, PreferredInput,
     IsGamepadButtonDown, GetGamepadConnected, GetImageForKeyCode, MouseIcon, MouseIconEnabled,
     MinDragAngle, MaxDragAngle, DragRotation, TouchStarted, TouchMoved, TouchEnded, AutomaticSize,
-    SelectionChanged, GuiNavigationEnabled, AutoSelectGuiEnabled, ElasticBehavior,
+    SelectionChanged, GuiNavigationEnabled, AutoSelectGuiEnabled, ElasticBehavior, GetButton,
 );
 
 macro_rules! classes {

@@ -2278,7 +2278,8 @@ mod device_tests {
         assert!(pad.contains("selected=First"), "{pad}");
         assert!(pad.contains("high:Begin:Gamepad1 low:Begin down=true high:End:Gamepad1 low:End"), "{pad}");
         assert!(pad.contains("sinks processed=true sinks"), "{pad}");
-        assert!(pad.contains("low:Begin low:End activated activated"), "{pad}");
+        // (UnbindAction("Low") calls Low with Cancel, as a 0.747 client does: notes/interaction.md "Touch buttons")
+        assert!(pad.contains("low:Begin low:End activated low:Cancel activated activated"), "{pad}");
         let phone = flow("touch");
         assert!(phone.contains("preferred=Touch"), "{phone}");
         assert!(phone.contains("touch=Touch same=true"), "{phone}");

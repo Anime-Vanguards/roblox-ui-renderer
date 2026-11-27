@@ -209,7 +209,7 @@
 			"status": "ok"
 		},
 		"fast/edit/input-device-flow": {
-			"digest": "8e63ce5677b8c8debcc722bf9349bede4c4b75c1480672e991c802200a76af28",
+			"digest": "95caf62926c2a895e2831f3902338a3e6cd7cacb9ed9ff1cacef6317ed144d6e",
 			"status": "ok"
 		},
 		"fast/edit/interaction-autobuttoncolor": {
@@ -1617,7 +1617,7 @@
 			"status": "ok"
 		},
 		"fixtures/edit/input-device-flow": {
-			"digest": "b55ba667b53c9e9e64d57009beb2a366cb1a694a17f9975025bc2fe301ceea3a",
+			"digest": "3d188c9301a2f16054aff8bca0c56f493505ce5d17e91c98f52c48b64f940753",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-autobuttoncolor": {
@@ -3013,7 +3013,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/input-device-flow": {
-			"digest": "7967fd622ae31e28502dd3b7138db7b5b79854782406fc79136ea3ed9495e041",
+			"digest": "a164fd67d04f98c2f00c0c53c0e616f3d1dc136638e2bbfbd9e0112677686b81",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-autobuttoncolor": {
@@ -4117,7 +4117,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T04:36:32.739Z",
+	"recorded": "2026-11-27T13:33:11.402Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",
