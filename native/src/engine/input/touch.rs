@@ -5,15 +5,21 @@
 //!   - Every touch has an InputObject of its own (a new one each time a finger comes down) and its own hover: an
 //!     object two fingers are over gets MouseEnter / InputBegan / MouseLeave / InputEnded from each of them.
 //!   - Events are processed in the order the fingers send them; a finger's moves within one frame are one move.
-//!   - The first finger down on a button takes it: a second finger on the same button gets MouseButton1Down and
-//!     MouseButton1Up but never Activated or MouseButton1Click.
-//!   - GuiState: Press where a finger comes down, Idle where any finger leaves or lifts (even with another finger
-//!     still on the object), Press again where a finger moves onto an object a finger that is still down came down
-//!     on.
+//!   - Stacked objects (P6d, walk.rs): a touch reaches the ScreenGuis under it from the topmost down to the first
+//!     with an Active object (or the ScrollingFrame that holds the finger) under it; the lower ones get nothing and
+//!     keep their hover until an event reaches them again or the finger lifts. In that ScreenGui the objects below
+//!     the sinker are hovered only (MouseEnter / MouseMoved / MouseLeave, no Input* events, no Press).
+//!   - Buttons: MouseButton1Down / Up go to the first GuiButton under the finger (touch_button); Activated and
+//!     MouseButton1Click to the buttons its touch reached at the touch-down (takers) that no other finger held, so a
+//!     second finger on a button gets MouseButton1Down and MouseButton1Up but never Activated or MouseButton1Click.
+//!   - GuiState: Press where a finger comes down (not on sunk objects), Idle where any finger leaves or lifts (even
+//!     with another finger still on the object), Press again where a finger moves onto an object a finger that is still
+//!     down came down on.
 //!   - The legacy Mouse and GetMouseLocation follow the latest finger event; Mouse.Button1Down / Button1Up fire for
-//!     every finger that does not land on a button.
+//!     every finger that no button takes and that is over no Active object other than a TextBox. Points keep their
+//!     fractions; the GuiObject events' arguments and the legacy Mouse floor them.
 //!   - Dragging: of the topmost ScrollingFrame under a finger that comes down and its ScrollingFrame ancestors, the
-//!     outermost that can scroll is that finger's while no other finger holds it (touch_frame). It starts to scroll
+//!     outermost that can scroll is that finger's while no other finger holds it (scroll_candidate). It starts to scroll
 //!     once the finger is more than 11.5 px from where it came down and the travel's longer axis is one the frame can
 //!     scroll (else never; start_axis decides at once or waits), that move scrolling nothing and being the last
 //!     InputChanged the frame gets from it, then follows the finger 1:1. Past an edge the overscroll is
@@ -46,6 +52,7 @@ use super::{
     Cx, Press, activation_count, button_key, deliver_to_actions, detector_under, drag, json_number, position_delta,
     scrolling::{self, Axis},
     textbox, vector2, vector3,
+    walk::{self, Holder, Ranks},
 };
 use crate::engine::{GuiEngine, InstanceId, NameId, dom::flags, instance as core, lua::instance_value, value::{Str, Value}};
 
@@ -161,8 +168,9 @@ struct Finger {
     /// The objects it came down on
     pressed: Vec<InstanceId>,
     press: Press,
-    /// It took `press.button` (no other finger held it)
-    takes: bool,
+    /// The GuiButtons its touch reached at the touch-down that no other finger held (Activated and MouseButton1Click
+    /// go to them at the release)
+    takers: Vec<InstanceId>,
     drag: Option<Drag>,
     /// (frame, x, y) where it was, one per frame, for the release velocity
     samples: Vec<(u64, f64, f64)>,
@@ -262,6 +270,7 @@ impl Touch {
             out.extend(finger.press.button);
             out.extend(finger.press.sink);
             out.extend(finger.press.receivers.iter().copied());
+            out.extend(finger.takers.iter().copied());
             out.extend(finger.drag.map(|d| d.frame));
         }
         out.extend(self.motions.borrow().iter().map(|(id, _)| *id));
@@ -275,13 +284,14 @@ pub fn finger_of(event: &Json) -> u32 {
         .map_or(0, |f| f as u32)
 }
 
-/// An event's point for finger `id`: its x, y, else where that finger is, else the pointer (whole logical px, as
-/// for the mouse)
+/// An event's point for finger `id`: its x, y, else where that finger is, else the pointer. Fractions stay (measured,
+/// P6d: a client's touch at 99.4, 150.25 reports that Position and GetMouseLocation and misses an object whose left
+/// edge is at 100; the GuiObject events' arguments and the legacy Mouse floor it, event_point)
 pub(crate) fn point(cx: &Cx, id: u32, event: &Json) -> (f64, f64) {
     let (dx, dy) = cx.i.touches.fingers.borrow().iter().find(|f| f.id == id).map_or_else(|| cx.i.mouse_location(), |f| (f.x, f.y));
     let x = json_number(event.get("x")).unwrap_or(dx);
     let y = json_number(event.get("y")).unwrap_or(dy);
-    ((x + 0.5).floor(), (y + 0.5).floor())
+    (x, y)
 }
 
 impl Cx<'_> {
@@ -339,18 +349,6 @@ impl Cx<'_> {
         self.i.touches.fingers.borrow().iter().find(|f| f.drag.is_some_and(|d| d.frame == frame)).map(|f| f.id)
     }
 
-    /// A ScrollingFrame under the finger that no other finger holds: the finger's input counts as processed
-    fn free_scroller_under(&self, id: u32, list: &[InstanceId]) -> bool {
-        list.iter().any(|&o| self.is_scroller(o) && self.frame_holder(o).is_none_or(|holder| holder == id))
-    }
-
-    /// Processed for a finger going down or moving: an Active object, a GuiButton / TextBox, a UIDragDetector or a
-    /// ScrollingFrame no other finger holds under it (measured: a second finger on a frame another finger drags is
-    /// not processed)
-    fn finger_processed(&self, id: u32, list: &[InstanceId]) -> bool {
-        self.any_active(list) || self.sink_of(list).0.is_some() || detector_under(self, list) || self.free_scroller_under(id, list)
-    }
-
     fn touch_signals(&self, event: NameId, object: InstanceId, processed: bool) {
         self.set_last_input_type("Touch");
         self.fire_uis(event, vec![Value::Instance(object), Value::Bool(processed)]);
@@ -404,9 +402,12 @@ fn process_moves_in(cx: &Cx, frame: u64) -> LuaResult<()> {
     Ok(())
 }
 
-/// Finger `id` moved to (x, y) in frame `frame`: MouseMoved on the objects under it, the legacy Mouse.Move,
-/// InputChanged on those it stays on (not on a ScrollingFrame it drags, nor inside it), MouseLeave + InputEnded on those
-/// it left, MouseEnter + InputBegan on those it entered, then the drag and UIS InputChanged and TouchMoved.
+/// Finger `id` moved to (x, y) in frame `frame`. ScreenGui by ScreenGui from the top, down to the first one with a
+/// sinker under it (walk.rs; the ScrollingFrame the finger holds counts too): MouseMoved on the objects under it (a held
+/// ScrollingFrame does not stop these), the legacy Mouse.Move, then per ScreenGui InputChanged on those it stays on (not
+/// sunk; not on a ScrollingFrame it drags, nor inside it), MouseLeave + InputEnded on those it left, MouseEnter +
+/// InputBegan (not sunk) on those it entered; what it hovers in lower ScreenGuis stays hovered. Then the drag and UIS
+/// InputChanged and TouchMoved.
 fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
     let n = &cx.i.n;
     let Some((object, from, hover, drag_before, moved_before)) = cx
@@ -424,8 +425,7 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
     let (position, delta) = position_delta(cx, object, x, y);
     cx.set_input(object, "Change", position, Some(delta));
     let list = cx.hit_list(x, y);
-    let now: FxHashSet<InstanceId> = list.iter().copied().collect();
-    let point = || vec![Value::Number(x), Value::Number(y)];
+    let point = || event_point(x, y);
 
     // The drag: a finger that took a frame over starts counting here; past the slop the drag starts (this move still
     // reaches the frame as InputChanged); a dragging finger's moves scroll the frame
@@ -469,7 +469,8 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
         }
     }
     if refused {
-        // (the finger lets the frame go: this touch never scrolls it)
+        // (the finger lets the frame go: this touch never scrolls it, and the frame no longer keeps it from the objects
+        // below, measured P6d)
         drag = None;
     }
     let dragged_frame = drag_before.filter(|d| d.dragging).map(|d| d.frame);
@@ -477,43 +478,59 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
         dragged_frame.is_some_and(|frame| o == frame || cx.engine.state.borrow().dom.is_descendant_of(o, frame))
     };
 
-    for &o in &list {
-        cx.fire(o, n.MouseMoved, point());
+    let ranks = Ranks::new(cx);
+    let walk = walk::walk(cx, &ranks, &list, drag.map(|d| Holder { frame: d.frame, stops: true }), true);
+    for o in moved_reach(cx, &ranks, &list) {
+        // (measured: a TextBox gets no MouseMoved from a finger)
+        if !cx.is(o, cx.i.c.TextBox) {
+            cx.fire(o, n.MouseMoved, point());
+        }
     }
     cx.fire_legacy("Move", Vec::new())?;
-    for &o in &list {
-        if hover.contains(&o) && !inside_dragged(o) {
-            cx.fire(o, n.InputChanged, vec![Value::Instance(object)]);
-        }
-    }
-    for &o in &hover {
-        if !now.contains(&o) {
-            cx.i.touches.shown.borrow_mut().remove(&o);
-            cx.i.touch(o);
-            if cx.alive(o) {
-                cx.fire(o, n.MouseLeave, point());
-                cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
-            }
-        }
-    }
-    cx.flush_states();
+    let hovered: Vec<(InstanceId, Option<usize>)> = hover.iter().map(|&o| (o, ranks.of(cx, o))).collect();
     let pressed_by_any = |o: InstanceId| cx.i.touches.fingers.borrow().iter().any(|f| f.pressed.contains(&o));
-    for &o in &list {
-        if !hover.contains(&o) {
-            if pressed_by_any(o) {
-                cx.i.touches.shown.borrow_mut().insert(o);
-                cx.i.touch(o);
+    for rank in walk::visit_order(&walk, &hovered) {
+        let here = walk.group(rank).to_vec();
+        let before: Vec<InstanceId> = hovered.iter().filter(|(_, r)| *r == rank).map(|(o, _)| *o).collect();
+        for &o in &here {
+            if before.contains(&o) && !walk.is_sunk(o) && !inside_dragged(o) {
+                cx.fire(o, n.InputChanged, vec![Value::Instance(object)]);
             }
-            cx.fire(o, n.MouseEnter, point());
-            cx.fire(o, n.InputBegan, vec![Value::Instance(object)]);
+        }
+        for &o in &before {
+            if !here.contains(&o) {
+                cx.i.touches.shown.borrow_mut().remove(&o);
+                cx.i.touch(o);
+                if cx.alive(o) {
+                    cx.fire(o, n.MouseLeave, point());
+                    cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
+                }
+                cx.flush_states();
+            }
+        }
+        for &o in &here {
+            if !before.contains(&o) {
+                let sunk = walk.is_sunk(o);
+                if !sunk && pressed_by_any(o) {
+                    cx.i.touches.shown.borrow_mut().insert(o);
+                    cx.i.touch(o);
+                }
+                cx.fire(o, n.MouseEnter, point());
+                if !sunk {
+                    cx.fire(o, n.InputBegan, vec![Value::Instance(object)]);
+                }
+                cx.flush_states();
+            }
         }
     }
+    let mut now_hovered = walk.objects();
+    now_hovered.extend(hovered.iter().filter(|(_, rank)| !walk.handles(*rank)).map(|(o, _)| *o));
     {
         let mut fingers = cx.i.touches.fingers.borrow_mut();
         if let Some(finger) = fingers.iter_mut().find(|f| f.id == id) {
             finger.x = x;
             finger.y = y;
-            finger.hover = list.clone();
+            finger.hover = now_hovered;
             finger.drag = drag;
             // (measured, IN4: a finger that leaves the button it came down on and comes back still clicks it at the
             // release; only a drag cancels the click)
@@ -547,17 +564,20 @@ fn finger_moved(cx: &Cx, id: u32, x: f64, y: f64, frame: u64) -> LuaResult<()> {
     if let Some(frame_id) = scroll_to {
         drag_frame(cx, id, frame_id, from, (x, y))?;
     }
-    let processed = cx.finger_processed(id, &list);
+    // Measured: processed over an Active object or a UIDragDetector, or while a ScrollingFrame holds the finger (also
+    // off the frame before the slop; not once it let the finger go, nor for a second finger on a frame another holds)
+    let processed = cx.any_active(&list) || detector_under(cx, &list) || drag.is_some();
     cx.touch_signals(n.InputChanged, object, processed);
     cx.touch_signals(n.TouchMoved, object, processed);
     sync_overscroll(cx);
     Ok(())
 }
 
-/// Finger `id` came down at (x, y): MouseButton1Down on the button it lands on (else the legacy Mouse.Button1Down),
-/// MouseEnter + InputBegan(Touch Begin) on the objects under it, which show Press, then UIS InputBegan and
-/// TouchStarted. It stops the coasting of the ScrollingFrames under it and holds the topmost one no other finger
-/// holds.
+/// Finger `id` came down at (x, y): MouseButton1Down on the GuiButton touch_button finds (else, unless blocks_legacy, the
+/// legacy Mouse.Button1Down), then ScreenGui by ScreenGui from the top down to the first one with a sinker
+/// (walk.rs; a ScrollingFrame the finger may drag counts too) MouseEnter on the objects under it and InputBegan(Touch
+/// Begin) on those not sunk, which show Press, then UIS InputBegan and TouchStarted. It stops the coasting of the
+/// ScrollingFrames under it and holds its ScrollingFrame (scroll_candidate).
 pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
     process_moves_in(cx, cx.i.touches.frame.get() + 1)?;
     if cx.i.touches.fingers.borrow().iter().any(|f| f.id == id) {
@@ -573,18 +593,33 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
     let (object, value) = cx.touch_object();
     cx.set_input(object, "Begin", vector3(x, y - cx.inset(), 0.0), Some(vector3(0.0, 0.0, 0.0)));
     let list = cx.hit_list(x, y);
-    let (sink, _) = cx.sink_of(&list);
-    let button = sink.filter(|&sink| cx.is(sink, cx.i.c.GuiButton));
-    let takes = button.is_some_and(|b| !cx.i.touches.fingers.borrow().iter().any(|f| f.takes && f.press.button == Some(b)));
+    let ranks = Ranks::new(cx);
+    // The ScrollingFrame that holds the touch is one under it in the ScreenGuis the touch reaches (an Active object above
+    // it does not keep it: a drag that starts on a button inside it scrolls it)
+    let candidate = scroll_candidate(cx, &walk::walk(cx, &ranks, &list, None, true).objects());
+    let walk = walk::walk(cx, &ranks, &list, candidate.map(|frame| Holder { frame, stops: true }), true);
+    let receivers = walk.receivers();
+    let button = touch_button(cx, &ranks, &list);
+    let sink = receivers.iter().copied().find(|&o| cx.is(o, cx.i.c.GuiButton) || cx.is(o, cx.i.c.TextBox));
+    // The buttons the touch reaches that no other finger holds: Activated and MouseButton1Click go to them at the
+    // release (measured: an inactive button over another gives both their clicks)
+    let takers: Vec<InstanceId> = receivers
+        .iter()
+        .copied()
+        .filter(|&o| cx.is(o, cx.i.c.GuiButton) && !cx.i.touches.fingers.borrow().iter().any(|f| f.takers.contains(&o)))
+        .collect();
     for &o in &list {
         if cx.class_name_is(o, cx.i.c.ScrollingFrame) {
             stop_motion(cx, o, frame);
         }
     }
-    let processed = cx.finger_processed(id, &list);
+    // Measured: processed over an Active object (an inactive button or TextBox does not count) or a UIDragDetector, or
+    // when a ScrollingFrame holds the finger
+    let processed = cx.any_active(&list) || detector_under(cx, &list) || candidate.is_some();
     match button {
-        Some(button) => cx.fire(button, n.MouseButton1Down, vec![Value::Number(x), Value::Number(y)]),
-        None => cx.fire_legacy("Button1Down", Vec::new())?,
+        Some(button) => cx.fire(button, n.MouseButton1Down, event_point(x, y)),
+        None if !blocks_legacy(cx, &list) => cx.fire_legacy("Button1Down", Vec::new())?,
+        None => {}
     }
     // Measured: a focused TextBox loses focus after the legacy Mouse.Button1Down
     if let Some(focused) = textbox::focused_box(cx) {
@@ -592,14 +627,14 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
             textbox::unfocus(cx, focused, false, Some(object), true);
         }
     }
-    let mut press = Press { button, sink, clickable: button.is_some(), receivers: list.clone(), dragged: false };
+    let mut press = Press { button, sink, clickable: true, receivers: receivers.clone(), dragged: false };
     let mut grabbed = false;
     if cx.i.touches.holder.get().is_none() {
-        let bar = scrolling::press(cx, &list, x, y);
+        let bar = scrolling::press(cx, &receivers, x, y);
         grabbed = bar;
         if bar {
             cx.i.touches.holder.set(Some(id));
-        } else if drag::press(cx, &list, x, y, cx.engine.options.edit_mode()) {
+        } else if drag::press(cx, &receivers, x, y, cx.engine.options.edit_mode()) {
             cx.i.touches.holder.set(Some(id));
             let detected = cx.i.drag.borrow().as_ref().is_some_and(|active| active.detector.is_some() && Some(active.target) == button);
             if detected {
@@ -608,12 +643,18 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
             }
         }
     }
-    let scroller = if grabbed { None } else { touch_frame(cx, &list) };
-    for &o in &list {
-        cx.i.touches.shown.borrow_mut().insert(o);
-        cx.i.touch(o);
-        cx.fire(o, n.MouseEnter, vec![Value::Number(x), Value::Number(y)]);
-        cx.fire(o, n.InputBegan, vec![Value::Instance(object)]);
+    let scroller = if grabbed { None } else { candidate };
+    for o in walk.objects() {
+        let sunk = walk.is_sunk(o);
+        if !sunk {
+            cx.i.touches.shown.borrow_mut().insert(o);
+            cx.i.touch(o);
+        }
+        cx.fire(o, n.MouseEnter, event_point(x, y));
+        if !sunk {
+            cx.fire(o, n.InputBegan, vec![Value::Instance(object)]);
+        }
+        cx.flush_states();
     }
     cx.i.touches.fingers.borrow_mut().push(Finger {
         id,
@@ -622,10 +663,10 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
         x,
         y,
         pending: None,
-        hover: list.clone(),
-        pressed: list.clone(),
+        hover: walk.objects(),
+        pressed: receivers,
         press,
-        takes,
+        takers,
         drag: scroller.map(|frame| Drag::new(frame, Some((x, y)), (x, y))),
         samples: vec![(frame, x, y)],
     });
@@ -640,11 +681,13 @@ pub(crate) fn down(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
     Ok(())
 }
 
-/// Finger `id` lifted at (x, y) (the frame's waiting moves first): on the button it came down on and took MouseButton1Up,
-/// Activated(touch, count) and (unless it left the button or dragged) MouseButton1Click; on another button only
-/// MouseButton1Up; elsewhere the legacy Mouse.Button1Up, and a TextBox it came down on takes focus. Then MouseLeave +
-/// InputEnded(Touch End) on the objects it is over (Idle), UIS InputEnded and TouchEnded (InputEnded before the
-/// MouseLeaves when it dragged a ScrollingFrame, measured). The frame it dragged springs back or coasts.
+/// Finger `id` lifted at (x, y) (the frame's waiting moves first): MouseButton1Up on the GuiButton touch_button finds
+/// (else, unless blocks_legacy, the legacy Mouse.Button1Up), and a TextBox it came down on takes focus. Then
+/// ScreenGui by ScreenGui from the top down to the first one with a sinker: Activated(touch, count) and (unless it
+/// dragged) MouseButton1Click on the buttons it took at the touch-down that it lifts on, then MouseLeave on the objects
+/// it hovers there and InputEnded(Touch End) on those not sunk (Idle), UIS InputEnded, MouseLeave + InputEnded on what
+/// it still hovers in lower ScreenGuis, and TouchEnded. A finger that dragged a ScrollingFrame: UIS InputEnded first,
+/// then everything it hovers leaves (measured). The frame it dragged springs back or coasts.
 pub(crate) fn up(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
     process_moves_in(cx, cx.i.touches.frame.get() + 1)?;
     let finger = {
@@ -666,49 +709,86 @@ pub(crate) fn up(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
     }
     let dragging = finger.drag.is_some_and(|d| d.dragging);
     let list = cx.hit_list(x, y);
-    let (sink, _) = cx.sink_of(&list);
-    match sink.filter(|&sink| cx.is(sink, cx.i.c.GuiButton)) {
+    let ranks = Ranks::new(cx);
+    // (measured: a ScrollingFrame that still holds a tap keeps it from the objects below it in its ScreenGui, not from
+    // lower ScreenGuis, whose objects under the point get InputEnded hovered or not)
+    let walk = walk::walk(cx, &ranks, &list, finger.drag.map(|d| Holder { frame: d.frame, stops: dragging }), true);
+    let receivers = walk.receivers();
+    match touch_button(cx, &ranks, &list) {
         Some(button) => {
             cx.i.touch(button);
-            cx.fire(button, n.MouseButton1Up, vec![Value::Number(x), Value::Number(y)]);
-            let taken = finger.takes && finger.press.button == Some(button) && !finger.press.dragged;
-            if taken && !cx.is_false(button, n.Active) {
-                let count = activation_count(cx, button);
-                cx.fire(button, n.Activated, vec![Value::Instance(object), Value::Number(count)]);
-            }
-            if taken && finger.press.clickable {
-                cx.fire(button, n.MouseButton1Click, Vec::new());
-            }
+            cx.fire(button, n.MouseButton1Up, event_point(x, y));
         }
-        None => {
-            cx.fire_legacy("Button1Up", Vec::new())?;
-            if let Some(text_box) = sink.filter(|&sink| cx.is(sink, cx.i.c.TextBox)) {
-                if finger.press.sink == Some(text_box) && !dragging {
-                    textbox::press(cx, text_box, x, y, object)?;
-                    textbox::release(cx);
-                }
-            }
+        None if !blocks_legacy(cx, &list) => cx.fire_legacy("Button1Up", Vec::new())?,
+        None => {}
+    }
+    let first_sink = receivers.iter().copied().find(|&o| cx.is(o, cx.i.c.GuiButton) || cx.is(o, cx.i.c.TextBox));
+    if let Some(text_box) = first_sink.filter(|&sink| cx.is(sink, cx.i.c.TextBox)) {
+        if finger.press.sink == Some(text_box) && !dragging {
+            textbox::press(cx, text_box, x, y, object)?;
+            textbox::release(cx);
         }
     }
-    // Measured: the release is processed over an Active object, a button / TextBox or a detector, or when the finger
-    // dragged a ScrollingFrame (a tap on one is not)
-    let processed = cx.any_active(&list) || sink.is_some() || detector_under(cx, &list) || dragging;
-    if dragging {
-        cx.touch_signals(n.InputEnded, object, processed);
-    }
-    for &o in &finger.hover {
+    // Measured: the release is processed over an Active object or a detector, or when the finger dragged a
+    // ScrollingFrame (a tap on one is not; nor one on an inactive button)
+    let processed = cx.any_active(&list) || detector_under(cx, &list) || dragging;
+    let hovered: Vec<(InstanceId, Option<usize>)> = finger.hover.iter().map(|&o| (o, ranks.of(cx, o))).collect();
+    let leave = |o: InstanceId, ended: bool| {
         cx.i.touches.shown.borrow_mut().remove(&o);
         cx.i.touch(o);
         if cx.alive(o) {
-            cx.fire(o, n.MouseLeave, vec![Value::Number(x), Value::Number(y)]);
-            cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
+            cx.fire(o, n.MouseLeave, event_point(x, y));
+            if ended {
+                cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
+            }
+        }
+        cx.flush_states();
+    };
+    if dragging {
+        cx.touch_signals(n.InputEnded, object, processed);
+        for &(o, rank) in &hovered {
+            leave(o, walk.handles(rank) && !walk.is_sunk(o));
+        }
+    } else {
+        for rank in walk::visit_order(&walk, &hovered) {
+            let here = walk.group(rank).to_vec();
+            let before: Vec<InstanceId> = hovered.iter().filter(|(_, r)| *r == rank).map(|(o, _)| *o).collect();
+            for &o in &here {
+                if finger.takers.contains(&o) && !walk.is_sunk(o) && !finger.press.dragged {
+                    cx.i.touch(o);
+                    if !cx.is_false(o, n.Active) {
+                        let count = activation_count(cx, o);
+                        cx.fire(o, n.Activated, vec![Value::Instance(object), Value::Number(count)]);
+                    }
+                    if finger.press.clickable {
+                        cx.fire(o, n.MouseButton1Click, Vec::new());
+                    }
+                }
+            }
+            for &o in &here {
+                let sunk = walk.is_sunk(o);
+                if before.contains(&o) {
+                    leave(o, !sunk);
+                } else if !sunk {
+                    cx.fire(o, n.InputEnded, vec![Value::Instance(object)]);
+                }
+            }
+            for &o in &before {
+                if !here.contains(&o) {
+                    leave(o, true);
+                }
+            }
+        }
+        cx.touch_signals(n.InputEnded, object, processed);
+        // What it hovers in the ScreenGuis the release did not reach leaves after UIS InputEnded (measured)
+        for &(o, rank) in &hovered {
+            if !walk.handles(rank) {
+                leave(o, true);
+            }
         }
     }
     cx.refresh_touch_hover();
     cx.flush_states();
-    if !dragging {
-        cx.touch_signals(n.InputEnded, object, processed);
-    }
     cx.touch_signals(n.TouchEnded, object, processed);
     if !cx.i.touches.any_down() {
         deliver_to_actions(cx, button_key(cx, 1.0), false);
@@ -726,6 +806,49 @@ pub(crate) fn up(cx: &Cx, id: u32, x: f64, y: f64) -> LuaResult<()> {
     drop(finger.value);
     sync_overscroll(cx);
     Ok(())
+}
+
+/// The objects a finger's move fires MouseMoved on (measured, P6d): ScreenGui by ScreenGui from the top down to the first
+/// with an Active object other than a TextBox under the point (a TextBox and the ScrollingFrame that holds the finger do
+/// not stop it, though they keep the lower ScreenGuis' hover and Input* events)
+fn moved_reach(cx: &Cx, ranks: &Ranks, list: &[InstanceId]) -> Vec<InstanceId> {
+    let mut out = Vec::new();
+    for (_, objects) in walk::groups(cx, ranks, list) {
+        let stops = objects.iter().any(|&o| cx.is_true(o, cx.i.n.Active) && !cx.is(o, cx.i.c.TextBox));
+        out.extend(objects);
+        if stops {
+            break;
+        }
+    }
+    out
+}
+
+/// Whether an Active object other than a TextBox is under a finger: then neither a button nor the legacy Mouse gets
+/// Button1Down / Up (measured, P6d: a TextBox lets the legacy Mouse have them, an Active Frame or ScrollingFrame does not)
+fn blocks_legacy(cx: &Cx, list: &[InstanceId]) -> bool {
+    list.iter().any(|&o| cx.is_true(o, cx.i.n.Active) && !cx.is(o, cx.i.c.TextBox))
+}
+
+/// The GuiButton a finger's MouseButton1Down and MouseButton1Up go to (measured, P6d): ScreenGui by ScreenGui from the
+/// top, the first GuiButton under the point, also one below an Active object of its ScreenGui; a ScreenGui with an Active
+/// object other than a TextBox under the point and no button ends the search (a TextBox, or a ScrollingFrame that is not
+/// Active, does not)
+fn touch_button(cx: &Cx, ranks: &Ranks, list: &[InstanceId]) -> Option<InstanceId> {
+    for (_, objects) in walk::groups(cx, ranks, list) {
+        if let Some(&button) = objects.iter().find(|&&o| cx.is(o, cx.i.c.GuiButton)) {
+            return Some(button);
+        }
+        if objects.iter().any(|&o| cx.is_true(o, cx.i.n.Active) && !cx.is(o, cx.i.c.TextBox)) {
+            return None;
+        }
+    }
+    None
+}
+
+/// A touch event's point as the GuiObject events and the legacy Mouse report it: whole px, floored (measured, P6d: a
+/// touch at 99.6, 150.75 reports 99, 150 there while its InputObject keeps the fractions)
+fn event_point(x: f64, y: f64) -> Vec<Value> {
+    vec![Value::Number(x.floor()), Value::Number(y.floor())]
 }
 
 // Dragging, coasting and springing back
@@ -746,12 +869,14 @@ fn geometry(cx: &Cx, frame: InstanceId) -> Geometry {
     Geometry { max, window, allow: (direction != "Y" && max.0 > 0.0, direction != "X" && max.1 > 0.0), elastic }
 }
 
-/// The ScrollingFrame a finger coming down drags (P6c, measured): the outermost ScrollingFrame that can scroll among
-/// the topmost one under the finger and its ScrollingFrame ancestors. A frame inside a scrolling frame does not scroll by
-/// touch (its ancestor does, or nothing when the ancestor cannot scroll that way); one inside frames that cannot scroll
-/// does. None when another finger holds that frame or it is not ScrollingEnabled (a disabled ancestor still takes the
-/// finger, so the frame inside it does not scroll either).
-fn touch_frame(cx: &Cx, list: &[InstanceId]) -> Option<InstanceId> {
+/// The ScrollingFrame that holds a finger coming down, among the objects its touch reaches (P6c, P6d, measured): the
+/// outermost ScrollingFrame that can scroll among the topmost one and its ScrollingFrame ancestors, the one it drags. A
+/// frame inside a scrolling frame does not scroll by touch (its ancestor does, or nothing when the ancestor cannot scroll
+/// that way); one inside frames that cannot scroll does. When none can scroll, the topmost one holds the touch until the
+/// finger passes the slop (it keeps the touch from the objects below it meanwhile). None when another finger holds that
+/// frame or it is not ScrollingEnabled (a disabled ancestor still takes the finger, so the frame inside it does not scroll
+/// either).
+fn scroll_candidate(cx: &Cx, list: &[InstanceId]) -> Option<InstanceId> {
     let class = cx.i.c.ScrollingFrame;
     let topmost = list.iter().copied().find(|&o| cx.class_name_is(o, class))?;
     let mut chosen = None;
@@ -765,7 +890,8 @@ fn touch_frame(cx: &Cx, list: &[InstanceId]) -> Option<InstanceId> {
         }
         current = cx.engine.state.borrow().dom.get(id).and_then(|instance| instance.parent);
     }
-    chosen.filter(|&frame| cx.is_scroller(frame) && cx.frame_holder(frame).is_none())
+    let frame = chosen.unwrap_or(topmost);
+    (cx.is_scroller(frame) && cx.frame_holder(frame).is_none()).then_some(frame)
 }
 
 /// Whether a finger past the slop starts dragging `frame` (Some(true)), waits (Some(false)) or never scrolls it (None),

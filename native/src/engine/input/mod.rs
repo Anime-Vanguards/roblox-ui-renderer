@@ -1,6 +1,7 @@
 //! Input emulation (port of `runtime/input/init.luau`): hit-testing, GuiObject / GuiButton / TextBox
 //! / ScrollingFrame input and UserInputService / legacy Mouse state, following rules measured in
-//! Roblox Studio (notes/interaction.md, experiments in tools/interaction/).
+//! Roblox Studio (notes/interaction.md, experiments in tools/interaction/) and, where a 0.747 client
+//! differs, the client's (input across ScreenGuis: walk.rs).
 //!
 //!   install(engine)                once, from Engine.Start after the layout (lua::globals::start)
 //!   dispatch(lua, engine, &event)  one input event in logical viewport pixels (session.rs, story.rs
@@ -29,6 +30,7 @@ pub mod scrolling;
 pub mod textbox;
 mod touch;
 pub mod touch_buttons;
+mod walk;
 
 #[cfg(test)]
 mod tests;
@@ -756,8 +758,9 @@ impl Cx<'_> {
         let Some(legacy) = self.legacy_mouse()? else { return Ok(()) };
         let mouse = self.i.mouse.get();
         let inset = self.inset();
-        legacy.raw_set("X", mouse.x)?;
-        legacy.raw_set("Y", mouse.y - inset)?;
+        // (whole px, floored: a touch at fractions reports them floored, measured P6d)
+        legacy.raw_set("X", mouse.x.floor())?;
+        legacy.raw_set("Y", (mouse.y - inset).floor())?;
         let (width, height) = self.engine.options.profile.device.viewport();
         legacy.raw_set("ViewSizeX", width)?;
         legacy.raw_set("ViewSizeY", height - inset)?;

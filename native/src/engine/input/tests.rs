@@ -4805,3 +4805,148 @@ game:GetService("ContextActionService"):BindAction("Jump", function() end, true,
         }
     }
 }
+
+// P6d: stacked objects under a finger and under the mouse, and fractional touch points (data/studio/stacked-input.json:
+// the kit's case bodies and the client logs, replayed through the same prelude functions)
+
+const STACKED_PRELUDE: &str = r##"
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
+local Log = {}
+local function fmt(v)
+	local k = typeof(v)
+	if k == "Vector2" then
+		return string.format("(%g,%g)", v.X, v.Y)
+	elseif k == "number" then
+		return string.format("%g", v)
+	elseif k == "EnumItem" then
+		return v.Name
+	elseif k == "Instance" then
+		return v:GetFullName()
+	end
+	return tostring(v)
+end
+local function log(...)
+	local parts = {}
+	for i = 1, select("#", ...) do
+		local v = select(i, ...)
+		table.insert(parts, type(v) == "string" and v or fmt(v))
+	end
+	local line = table.concat(parts, " ")
+	if not (DROP and string.find(line, DROP, 1, true)) then
+		table.insert(Log, line)
+	end
+end
+local function frames(n)
+	for _ = 1, n or 1 do
+		StepDisplay(1 / 60)
+		Flush()
+	end
+	UpdateAll()
+end
+local function finish()
+	return Log
+end
+local VIM = {}
+function VIM:SendTouchEvent(id, state, x, y)
+	Dispatch({ type = if state == 0 then "down" elseif state == 2 then "up" else "move", x = x, y = y, button = 1, finger = id })
+end
+function VIM:SendMouseMoveEvent(x, y)
+	Dispatch({ type = "move", x = x, y = y })
+end
+function VIM:SendMouseButtonEvent(x, y, button, down)
+	Dispatch({ type = if down then "down" else "up", x = x, y = y, button = button + 1 })
+end
+local function touchAt(id, state, x, y)
+	VIM:SendTouchEvent(id, state, x, y)
+	frames(2)
+end
+local function mouseTo(x, y)
+	VIM:SendMouseMoveEvent(x, y, game)
+	frames(2)
+end
+local function mouseButton(down, x, y)
+	VIM:SendMouseButtonEvent(x, y, 0, down, game, 0)
+	frames(2)
+end
+"##;
+
+/// Runs case `name` of data/studio/stacked-input.json in a fresh 800 x 600 client of its device and compares its log with
+/// the client's line by line: the first difference, with the lines around it, is the error.
+fn stacked_case(name: &str) -> Result<(), String> {
+    let data: Json = serde_json::from_str(include_str!("../../../../data/studio/stacked-input.json")).expect("stacked-input.json");
+    let case = &data[name];
+    let device = (case["device"] == "touch").then_some(roblox_engine_emulator::client_profile::DeviceKind::Touch);
+    let (lua, engine) = start_with(800.0, 600.0, "play", device);
+    let drop = case["drop"].as_str().map_or("nil".to_string(), |d| format!("{d:?}"));
+    let source = format!("local DROP = {drop}\n{STACKED_PRELUDE}\nResult = (function()\n{}\nend)()\n", case["body"].as_str().expect("body"));
+    let script = {
+        let mut state = engine.state.borrow_mut();
+        let class = engine.reflection.class_id("ModuleScript").unwrap();
+        crate::engine::instance::create_named(&mut state, &engine.reflection, class, "Test")
+    };
+    let env = engine_lua::modules::environment(&lua, &engine, script).expect("environment");
+    hooks(&lua, &engine, &env).expect("hooks");
+    let function = lua.load(source).set_name("=Test").set_environment(env.clone()).into_function().expect("compile");
+    let call = engine_lua::globals::call(&lua, &engine, function, LuaMultiValue::new()).expect("call");
+    if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+        panic!("{name}: script failed: {message}");
+    }
+    // (Activated's click count is left out: the kit logs it as n (above 0) or 0, and a 0.747 client counted the first
+    // activation of a new button above 0; the count is not part of what these cases measure)
+    let count = |line: String| match line.contains(".Activated ") && (line.ends_with(" n") || line.ends_with(" 0")) {
+        true => line[..line.len() - 2].to_string(),
+        false => line,
+    };
+    let got: Vec<String> = env.raw_get::<LuaTable>("Result").expect("Result").sequence_values::<String>().map(|l| count(l.unwrap())).collect();
+    let client: Vec<String> = case["client"].as_array().unwrap().iter().map(|l| count(l.as_str().unwrap().to_string())).collect();
+    if let Ok(dir) = std::env::var("STACKED_INPUT_DUMP") {
+        let _ = std::fs::write(std::path::Path::new(&dir).join(format!("{name}.txt")), got.join("\n"));
+    }
+    if let Some(line) = (0..got.len().max(client.len())).find(|&i| got.get(i) != client.get(i)) {
+        let from = line.saturating_sub(6);
+        let context = |log: &[String]| log[from.min(log.len())..(line + 4).min(log.len())].join("\n");
+        return Err(format!("{name}: line {} differs\n--- rur:\n{}\n--- client:\n{}", line + 1, context(&got), context(&client)));
+    }
+    Ok(())
+}
+
+/// Runs the cases and fails with each failing case's first difference
+fn stacked_cases(names: &[&str]) {
+    let failures: Vec<String> = names.iter().filter_map(|name| stacked_case(name).err()).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+/// A finger over a top object T and a bottom object F (a Frame) or B (a TextButton), in one ScreenGui, F's in a lower
+/// ScreenGui or T a child of F, for 15 kinds of T (Active or not: buttons, frames, labels, images, TextBoxes,
+/// ScrollingFrames, a CanvasGroup, a non-interactable and a transparent Active frame): which of them get each event.
+#[test]
+fn stacked_touch_input_matches_a_client() {
+    stacked_cases(&["stack2_same", "stack2_lower", "stack2_nested"]);
+}
+
+/// A finger across ScreenGuis: hover a lower ScreenGui keeps while an upper one sinks the touch, three ScreenGuis, two
+/// Active objects in one, a label above the Active object, an Active ancestor, Active changed during a touch,
+/// DisplayOrder, Global ZIndex and two fingers.
+#[test]
+fn touch_across_screen_guis_matches_a_client() {
+    stacked_cases(&["stack3"]);
+}
+
+/// A ScrollingFrame over stacked objects keeps the touch from them until the finger passes the slop or the release; the
+/// legacy Mouse, a TextBox's focus and UserInputService's touch signals with a button below.
+#[test]
+fn touch_on_scrolling_frames_and_text_boxes_matches_a_client() {
+    stacked_cases(&["stack4"]);
+}
+
+/// Touches at fractional points: InputObject Position and Delta, GetMouseLocation and hit-testing keep the fractions, the
+/// GuiObject events' arguments and the legacy Mouse floor them, a ScrollingFrame follows fractional steps.
+#[test]
+fn fractional_touch_points_match_a_client() {
+    stacked_cases(&["frac"]);
+}
