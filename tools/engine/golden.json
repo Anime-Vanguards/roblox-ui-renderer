@@ -1220,6 +1220,14 @@
 			"digest": "540a2dff96a0fa175d00438a2628d289b8f3a39f979ea176d29b31cd3ba3529f",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-synth-rotated": {
+			"digest": "d771b59c61bd45dce931d2716f7d9e24be3698e752895c7f7b345154f5608033",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-synth-rotated@quarter": {
+			"digest": "a8f01dec8c6e78cd8dd90fa64ebb18b93acfc29c04742f8dc39c289a6b668d79",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-synth@quarter": {
 			"digest": "d0038986a3065c6982814da24d7570aa1435ee5bd50be49e7c4a9669e8b78085",
 			"status": "ok"
@@ -2536,6 +2544,14 @@
 			"digest": "613a03f26399fa895d740ad3f3bb29b674146aa3fb70a5bec97cfb766fb3b166",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-synth-rotated": {
+			"digest": "952768eb9c42e8cd2239da48afe60fc2570b4402d0ace9063f0c40547214f61e",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-synth-rotated@quarter": {
+			"digest": "e06e62bc6c4cda3a68fdb5b41234a22f931406711b7a26d7da901063584296a8",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-synth@quarter": {
 			"digest": "e9c37b395a21592a2e45ca065a11fe227f82bbdfc8110473c371f0e2aeab40e5",
 			"status": "ok"
@@ -3580,6 +3596,10 @@
 			"digest": "bb701ffe4643dbf579624dfad93fb3cebbf67dd193ce949af69747e4549943bc",
 			"status": "ok"
 		},
+		"fixtures/play/text-probe-synth-rotated": {
+			"digest": "48051d021be62d83b61db1b485843f4e72d454a165950f93184c76c7629547dd",
+			"status": "ok"
+		},
 		"fixtures/play/text-probe-synthscaled": {
 			"digest": "77273b978eff11c7ff0197684f33907b4317d0d06f5183f053eb7827c0003637",
 			"status": "ok"
@@ -3869,7 +3889,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-26T23:40:53.991Z",
+	"recorded": "2026-11-27T00:12:21.234Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

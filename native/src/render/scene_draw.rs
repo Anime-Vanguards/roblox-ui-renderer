@@ -8,6 +8,11 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 pub type DrawError = anyhow::Error;
 use std::time::Instant;
+
+/// A transform followed by a text quad's shear (TextQuad::shear: local x moved by skew x (pivot - y))
+fn sheared(m: Transform, [skew, pivot]: [f64; 2]) -> Transform {
+    multiply(m, [1., 0., -skew, 1., skew * pivot, 0.])
+}
 /// Per-prepare CPU timings. Categories are exclusive; upload_ms is a nested diagnostic
 /// included in the drawing category that requested the upload. Counts describe actual work.
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -2802,6 +2807,9 @@ impl DrawPreparer {
             if q.translation_only {
                 m = [1., 0., 0., 1., m[4], m[5]];
             }
+            if let Some(shear) = q.shear {
+                m = sheared(m, shear);
+            }
             let clip = text_clip_rect(node, ctx.origin, self.scale);
             let qr = Rect::new(q.x, q.y, q.w, q.h);
             let selection: Vec<_> = q
@@ -2877,6 +2885,9 @@ impl DrawPreparer {
                 let mut m = node_transform(node, ctx.origin, self.scale);
                 m[4] += by[0];
                 m[5] += by[1];
+                if let Some(shear) = q.shear {
+                    m = sheared(m, shear);
+                }
                 let clip = text_clip_rect(node, ctx.origin, self.scale);
                 let qr = Rect::new(q.x, q.y, q.w, q.h);
                 if m == [1., 0., 0., 1., m[4], m[5]] && q.opacity == 1. && q.w == q.width as f64 && q.h == q.height as f64 {

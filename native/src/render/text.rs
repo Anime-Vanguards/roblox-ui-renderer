@@ -21,6 +21,9 @@ pub struct TextQuad {
     pub selection_mode: u8,
     /// Device-local [left, top, right, bottom]; add node translation only, like buildTextEditing.
     pub selection_rects: Vec<[f64; 4]>,
+    /// A synthetic italic glyph under a rotation, [skew, pivot]: the image's local (x, y) is drawn at
+    /// (x + skew x (pivot - y), y) before the node's transform, so the glyph is resampled once (`rotated`)
+    pub shear: Option<[f64; 2]>,
 }
 
 #[derive(Debug)]
@@ -734,7 +737,11 @@ fn placed_quad(
         let r = corner(p.x + offset[0] + (left as f64 + w as f64 + 1.0) * s - lean);
         (l, [l, bounds[1], r, bounds[3]])
     } else {
-        let lean = italic_lean(skew, bounds[3] - (p.baseline + offset[1]));
+        // Rotated text leans by the exact skew (fixtures/text-probe-synth-rotated.luau, whole-pixel TextSize 36 and 30 at
+        // -13 to 45 degrees: every glyph's centroid within 0.05 px of the client's, where the whole lean put them 0.2 to
+        // 0.5 px off by their depth)
+        let depth = bounds[3] - (p.baseline + offset[1]);
+        let lean = if p.unsnapped { skew * depth } else { italic_lean(skew, depth) };
         (x - lean, [bounds[0] - lean, bounds[1], bounds[2] - lean, bounds[3]])
     };
     Quad {
@@ -962,6 +969,7 @@ fn image(
     }
 }
 fn composite(quads: &[Quad]) -> Result<Vec<TextQuad>, TextError> {
+        shear: None,
     let Some(layout) = composite_layout(quads)? else {
         return Ok(Vec::new());
     };
@@ -1168,9 +1176,8 @@ fn rotated(quads: &[Quad], matrix: Option<[f64; 6]>) -> Vec<TextQuad> {
             if let (Some(m), true) = (matrix, q.shade.is_some()) {
                 return rotated_shaded(q, m);
             }
-            if q.skew != 0.0 {
-                // Synthetic italic under a rotation: the skewed coverage resampled over its cover box, so the
-                // image is resampled twice (skewing the draw's transform instead would resample it once)
+            if q.skew != 0.0 && matrix.is_none() {
+                // Synthetic italic without a matrix to skew: the skewed coverage resampled over its cover box
                 let cover = q.cover();
                 let width = (cover[2] - cover[0]) as usize;
                 let height = (cover[3] - cover[1]) as usize;
@@ -1245,7 +1252,7 @@ fn rotated(quads: &[Quad], matrix: Option<[f64; 6]>) -> Vec<TextQuad> {
                     q.y + q.h as f64 + 1.0,
                 ]
             };
-            Some(image(
+            let mut quad = image(
                 x,
                 y,
                 r - x,
@@ -1258,7 +1265,16 @@ fn rotated(quads: &[Quad], matrix: Option<[f64; 6]>) -> Vec<TextQuad> {
                 } else {
                     q.alpha / 255.0
                 },
-            ))
+            );
+            // Synthetic italic under a rotation: the upright bitmap drawn under the skew and the rotation, resampled
+            // once. Measured (sim client 0.747, 1.5x, fixtures/text-probe-synth-rotated.luau at -13 to 45 degrees):
+            // the client's stems lean as the skew says (an "I" at -13 degrees within 0.3 degrees of upright on the
+            // screen) and stay as sharp as a rotated upright glyph, where resampling the skewed coverage again
+            // widened every glyph until neighbours touched (49,594 px)
+            if q.skew != 0.0 {
+                quad.shear = Some([q.skew, q.bounds[3] + q.pivot]);
+            }
+            Some(quad)
         })
         .collect()
 }
@@ -1512,6 +1528,7 @@ pub(crate) fn layer_quad(layout: TextLayout, rgba: Arc<[u8]>) -> TextQuad {
     }
 }
 fn moved(layout: TextLayout, by: [f64; 2]) -> TextLayout {
+        shear: None,
     TextLayout {
         x: layout.x + by[0],
         y: layout.y + by[1],
@@ -2651,6 +2668,44 @@ mod tests {
     #[test]
     fn a_line_stands_on_the_baseline_of_the_label_face() {
         let own = serde_json::json!({"unitsPerEm": 1000, "ascender": 974, "descender": -236, "lineGap": 0});
+    /// A rotated synthetic italic glyph is its upright padded bitmap drawn under the skew and the rotation (resampled
+    /// once, TextQuad::shear), leaning by the exact skew x its depth below the baseline; an unrotated one leans by whole
+    /// px (fixtures/text-probe-synth-rotated.luau, text-probe-synth.luau)
+    #[test]
+    fn a_rotated_synthetic_italic_glyph_is_skewed_by_its_draw_transform() {
+        let placement = |unsnapped: bool| super::Placement {
+            font: 0,
+            glyph: 0,
+            ppem: 22.0,
+            run: None,
+            bold: 0,
+            italic: true,
+            scale: 1.0,
+            unsnapped,
+            shown: true,
+            quarter: None,
+            x: 100.0,
+            exact: None,
+            copies: None,
+            baseline: 50.0,
+        };
+        let bitmap = || super::GlyphBitmap { coverage: vec![255; 10 * 18].into(), w: 10, h: 18, left: 1, top: 10, slanted: false, layers: Vec::new() };
+        let quad = |p: &super::Placement| super::placed_quad(p, bitmap(), [0.0, 0.0], [255.0; 3], 255.0, &serde_json::Value::Null, [0.0; 4], 1.5);
+        // a descender 9 padded px below the baseline: 1.98 px of lean, 2 whole px unrotated
+        let upright = quad(&placement(false));
+        assert_eq!(upright.bounds, [98.0, 39.0, 110.0, 59.0]);
+        let turned = quad(&placement(true));
+        let lean = super::TEXT_ITALIC_SKEW * 9.0;
+        assert!((turned.bounds[0] - (100.0 - lean)).abs() < 1e-9 && (turned.x - (101.0 - lean)).abs() < 1e-9, "{:?}", turned.bounds);
+        let m = [0.9, 0.4, -0.4, 0.9, 3.0, 7.0];
+        let images = super::rotated(&[turned.clone()], Some(m));
+        assert_eq!((images[0].width, images[0].height), (12, 20), "the padded bitmap, not a skewed cover box");
+        assert_eq!(images[0].shear, Some([super::TEXT_ITALIC_SKEW, turned.bounds[3]]));
+        // without a matrix to skew, the skewed coverage resampled over its cover box (12 px + ceil(skew x 20))
+        let images = super::rotated(&[turned], None);
+        assert_eq!((images[0].width, images[0].height, images[0].shear), (17, 20, None));
+    }
+
         let emoji = serde_json::json!({"unitsPerEm": 2048, "ascender": 1900, "descender": -500, "lineGap": 0});
         let text = serde_json::json!({"face": own, "runs": [{"metrics": emoji}, {}]});
         // A fallback glyph of a plain line: the label face's metrics at the glyph's pixel size
