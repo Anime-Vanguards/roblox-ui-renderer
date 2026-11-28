@@ -2777,10 +2777,15 @@ pub fn build(engine: &Rc<Engine>, roots: &[InstanceId], _records: &Records, extr
 }
 
 /// The scene header's `viewport`.
+/// With `--glyph-scale` the engine lays out at the glyph scale (`glyphScale`) and the picture is drawn at `scale`
+/// (cli.rs `draw_scale`).
 pub(crate) fn viewport_json(engine: &Engine) -> Json {
     let options = &engine.options;
     let (width, height) = options.profile.device.viewport();
-    json!({ "width": number(width), "height": number(height), "scale": number(options.pixel_scale) })
+    match engine.gui().draw_scale.get() {
+        Some(scale) => json!({ "width": number(width), "height": number(height), "scale": number(scale), "glyphScale": number(options.pixel_scale) }),
+        None => json!({ "width": number(width), "height": number(height), "scale": number(options.pixel_scale) }),
+    }
 }
 
 #[cfg(test)]

@@ -54,6 +54,9 @@ pub struct Gui {
     pub layer_order: RefCell<layers::LayerOrder>,
     /// Where the parents of Path2Ds were at the last frame's layout (`path2d_layout::install`)
     pub path_frames: RefCell<path2d_layout::Frames>,
+    /// With `--glyph-scale` (the engine then lays out at that scale): the device scale the picture is drawn at
+    /// (`--scale`), the scene header's `viewport.scale` beside its `glyphScale` (export.rs viewport_json); None without
+    pub draw_scale: std::cell::Cell<Option<f64>>,
 }
 
 impl Extension for Gui {

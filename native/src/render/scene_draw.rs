@@ -10,8 +10,40 @@ pub type DrawError = anyhow::Error;
 use std::time::Instant;
 
 /// A transform followed by a text quad's shear (TextQuad::shear: local x moved by skew x (pivot - y))
+#[cfg(test)]
+mod magnified_tests {
+    /// A text layer made at the glyph scale is drawn k times as large, its selection and synthetic-italic pivot with it
+    #[test]
+    fn a_magnified_layer_keeps_its_texels() {
+        let mut q = super::super::text::layer_quad(super::super::text::TextLayout { x: 2.0, y: 3.0, w: 10.0, h: 5.0, width: 10, height: 5 }, std::sync::Arc::from(vec![0u8; 200]));
+        q.selection_rects = vec![[1.0, 1.0, 4.0, 2.0]];
+        q.shear = Some([0.25, 7.0]);
+        let big = super::magnified(q.clone(), 6.0);
+        assert_eq!((big.x, big.y, big.w, big.h, big.width, big.height), (12.0, 18.0, 60.0, 30.0, 10, 5));
+        assert_eq!(big.selection_rects, vec![[6.0, 6.0, 24.0, 12.0]]);
+        assert_eq!(big.shear, Some([0.25, 42.0]));
+        let same = super::magnified(q, 1.0);
+        assert_eq!((same.x, same.w, same.width), (2.0, 10.0, 10));
+    }
+}
 fn sheared(m: Transform, [skew, pivot]: [f64; 2]) -> Transform {
     multiply(m, [1., 0., -skew, 1., skew * pivot, 0.])
+}
+/// A text layer made at the text's scale, drawn `k` times as large (`--glyph-scale`: its image magnified, sampled
+/// bilinearly by the resampled-quad path); itself when `k` is 1
+fn magnified(mut q: super::text::TextQuad, k: f64) -> super::text::TextQuad {
+    if k == 1. {
+        return q;
+    }
+    q.x *= k;
+    q.y *= k;
+    q.w *= k;
+    q.h *= k;
+    for rect in &mut q.selection_rects {
+        *rect = rect.map(|v| v * k);
+    }
+    q.shear = q.shear.map(|[skew, pivot]| [skew, pivot * k]);
+    q
 }
 /// Per-prepare CPU timings. Categories are exclusive; upload_ms is a nested diagnostic
 /// included in the drawing category that requested the upload. Counts describe actual work.
@@ -603,6 +635,9 @@ pub struct DrawPreparer {
     pub(crate) stats: DrawStats,
     pub(crate) packet: RenderPacket,
     pub(crate) scale: f64,
+    /// The scale the scene's text is laid out and rasterized at (scene.rs Viewport::glyph_scale): its text layers are
+    /// drawn magnified by scale / text_scale
+    pub(crate) text_scale: f64,
     next_id: u64,
     pub(crate) frame: u64,
     textures: FxHashMap<u64, Vec<CachedTexture>>,
@@ -764,6 +799,7 @@ impl DrawPreparer {
             stats: DrawStats::default(),
             packet: RenderPacket::default(),
             scale: 1.,
+            text_scale: 1.,
             next_id: 1,
             frame: 0,
             textures: FxHashMap::default(),
@@ -923,8 +959,9 @@ impl DrawPreparer {
         // The previous scene lives until this frame is prepared (drawn_before holds its nodes' addresses),
         // then its own nodes are freed off this thread
         let previous_scene = last;
-        let scale_same = self.scale == view.scale;
+        let scale_same = self.scale == view.scale && self.text_scale == view.glyph_scale;
         self.scale = view.scale;
+        self.text_scale = view.glyph_scale;
         self.frame += 1;
         let assets_changed = self
             .node_cache
@@ -1582,6 +1619,7 @@ impl DrawPreparer {
                     origin: ctx.origin,
                     target_size: [ctx.width, ctx.height],
                     scale: self.scale,
+                    text_scale: self.text_scale,
                     in_group: skip_group == Some(id as u64),
                     opaque: false,
                     part: super::node_records::NodePart::All,
@@ -1668,6 +1706,7 @@ impl DrawPreparer {
             origin: ctx.origin,
             target_size: [ctx.width, ctx.height],
             scale: self.scale,
+            text_scale: self.text_scale,
             in_group,
             opaque: false,
             part,
@@ -2930,7 +2969,9 @@ impl DrawPreparer {
         let (hits, node_hits, misses) =
             (self.text_cache.hits, self.text_cache.node_hits, self.text_cache.misses);
         use super::text::TextPlan;
-        let plan = match self.text_cache.plan(node, scene.fonts(), assets, self.scale) {
+        // Text laid out at another scale (`--glyph-scale`) is drawn from its layers at that scale, magnified
+        let k = self.scale / self.text_scale;
+        let plan = match self.text_cache.plan(node, scene.fonts(), assets, self.text_scale) {
             Ok(plan) => plan,
             Err(_) if assets.pending_count() > 0 => TextPlan::Layers(Vec::new()),
             Err(e) => return Err(e.into()),
@@ -2944,24 +2985,24 @@ impl DrawPreparer {
                 .map(|q| {
                     // A cached layer is one shared allocation: its texture is found without hashing it
                     let id = self.upload_shared(q.width, q.height, &q.rgba);
-                    (q, id)
+                    (magnified(q, k), id)
                 })
                 .collect(),
             TextPlan::Composite { layout, pixels, store } => {
                 // Drawn as layer() below (an unrotated text layer): not composited when that record
                 // would be dropped (the cache keeps its quads for when it is drawn)
                 let m = node_transform(node, ctx.origin, self.scale);
-                let at = Rect::new(layout.x, layout.y, layout.w, layout.h).translated(m[4], m[5]);
+                let at = Rect::new(layout.x * k, layout.y * k, layout.w * k, layout.h * k).translated(m[4], m[5]);
                 if m[..4] == [1., 0., 0., 1.]
-                    && layout.w == layout.width as f64
-                    && layout.h == layout.height as f64
+                    && layout.w * k == layout.width as f64
+                    && layout.h * k == layout.height as f64
                     && Self::culled(ctx, at.bounds(), text_clip_rect(node, ctx.origin, self.scale))
                 {
                     self.text_cache.defer(store, pixels);
                     Vec::new()
                 } else {
                     let id = self.queue_text(layout, pixels, store);
-                    vec![(super::text::layer_quad(layout, NO_SOURCE.with(|s| s.clone())), id)]
+                    vec![(magnified(super::text::layer_quad(layout, NO_SOURCE.with(|s| s.clone())), k), id)]
                 }
             }
         };
@@ -3037,8 +3078,9 @@ impl DrawPreparer {
             let opacity = (1. - number(&shadow["transparency"], 0.)).clamp(0., 1.);
             // The glow's half-width W in device px: 3 x BlurRadius / the device scale, whatever a UIScale does
             // (2 x BlurRadius at 1.5x, 3 x at 1x: shadow-probe-text2 / -text3 at both scales, notes/images.md)
-            let width = 3. * number(&shadow["blur"], 0.).max(0.) / self.scale;
-            let quads = match super::text::text_shadow(node, scene.fonts(), assets, self.scale, rgb, opacity, width) {
+            let width = 3. * number(&shadow["blur"], 0.).max(0.) / self.text_scale;
+            let k = self.scale / self.text_scale;
+            let quads = match super::text::text_shadow(node, scene.fonts(), assets, self.text_scale, rgb, opacity, width) {
                 Ok(quads) => quads,
                 Err(_) if assets.pending_count() > 0 => Vec::new(),
                 Err(e) => return Err(e.into()),
@@ -3046,6 +3088,7 @@ impl DrawPreparer {
             let by = [component(&shadow["offset"], 0, 0.).trunc(), component(&shadow["offset"], 1, 0.).trunc()];
             for q in quads {
                 let id = self.upload_shared(q.width, q.height, &q.rgba);
+                let q = magnified(q, k);
                 let mut m = node_transform(node, ctx.origin, self.scale);
                 m[4] += by[0];
                 m[5] += by[1];

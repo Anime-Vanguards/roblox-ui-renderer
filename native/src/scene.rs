@@ -9,6 +9,9 @@ pub struct Viewport {
     pub width: f64,
     pub height: f64,
     pub scale: f64,
+    /// The device scale the scene's text was laid out and its glyphs rasterized at (`glyphScale`, `--glyph-scale`);
+    /// `scale` when the scene has none. Its text is drawn at that scale and magnified to `scale`.
+    pub glyph_scale: f64,
 }
 
 impl Default for Viewport {
@@ -17,6 +20,7 @@ impl Default for Viewport {
             width: 1200.0,
             height: 900.0,
             scale: 1.5,
+            glyph_scale: 1.5,
         }
     }
 }
@@ -149,10 +153,12 @@ impl SceneStore {
                 .filter(|n| n.is_finite() && *n > 0.0)
                 .unwrap_or(fallback)
         };
+        let scale = positive("scale", d.scale);
         Viewport {
             width: positive("width", d.width),
             height: positive("height", d.height),
-            scale: positive("scale", d.scale),
+            scale,
+            glyph_scale: positive("glyphScale", scale),
         }
     }
 
@@ -476,6 +482,18 @@ impl SceneStore {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// `glyphScale` (`--glyph-scale`): the scale the scene's text was laid out at; without it, the device scale
+    #[test]
+    fn the_viewport_reads_its_glyph_scale() {
+        let mut scene = SceneStore::default();
+        scene.apply(&json!({"viewport":{"width":64,"height":40,"scale":12,"glyphScale":1},"nodes":[],"layers":[],"fonts":[],"images":[]})).unwrap();
+        assert_eq!(scene.viewport(), Viewport { width: 64.0, height: 40.0, scale: 12.0, glyph_scale: 1.0 });
+        scene.apply(&json!({"viewport":{"width":64,"height":40,"scale":3},"nodes":[],"layers":[],"fonts":[],"images":[]})).unwrap();
+        assert_eq!(scene.viewport().glyph_scale, 3.0);
+        scene.apply(&json!({"viewport":{"width":64,"height":40,"scale":3,"glyphScale":-1},"nodes":[],"layers":[],"fonts":[],"images":[]})).unwrap();
+        assert_eq!(scene.viewport().glyph_scale, 3.0);
+    }
 
     #[test]
     fn node_patches_merge_changed_keys_and_unset_removed_ones() {

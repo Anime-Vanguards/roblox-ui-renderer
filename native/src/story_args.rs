@@ -486,8 +486,8 @@ impl Context {
             let inline = value.trim().starts_with('{') || value == "1" || value == "0";
             result.extend(["--plugin".to_string(), if inline { value } else { self.resolve(&value).display().to_string() }]);
         }
-        const KEYS: [&str; 19] = [
-            "--story", "--module", "--model", "--fixture", "--viewport", "--scale", "--time", "--mode", "--player", "--background", "--place-name",
+        const KEYS: [&str; 20] = [
+            "--story", "--module", "--model", "--fixture", "--viewport", "--scale", "--glyph-scale", "--time", "--mode", "--player", "--background", "--place-name",
             "--snapshot-dir", "--actions", "--controls", "--camera", "--place-id", "--rotation-clipping", "--topbar-inset", "--device",
         ];
         for key in KEYS {

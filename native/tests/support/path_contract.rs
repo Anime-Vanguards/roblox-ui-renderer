@@ -188,7 +188,7 @@ const REVIEWED_PARSERS: &[(Crate, &str, &str, u64)] = &[
         Crate::Native,
         "src/engine/cli.rs",
         "pub fn parse(",
-        0xb3768be13cd45506,
+        0x4a67882a0a6830a1,
     ),
     (
         Crate::Native,
@@ -542,6 +542,7 @@ const NON_PATH_OPTIONS: &[&str] = &[
     "--from",
     "--frozen",
     "--git-ref",
+    "--glyph-scale",
     "--headless",
     "--help",
     "--idle",

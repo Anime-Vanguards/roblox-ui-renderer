@@ -508,7 +508,12 @@ pub(crate) fn text_glyph_style(join: Option<&str>, bold: f64, quarter: Option<u8
 /// skipped (the Python rasterizer rejects them).
 pub fn atlas_entries(scene: &Value) -> Vec<AtlasEntry> {
     let fonts = as_array(scene.get("fonts"));
-    let scale = to_number(scene.get("viewport").and_then(|viewport| viewport.get("scale")));
+    // (the scale the text was laid out at: `glyphScale` with `--glyph-scale`, else the device scale)
+    let viewport = scene.get("viewport");
+    let scale = match viewport.and_then(|viewport| viewport.get("glyphScale")).and_then(Value::as_f64) {
+        Some(glyph_scale) if glyph_scale.is_finite() && glyph_scale > 0.0 => glyph_scale,
+        _ => to_number(viewport.and_then(|viewport| viewport.get("scale"))),
+    };
     let mut entries: Vec<AtlasEntry> = Vec::new();
     let mut positions: HashMap<String, usize> = HashMap::new();
     let mut want = |entry: AtlasEntry| {

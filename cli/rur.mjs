@@ -72,6 +72,8 @@
 // from below it, as in a Roblox client. --run-context loopback --server-harness <file> [--latency <frames>] (with
 // --mode play): the story is the client of a server and client in one run (the engine's "Loopback run context"); the
 // server mounts the project and runs the harness's Server, and the client's DataModel is the server's replicated copy.
+// --glyph-scale <r>: the GUI is laid out and its text rasterized at r device px per GUI px, and the picture drawn at
+// --scale with the text magnified from those rasters, as a Roblox client draws a SurfaceGui (r = 1: its canvas pixels).
 // --viewport WxH (logical px), WxH@physical (divided by --scale) or --viewport-from <png> (its size,
 // physical px). --plugin [settings JSON]: a Studio `plugin` global with dock widgets. --json: stdout
 // holds only the JSON result (one line). --tag <name> (<out>/<name>/), --keep (numbered <out>-2, ...
@@ -223,7 +225,7 @@ export function runtimeArgs(args, scenePath = null, project = null) {
 		const value = args.plugin === true ? "1" : String(args.plugin);
 		result.push("--plugin", value.trim().startsWith("{") || value === "1" || value === "0" ? value : path.resolve(value));
 	}
-	for (const key of ["story", "module", "model", "fixture", "viewport", "scale", "time", "mode", "player", "background", "place-name", "snapshot-dir", "actions", "controls", "camera", "place-id", "rotation-clipping", "topbar-inset", "device", "run-context", "server-harness", "latency"]) {
+	for (const key of ["story", "module", "model", "fixture", "viewport", "scale", "glyph-scale", "time", "mode", "player", "background", "place-name", "snapshot-dir", "actions", "controls", "camera", "place-id", "rotation-clipping", "topbar-inset", "device", "run-context", "server-harness", "latency"]) {
 		if (args[key] !== undefined && args[key] !== true) {
 			// --actions / --controls: a JSON file or inline JSON
 			const inline = key === "actions" ? "[" : "{";

@@ -96,6 +96,11 @@ pub struct Args {
     pub server_harness: Option<String>,
     /// `--latency <frames>` with `--run-context loopback`: each way's delivery that many frames on (1: the next frame)
     pub latency: Option<u32>,
+    /// `--glyph-scale r`: the GUI is laid out and its text rasterized at r device px per GUI px, and the picture drawn
+    /// at `--scale` with the text magnified from those rasters, as a client draws a SurfaceGui (laid out at one
+    /// texel per canvas px; notes/text.md "Text on a SurfaceGui in a client"). The scene header then carries
+    /// `glyphScale` beside `scale` (export.rs viewport_json). None: everything at `--scale`
+    pub glyph_scale: Option<f64>,
     /// The first argument [`parse`] did not know (a misspelt option, or a value with no option); the
     /// commands people type refuse it ([`parse_command`]), the service and batch requests the CLI
     /// builds skip it
@@ -203,6 +208,13 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             "--all-layers" => result.all_layers = need()? != "0",
             "--load" => result.loads.push(need()?),
             "--topbar-inset" => result.topbar_inset = Some(number(need()?)?.max(0.0)),
+            "--glyph-scale" => {
+                let scale = number(need()?)?;
+                if !(scale.is_finite() && scale > 0.0) {
+                    return Err(format!("--glyph-scale: expected a number above 0, got {scale}"));
+                }
+                result.glyph_scale = Some(scale);
+            }
             // (the Node CLI's engine arguments start with the command's name: cli/engine.mjs engineBaseArgs)
             "engine" if index == 0 => {}
             _ => {
@@ -691,6 +703,10 @@ fn install_test_hooks(lua: &Lua, engine: &Rc<Engine>) -> LuaResult<()> {
 /// default repo).
 pub fn prepare(args: &Args) -> Result<Prepared, String> {
     let mut engine = args.engine.clone();
+    // (`--glyph-scale`: the engine lays out at the glyph scale; the picture keeps `--scale`, `draw_scale`)
+    if let Some(glyph_scale) = args.glyph_scale {
+        engine.scale = Some(glyph_scale);
+    }
     let (width, height) = engine.viewport.unwrap_or((1920.0, 1080.0));
     engine.viewport = Some((width + 2.0 * args.margin, height + 2.0 * args.margin));
     #[cfg(feature = "desktop")]
@@ -701,6 +717,11 @@ pub fn prepare(args: &Args) -> Result<Prepared, String> {
         options.profile.device.topbar_inset = Some(inset);
     }
     Ok(Prepared { options, roots: prepared.roots, snapshot_dir: prepared.snapshot_dir, target: (width, height), mounts: prepared.mounts })
+}
+
+/// The device scale a run of `args` draws its picture at when it lays out at another (`--glyph-scale`): `--scale`
+pub fn draw_scale(args: &Args) -> Option<f64> {
+    args.glyph_scale.map(|_| args.engine.scale.filter(|scale| *scale != 0.0 && !scale.is_nan()).unwrap_or(1.5))
 }
 
 /// The story source of `args`
@@ -739,6 +760,8 @@ fn mount_story(
     source: Option<&story::Source>,
     target: (f64, f64),
 ) -> Result<story::Story, String> {
+    // (every run mounts here, a kept or preloaded VM's too: the draw scale is the run's own)
+    super::GuiEngine::gui(&**engine).draw_scale.set(draw_scale(args));
     // --controls (inline JSON or a JSON file): applied to the story's control sources before it mounts
     let controls = match &args.controls {
         Some(spec) => {
@@ -2476,6 +2499,50 @@ end
             .map(|line| line["glyphs"].as_array().map_or(0, Vec::len))
             .sum();
         assert!(glyphs > 0, "the label draws its text: {}", output.text);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// `--glyph-scale`: the GUI is laid out and its text rasterized at the glyph scale, the picture drawn at `--scale`
+    /// (a 0.747 client draws a SurfaceGui's text so, from one texel per canvas pixel: notes/text.md "Text on a
+    /// SurfaceGui in a client"). The scene's text is the text of a run at the glyph scale; its header names both scales.
+    #[test]
+    fn a_glyph_scale_lays_text_out_at_that_scale() {
+        let directory = std::env::temp_dir().join(format!("rur-glyph-scale-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let fixture = directory.join("labels.luau");
+        std::fs::write(&fixture, r#"return function(Target)
+	for Index, Size in { 4, 7, 12 } do
+		local L = Instance.new("TextLabel")
+		L.Name = `T{Size}`
+		L.Position = UDim2.fromOffset(2, Index * 16)
+		L.Size = UDim2.fromOffset(60, Size + 1)
+		L.TextSize = Size
+		L.Font = Enum.Font.SourceSans
+		L.TextXAlignment = Enum.TextXAlignment.Right
+		L.Text = "HIl|Ag wide"
+		L.Parent = Target
+	end
+end
+"#).unwrap();
+        let fonts = own_fonts(&directory, &crate::engine::default_repo());
+        let text = |output: &SceneOutput| -> Vec<Json> {
+            output.scene["nodes"].as_array().unwrap().iter().filter(|node| node["text"].is_object()).map(|node| node["text"].clone()).collect()
+        };
+        let scaled = run_once_with_fonts(&args(&fixture, &["--scale", "6", "--glyph-scale", "1"]), &fonts).unwrap();
+        let at_one = run_once_with_fonts(&args(&fixture, &["--scale", "1"]), &fonts).unwrap();
+        let at_six = run_once_with_fonts(&args(&fixture, &["--scale", "6"]), &fonts).unwrap();
+        assert_eq!(scaled.scene["viewport"], json!({"width": 300, "height": 240, "scale": 6, "glyphScale": 1}));
+        assert_eq!(at_six.scene["viewport"], json!({"width": 300, "height": 240, "scale": 6}));
+        assert_eq!(text(&scaled).len(), 3);
+        assert_eq!(text(&scaled), text(&at_one));
+        assert_ne!(text(&scaled), text(&at_six));
+        assert_eq!(text(&scaled).iter().map(|text| text["size"].clone()).collect::<Vec<_>>(), [json!(4), json!(7), json!(12)]);
+        assert!(text(&scaled).iter().all(|text| text["lines"][0]["glyphs"].as_array().is_some_and(|glyphs| !glyphs.is_empty())));
+        assert!(parse(&["--glyph-scale".into(), "0".into()]).unwrap_err().contains("--glyph-scale"));
+        // (a preloaded VM's run, as the render service runs one, draws at the run's own scales too)
+        let both = args(&fixture, &["--scale", "6", "--glyph-scale", "1"]);
+        let (kept, _) = Preloaded::load(&both).unwrap().run_kept(&both).unwrap();
+        assert_eq!(kept.scene["viewport"], scaled.scene["viewport"]);
         std::fs::remove_dir_all(directory).unwrap();
     }
 }

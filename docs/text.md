@@ -53,6 +53,10 @@ The default tracks production Roblox (as of 2026-11-12, whole-pixel is active on
 - **`UIStroke` on text:** FreeType stroker band with radius `floor(10 * t) / 10` px (`10 t = f32(f32(10 * thickness) * DPI)`: the thickness's tenths of a GUI px, then the device scale), at most 25.5 device px, and opacity `alpha8(1 - stroke_transparency)` (independent of `TextTransparency`).
 - **Legacy `TextStroke`:** Renders glyph fills four times at diagonal offsets `(±1, ±1)` behind the fill.
 
+### Text on a SurfaceGui
+
+A Roblox client lays a `SurfaceGui` out at one texel per canvas pixel, rasterizes its glyphs at that size and magnifies them bilinearly with the view, while its frames stay sharp geometry. `--glyph-scale 1` ([render.md](render.md#key-options)) draws a GUI that way at any `--scale`: the layout, line breaks, `TextBounds` and glyph rasters are those of device scale 1, and each text's composited layer is magnified to `--scale`. Measured in a 0.747 client at 6, 12 and 15 device pixels a canvas pixel: the rows of `HIl|Ag` at `TextSize` 4 to 12 and of right, centred and left-aligned SourceSans, Arial and SourceSansBold labels match within 0.034 rms of white, where the text drawn at the view's scale is 0.26 to 0.29 off. `BillboardGui`s are not measured.
+
 ## Placement and compositing
 
 - **Line start:** Content alignment anchor snaps half-up, and up from 0.001 GUI px below the half (the anchor plus 0.001 in GUI px, scaled back, in float32): `Left = round(x)`, `Right = round(x + w) - width`, `Center = round(x + w/2) - floor(width/2)`. Rich text aligns its width floored to whole logical px (`L = floor(width / DPI) * DPI`: `Right = round(x + w) - floor(L)`, `Center = round(x + w/2) - floor(L/2)`), so at 1.5x a width that is not a multiple of 3 px starts 1 px further right, at 2x an odd right-aligned one, at 3x up to 2 px; a truncated rich line floors its kept text and its ellipsis apart.

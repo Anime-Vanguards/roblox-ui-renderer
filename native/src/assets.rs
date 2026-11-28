@@ -384,7 +384,7 @@ impl AssetStore {
                 // Preserve partial page ownership while the worker is still producing this node's
                 // other pages. Missing keys must not unpin its already completed glyphs.
                 let requirements =
-                    crate::render::text::glyph_requirements(node, scene.fonts(), viewport.scale);
+                    crate::render::text::glyph_requirements(node, scene.fonts(), viewport.glyph_scale);
                 let mut pages = Vec::new();
                 let mut covered = true;
                 for alternatives in requirements {
