@@ -2375,6 +2375,39 @@ mod layer_tests {
         assert_eq!(startup_key(&all_args), startup_key(&args(&fixture, &[])));
     }
 
+    /// A tab is four spaces of its run's face and size, drawn as nothing (a 0.747 client: fixtures/text-probe-tabs.luau):
+    /// plain, several, alone, in a rich run of another size and in a TextBox. The test font stands in for Studio's (beside
+    /// "|", which it kerns with no space: a tab beside a letter a face kerns with a space is not measured).
+    #[test]
+    fn a_tab_is_four_spaces() {
+        let directory = std::env::temp_dir().join(format!("rur-tabs-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let fixture = directory.join("tabs.luau");
+        std::fs::write(&fixture, r#"return function(Target)
+	local function Width(Text, Rich, Class)
+		local L = Instance.new(Class or "TextLabel")
+		L.Size = UDim2.fromOffset(280, 60)
+		L.TextSize = 24
+		L.RichText = Rich or false
+		L.Text = Text
+		L.Parent = Target
+		return L.TextBounds.X
+	end
+	local Same = {}
+	for _, Pair in { { "|\t|", "|    |" }, { "\t|", "    |" }, { "Hello\t\t|", "Hello        |" } } do
+		table.insert(Same, tostring(Width(Pair[1]) == Width(Pair[2])))
+	end
+	table.insert(Same, tostring(Width("A<font size=\"40\">\t</font>B", true) == Width("A<font size=\"40\">    </font>B", true)))
+	table.insert(Same, tostring(Width("|\t|", false, "TextBox") == Width("|    |", false, "TextBox")))
+	table.insert(Same, tostring(Width("A\tB") > Width("AB") + 10))
+	print("tabs " .. table.concat(Same, " "))
+end
+"#).unwrap();
+        let output = run_once_with_fonts(&args(&fixture, &[]), &own_fonts(&directory, &crate::engine::default_repo())).unwrap();
+        assert!(output.text.contains("tabs true true true true true true"), "{}", output.text);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     /// `--load Service/Name=<file.rbxm>` puts a model's top-level instances (two ScreenGuis here, as a
     /// SerializationService blob of a PlayerGui's children holds) in a Folder at that path for the
     /// fixture to clone; a path that does not start with a service is an error.

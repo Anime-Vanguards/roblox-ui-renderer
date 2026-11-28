@@ -411,7 +411,8 @@ pub fn round_pen(paragraphs: &mut [Vec<Glyph>], subpixel: bool) {
     if !subpixel {
         for glyph in paragraphs.iter_mut().flatten() {
             glyph.pen = pen;
-            glyph.advance = idiv(glyph.advance * 64.0 + 32.0, 64.0);
+            // (a tab is four whole-pixel spaces: FredokaOne at 24 x 1.5 is 4 x 8 px, not round(4 x 7.8); shape_paragraph)
+            glyph.advance = if glyph.code == 9 { 4.0 * idiv(glyph.advance / 4.0 * 64.0 + 32.0, 64.0) } else { idiv(glyph.advance * 64.0 + 32.0, 64.0) };
             pen += glyph.advance;
             glyph.end = pen;
         }
@@ -526,6 +527,29 @@ pub fn shape_paragraph(fonts: &mut FontRegistry, codepoints: &[Codepoint], face:
                 Ok(position) => run_codepoints[position].0,
                 Err(_) => run_codepoints.iter().rev().find(|entry| entry.1 == info.cluster).map(|entry| entry.0).unwrap_or(0),
             };
+            if code == 9 {
+                // A tab: four spaces of its run's face and size, drawn as nothing and wrapped as a space. Measured (a
+                // 0.747 client, fixtures/text-probe-tabs.luau): "Hello\t" is "Hello" + 16 logical px in SourceSansPro at 24
+                // (a space 4), 21.33 in FredokaOne (5.33), 24 in Arimo, 45.33 in RobotoMono; in every place, alignment,
+                // TextBox, rich run (<font size>) and TextScaled label, wherever the tab is in its line. rur took the
+                // font's own glyph for U+0009 (SourceSansPro 13, FredokaOne 10).
+                let space = font.cmap.get(&32).copied().unwrap_or(info.glyph);
+                out.push(Glyph {
+                    glyph: space,
+                    face: run_face,
+                    x: 0.0,
+                    x_offset: 0.0,
+                    advance: 4.0 * glyph_advance(font.advance(space) as f64, 0.0, x_scale, hb_scale, units_per_em),
+                    cluster: info.cluster,
+                    code,
+                    size,
+                    run: 0,
+                    pen: 0.0,
+                    end: 0.0,
+                    offset: 0.0,
+                });
+                continue;
+            }
             if hidden(code) {
                 // HarfBuzz's hidden default ignorable: the space glyph, no advance (Studio: "A\u{FE0F}B" and
                 // "A\u{200B}B" measure as "AB", "🏜\u{FE0F}" as "🏜"; Twemoji gives U+FE0F a full em)
@@ -1585,6 +1609,19 @@ mod truncation_tests {
         assert_eq!(shown(&truncate_rich_drawn(&line, 80.0, Truncate::SplitWord, &at)), "abcde\u{2026}");
         assert_eq!(shown(&truncate_rich_drawn(&line, 88.0, Truncate::SplitWord, &at)), "abcde\u{2026}");
         assert_eq!(shown(&truncate_rich_drawn(&line, 92.0, Truncate::SplitWord, &at)), "abcdef\u{2026}");
+    }
+
+    /// Whole-pixel text rounds a tab as four rounded spaces (a 0.747 client, fixtures/text-probe-tabs.luau: FredokaOne at
+    /// 24 x 1.5 has a 7.8 px space and a 32 px tab, not round(31.2)); quarter-pixel text keeps the exact pen
+    #[test]
+    fn a_whole_pixel_tab_is_four_rounded_spaces() {
+        let glyph = |code: u32, advance: f64| Glyph { glyph: 1, face: 0, x: 0.0, x_offset: 0.0, advance, cluster: 0, code, size: 0.0, run: 0, pen: 0.0, end: 0.0, offset: 0.0 };
+        let mut line = vec![glyph(9, 4.0 * 7.8), glyph(97, 4.0 * 7.8)];
+        round_pen(std::slice::from_mut(&mut line), false);
+        assert_eq!([line[0].advance, line[1].advance], [32.0, 31.0]);
+        let mut line = vec![glyph(9, 4.0 * 7.8)];
+        round_pen(std::slice::from_mut(&mut line), true);
+        assert_eq!(line[0].end, 31.2);
     }
 
     /// A TextBox's wrap (a 0.747 client, fixtures/text-probe-boxwrap.luau, here with 10 px glyphs): whitespace stays on
