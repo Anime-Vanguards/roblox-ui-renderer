@@ -245,11 +245,14 @@ impl AtlasEntry {
     }
 }
 
-/// A text UIStroke's reach: floor(10 t) / 10 physical px truncated to 26.6, t = thickness * scale in float32, at most
-/// TEXT_STROKE_REACH.
+/// A text UIStroke's reach: floor(10 t) / 10 physical px truncated to 26.6, at most TEXT_STROKE_REACH. The tenths are
+/// the thickness's tenths of a GUI px times the device scale, each product in float32: f32(f32(10 x thickness) x
+/// scale). The order decides thicknesses whose device tenths are whole in exact arithmetic: ScaledSize 0.07 x 30 is
+/// f32 2.0999999, 21 tenths of a GUI px, 63 at 3x (6.3 px) where f32(2.0999999 x 30) gives 62; 0.04 x 30 stays at 35
+/// (sim client 0.747, fixtures/stroke-probe-scaledui.luau and -scaledui2.luau: all 84 labels at 1x, 1.5x, 2x and 3x).
 pub fn text_stroke_radius(thickness: f64, scale: f64) -> f64 {
     let fround = |value: f64| value as f32 as f64;
-    let tenths = fround(fround(thickness) * fround(scale * 10.0));
+    let tenths = fround(fround(fround(thickness) * 10.0) * fround(scale));
     let radius = (tenths.floor() / 10.0 * 64.0).floor() / 64.0;
     if radius > TEXT_STROKE_REACH { TEXT_STROKE_REACH } else { radius }
 }
@@ -1309,6 +1312,13 @@ mod tests {
         assert_eq!(text_stroke_radius(9.0, 3.0), 25.5);
         assert_eq!(text_stroke_radius(13.0, 2.0), 25.5);
         assert_eq!(text_stroke_radius(17.0, 1.5), 25.5);
+        // ScaledSize 0.07 x TextSize 30 (f32 2.0999999): 21 tenths of a GUI px, 6.3 px at 3x; 0.04 x 30 (f32 1.1999999)
+        // stays at 3.5 (fixtures/stroke-probe-scaledui.luau, its capped labels)
+        let scaled = |thickness: f64, size: f64| (thickness as f32 * size as f32) as f64;
+        assert_eq!(text_stroke_radius(scaled(0.07, 30.0), 3.0), 6.296875);
+        assert_eq!(text_stroke_radius(scaled(0.04, 30.0), 3.0), 3.5);
+        assert_eq!(text_stroke_radius(scaled(0.04, 35.0), 3.0), 4.1875);
+        assert_eq!(text_stroke_radius(scaled(0.07, 30.0), 1.5), 3.09375);
     }
 
     /// A label under a text shadow with a blur also wants each glyph unhinted (the glow's outlines); a

@@ -50,7 +50,7 @@ The default tracks production Roblox (as of 2026-11-12, whole-pixel is active on
 - Uses compiled-in **FreeType 2.14.2** (`native/build.rs`, `src/glyphs/rur_glyph.c`) producing grayscale bitmaps at whole device pixels.
 - **Glyphs over 100 logical px** (150 device px at 1.5x, 200 at 2x, 300 at 3x, 100 at 1x; `LegacyArial` at `TextSize` 68 and up: the face is sized 1.5 times the `TextSize`) are rasterized at 100 logical px and drawn on quads scaled by `size / cap` about the pen, like a fractional size, so they are soft on both axes; the line keeps the glyph's own size.
 - **Synthetic bold:** Applied when requested weight >= 600 and the resolved face is < 600 via `FT_Outline_EmboldenXY(2*S, 2*S)` in 26.6 units (advances unchanged).
-- **`UIStroke` on text:** FreeType stroker band with radius `floor(10 * t) / 10` px (`t = f32(thickness * DPI)`), at most 25.5 device px, and opacity `alpha8(1 - stroke_transparency)` (independent of `TextTransparency`).
+- **`UIStroke` on text:** FreeType stroker band with radius `floor(10 * t) / 10` px (`10 t = f32(f32(10 * thickness) * DPI)`: the thickness's tenths of a GUI px, then the device scale), at most 25.5 device px, and opacity `alpha8(1 - stroke_transparency)` (independent of `TextTransparency`).
 - **Legacy `TextStroke`:** Renders glyph fills four times at diagonal offsets `(±1, ±1)` behind the fill.
 
 ## Placement and compositing
