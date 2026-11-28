@@ -29,6 +29,23 @@ impl Dir {
         }
     }
 
+    /// The side a thumbstick push at (x, y) (y up, float32 as the client reads it) is on: the axis it leans along
+    /// further, a tie at an exact diagonal going Right for x > 0 and else Left above and Down below (measured: pushes at
+    /// 45, 135, 225 and 315 degrees, whose float32 axes are equal, read Right, Left, Down and Right). It picks the
+    /// NextSelection* override, the SelectionBehavior* of a group and the direction SelectionLost / Gained carry.
+    pub fn of_stick(x: f32, y: f32) -> Dir {
+        let (ax, ay) = (x.abs(), y.abs());
+        if ax > ay || (ax == ay && x > 0.0) {
+            if x > 0.0 { Dir::Right } else { Dir::Left }
+        } else if ay > ax {
+            if y > 0.0 { Dir::Up } else { Dir::Down }
+        } else if y > 0.0 {
+            Dir::Left
+        } else {
+            Dir::Down
+        }
+    }
+
     /// The GuiNavigationDirection item SelectionGained / SelectionLost carry
     pub fn item(self) -> &'static str {
         match self {
@@ -158,6 +175,93 @@ pub fn choose(a: &Rect, dir: Dir, candidates: &[(InstanceId, Rect)]) -> Option<I
     best.map(|(_, id)| id)
 }
 
+/// A thumbstick push within this many degrees of a cardinal direction takes the D-pad's pick for it when that lies in
+/// the selection's band (fitted on random scenes: `choose_stick`)
+pub const STICK_SNAP_DEGREES: f64 = 8.0;
+/// The thumbstick's cone: a candidate's centre at most this many degrees off the push, seen from where the push's ray
+/// leaves the selection (fitted on random scenes and one-candidate sweeps: `choose_stick`)
+pub const STICK_CONE_DEGREES: f64 = 22.5;
+/// How much a cone candidate's offset across the push counts against its distance along it (`choose_stick`)
+pub const STICK_ACROSS_WEIGHT: f64 = 5.0;
+
+/// The best candidate from `a` for a Thumbstick1 push at (x, y) (y up), as a 0.747 client picks it (fitted on random
+/// scenes: notes/interaction.md "Gamepad selection", the thumbstick):
+/// 1. Within [`STICK_SNAP_DEGREES`] of a cardinal direction: the D-pad's pick toward it ([`choose`]) when that lies in
+///    the selection's band (its x range for Up / Down, its y range for Left / Right).
+/// 2. Else the nearest candidate the push's ray from the selection's centre hits (by where the ray meets it).
+/// 3. Else, among the candidates whose centre lies within [`STICK_CONE_DEGREES`] of the push seen from where the ray
+///    leaves the selection's rect: the smallest along + [`STICK_ACROSS_WEIGHT`] x across (the centres' offsets along
+///    and across the push).
+///
+/// Ties go to the first in draw order.
+pub fn choose_stick(a: &Rect, x: f32, y: f32, candidates: &[(InstanceId, Rect)]) -> Option<InstanceId> {
+    let dir = Dir::of_stick(x, y);
+    let angle = f64::from(y).atan2(f64::from(x));
+    let cardinal = match dir {
+        Dir::Right => 0.0,
+        Dir::Up => std::f64::consts::FRAC_PI_2,
+        Dir::Left => std::f64::consts::PI,
+        Dir::Down => -std::f64::consts::FRAC_PI_2,
+    };
+    let off = (angle - cardinal + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    if off.abs().to_degrees() <= STICK_SNAP_DEGREES {
+        if let Some(pick) = choose(a, dir, candidates) {
+            let in_band = candidates.iter().find(|(id, _)| *id == pick).is_some_and(|(_, b)| rank(a, b, dir).0 == 0);
+            if in_band {
+                return Some(pick);
+            }
+        }
+    }
+    // the push in screen space (y down)
+    let (ux, uy) = (angle.cos(), -angle.sin());
+    let mut hit: Option<(f64, InstanceId)> = None;
+    for (id, b) in candidates {
+        if let Some(at) = ray_hit(a.cx, a.cy, ux, uy, b) {
+            if hit.is_none_or(|(held, _)| at < held) {
+                hit = Some((at, *id));
+            }
+        }
+    }
+    if let Some((_, id)) = hit {
+        return Some(id);
+    }
+    let half = |extent: f64, u: f64| if u.abs() < 1e-12 { f64::INFINITY } else { extent / 2.0 / u.abs() };
+    let leave = half(a.r - a.l, ux).min(half(a.b - a.t, uy));
+    let (ex, ey) = (a.cx + leave * ux, a.cy + leave * uy);
+    let cone = STICK_CONE_DEGREES.to_radians().cos();
+    let mut best: Option<(f64, InstanceId)> = None;
+    for (id, b) in candidates {
+        let (vx, vy) = (b.cx - ex, b.cy - ey);
+        let length = vx.hypot(vy);
+        if !(length > 0.0 && (vx * ux + vy * uy) / length >= cone) {
+            continue;
+        }
+        let (dx, dy) = (b.cx - a.cx, b.cy - a.cy);
+        let score = (dx * ux + dy * uy) + STICK_ACROSS_WEIGHT * (dx * uy - dy * ux).abs();
+        if best.is_none_or(|(held, _)| score < held) {
+            best = Some((score, *id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// Where the ray from (ox, oy) along (ux, uy) first meets rect `b` (slab test, from the ray's start on); None: never
+fn ray_hit(ox: f64, oy: f64, ux: f64, uy: f64, b: &Rect) -> Option<f64> {
+    let (mut near, mut far) = (0.0f64, f64::INFINITY);
+    for (o, u, lo, hi) in [(ox, ux, b.l, b.r), (oy, uy, b.t, b.b)] {
+        if u.abs() < 1e-12 {
+            if o < lo || o > hi {
+                return None;
+            }
+        } else {
+            let (p, q) = ((lo - o) / u, (hi - o) / u);
+            near = near.max(p.min(q));
+            far = far.min(p.max(q));
+        }
+    }
+    (near <= far).then_some(near)
+}
+
 impl Cx<'_> {
     fn rect(&self, id: InstanceId) -> Option<Rect> {
         self.record(id, |r| Rect::new(r.x, r.y, r.w, r.h))
@@ -256,6 +360,17 @@ impl Cx<'_> {
     /// - Inside a SelectionGroup (innermost first) the search looks at the group's descendants first; with nothing
     ///   there it leaves the group (SelectionBehavior Escape) or stays (Stop).
     pub fn navigate(&self, from: InstanceId, dir: Dir) -> Option<InstanceId> {
+        self.navigate_with(from, dir, |a, candidates| choose(a, dir, candidates))
+    }
+
+    /// Where a Thumbstick1 push at (x, y) moves the selection from `from` (None: it stays): the overrides and groups
+    /// as a D-pad press toward the push's side (`Dir::of_stick`; measured), the search along the stick's angle
+    /// ([`choose_stick`]).
+    pub fn navigate_stick(&self, from: InstanceId, x: f32, y: f32) -> Option<InstanceId> {
+        self.navigate_with(from, Dir::of_stick(x, y), |a, candidates| choose_stick(a, x, y, candidates))
+    }
+
+    fn navigate_with(&self, from: InstanceId, dir: Dir, choose: impl Fn(&Rect, &[(InstanceId, Rect)]) -> Option<InstanceId>) -> Option<InstanceId> {
         let candidates = self.selectables();
         let next = match dir {
             Dir::Up => "NextSelectionUp",
@@ -274,7 +389,7 @@ impl Cx<'_> {
         let others: Vec<(InstanceId, Rect)> = candidates.into_iter().filter(|(id, _)| *id != from).collect();
         let (group, behavior) = match (self.engine.reflection.name_id("SelectionGroup"), self.engine.reflection.name_id(&format!("SelectionBehavior{}", dir.item()))) {
             (Some(group), Some(behavior)) => (group, behavior),
-            _ => return choose(&a, dir, &others),
+            _ => return choose(&a, &others),
         };
         let groups: Vec<InstanceId> = {
             let state = self.engine.state.borrow();
@@ -288,14 +403,14 @@ impl Cx<'_> {
                 let state = self.engine.state.borrow();
                 others.iter().filter(|(id, _)| state.dom.is_descendant_of(*id, container)).copied().collect()
             };
-            if let Some(found) = choose(&a, dir, &inside) {
+            if let Some(found) = choose(&a, &inside) {
                 return Some(found);
             }
             if self.enum_name(container, behavior) == "Stop" {
                 return None;
             }
         }
-        choose(&a, dir, &others)
+        choose(&a, &others)
     }
 
     /// ButtonSelect with nothing selected: the lowest SelectionOrder, then the highest layer (DisplayOrder, then the
@@ -474,6 +589,107 @@ mod tests {
         }
         assert!(total > 7000, "{total}");
         assert_eq!((matched, total), (MATCHED, TOTAL), "misses:\n{}", misses.join("\n"));
+    }
+
+    /// random_stick_scenes_follow_the_client's count of pushes the model gets right, of those both captures agree on
+    const STICK_MATCHED: usize = 8791;
+    const STICK_TOTAL: usize = 8951;
+
+    /// The side a push is on (`Dir::of_stick`), measured at the exact diagonals whose float32 axes tie
+    #[test]
+    fn a_push_takes_the_side_it_leans_to() {
+        let at = |degrees: f64| {
+            let r = degrees.to_radians();
+            Dir::of_stick(r.cos() as f32, r.sin() as f32)
+        };
+        assert_eq!([at(0.0), at(44.0), at(46.0), at(90.0), at(180.0), at(270.0)], [Dir::Right, Dir::Right, Dir::Up, Dir::Up, Dir::Left, Dir::Down]);
+        assert_eq!([at(45.0), at(135.0), at(225.0), at(315.0)], [Dir::Right, Dir::Left, Dir::Down, Dir::Right]);
+    }
+
+    /// One candidate swept around a 40 x 40 button at (380, 280), and pairs of candidates (P6c's stick2 probe in a
+    /// 0.747 client): the last angle that reaches and the first that does not, the ray reaching a tall one further,
+    /// and the nearer candidate winning over a farther one closer to the push. (Two answers of these sweeps differ,
+    /// pinned below: a candidate the ray hits 300 px away loses to a nearer one in the band at 0 to 3 degrees, where
+    /// the client took the far one, and a cone candidate 100 px away reaches 18 degrees in the client, 16 here.)
+    #[test]
+    fn the_stick_follows_the_client_sweeps() {
+        let a = r(380.0, 280.0, 40.0, 40.0);
+        let around = |cx: f64, cy: f64, w: f64, h: f64| r(cx - w / 2.0, cy - h / 2.0, w, h);
+        let pick = |degrees: f64, list: &[Rect]| {
+            let r = degrees.to_radians();
+            let candidates: Vec<(InstanceId, Rect)> = list.iter().enumerate().map(|(k, rect)| (id(k as u32 + 1), *rect)).collect();
+            choose_stick(&a, r.cos() as f32, r.sin() as f32, &candidates).map(|found| found.index)
+        };
+        for (distance, last) in [(80.0, 16.0), (150.0, 19.0), (300.0, 20.0)] {
+            let target = [around(400.0 + distance, 300.0, 40.0, 30.0)];
+            assert_eq!(pick(last, &target), Some(1), "{distance} at {last}");
+            assert_eq!(pick(last + 1.0, &target), None, "{distance} at {}", last + 1.0);
+        }
+        for (w, h, last) in [(10.0, 10.0, 20.0), (80.0, 80.0, 20.0), (40.0, 200.0, 29.0)] {
+            let target = [around(600.0, 300.0, w, h)];
+            assert_eq!(pick(last, &target), Some(1), "{w}x{h} at {last}");
+            assert_eq!(pick(last + 1.0, &target), None, "{w}x{h} at {}", last + 1.0);
+        }
+        let diagonal = [around(541.0, 159.0, 40.0, 30.0)];
+        assert_eq!([pick(24.0, &diagonal), pick(25.0, &diagonal), pick(65.0, &diagonal), pick(66.0, &diagonal)], [None, Some(1), Some(1), None]);
+        let (s20, c20) = (20f64.to_radians().sin(), 20f64.to_radians().cos());
+        // A 300 px away straight right, B 100 px away at 20 degrees: B from 4 degrees on
+        let pair = [around(700.0, 300.0, 40.0, 30.0), around(400.0 + 100.0 * c20, 300.0 - 100.0 * s20, 40.0, 30.0)];
+        for degrees in [4.0, 10.0, 22.0] {
+            assert_eq!(pick(degrees, &pair), Some(2), "{degrees}");
+        }
+        assert_eq!(pick(0.0, &pair), Some(2), "the client takes A here");
+        // A 100 px away straight right, B 300 px away at 20 degrees: A up to 16 degrees, then B
+        let pair = [around(500.0, 300.0, 40.0, 30.0), around(400.0 + 300.0 * c20, 300.0 - 300.0 * s20, 40.0, 30.0)];
+        for degrees in [0.0, 10.0, 16.0] {
+            assert_eq!(pick(degrees, &pair), Some(1), "{degrees}");
+        }
+        for degrees in [19.0, 22.0] {
+            assert_eq!(pick(degrees, &pair), Some(2), "{degrees}");
+        }
+    }
+
+    /// The client's picks over 125 random scenes, 12 pushes from each button (data/studio/navigation-stick-scenes.json;
+    /// "?" marks a push two captures disagreed on). Pinned so a change to the model shows what it gains or loses.
+    #[test]
+    fn random_stick_scenes_follow_the_client() {
+        const CODES: &str = "123456789abcdefghijklmnopqrstuvwxyz";
+        let data: serde_json::Value = serde_json::from_str(include_str!("../../../../data/studio/navigation-stick-scenes.json")).expect("dataset");
+        let (mut matched, mut total, mut misses) = (0, 0, Vec::new());
+        for line in data["scenes"].as_array().expect("scenes") {
+            let line = line.as_str().expect("line");
+            let (head, results) = line.split_once(" | ").expect("results");
+            let (scene, rects) = head.split_once(' ').expect("rects");
+            let candidates: Vec<(InstanceId, Rect)> = rects
+                .split(';')
+                .enumerate()
+                .map(|(k, rect)| {
+                    let v: Vec<f64> = rect.split(',').map(|n| n.parse().expect("number")).collect();
+                    (id(k as u32), r(v[0], v[1], v[2], v[3]))
+                })
+                .collect();
+            for cell in results.split(' ') {
+                let (from, pushes) = cell.split_once(':').expect("cell");
+                let from = CODES.find(from).expect("button");
+                for push in pushes.split(',') {
+                    let (degrees, pick) = push.split_once('=').expect("push");
+                    if pick == "?" {
+                        continue;
+                    }
+                    let want = if pick == "." { None } else { Some(CODES.find(pick).expect("pick") as u32) };
+                    let radians = degrees.parse::<f64>().expect("degrees").to_radians();
+                    let others: Vec<(InstanceId, Rect)> = candidates.iter().filter(|(c, _)| c.index != from as u32).copied().collect();
+                    let got = choose_stick(&candidates[from].1, radians.cos() as f32, radians.sin() as f32, &others).map(|found| found.index);
+                    total += 1;
+                    if got == want {
+                        matched += 1;
+                    } else {
+                        misses.push(format!("{scene} from {} at {degrees}: client {want:?} model {got:?}", from + 1));
+                    }
+                }
+            }
+        }
+        assert_eq!((matched, total), (STICK_MATCHED, STICK_TOTAL), "misses:\n{}", misses.join("\n"));
     }
 
     /// Outside the band: the 45-degree cone beats the rest (maps against a fixed rival), lateral offset first

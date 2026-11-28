@@ -7,6 +7,8 @@
 //   {t?, type:"key", key, down?, shift?, ctrl?, alt?}   {t?, type:"text"|"paste", text}
 //   {t?, type:"click", <point>, button?, finger?, hold?}
 //   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?, finger?, steps?, duration?}
+//   {t?, type:"stick", x, y, stick?: 1|2}   a gamepad thumbstick's position, x and y from -1 to 1 (y up); 1 the left
+//   stick (default), 2 the right; it stays there until the next stick action of that stick, (0, 0) lets it go
 //   finger: 0-9 (default 0), a touch device's finger (--device touch); other devices ignore it
 //   <point>: node | target (an `inspect` path or a suffix of one) [+ anchor {x, y}, offset {x, y}], or x, y
 
@@ -15,7 +17,7 @@ import path from "node:path";
 
 export class UsageError extends Error {}
 
-export const ACTION_TYPES = ["move", "down", "up", "wheel", "leave", "key", "text", "paste", "click", "drag"];
+export const ACTION_TYPES = ["move", "down", "up", "wheel", "leave", "key", "text", "paste", "click", "drag", "stick"];
 
 const describe = value => value === null ? "null" : Array.isArray(value) ? "a list" : typeof value === "object" ? "an object"
 	: typeof value === "boolean" ? "a boolean" : typeof value === "number" ? "a number" : "a string";
@@ -96,6 +98,16 @@ function checkFinger(object) {
 	if (finger !== undefined && (!Number.isInteger(finger) || finger < 0 || finger > MAX_FINGER)) throw new Error(`\`finger\` must be a whole number from 0 to ${MAX_FINGER}, not ${finger}`);
 }
 
+function checkStick(object) {
+	for (const axis of ["x", "y"]) {
+		const value = optionalNumber(object, axis);
+		if (value === undefined) throw new Error(`stick: needs \`${axis}\` (from -1 to 1)`);
+		if (value < -1 || value > 1) throw new Error(`\`${axis}\` must be from -1 to 1, not ${value}`);
+	}
+	const stick = optionalNumber(object, "stick");
+	if (stick !== undefined && stick !== 1 && stick !== 2) throw new Error(`\`stick\` must be 1 or 2, not ${stick}`);
+}
+
 function checkButton(object) {
 	const button = optionalNumber(object, "button");
 	if (button !== undefined && ![1, 2, 3].includes(button)) throw new Error(`\`button\` must be 1, 2 or 3, not ${button}`);
@@ -139,6 +151,9 @@ function check(action) {
 			break;
 		case "text": case "paste":
 			requiredString(action, "text");
+			break;
+		case "stick":
+			checkStick(action);
 			break;
 		case "click": {
 			if (!pointFields(action, "click")) throw new Error("click: needs `node` (or `target`) or x, y");

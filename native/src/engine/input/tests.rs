@@ -5511,3 +5511,237 @@ case("hnormal", 200, 100, 12, true, 0, { { 3, 50 } })
 "#,
     );
 }
+
+/// Thumbstick pushes in a 0.747 client (VirtualInputManager:HandleGamepadAxisInput in a keyboard-and-mouse client with a
+/// gamepad connected, rur D3's st_ev probe, two sessions identical): the selection's moves and the direction its signals
+/// carry, UserInputService's InputChanged / InputEnded and gameProcessed, re-arming, overrides, groups and skipped
+/// candidates. Every answer is the client's. (GuiState is left out: the client sets the new selection's Hover before its
+/// SelectionChanged, for the D-pad as for the stick, and rur after; backlog IN3d.)
+#[test]
+fn thumbstick_pushes_match_a_client() {
+    let (lua, engine) = start(800.0, 600.0);
+    run(
+        &lua,
+        &engine,
+        r##"
+local GuiService = game:GetService("GuiService")
+local UIS = game:GetService("UserInputService")
+local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+local Gui = Instance.new("ScreenGui")
+Gui.IgnoreGuiInset = true
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.Parent = PlayerGui
+local Log = {}
+local function Fmt(V)
+	return string.format("(%g,%g,%g)", V.X, V.Y, V.Z)
+end
+for _, S in { "InputBegan", "InputChanged", "InputEnded" } do
+	UIS[S]:Connect(function(Io, Gp)
+		if Io.UserInputType == Enum.UserInputType.MouseMovement then return end
+		table.insert(Log, string.format("UIS.%s %s %s %s pos=%s d=%s gp=%s", S, Io.UserInputType.Name, Io.KeyCode.Name, Io.UserInputState.Name, Fmt(Io.Position), Fmt(Io.Delta), tostring(Gp)))
+	end)
+end
+local function Btn(Name, X, Y, W, H, Parent, Props)
+	local O = Instance.new("TextButton")
+	O.Name = Name
+	O.Position = UDim2.fromOffset(X, Y)
+	O.Size = UDim2.fromOffset(W or 100, H or 40)
+	for K, V in Props or {} do
+		O[K] = V
+	end
+	O.Parent = Parent or Gui
+	for _, S in { "SelectionGained", "SelectionLost" } do
+		O[S]:Connect(function(Way) table.insert(Log, `{O.Name}.{S} {Way.Name}`) end)
+	end
+	O.SelectionChanged:Connect(function(Am, Prev, New)
+		table.insert(Log, `{O.Name}.SelectionChanged {Am} {Prev and Prev.Name or "nil"} {New and New.Name or "nil"}`)
+	end)
+	return O
+end
+local function Clear()
+	GuiService.SelectedObject = nil
+	for _, Child in Gui:GetChildren() do
+		Child:Destroy()
+	end
+	Flush()
+	table.clear(Log)
+end
+local function Stick(X, Y, Which)
+	Dispatch({ type = "stick", x = X, y = Y, stick = Which })
+	Flush()
+end
+local function Sel()
+	return GuiService.SelectedObject and GuiService.SelectedObject.Name or "nil"
+end
+local function Select(O)
+	UpdateAll()
+	GuiService.SelectedObject = O
+	Flush()
+	table.clear(Log)
+end
+local function Push(From, Degrees)
+	Select(From)
+	local R = math.rad(Degrees)
+	Stick(math.cos(R), math.sin(R))
+	local Picked = Sel()
+	Stick(0, 0)
+	return Picked
+end
+local function Check(Label, Answer, Client)
+	assert(Answer == Client, `{Label}: {Answer}, client {Client}`)
+end
+local function Ring()
+	Clear()
+	local C = Btn("C", 350, 280)
+	Btn("U", 350, 140) Btn("Dn", 350, 420) Btn("L", 150, 280) Btn("R", 550, 280)
+	Btn("UR", 550, 140) Btn("DL", 150, 420) Btn("UL", 150, 140) Btn("DR", 550, 420)
+	return C
+end
+
+-- the push's pick and the direction its signals carry, and the whole event order once
+local C = Ring()
+Select(C)
+Stick(1, 0)
+Stick(0, 0)
+Check("events at 0", table.concat(Log, " | "), "C.SelectionLost Right | R.SelectionGained Right | C.SelectionChanged false C R | R.SelectionChanged true C R"
+	.. " | UIS.InputChanged Gamepad1 Thumbstick1 Change pos=(1,0,0) d=(1,0,0) gp=true | UIS.InputEnded Gamepad1 Thumbstick1 End pos=(0,0,0) d=(-1,0,0) gp=true")
+local Picks = {}
+for _, Degrees in { 0, 30, 45, 60, 90, 135, 180, 200, 270, 315, 340 } do
+	C = Ring()
+	Select(C)
+	local R = math.rad(Degrees)
+	Stick(math.cos(R), math.sin(R))
+	local Way = Log[1] and string.match(Log[1], "SelectionLost (%a+)") or "-"
+	table.insert(Picks, `{Degrees}:{Sel()}/{Way}`)
+	Stick(0, 0)
+end
+Check("picks", table.concat(Picks, " "), "0:R/Right 30:UR/Right 45:UR/Right 60:C/- 90:U/Up 135:UL/Left 180:L/Left 200:DL/Left 270:Dn/Down 315:DR/Right 340:DR/Right")
+
+-- gameProcessed: Thumbstick1 always, Thumbstick2 never; nothing selected, navigation off, nowhere to go
+C = Ring()
+Select(nil)
+Stick(1, 0)
+Stick(0, 0)
+Check("nothing selected", Sel() .. " | " .. table.concat(Log, " | "), "nil | UIS.InputChanged Gamepad1 Thumbstick1 Change pos=(1,0,0) d=(1,0,0) gp=true | UIS.InputEnded Gamepad1 Thumbstick1 End pos=(0,0,0) d=(-1,0,0) gp=true")
+GuiService.GuiNavigationEnabled = false
+Select(C)
+Stick(1, 0)
+Stick(0, 0)
+Check("navigation off", Sel() .. " | " .. table.concat(Log, " | "), "C | UIS.InputChanged Gamepad1 Thumbstick1 Change pos=(1,0,0) d=(1,0,0) gp=true | UIS.InputEnded Gamepad1 Thumbstick1 End pos=(0,0,0) d=(-1,0,0) gp=true")
+GuiService.GuiNavigationEnabled = true
+Select(C)
+Stick(1, 0, 2)
+Stick(0, 0, 2)
+Check("Thumbstick2", Sel() .. " | " .. table.concat(Log, " | "), "C | UIS.InputChanged Gamepad1 Thumbstick2 Change pos=(1,0,0) d=(1,0,0) gp=false | UIS.InputEnded Gamepad1 Thumbstick2 End pos=(0,0,0) d=(-1,0,0) gp=false")
+Select(Gui.R)
+Stick(1, 0)
+Stick(0, 0)
+Check("nowhere to go", Sel() .. " | " .. table.concat(Log, " | "), "R | UIS.InputChanged Gamepad1 Thumbstick1 Change pos=(1,0,0) d=(1,0,0) gp=true | UIS.InputEnded Gamepad1 Thumbstick1 End pos=(0,0,0) d=(-1,0,0) gp=true")
+
+-- InputChanged for every change (none for the same position), InputEnded only at (0, 0)
+Select(C)
+for _, P in { { 0.2, 0 }, { 0.2, 0 }, { 0.3, 0.1 }, { 0.001, 0 }, { 0, 0.0001 }, { 0, 0 }, { 0, 0 } } do
+	Stick(P[1], P[2])
+end
+Check("small moves", Sel() .. " | " .. table.concat(Log, " | "), "C | UIS.InputChanged Gamepad1 Thumbstick1 Change pos=(0.2,0,0) d=(0.2,0,0) gp=true"
+	.. " | UIS.InputChanged Gamepad1 Thumbstick1 Change pos=(0.3,0.1,0) d=(0.1,0.1,0) gp=true | UIS.InputChanged Gamepad1 Thumbstick1 Change pos=(0.001,0,0) d=(-0.299,-0.1,0) gp=true"
+	.. " | UIS.InputChanged Gamepad1 Thumbstick1 Change pos=(0,0.0001,0) d=(-0.001,0.0001,0) gp=true | UIS.InputEnded Gamepad1 Thumbstick1 End pos=(0,0,0) d=(0,-0.0001,0) gp=true")
+-- a push arriving in two steps moves when it passes 0.6, along the angle it has then
+Select(C)
+Stick(0.5, 0.1)
+local Before = Sel()
+Stick(0.7, 0.75)
+Check("ramp", Before .. ">" .. Sel() .. " " .. (string.match(table.concat(Log, " "), "SelectionLost (%a+)") or "-"), "C>UR Up")
+Stick(0, 0)
+
+-- re-arming: only once both axes are below 0.6 again
+local Out = {}
+for _, Path in {
+	{ { 1, 0 }, { 0.3, 0.9 } },
+	{ { 1, 0 }, { 0.59, 0.9 } },
+	{ { 1, 0 }, { 0.61, 0.9 } },
+	{ { 1, 0 }, { 0.3, 0.3 }, { 0.3, 0.9 } },
+	{ { 0.7, 0.7 }, { 0.7, -0.7 } },
+	{ { 0.7, 0.7 }, { 0.5, 0.5 }, { 0.7, -0.7 } },
+	{ { 1, 0 }, { -1, 0 } },
+	{ { 0.65, 0 }, { 0.65, 0.59 }, { 0.59, 0.65 } },
+} do
+	Select(C)
+	local Trail = {}
+	for _, P in Path do
+		Stick(P[1], P[2])
+		table.insert(Trail, Sel())
+	end
+	Stick(0, 0)
+	table.insert(Out, table.concat(Trail, ">"))
+end
+Check("re-arm", table.concat(Out, " "), "R>R R>R R>R R>R>UR UR>UR UR>UR>UR R>R R>R>R")
+
+-- NextSelection overrides by the push's side
+Out = {}
+for _, Degrees in { 0, 20, 40, 44, 46, 50, 70, 90, 135, 180, 225, 270, 300 } do
+	Clear()
+	C = Btn("C", 350, 280)
+	local N = {}
+	for I, Name in { "Up", "Down", "Left", "Right" } do
+		N[Name] = Btn("N" .. Name, 20, 20 + 50 * I, 60, 30)
+	end
+	Btn("R", 550, 280) Btn("U", 350, 140) Btn("UR", 550, 140)
+	C.NextSelectionUp, C.NextSelectionDown, C.NextSelectionLeft, C.NextSelectionRight = N.Up, N.Down, N.Left, N.Right
+	table.insert(Out, `{Degrees}:{Push(C, Degrees)}`)
+end
+Check("overrides", table.concat(Out, " "), "0:NRight 20:NRight 40:NRight 44:NRight 46:NUp 50:NUp 70:NUp 90:NUp 135:NLeft 180:NLeft 225:NDown 270:NDown 300:NDown")
+Out = {}
+for _, Degrees in { 0, 30, 44, 46, 60 } do
+	Clear()
+	C = Btn("C", 350, 280)
+	local NR = Btn("NR", 20, 20, 60, 30)
+	Btn("R", 550, 280) Btn("U", 350, 140) Btn("UR", 550, 140)
+	C.NextSelectionRight = NR
+	table.insert(Out, `{Degrees}:{Push(C, Degrees)}`)
+end
+Check("override right only", table.concat(Out, " "), "0:NR 30:NR 44:NR 46:UR 60:C")
+
+-- a SelectionGroup is searched first, its SelectionBehavior by the push's side
+Out = {}
+for _, Behavior in { Enum.SelectionBehavior.Escape, Enum.SelectionBehavior.Stop } do
+	Clear()
+	local G = Instance.new("Frame")
+	G.Name = "G"
+	G.Size = UDim2.fromOffset(800, 600)
+	G.BackgroundTransparency = 1
+	G.SelectionGroup = true
+	G.SelectionBehaviorRight = Behavior
+	G.SelectionBehaviorUp = Behavior
+	G.Parent = Gui
+	C = Btn("C", 350, 280, 100, 40, G)
+	Btn("GFar", 700, 300, 60, 30, G)
+	Btn("Near", 480, 280, 40, 40)
+	Btn("OutUp", 350, 100, 100, 40)
+	for _, Degrees in { 0, 90 } do
+		table.insert(Out, `{Behavior.Name} {Degrees}:{Push(C, Degrees)}`)
+	end
+end
+Check("group", table.concat(Out, " "), "Escape 0:GFar Escape 90:OutUp Stop 0:GFar Stop 90:C")
+
+-- a candidate under a button drawn above it, and one outside a clipping Frame, are skipped
+Clear()
+C = Btn("C", 350, 280)
+Btn("T", 550, 280)
+Btn("Cover", 590, 290, 30, 20, nil, { ZIndex = 5, Selectable = false, Text = "" })
+Btn("T2", 700, 280)
+local Covered = Push(C, 0)
+Clear()
+C = Btn("C", 350, 280)
+local Clip = Instance.new("Frame")
+Clip.Position = UDim2.fromOffset(500, 250)
+Clip.Size = UDim2.fromOffset(100, 100)
+Clip.ClipsDescendants = true
+Clip.BackgroundTransparency = 1
+Clip.Parent = Gui
+Btn("Hidden", 120, 30, 100, 40, Clip)
+Btn("T2", 700, 300)
+Check("eligibility", Covered .. " " .. Push(C, 0), "T2 T2")
+"##,
+    );
+}

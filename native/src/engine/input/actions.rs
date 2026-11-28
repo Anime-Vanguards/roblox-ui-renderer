@@ -11,6 +11,11 @@
 //!   {t?, type:"click", <point>, button?, finger?, hold?: seconds between down and up (0)}
 //!   {t?, type:"drag", from: <point> (or <point> fields on the action), to: <point>, button?, finger?,
 //!    steps?: moves from `from` to `to` (10), duration?: seconds they take (0.25)}
+//!   {t?, type:"stick", x, y, stick?: 1|2}
+//!
+//! `stick` moves a gamepad thumbstick to (x, y), each from -1 to 1 (y up, as InputObject.Position reads it), where
+//! it stays until the next `stick` action of that stick; 1 (the default) is the left stick (Thumbstick1), 2 the right
+//! one. (0, 0) lets it go.
 //!
 //! `finger` (a whole number from 0 to 9, default 0) names the finger of a touch device (`--device touch`): each
 //! finger is a touch of its own, so two fingers can be down at once. An event without it is finger 0, as before the
@@ -32,7 +37,7 @@ use crate::engine::GuiEngine;
 use crate::engine::{Engine, InstanceId, dom::flags, layout::absolute_position};
 
 /// The event types of an action list
-pub const TYPES: [&str; 10] = ["move", "down", "up", "wheel", "leave", "key", "text", "paste", "click", "drag"];
+pub const TYPES: [&str; 11] = ["move", "down", "up", "wheel", "leave", "key", "text", "paste", "click", "drag", "stick"];
 
 /// Whether an action is expanded by the timeline (not dispatched as it is): a click, a drag, or a
 /// wheel that names a node
@@ -191,6 +196,22 @@ fn check_finger(object: &Map<String, Json>) -> Result<(), String> {
     }
 }
 
+/// A `stick` event's position (x and y from -1 to 1) and stick (1 or 2, default 1)
+pub fn check_stick(object: &Map<String, Json>) -> Result<(), String> {
+    for axis in ["x", "y"] {
+        match optional_number(object, axis)? {
+            None => return Err(format!("stick: needs `{axis}` (from -1 to 1)")),
+            Some(v) if !(-1.0..=1.0).contains(&v) => return Err(format!("`{axis}` must be from -1 to 1, not {v}")),
+            Some(_) => {}
+        }
+    }
+    match optional_number(object, "stick")? {
+        None => Ok(()),
+        Some(s) if s == 1.0 || s == 2.0 => Ok(()),
+        Some(s) => Err(format!("`stick` must be 1 or 2, not {s}")),
+    }
+}
+
 fn check_button(object: &Map<String, Json>) -> Result<(), String> {
     match optional_number(object, "button")? {
         None => Ok(()),
@@ -246,6 +267,7 @@ fn check(action: &Json) -> Result<(), String> {
             }
         }
         "text" | "paste" => required_string(object, "text")?,
+        "stick" => check_stick(object)?,
         "click" => {
             click_point(action)?;
             check_button(object)?;
@@ -473,7 +495,8 @@ mod schema_tests {
             {"type": "drag", "node": "A", "to": {"node": "B", "anchor": {"x": 1, "y": 1}}},
             {"type": "wheel", "node": "Scroll", "notches": -1}, {"type": "wheel", "target": "Scroll", "anchor": {"x": 0.2}, "offset": {"x": 1, "y": 2}, "dy": 100, "shift": true},
             {"type": "down", "x": 1, "y": 2, "finger": 1}, {"type": "move", "x": 3, "y": 4, "finger": 9}, {"type": "up", "finger": 0},
-            {"type": "click", "x": 10, "y": 20, "finger": 2}, {"type": "drag", "from": "A", "to": "B", "finger": 1}
+            {"type": "click", "x": 10, "y": 20, "finger": 2}, {"type": "drag", "from": "A", "to": "B", "finger": 1},
+            {"t": 0.5, "type": "stick", "x": 0.8, "y": -0.2}, {"type": "stick", "x": 0, "y": 1, "stick": 2}, {"type": "stick", "x": -1, "y": 0, "stick": 1}
         ]"#;
         validate(&serde_json::from_str(ok).unwrap()).unwrap();
         validate(&json!([])).unwrap();
@@ -496,7 +519,7 @@ mod schema_tests {
     fn names_the_offending_action() {
         assert_eq!(error(r#"{"type": "move"}"#), "--actions: a JSON list of actions expected, not an object");
         assert!(error(r#"[{"type": "move", "x": 1, "y": 1}, {"type": "clik"}]"#).starts_with("--actions[1] (clik): unknown type \"clik\""));
-        assert_eq!(error(r#"[{"x": 1}]"#), "--actions[0]: `type` is missing (one of move, down, up, wheel, leave, key, text, paste, click, drag)");
+        assert_eq!(error(r#"[{"x": 1}]"#), "--actions[0]: `type` is missing (one of move, down, up, wheel, leave, key, text, paste, click, drag, stick)");
         assert_eq!(error(r#"[{"type": "move", "x": "1", "y": 2}]"#), "--actions[0] (move): `x` must be a number, not a string");
         assert_eq!(error(r#"[{"type": "move", "x": 1}]"#), "--actions[0] (move): move: needs x and y");
         assert_eq!(error(r#"[{"type": "key"}]"#), "--actions[0] (key): `key` (a string) is missing");
@@ -517,6 +540,10 @@ mod schema_tests {
         assert_eq!(error(r#"[{"type": "move", "x": 1, "y": 1, "finger": 1.5}]"#), "--actions[0] (move): `finger` must be a whole number from 0 to 9, not 1.5");
         assert_eq!(error(r#"[{"type": "click", "x": 1, "y": 1, "finger": -1}]"#), "--actions[0] (click): `finger` must be a whole number from 0 to 9, not -1");
         assert_eq!(error(r#"[{"type": "drag", "from": "A", "to": "B", "finger": "1"}]"#), "--actions[0] (drag): `finger` must be a number, not a string");
+        assert_eq!(error(r#"[{"type": "stick", "x": 1}]"#), "--actions[0] (stick): stick: needs `y` (from -1 to 1)");
+        assert_eq!(error(r#"[{"type": "stick", "x": 1.5, "y": 0}]"#), "--actions[0] (stick): `x` must be from -1 to 1, not 1.5");
+        assert_eq!(error(r#"[{"type": "stick", "x": 0, "y": 0, "stick": 3}]"#), "--actions[0] (stick): `stick` must be 1 or 2, not 3");
+        assert_eq!(error(r#"[{"type": "stick", "x": "1", "y": 0}]"#), "--actions[0] (stick): `x` must be a number, not a string");
     }
 
     #[test]

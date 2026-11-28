@@ -32,9 +32,10 @@ Mounts the story and keeps the Luau VM alive. Send one JSON command per line on 
 {"type":"leave"}
 {"type":"key","key":"A","down":true}
 {"type":"text","text":"x"}
+{"type":"stick","x":0.8,"y":0.3}
 ```
 
-Wheel `dy` is in logical pixels at `100` per notch (`notches` is also accepted). With `--device touch`, `move` / `down` / `up` take a `finger` (0 to 9, default 0), so several fingers can be down at once; an event without one is finger 0. Events follow Studio's per-frame order ([interaction.md](interaction.md)). Including a `presentation` packet in `frame` returns `ScrollingFrame` spring state so a UI host can predict scrolling at display refresh rate.
+Wheel `dy` is in logical pixels at `100` per notch (`notches` is also accepted). A `stick` event moves a gamepad thumbstick to `x`, `y` (each `-1` to `1`, `y` up; `stick` `2` for the right one) until the next one. With `--device touch`, `move` / `down` / `up` take a `finger` (0 to 9, default 0), so several fingers can be down at once; an event without one is finger 0. Events follow Studio's per-frame order ([interaction.md](interaction.md)). Including a `presentation` packet in `frame` returns `ScrollingFrame` spring state so a UI host can predict scrolling at display refresh rate.
 
 See `tools/engine/golden.mjs` (`live` entries) for a complete reference client. The desktop storybook drives the same session API in-process.
 

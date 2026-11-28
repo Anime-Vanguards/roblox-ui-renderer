@@ -82,12 +82,15 @@ Pass a JSON array (inline or file path) of input events scheduled at `t` seconds
 | `down`, `up` | `x`, `y` (default: current pointer), `button` `1` / `2` / `3` (default `1`), `finger` |
 | `click` | Point, `button`, `finger`, `hold` (seconds between down and up) |
 | `drag` | `from` and `to` points, `button`, `finger`, `steps` (default `10`), `duration` (default `0.25` s) |
+| `stick` | `x`, `y` (each from `-1` to `1`, `y` up), `stick` `1` (left, default) / `2` (right): a gamepad thumbstick moves there and stays until the next `stick` action of that stick; `(0, 0)` lets it go |
 | `wheel` | Point (default: current pointer), `notches` (`+1` = away from user) or `dy` (`100` px per notch) |
 | `leave` | Pointer exits the viewport |
 | `key` | `key` (`Enum.KeyCode` name), `down` (default `true`), `shift`, `ctrl`, `alt` |
 | `text`, `paste` | `text` string inserted into the focused `TextBox` |
 
 **Targeting points:** Specify either logical viewport coordinates (`x`, `y`) or a `node` path (matching `inspect tree` or any name-aligned suffix) with optional `anchor` (`{x, y}`, default center) and `offset` (`{x, y}` in px). Node targets resolve dynamically from live layout at the moment the action fires. `click`, `drag`, and `wheel` move the pointer to the target point first.
+
+**Thumbsticks:** a `stick` action moves `Thumbstick1` or `Thumbstick2` of a connected gamepad. A push of `0.6` or more on either axis moves the selection once along the stick's angle, as in a Roblox client ([interaction.md](interaction.md#gamepad-selection)); let it go (`0, 0`) before the next push.
 
 **Fingers:** with `--device touch`, `finger` (a whole number from `0` to `9`, default `0`) names the finger of a `move`, `down`, `up`, `click` or `drag`, so two fingers can be down at once (a pinch is two `drag`s at the same `t` with different fingers). Actions without it are finger `0`; other devices have one pointer and ignore it. Touch rules: [interaction.md](interaction.md#touch).
 

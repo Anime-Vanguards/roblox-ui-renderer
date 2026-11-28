@@ -10,7 +10,7 @@
 //!     (finger: 0-9, a touch device's finger, touch.rs; other devices ignore it)
 //!     {type="wheel", notches (+1 = one notch away from the user) | dy (px, 100 per notch), x, y}
 //!     {type="key", key=<Enum.KeyCode name>, down, shift?, ctrl?, alt?}  {type="text", text}
-//!     {type="paste", text}
+//!     {type="paste", text}  {type="stick", x, y, stick=1|2}  (a gamepad thumbstick's position, y up)
 //!
 //! Handlers run deferred like the engine's signals, in firing order; the deferred queue is flushed
 //! after every event (measured: a FocusLost handler for a click sees the click's input still in
@@ -279,6 +279,8 @@ pub struct Input {
     /// True if a mouse button went down since the last `clear_frame_click`, so zero-hold `click`
     /// actions still register a pressed state on the frame they occur (`rur sequence --cursor`).
     clicked_this_frame: Cell<bool>,
+    /// The thumbsticks (Thumbstick1, Thumbstick2): position, and whether a push may move the selection (`stick`)
+    sticks: Cell<[(f32, f32, bool); 2]>,
 }
 
 /// The input of an engine (installed by Engine.Start).
@@ -513,6 +515,7 @@ impl Input {
             modal: Cell::new(false),
             touch_shown: Cell::new(true),
             clicked_this_frame: Cell::new(false),
+            sticks: Cell::new([(0.0, 0.0, true); 2]),
         }
     }
 
@@ -1682,6 +1685,57 @@ fn navigate_key(cx: &Cx, code_name: &str) -> bool {
     true
 }
 
+/// A gamepad thumbstick moving to `x`, `y` (each -1 to 1, y up; `stick` 2 is Thumbstick2), as a 0.747 client takes it
+/// (measured: notes/interaction.md "Gamepad selection", the thumbstick):
+/// - The same position again fires nothing. Any other fires UserInputService.InputChanged (state Change, Position
+///   (x, y, 0), Delta from the last position), and (0, 0) InputEnded (state End, Delta back to 0) instead, with one
+///   InputObject per stick (UserInputType Gamepad1, KeyCode Thumbstick1 / Thumbstick2) and no InputBegan;
+///   gameProcessed is true for Thumbstick1, whatever it moves, and false for Thumbstick2.
+/// - Thumbstick1 moves the selection, before those events, when |x| or |y| reaches 0.6: once, until both fall below 0.6
+///   again (holding it, turning it or pushing it the other way does not move again). It moves only with something
+///   selected and GuiNavigationEnabled, along the stick's angle (navigation.rs `navigate_stick`).
+fn stick(cx: &Cx, event: &Json) -> LuaResult<()> {
+    let index = usize::from(json_number(event.get("stick")) == Some(2.0));
+    let axis = |key: &str| json_number(event.get(key)).filter(|v| v.is_finite()).unwrap_or(0.0).clamp(-1.0, 1.0) as f32;
+    let (x, y) = (axis("x"), axis("y"));
+    let mut sticks = cx.i.sticks.get();
+    let (old_x, old_y, armed) = sticks[index];
+    if (x, y) == (old_x, old_y) {
+        return Ok(());
+    }
+    let pushed = x.abs() >= 0.6 || y.abs() >= 0.6;
+    sticks[index] = (x, y, !pushed);
+    cx.i.sticks.set(sticks);
+    if index == 0 && pushed && armed {
+        navigate_stick(cx, x, y);
+    }
+    let n = &cx.i.n;
+    let code_name = if index == 0 { "Thumbstick1" } else { "Thumbstick2" };
+    let object = cx.input_object(&format!("Stick:{code_name}"), "Gamepad1");
+    cx.set(object, n.KeyCode, cx.item("KeyCode", code_name));
+    let delta = vector3(f64::from(x - old_x), f64::from(y - old_y), 0.0);
+    let released = x == 0.0 && y == 0.0;
+    cx.set_input(object, if released { "End" } else { "Change" }, vector3(f64::from(x), f64::from(y), 0.0), Some(delta));
+    cx.flush_states();
+    cx.fire_uis(if released { n.InputEnded } else { n.InputChanged }, vec![Value::Instance(object), Value::Bool(index == 0)]);
+    Ok(())
+}
+
+/// A Thumbstick1 push past 0.6 with something selected: the selection follows the stick's angle (navigation.rs
+/// `navigate_stick`); SelectionLost / SelectionGained carry the push's side as a GuiNavigationDirection
+/// (`Dir::of_stick`). GuiNavigationEnabled false stops it.
+fn navigate_stick(cx: &Cx, x: f32, y: f32) {
+    let Some(gui_service) = cx.service("GuiService") else { return };
+    let Some(from) = cx.i.selected.get().filter(|&s| cx.alive(s)) else { return };
+    if !cx.i.navigation_enabled.get() {
+        return;
+    }
+    let dir = navigation::Dir::of_stick(x, y);
+    if let Some(target) = cx.navigate_stick(from, x, y) {
+        set_selected(cx, gui_service, Some(target), dir.item());
+    }
+}
+
 /// gameProcessed of a key's release with something selected (measured per key): true for the D-pad, the Left
 /// and Right arrows and ButtonA, false for the Up and Down arrows, WASD and ButtonSelect.
 fn navigation_release_processed(cx: &Cx, code_name: &str) -> bool {
@@ -1775,6 +1829,7 @@ impl Input {
                 Some("paste") if matches!(event.get("text"), Some(Json::String(_))) => {
                     textbox::paste(&cx, event["text"].as_str().unwrap().as_bytes());
                 }
+                Some("stick") => stick(&cx, event)?,
                 _ => return Ok(false),
             }
             Ok(true)

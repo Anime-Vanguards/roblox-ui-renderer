@@ -49,7 +49,8 @@ Measured in a 0.747 client with a gamepad connected (each rule below is the clie
 - **Signals:** `SelectionLost` and `SelectionGained` carry the `GuiNavigationDirection` (None for a script's selection); `SelectionChanged` fires on the old object and its ancestors, then on the new one and the ancestors not reached yet. A selection that becomes hidden, unselectable or moves off the screen is dropped.
 - **Buttons:** `ButtonA` activates the selected button like `Return`; on another selected object it does nothing. `ButtonSelect` clears the selection, or with none selects the object with the lowest `SelectionOrder`, then the highest layer, then the topmost and leftmost (`AutoSelectGuiEnabled = false` disables it).
 - **Highlight:** `rbxasset://textures/ui/SelectionBox.png` as a 9-slice (slice center 19, 19, 43, 43) over the selected object grown by 14 px, drawn last in its `ScreenGui`, unclipped and turned with the object; a `SelectionImageObject` on the object or on its `PlayerGui` replaces it (its background, border, corners and image).
-- Not emulated: the thumbstick (in a client a push of 0.6 or more on either axis moves the selection once, towards the button nearest the stick's angle; the input format has no stick axes), the analog selection cursor, and selection in `SurfaceGui` / `BillboardGui`.
+- **Thumbstick** (`stick` actions and events, [stories.md](stories.md#timed-input---actions)): a push of `Thumbstick1` moves the selection when `|x|` or `|y|` reaches 0.6, once; it moves again only after both axes fell below 0.6. Every change fires `UserInputService.InputChanged` (one `InputObject` per stick, `Position` (x, y, 0)), and the stick's return to (0, 0) `InputEnded`; `gameProcessedEvent` is `true` for `Thumbstick1` and `false` for `Thumbstick2`, which moves nothing. Where it goes: within 8 degrees of Up, Down, Left or Right, the D-pad's pick when that overlaps the selection's column or row; else the nearest object the stick's ray from the selection's centre passes through; else, among the objects whose centre lies within 22.5 degrees of the stick seen from where that ray leaves the selection, the one with the smallest distance along the stick plus 5 times its offset across it. The overrides, groups and the direction the signals carry follow the side the stick leans to. Over 125 random scenes this picks the client's button in 8,791 of 8,951 pushes (`data/studio/navigation-stick-scenes.json`; 98.2 % on the scenes it was fitted on and on held-out ones).
+- Not emulated: the analog selection cursor and selection in `SurfaceGui` / `BillboardGui`.
 
 ## Touch
 
@@ -110,6 +111,6 @@ On `--device touch`, `ContextActionService:BindAction(name, handler, true, ...)`
 
 ## Driving input
 
-- **Headless CLI renders:** `--actions` ([stories.md](stories.md#timed-input---actions)); `finger` picks a touch device's finger.
+- **Headless CLI renders:** `--actions` ([stories.md](stories.md#timed-input---actions)); `finger` picks a touch device's finger, `stick` moves a gamepad thumbstick.
 - **Live sessions:** `events` inside `frame` commands ([live-preview.md](live-preview.md)).
 - **Studio comparison probes (Windows):** `tools/interaction/` injects window messages into Studio's viewport to record reference event streams.

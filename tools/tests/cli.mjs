@@ -592,6 +592,10 @@ end
 	bad('[{"type":"wheel","x":1,"y":1,"offset":{"x":1},"notches":1}]', /^--actions\[0\] \(wheel\): wheel: `offset` needs a `node`$/);
 	bad('[{"type":"wheel","target":5,"notches":1}]', /^--actions\[0\] \(wheel\): wheel: `target` must be a node path string, not a number$/);
 	bad('[{"type":"wheel","node":"A"}]', /^--actions\[0\] \(wheel\): wheel: needs `notches`/);
+	bad('[{"type":"stick","x":1}]', /^--actions\[0\] \(stick\): stick: needs `y` \(from -1 to 1\)$/);
+	bad('[{"type":"stick","x":-1.5,"y":0}]', /^--actions\[0\] \(stick\): `x` must be from -1 to 1, not -1\.5$/);
+	bad('[{"type":"stick","x":0,"y":0,"stick":3}]', /^--actions\[0\] \(stick\): `stick` must be 1 or 2, not 3$/);
+	assert.equal(readActions('[{"t":0.1,"type":"stick","x":0.8,"y":-0.6},{"t":0.2,"type":"stick","x":0,"y":0},{"type":"stick","x":1,"y":0,"stick":2}]', { time: 1 }).length, 3);
 	bad(path.join(os.tmpdir(), "rur-no-such-actions.json"), /no such file/);
 	assert.deepEqual(readActions('[{"t":0.2,"type":"click","target":"Toggle","anchor":{"x":0.1},"offset":{"x":1,"y":0},"button":1,"hold":0.05},{"t":0.3,"type":"drag","node":"A","to":{"x":1,"y":2},"steps":3,"duration":0.1},{"frame":2,"type":"wheel","dy":100},{"type":"wheel","node":"Panel","anchor":{"y":0.2},"offset":{"x":-4},"notches":-1}]', { time: 1 }).length, 4);
 
