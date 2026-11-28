@@ -1020,7 +1020,7 @@ function deepEqual(a, b) {
 	return true;
 }
 
-const GEOMETRY_FIELDS = new Set(["rect", "clip", "matrix", "absolute", "scale", "text", "scroll", "clipOwners", "rotationCull", "culled", "rotation"]);
+const GEOMETRY_FIELDS = new Set(["rect", "clip", "matrix", "absolute", "scale", "text", "scroll", "clipOwners", "rotationCull", "culled", "rotation", "turned"]);
 
 function compareScenes(golden, now) {
 	const diffs = { status: [], output: [], structure: [], properties: [], geometry: [], layers: [], scene: [], diagnostics: [] };

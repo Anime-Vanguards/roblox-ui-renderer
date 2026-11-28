@@ -596,6 +596,10 @@
 			"digest": "0c551e953c108d19e24b38c5ebdfd637cb0705092bda06d7df50ec07a9127b07",
 			"status": "ok"
 		},
+		"fast/edit/rotation-probe-whole": {
+			"digest": "c4e8893cc5e7364e4eadf3621184c41194c2999f02ca6ce1c19903bc0833ee32",
+			"status": "ok"
+		},
 		"fast/edit/screen-layers": {
 			"digest": "47ba36b15fcd7b85435b9a14bdcefde83c955d19837fbd614e1a48c6eb052057",
 			"status": "ok"
@@ -1181,11 +1185,11 @@
 			"status": "ok"
 		},
 		"fast/edit/text-probe-groupturned-quarter": {
-			"digest": "0224f0525d38effe5e66089800d02c146dd7dff2ea66d4d8d0e0e2db0d0850cd",
+			"digest": "039450b339e8ca054e8f1d554cca9e4cc68b1fab1761213c3e4d5d2d0a6b071b",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-groupturned-quarter@quarter": {
-			"digest": "49a75f5149515696176e13dba761bb4141ff6121a47555c4fb6365d3c95b6e4d",
+			"digest": "3caa00ec5a72d69e7d65428aee82f4c65c1b19d1a45ee62643d3fa6252d14aa1",
 			"status": "ok"
 		},
 		"fast/edit/text-probe-groupturned-sizes": {
@@ -2144,6 +2148,10 @@
 			"digest": "3b7f30d1cbbcef24908ccd1a6f35ce50e227a451e8cf794daff8366a5a6c7290",
 			"status": "ok"
 		},
+		"fixtures/edit/rotation-probe-whole": {
+			"digest": "771a2044ca744e38e9c60280675d31504ae01c92602de96d04758920f0c25ef6",
+			"status": "ok"
+		},
 		"fixtures/edit/screen-layers": {
 			"digest": "e04ce1a683770ac938d591e7b25229f968113203830d0e8fe07ea32a71c33a31",
 			"status": "ok"
@@ -2729,11 +2737,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-quarter": {
-			"digest": "ad1ab4f089adb0e8f3323858a76d780b837adadfdd5a28bd2ea68498cf17aa59",
+			"digest": "8dcc6ae914d32b1b41a8540c9e9068fda36e93cf16f2e3d223cd2b1ec463c953",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-quarter@quarter": {
-			"digest": "9833d875e598918bbb764547698d5b934d36a4dafae28f6c10917436b0ae9945",
+			"digest": "7bd18127ea3fec9de324215f4b8f9769850a9716aac055e79786a6ef1c896ee2",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-sizes": {
@@ -3640,6 +3648,10 @@
 			"digest": "81ae929fdd34afa6cf2a9b8e0403a02c2920d6c94a93d1846cc43ff3578d8117",
 			"status": "ok"
 		},
+		"fixtures/play/rotation-probe-whole": {
+			"digest": "e64b46f01b3c0fee98128eb7091734e7fcd49a6bea2e809b8fcd0f7a3b1e4cc3",
+			"status": "ok"
+		},
 		"fixtures/play/screen-layers": {
 			"digest": "0be7e1c55bc9918b431717614e2d210d18b5ff5e94daf4b3dc9daf6d741aba25",
 			"status": "ok"
@@ -4089,7 +4101,7 @@
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-groupturned-quarter": {
-			"digest": "aad1908a5ffcdb6946a422a413def613ade7f7f1cc80a48f45bb91d0c29cde93",
+			"digest": "eb37bbc67f188267d4263f473b41165a4ba380cb03e78cb61d2598bc257d966a",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-groupturned-sizes": {

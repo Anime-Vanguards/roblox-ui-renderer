@@ -15,8 +15,8 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 /// images, notes/images.md round 4).
 pub fn translated_image_node(node: &Value) -> Option<Value> {
     // A node in a turned CanvasGroup's texture holds its matrix in the group's axes (groups.rs localized):
-    // on the screen it is turned, and it is drawn as a turned node
-    if node.get("fringe").is_some() {
+    // on the screen it is turned, and it is drawn as a turned node; so is a whole turn (`turned`, export.rs geometry)
+    if node.get("fringe").is_some() || node.get("turned").and_then(Value::as_bool) == Some(true) {
         return None;
     }
     let m = node.get("matrix")?.as_array()?;

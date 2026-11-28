@@ -1451,6 +1451,15 @@ fn geometry(ctx: &Ctx, id: InstanceId, record: &Record, matrix: &Option<Transfor
             numbers(&[round(m[0], 14), round(m[1], 14), round(m[2], 14), round(m[3], 14), m[4], m[5]]),
         );
         keys |= KEY_MATRIX;
+        // A whole turn (AbsoluteRotation 360, -360, 720, or 180 under a parent turned 180) has a translation's matrix,
+        // and a client draws it as a turned quad: its edges where they are, a pixel centre on its left or top edge in,
+        // on its right or bottom edge out, where an unturned element's edges round half up (sim client 0.747,
+        // fixtures/rotation-probe-whole.luau at 1.5x: 61 x 41 frames at 184.5 device px start at 184, an unturned one
+        // at 185). A turn cancelled to AbsoluteRotation 0 keeps drawing unturned (images::translated_image_node).
+        if record.rotation != 0.0 && [round(m[0], 14), round(m[1], 14), round(m[2], 14), round(m[3], 14)] == [1.0, 0.0, 0.0, 1.0] {
+            node.insert("turned".into(), Json::Bool(true));
+            keys |= KEY_TURNED;
+        }
     }
     if let Some(clip) = clip.filter(|_| placement) {
         node.insert("clip".into(), numbers(&clip));
@@ -1861,9 +1870,9 @@ fn automatic_content(ctx: &Ctx, memo: &mut FxHashMap<InstanceId, bool>, id: Inst
 
 /// The node keys a rebuild recomputes (scene.luau DynamicFields plus parent and the root's ZInfo);
 /// bit i of `Entry::dynamic_keys` = key i present.
-const DYNAMIC_KEYS: [&str; 15] = [
+const DYNAMIC_KEYS: [&str; 16] = [
     "parent", "rect", "rotation", "matrix", "clip", "absolute", "visible", "scale", "text", "scroll", "culled", "clipOwners",
-    "rotationCull", "displayOrder", "enabled",
+    "rotationCull", "displayOrder", "enabled", "turned",
 ];
 
 const KEY_PARENT: u16 = 1;
@@ -1881,7 +1890,8 @@ const KEY_CLIP_OWNERS: u16 = 1 << 11;
 const KEY_ROTATION_CULL: u16 = 1 << 12;
 const KEY_DISPLAY_ORDER: u16 = 1 << 13;
 const KEY_ENABLED: u16 = 1 << 14;
-const KEY_PLACEMENT: u16 = 1 << 3 | 1 << 4;
+const KEY_TURNED: u16 = 1 << 15;
+const KEY_PLACEMENT: u16 = 1 << 3 | 1 << 4 | KEY_TURNED;
 const KEY_Z: u16 = 1 << 10 | 1 << 11 | 1 << 12 | 1 << 13 | 1 << 14;
 
 /// What a culled AutomaticSize object (its centre outside its clip, `auto_culled`) takes with it, for the children of
@@ -2370,7 +2380,7 @@ impl Walk<'_, '_, '_, '_> {
             // Turns that cancel (a frame turned back by its parent's turn about the same centre: AbsoluteRotation 0)
             // leave the identity up to rounding: a client draws such an element as an unturned one, its edges on
             // whole pixels (fixtures/group-probe-stroke-gradient.luau: a 70 x 44 frame at x = 125 under 30 / -30
-            // degrees is drawn from 188 px at 1.5x, not 187.5). Whole turns (360 degrees) are not measured: kept.
+            // degrees is drawn from 188 px at 1.5x, not 187.5). Whole turns keep their matrix and are drawn turned (`turned`).
             if record.rotation == 0.0 && child_matrix.is_some_and(|m| {
                 (m[0] - 1.0).abs() < 1e-12 && m[1].abs() < 1e-12 && m[2].abs() < 1e-12 && (m[3] - 1.0).abs() < 1e-12 && m[4].abs() < 1e-9 && m[5].abs() < 1e-9
             }) {

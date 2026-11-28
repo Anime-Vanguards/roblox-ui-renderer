@@ -626,6 +626,47 @@ assert(Same(Draw, { "Clip", "PlainGrand", "TurnedGrand", "Text", "TextGrand" }),
     );
 }
 
+/// A whole turn (AbsoluteRotation 360 or -360, 180 under 180, a child of a frame turned 360) is drawn turned: its node says
+/// `turned` beside its translation's matrix; a turn cancelled to AbsoluteRotation 0 says nothing (sim client 0.747,
+/// fixtures/rotation-probe-whole.luau)
+#[test]
+fn whole_turns_are_marked_turned() {
+    run(
+        options(800.0, 600.0, 1.5),
+        r#"
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+local function Make(Name, Parent, Rotation)
+	local Object = Instance.new("Frame", Parent)
+	Object.Name = Name
+	Object.Position = UDim2.fromOffset(123, 11)
+	Object.Size = UDim2.fromOffset(61, 41)
+	Object.Rotation = Rotation
+	return Object
+end
+local Plain = Make("Plain", Root, 0)
+local Whole = Make("Whole", Root, 360)
+local Back = Make("Back", Root, -360)
+local Half = Make("Half", Make("HalfParent", Root, 180), 180)
+local Inside = Make("Inside", Make("WholeParent", Root, 360), 0)
+local Cancelled = Make("Cancelled", Make("Quarter", Root, 90), -90)
+local Turn = Make("Turn", Root, 1)
+local Nodes = {}
+for _, Node in Fresh(Root).nodes do
+	Nodes[Node.id] = Node
+end
+for _, Object in { Whole, Back, Half, Inside } do
+	local Node = Nodes[Id(Object)]
+	assert(Node.turned == true and Node.matrix ~= nil, Object.Name .. " is not marked turned")
+end
+for _, Object in { Plain, Cancelled, Turn } do
+	assert(Nodes[Id(Object)].turned == nil, Object.Name .. " is marked turned")
+end
+"#,
+        &[],
+    );
+}
+
 /// runtime/tests/scene_presentation.luau: presentation mode retains culled nodes with their clip
 /// provenance and scroll metadata (range, direction, zeroSensitive / enabled), without changing
 /// the canonical node fields or draw lists; normal mode carries none of it.

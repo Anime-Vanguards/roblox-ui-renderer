@@ -94,6 +94,10 @@ Rendered as three image quads (top, middle, bottom) tinted by `ScrollBarImageCol
   thumb is no longer than its window (than a negative window's size).
 - **Thumb offset:** `floor(max(0, visible - thumb) * position / (canvas - visible))`: a thumb longer than its window stays
   at its start.
+- **Whole turns:** an element turned a whole turn (`Rotation` 360, -360, 720, or 180 under a parent turned 180) is drawn as
+  a turned one: its edges stay where they are, a pixel whose centre is on its left or top edge is drawn and one on its right
+  or bottom edge is not, where an unturned element's edges round half up (`fixtures/rotation-probe-whole.luau`). A turn
+  that cancels to an `AbsoluteRotation` of 0 draws unturned.
 - **Small frames:** a frame not much larger than its bar draws its bars faded, by its longer side `L` and the thickness
   `t`: not at all up to `2t` (nor the border line beside them), then at `min(1, 1.52 (1 - e^(-0.8 u)))` of their opacity,
   `u = (L - 2t) / t` (a 7 px bar on a 16 x 12 frame at 80 / 255, on 20 x 12 at 192 / 255, full from about `3.34 t`).

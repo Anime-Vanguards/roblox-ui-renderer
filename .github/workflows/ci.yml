@@ -70,7 +70,7 @@ jobs:
       # instead of one after the other.
       - name: Rust tests
         working-directory: native
-        run: cargo test --release --locked --lib --test image_math --test paint --test text_corpus -- --skip engine::input::tests::textbox_focus_caret_and_editing --skip render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph --skip render::gpu::tests::partial_redraws_match_whole_frames --skip render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas --skip render::scene_draw::tests::a_turned_shapes_square_corner_has_hard_edges --skip render::gpu::tests::a_turned_glyph_layer_has_hard_edges
+        run: cargo test --release --locked --lib --test image_math --test paint --test text_corpus -- --skip engine::input::tests::textbox_focus_caret_and_editing --skip render::gpu::tests::native_gpu_quad_alpha_texture_groups_and_clipped_glyph --skip render::gpu::tests::partial_redraws_match_whole_frames --skip render::image_records::tests::native_snapped_image_pixels_match_canonical_canvas --skip render::scene_draw::tests::a_turned_shapes_square_corner_has_hard_edges --skip render::gpu::tests::a_turned_glyph_layer_has_hard_edges --skip render::scene_draw::tests::a_whole_turn_is_drawn_as_a_turned_quad
       # The plain release build of the default features. The test step built all of it already, so
       # this finds it fresh; it still builds whatever a failed test step left out.
       - name: Build

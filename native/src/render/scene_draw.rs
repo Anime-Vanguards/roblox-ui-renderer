@@ -367,6 +367,39 @@ mod tests {
         assert_eq!(plain, [944., 527., 1049., 572.]);
         assert_eq!(turned, plain);
     }
+    /// A whole turn (`turned`: AbsoluteRotation 360, its matrix a translation's) is drawn as a turned quad, a pixel centre on
+    /// its left or top edge in, on its right or bottom edge out, where an unturned frame's edges round half up (sim client
+    /// 0.747, fixtures/rotation-probe-whole.luau at 1.5x: a frame at 184.5 px starts at 184, an unturned one at 185)
+    #[test]
+    fn a_whole_turn_is_drawn_as_a_turned_quad() -> anyhow::Result<()> {
+        let mut gpu = match pollster::block_on(super::super::gpu::GpuRenderer::headless()) {
+            Ok(gpu) => gpu,
+            Err(error) => {
+                eprintln!("skipped: no GPU adapter ({error})");
+                return Ok(());
+            }
+        };
+        let assets = AssetStore::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap(), true);
+        // 5 + 10 GUI px at 1.5x: device 7.5 to 22.5 across, 4.5 to 13.5 down
+        let mut lit = |turned: bool| -> anyhow::Result<[[bool; 2]; 2]> {
+            let mut node = json!({"id":1,"rect":[5,3,10,6],"matrix":[1,0,0,1,0,0],"bg":{"color":[1,1,1],"transparency":0}});
+            if turned {
+                node["turned"] = json!(true);
+            }
+            let mut scene = SceneStore::default();
+            scene.apply(&json!({"viewport":{"width":20,"height":12,"scale":1.5},"background":[0,0,0],"nodes":[node],"layers":[{"draw":[1]}],"fonts":[],"images":[]})).map_err(anyhow::Error::msg)?;
+            let packet = DrawPreparer::new().prepare(&scene, &assets)?;
+            gpu.reset_scene_resources();
+            gpu.render(&packet)?;
+            let pixels = gpu.readback_rgba()?;
+            let at = |x: usize, y: usize| pixels[(y * 30 + x) * 4] > 127;
+            // [left tie column 7, right tie column 22] on row 8; [top tie row 4, bottom tie row 13] in column 12
+            Ok([[at(7, 8), at(22, 8)], [at(12, 4), at(12, 13)]])
+        };
+        assert_eq!(lit(true)?, [[true, false], [true, false]]);
+        assert_eq!(lit(false)?, [[false, true], [false, true]]);
+        Ok(())
+    }
     /// fixtures/image-probe-squarecorner-turned.luau: a client draws the edges of a turned shape's quadrant of radius 0
     /// (beside rounded ones) hard: a pixel whose centre is in the quad is covered, where the rounded box's distance
     /// ramps the edge (194 and 145 for 255 on a frame turned 45 degrees). The same on a turned Frame and a turned
