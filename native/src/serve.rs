@@ -919,7 +919,8 @@ pub fn fingerprint(repo: &Path, state_dir: &Path, args: &Args) -> u64 {
         metadata.modified().ok().hash(&mut hasher);
         hasher.finish()
     }
-    /// Read at project mount: models and meta files (scripts and JSON modules are read at require)
+    /// Read at project mount: models, text files, tables, TOML and YAML modules, meta and project files
+    /// (scripts and JSON modules are read at require)
     fn mount_read(name: &str) -> bool {
         crate::watch::mount_read(name)
     }

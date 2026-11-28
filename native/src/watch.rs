@@ -14,15 +14,24 @@ use std::path::Path;
 pub enum Scope {
     /// Any file or directory created, removed, renamed, written or resized
     Everything,
-    /// Entries created, removed or renamed, and writes to the files a project mount reads (models,
-    /// meta and project files): what a preloaded project depends on (scripts are read at require)
+    /// Entries created, removed or renamed, and writes to the files a project mount reads
+    /// ([`mount_read`]): what a preloaded project depends on (scripts and JSON modules are read at
+    /// require)
     Structure,
 }
 
-/// Whether a write to `name` (a path relative to the tree) changes what a project mount reads
+/// Whether a write to `name` (a file's name, or its path relative to the tree) changes what a project
+/// mount reads. The engine's mount, as `rojo build` 7.6.1 builds a place, reads models (.rbxm, .rbxmx,
+/// .model.json), project files, text files (.txt), localization tables (.csv), TOML and YAML modules
+/// (.toml, .yaml, .yml) and meta files as it mounts them; scripts and JSON modules it reads at require.
+/// Its rules take a suffix in lower case alone (`A.TXT` makes nothing), but it opens meta files, a
+/// folder's init.csv and its default.project.json by path, so the file system's case rule decides for
+/// those, and they count in any case.
 pub fn mount_read(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.ends_with(".rbxm") || lower.ends_with(".rbxmx") || lower.ends_with(".meta.json") || lower.ends_with(".project.json")
+    const RULES: [&str; 9] = [".rbxm", ".rbxmx", ".model.json", ".project.json", ".txt", ".csv", ".toml", ".yaml", ".yml"];
+    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let lower = file.to_ascii_lowercase();
+    RULES.iter().any(|suffix| file.ends_with(suffix)) || lower.ends_with(".meta.json") || lower == "init.csv" || lower == "default.project.json"
 }
 
 /// Whether a listing of a project tree passes over the entry named `name` and all below it: node_modules,
@@ -187,6 +196,42 @@ mod imp {
     }
 }
 
+#[cfg(test)]
+mod rule_tests {
+    use super::mount_read;
+
+    /// The files the engine reads as it mounts them count, each by its rule's lower-case suffix, and meta
+    /// files, init.csv and default.project.json in any case; scripts and JSON modules (read at require) and
+    /// suffixes no rule takes do not
+    #[test]
+    fn mount_read_takes_the_files_the_mount_reads() {
+        for name in [
+            "ReplicatedStorage\\Shared\\Greeting.txt",
+            "a.b.txt",
+            "Locale/en.csv",
+            "Data/config.toml",
+            "Data/table.yaml",
+            "Data/table.yml",
+            "Spawn.model.json",
+            "Map.rbxm",
+            "Map.rbxmx",
+            "Nested/default.project.json",
+            "Other.project.json",
+            "Panel.meta.json",
+            "init.meta.json",
+            "INIT.META.JSON",
+            "Up.Meta.json",
+            "Folder/Init.csv",
+            "Default.Project.json",
+        ] {
+            assert!(mount_read(name), "{name}");
+        }
+        for name in ["Module.luau", "Run.server.lua", "Data.json", "Notes.TXT", "Map.RBXMX", "Spawn.Model.json", "c.TOML", "Other.Project.json", "README.md", "csv"] {
+            assert!(!mount_read(name), "{name}");
+        }
+    }
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -210,6 +255,7 @@ mod tests {
         std::fs::create_dir_all(root.join("a")).unwrap();
         std::fs::write(root.join("a/module.luau"), "return 1").unwrap();
         std::fs::write(root.join("a/init.meta.json"), "{}").unwrap();
+        std::fs::write(root.join("a/greeting.txt"), "hello").unwrap();
         let start = changes(&root, Scope::Structure).expect("watched");
         let everything = changes(&root, Scope::Everything).expect("watched");
         // A script edit: Everything counts it, Structure does not
@@ -221,8 +267,12 @@ mod tests {
         std::fs::write(root.join("a/init.meta.json"), "{\"className\":\"Folder\"}").unwrap();
         let after_meta = settles(&root, Scope::Structure, start);
         assert!(after_meta > start);
+        // A text file's edit counts: the mount reads it into a StringValue
+        std::fs::write(root.join("a/greeting.txt"), "hello again").unwrap();
+        let after_text = settles(&root, Scope::Structure, after_meta);
+        assert!(after_text > after_meta);
         std::fs::create_dir_all(root.join("a/b")).unwrap();
-        assert!(settles(&root, Scope::Structure, after_meta) > after_meta);
+        assert!(settles(&root, Scope::Structure, after_text) > after_text);
         let _ = std::fs::remove_dir_all(&root);
     }
 

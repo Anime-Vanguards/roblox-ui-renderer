@@ -227,8 +227,10 @@ impl RuntimeOptions {
 
 impl StandbyKey {
     /// Everything a preloaded engine has already read: data files, the project's directory
-    /// structure (script sources are read at require time) and snapshots. A standby with a
-    /// different fingerprint than a fresh computation is stale and must not mount a story.
+    /// structure and the files its mount reads (models, text files, tables, meta files and the
+    /// others `watch::mount_read` names; script sources and JSON modules are read at require
+    /// time) and snapshots. A standby with a different fingerprint than a fresh computation is
+    /// stale and must not mount a story.
     pub fn fingerprint(&self) -> u64 {
         use rayon::prelude::*;
         use std::hash::{Hash, Hasher};
@@ -269,7 +271,9 @@ impl StandbyKey {
                         }
                         let own = std::fs::metadata(&path).map_or(0, |metadata| stamp(&path, &metadata));
                         own.rotate_left(1) ^ walk(&path, files)
-                    } else if files {
+                    } else if files || crate::watch::mount_read(&name) {
+                        // (below a root, a write to a file the mount reads leaves its directory's
+                        // own stamp as it was)
                         std::fs::metadata(&path).map_or(0, |metadata| stamp(&path, &metadata))
                     } else {
                         0
@@ -729,6 +733,31 @@ mod tests {
         assert_eq!(key.fingerprint(), before, "a folder made in .git");
         std::fs::create_dir_all(roots.join("ReplicatedStorage/Packages/.pesde/pkg")).unwrap();
         assert_ne!(key.fingerprint(), before, "a folder made in Packages/.pesde");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A write below a root to a file the mount reads (a text file, a meta file) makes a standby
+    /// stale, though it leaves its directory's own stamp as it was; a script's does not (the engine
+    /// reads it at require).
+    #[test]
+    fn a_standby_goes_stale_when_a_file_the_mount_reads_is_written() {
+        let dir = std::env::temp_dir().join(format!("rur-standby-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let roots = dir.join("src");
+        let shared = roots.join("ReplicatedStorage/Shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(shared.join("Module.luau"), "return 1").unwrap();
+        std::fs::write(shared.join("Greeting.txt"), "hello").unwrap();
+        std::fs::write(shared.join("Module.meta.json"), "{}").unwrap();
+        let key = StandbyKey(vec!["--roots".into(), roots.to_string_lossy().into_owned(), dir.to_string_lossy().into_owned()]);
+        let before = key.fingerprint();
+        std::fs::write(shared.join("Module.luau"), "return 22").unwrap();
+        assert_eq!(key.fingerprint(), before, "a script written");
+        std::fs::write(shared.join("Greeting.txt"), "hello again").unwrap();
+        let after_text = key.fingerprint();
+        assert_ne!(after_text, before, "a text file written");
+        std::fs::write(shared.join("Module.meta.json"), r#"{"properties":{}}"#).unwrap();
+        assert_ne!(key.fingerprint(), after_text, "a meta file written");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
