@@ -163,6 +163,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1099,6 +1105,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
+name = "encoding_rs"
+version = "0.8.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7268b386296a025e474d5140678f75d6de9493ae55a5d709eeb9dd08149945e1"
+dependencies = [
+ "cfg-if 1.0.5",
+]
+
+[[package]]
 name = "epaint"
 version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1561,6 +1576,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashlink"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+dependencies = [
+ "hashbrown 0.15.5",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1896,6 +1920,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonc-parser"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ec4ac49f13c7b00f435f8a5bb55d725705e2cf620df35a5859321595102eb7e"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "kasuari"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2044,7 +2077,7 @@ dependencies = [
 [[package]]
 name = "luau0-src"
 version = "0.22.0+luau748"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=c001ca5c3706b8eef5418af165db608ba8b33cf9#c001ca5c3706b8eef5418af165db608ba8b33cf9"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=5d9ac53da096c2316fe8f3321e4f041a2b73039a#5d9ac53da096c2316fe8f3321e4f041a2b73039a"
 dependencies = [
  "cc",
 ]
@@ -2052,7 +2085,7 @@ dependencies = [
 [[package]]
 name = "lune-roblox"
 version = "0.3.4"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=c001ca5c3706b8eef5418af165db608ba8b33cf9#c001ca5c3706b8eef5418af165db608ba8b33cf9"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=5d9ac53da096c2316fe8f3321e4f041a2b73039a#5d9ac53da096c2316fe8f3321e4f041a2b73039a"
 dependencies = [
  "glam",
  "lune-utils",
@@ -2069,7 +2102,7 @@ dependencies = [
 [[package]]
 name = "lune-utils"
 version = "0.3.4"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=c001ca5c3706b8eef5418af165db608ba8b33cf9#c001ca5c3706b8eef5418af165db608ba8b33cf9"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=5d9ac53da096c2316fe8f3321e4f041a2b73039a#5d9ac53da096c2316fe8f3321e4f041a2b73039a"
 dependencies = [
  "console",
  "dunce",
@@ -2216,7 +2249,7 @@ dependencies = [
 [[package]]
 name = "mlua-sys"
 version = "0.13.0"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=c001ca5c3706b8eef5418af165db608ba8b33cf9#c001ca5c3706b8eef5418af165db608ba8b33cf9"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=5d9ac53da096c2316fe8f3321e4f041a2b73039a#5d9ac53da096c2316fe8f3321e4f041a2b73039a"
 dependencies = [
  "cc",
  "cfg-if 1.0.5",
@@ -3267,7 +3300,7 @@ dependencies = [
 [[package]]
 name = "ree-profile-view"
 version = "0.14.0"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=c001ca5c3706b8eef5418af165db608ba8b33cf9#c001ca5c3706b8eef5418af165db608ba8b33cf9"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=5d9ac53da096c2316fe8f3321e4f041a2b73039a#5d9ac53da096c2316fe8f3321e4f041a2b73039a"
 dependencies = [
  "fontdue",
  "png 0.18.1",
@@ -3345,11 +3378,12 @@ dependencies = [
 [[package]]
 name = "roblox-engine-emulator"
 version = "0.14.0"
-source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=c001ca5c3706b8eef5418af165db608ba8b33cf9#c001ca5c3706b8eef5418af165db608ba8b33cf9"
+source = "git+https://github.com/Anime-Vanguards/roblox-engine-emulator?rev=5d9ac53da096c2316fe8f3321e4f041a2b73039a#5d9ac53da096c2316fe8f3321e4f041a2b73039a"
 dependencies = [
  "base64 0.13.1",
  "chrono",
  "glam",
+ "jsonc-parser",
  "lune-roblox",
  "mlua",
  "mlua-sys",
@@ -3366,6 +3400,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "toml",
+ "yaml-rust2",
  "zstd",
 ]
 
@@ -4061,6 +4097,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408"
 dependencies = [
  "pin-project-lite",
+]
+
+[[package]]
+name = "toml"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -5276,6 +5321,17 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
+
+[[package]]
+name = "yaml-rust2"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ce2a4ff45552406d02501cea6c18d8a7e50228e7736a872951fe2fe75c91be7"
+dependencies = [
+ "arraydeque",
+ "encoding_rs",
+ "hashlink",
+]
 
 [[package]]
 name = "yoke"

@@ -304,20 +304,28 @@ export function detectRojoProject(args, defaultProject) {
 	return null;
 }
 
-// The suffixes of the files the engine mounts as scripts, the first that matches naming one (the emulator's
-// src/project.rs SCRIPT_SUFFIXES)
-const SCRIPT_SUFFIXES = [".server.luau", ".server.lua", ".client.luau", ".client.lua", ".luau", ".lua"];
+// The suffixes of the files the engine mounts as scripts, the first that matches naming one, each in lower case alone as
+// in Rojo's rules (the emulator's src/project.rs SCRIPT_SUFFIXES: `A.LUAU` makes nothing, `E.Server.luau` is a
+// ModuleScript "E.Server", `.plugin.luau` a Script that runs in a plugin)
+const SCRIPT_SUFFIXES = [".server.luau", ".server.lua", ".client.luau", ".client.lua", ".plugin.luau", ".plugin.lua", ".luau", ".lua"];
+
+// The files that make a folder a script, in the order the engine looks for them as Rojo does: a module before a server
+// script before a client one (the emulator's src/project.rs INIT_SCRIPTS)
+const INIT_SCRIPTS = ["init.luau", "init.lua", "init.server.luau", "init.server.lua", "init.client.luau", "init.client.lua"];
+
+// Whether the engine finds a folder's init files by path in any case: it looks them up by path as Rojo does, so the
+// file system's case rule decides, and NTFS and APFS ignore case
+const CASELESS_INIT = process.platform === "win32" || process.platform === "darwin";
 
 // The instance name of script file `name` (its name less the suffix: Foo.story.luau is Foo.story), or null for a file
 // the engine doesn't mount as a script. As Rojo names them (the emulator's src/project.rs script_info): a file named
-// only by a suffix loses a .server or .client one whole (.server.luau is a Script named "") and keeps a module's
-// (.luau is a ModuleScript named .luau)
+// only by a suffix loses a .server, .client or .plugin one whole (.server.luau is a Script named "") and keeps a
+// module's (.luau is a ModuleScript named .luau)
 function scriptName(name) {
-	const lower = name.toLowerCase();
-	const suffix = SCRIPT_SUFFIXES.find(suffix => lower.endsWith(suffix));
+	const suffix = SCRIPT_SUFFIXES.find(suffix => name.endsWith(suffix));
 	if (suffix === undefined) return null;
 	const stem = name.slice(0, name.length - suffix.length);
-	return stem === "" && !/^\.(server|client)\./.test(suffix) ? name : stem;
+	return stem === "" && !/^\.(server|client|plugin)\./.test(suffix) ? name : stem;
 }
 
 // The parts of `file`'s path below `dir` ([] for `dir` itself), or null when it isn't inside
@@ -327,10 +335,11 @@ function partsBelow(dir, file) {
 	return relative.startsWith("..") || path.isAbsolute(relative) ? null : relative.split(/[/\\]/);
 }
 
-// The names in folder `dir`, lowercased ([] for one that can't be read)
-function lowerNames(dir) {
+// The names in folder `dir` as the engine's init lookup compares them, lowercased where it ignores case ([] for one that
+// can't be read)
+function initNames(dir) {
 	try {
-		return fs.readdirSync(dir).map(name => name.toLowerCase());
+		return fs.readdirSync(dir).map(name => (CASELESS_INIT ? name.toLowerCase() : name));
 	} catch {
 		return [];
 	}
@@ -387,14 +396,17 @@ function mountedPath(target, at, value, depth = 0, plain = false) {
 	let dir = value;
 	for (const [index, part] of parts.entries()) {
 		if (index === parts.length - 1) {
+			// An init script is its folder when it is the first of init.luau, ..., init.client.lua there and the folder is
+			// no service's top (a folder at a service gives the service its contents)
+			const key = CASELESS_INIT ? part.toLowerCase() : part;
+			if (INIT_SCRIPTS.includes(key) && segments.length > 1) {
+				const names = initNames(dir);
+				if (INIT_SCRIPTS.find(init => names.includes(init)) === key) return segments;
+			}
+			// Any other script is a child by its own rule (init.story.luau a ModuleScript "init.story"), but an init file
+			// spelled exactly makes no child of its own (an Init.luau its folder found is also a child "Init")
 			const name = scriptName(part);
-			const lower = part.toLowerCase();
-			if (name === null) return null;
-			if (!lower.startsWith("init.")) return [...segments, name];
-			// An init script is its folder: the first of init.server.luau, ..., init.lua there (the others, other init.*
-			// files and any at a service's top are not mounted)
-			const names = lowerNames(dir);
-			return segments.length > 1 && SCRIPT_SUFFIXES.map(suffix => `init${suffix}`).find(init => names.includes(init)) === lower ? segments : null;
+			return name === null || INIT_SCRIPTS.includes(part) ? null : [...segments, name];
 		}
 		dir = path.join(dir, part);
 		const nested = nestedPath(target, dir, segments, part, depth, false);

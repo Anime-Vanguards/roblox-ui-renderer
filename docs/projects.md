@@ -10,7 +10,7 @@ A **root** is a directory organized by Roblox service name:
 - `<root>/ReplicatedStorage/Shared/Button.luau` → `game.ReplicatedStorage.Shared.Button`
 - `<root>/StarterPlayer/StarterPlayerScripts/...` → `game.StarterPlayer.StarterPlayerScripts...`
 
-File mappings match Rojo: folders become `Folder`s (`init.luau` and `init.meta.json` supported), `.luau` files become `ModuleScript`s (`.server.luau` / `.client.luau` become `Script` / `LocalScript`), `.json` files become JSON modules, and `.rbxm`/`.rbxmx` files expand into their instances.
+File mappings match `rojo build` 7.6.1: folders become `Folder`s (a folder's first of `init.luau`, `init.server.luau` and `init.client.luau` makes it that script, `init.csv` a `LocalizationTable`, and `init.meta.json` applies to it), `.luau` files become `ModuleScript`s (`.server.luau` / `.client.luau` become `Script` / `LocalScript`, `.plugin.luau` a `Script` only a plugin runs), `.json`, `.toml` and `.yaml` files become modules of their data, `.txt` files `StringValue`s, `.csv` files `LocalizationTable`s, and `.model.json`, `.rbxm` and `.rbxmx` files their one instance; a `<name>.meta.json` beside a file applies to its instance. As in Rojo, a suffix counts only in lower case.
 
 Pass `--roots "<dir>;<dir>"` to specify roots directly instead of using a project's `rur.json`.
 

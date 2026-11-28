@@ -1497,2891 +1497,2891 @@
 			"status": "live"
 		},
 		"fixtures/edit/anim-mount": {
-			"digest": "fd8ff29c03476a12c3123306f1c955b4edb1040d45e9764508a8032bde5abd40",
+			"digest": "28d39ca47526a64b8185f91e0e59f2b3a90db0ba4cdddcb3a2bfc125c8e6f41d",
 			"status": "ok"
 		},
 		"fixtures/edit/anim-probe-springs": {
-			"digest": "56410901fac5315dcebb6b9d4f5a9abf45e57430a63a267bc47ebf03dc2e9991",
+			"digest": "b6507ecabfaaad1239594271fa2f8c606e462489d6a358b71292bf7a30cc9031",
 			"status": "ok"
 		},
 		"fixtures/edit/anim-tweens": {
-			"digest": "4066d303308672fb251fa8170a142040cb91cae4f0db51815cdac607deda19e6",
+			"digest": "0008c5fe68c90c774f8dba8b09bbfd47387eed4285d327378b253f2688fada95",
 			"status": "ok"
 		},
 		"fixtures/edit/canvasgroup": {
-			"digest": "0a3b9f7df660a55be1b276ae696d10541804b81766aeb7578ae4c7ce9e10477c",
+			"digest": "ada70604fe00a2f0700fa2815b96b8c0d731233b96b2dd3e6ee748877d29e774",
 			"status": "ok"
 		},
 		"fixtures/edit/canvasgroup-rotated-gradient": {
-			"digest": "420ac357146ae0cd3a114edea6169795f06d107e91b2c59184a3ae69e3f1b896",
+			"digest": "538592b9086faed58de153ccea4866a1c099a1a03496de97a98287e63dbfb9b8",
 			"status": "ok"
 		},
 		"fixtures/edit/corners": {
-			"digest": "4337e5cbd1205d659e5e4ec2aac764a156d8f330c3777d5f8b4298524689d3ed",
+			"digest": "93038ff58903d202ba70197874331df3e41675b672adae5303ac1265646cfc4a",
 			"status": "ok"
 		},
 		"fixtures/edit/device-probe": {
-			"digest": "2def2a64d5a8b6404340f2e996dfc62a1b72040ab6f9823d5824274eee60dc58",
+			"digest": "eb724d2142ffed6f002121e8b0b8e121a6723649fe4af6ee5b35e7f64f240d76",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-edges": {
-			"digest": "f2039bd0d736d909822cd2042a4c1b92da66c13ec6ac502ba784ceb42b0527c3",
+			"digest": "3e14e3c4252117b0b3c1f1a532251ac0b30d4e13a087fd6e42dcd8941934bb25",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-clear": {
-			"digest": "b8b87922ea2f635e26a86a2a28bc6774fe19874f8ac4d78c7044774e3c10a4da",
+			"digest": "d24e72fe0c9dd93619ed7349fbeccfd1ca544fe935f63ea718783115aa742bc8",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-close": {
-			"digest": "dd10ce8b4631001a61660ca6b75e779b73cfd71fae9c8ea5463af17b05438704",
+			"digest": "6b8d6b9c9a6e2c280b496b2a343a439324ea18c6761f3cd543dc4d29f36d63a7",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-cut": {
-			"digest": "3cca1271da3ff6cb3612eeab4636a13e1147683b906fd80dc9d19674b11c3ebb",
+			"digest": "40ba767e91cc7b334d63d622d5261cad4caa5a2d728f6af4a58e99e43017e499",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-elliptical": {
-			"digest": "02387b4ef783a2fd57ec71269cb0cfc336902ecb38f74213e3d34196e855f16c",
+			"digest": "89f273fd04d1bb3a79213e0d0324d8ddb378e7fd2017ae6f1c5fe0ee223d11e4",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-ends": {
-			"digest": "dd21360b3ae3125ada3177fa7318013c4c5315cd5b557cc2185c0c0670e84aab",
+			"digest": "dd0d5330db48227445c4c685009da5b316eabd7d2808c01080840cabe176c2fa",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-ends2": {
-			"digest": "f8a2145d01f18fd1f1ccd37333f10d2e738d29bb4e9ee2c2be3f30523958a72d",
+			"digest": "7d27bf26cd8e068bc8973860816b28242eb97169d3bcb474981cd71dc5abc559",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-keys": {
-			"digest": "1f48a43398bdc8e192de007fb0594800a9a7731c8cf5b6e40caa5da5f314b965",
+			"digest": "468a5ede365a045c517aec08df43bfb3303f3d19a66693b742c76e12a185c9d7",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-lut": {
-			"digest": "15705bb6ea6ce6287cdaff6b7420df20ee418c5fd64e6b29417edeeb47bf4f6f",
+			"digest": "faf9de2045f7396262e1f9276ed66a8a880a45d39733bfd00cfd7f0797d0af9d",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-panel": {
-			"digest": "276c9c9110e726c053fe762a68d7479fb64f1f1d863f008d3de2a1075001aaa4",
+			"digest": "066aecce6778cba38ea672dbb057375cfd3a368447924573a0e2207b6250ea37",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-table": {
-			"digest": "d851dd9d814cf8a77548ab2bca9455f79f894f707d2d0dba1f6e683f707c23b0",
+			"digest": "c3a4229b65efc17b7f68941d5bc32485bca248fc3dacd3126702faadd20dbf01",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-turned": {
-			"digest": "10e7a67797b8087578b6513efcd481c2b4d1bb8b2503169878d1370b0a1fde85",
+			"digest": "f75c837e36f610ed2369f719f0b5e7a7a841fdb8b2565f61fdc2f6ec05dd0736",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-types": {
-			"digest": "b7498846addfba02adbbd7518a6759fd054245aee9922d199392c04636dd53e6",
+			"digest": "e8baf9bda36e8d0f99607e86729382d4167f7e32d31c0c1bc0dcb277d6f061bf",
 			"status": "ok"
 		},
 		"fixtures/edit/gradient-probe-valley": {
-			"digest": "5f5e4a23b30a8ff8c2959ad8171299c2d1b6ebe54bf6f156f26e8a676788475e",
+			"digest": "99b55c731b1863743e3bf116203ee37ad7fa958dae77de3f368aef17d4d343eb",
 			"status": "ok"
 		},
 		"fixtures/edit/gradients": {
-			"digest": "7e35dea940639516c4398b0f31bd32094775d5ea6f56f4ae4b41f112371decd7",
+			"digest": "6fed50fd20ade79f8e225adc6a80cfef5b3a11fd431927516733e2bc5ed2c873",
 			"status": "ok"
 		},
 		"fixtures/edit/group-blend": {
-			"digest": "1f44c95347b46ef25cdda81d45507fd54df4dcf3e9d57949392992cfd4bd1d52",
+			"digest": "ccd1a8261c597b98253e1036fe7890e5697cf4d88df6e579dc527c802ca20d91",
 			"status": "ok"
 		},
 		"fixtures/edit/group-misc": {
-			"digest": "a3413de55a9293f2d4a9e5ca08f3334732304372be5a957e7963b61eccf16ddd",
+			"digest": "96afcf294f88b1aa12c88853c08f633aa2e46fdd76f0dcb54627ffd7351f1e6f",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-bigarea": {
-			"digest": "0483636af8972779490f93e0d10553bc7372b97de6d7a682321f3647049b8185",
+			"digest": "337cd24574e35890b9e25ee74cbb3cd7c0f2ddb758cddc04c8dea77d132b6395",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-bigtex": {
-			"digest": "1d02c1337595305f6538295158c528798c9c0c1dbe1fbfd9301466b5a6f0df72",
+			"digest": "c66c76acb0853aa6a3a7fe221cb37b365c47b07d34fada4002bc863e57f65b07",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-bigtex3x": {
-			"digest": "8cb331fe1f64b82b523215856413f92c86ac54cc7109887c55fe8a4f70a40907",
+			"digest": "68e29c1427511501e8950271ef65bdab294b43a4f6095e3f9003d7ac42bf247c",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-border": {
-			"digest": "949c30a51c6ca2901b812bf06d06e0ba5b582ecf1b6760e7a577b78369d1a618",
+			"digest": "899b78f671f20820a59fd8d8dc639e36dc9853f6b54936a0dbd963a8cfe60d78",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-corner": {
-			"digest": "da79059b18debdaf56111a89be049a8a3151ab807e3f04545e3bbbe48331b7b1",
+			"digest": "31c423da8f86b1c69fa692ce1693ed96b927d2132754c39ccf36075c958a79c4",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-orbits": {
-			"digest": "ce444b090ff7a455561aa23d2c07077bcf2c2c9415d5e948e4029ab324597a43",
+			"digest": "fd0b6f4e4e3b71af549aeb4fa7a9dfe35d1e976854cf6d1676e80b9eec76752c",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-slicenegative": {
-			"digest": "8574d777832e655ac689ac513cb3cb11e9e86c5c803f3c38162cca1224bc8ca1",
+			"digest": "27d7fd99801f161e6c40db6b844fc2e42448aecce7cfc37af12475365e418ff1",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-stroke-gradient": {
-			"digest": "9375c852f91c89e2e297ebef3038d411dc6b3e80afec6a3c787ac43c1e26c804",
+			"digest": "f0619221d33523f329be3334e2b05ea31b4e09a25b1ecde01d29b216be376eaa",
 			"status": "ok"
 		},
 		"fixtures/edit/group-probe-turned": {
-			"digest": "66defd153f42b2671f1765f7025e35d6d17f7dc9798451f97f1fad72439fcf90",
+			"digest": "4cf8da7dc13509c4b508675e5e7b74e73999b897e906479ed20a97c2a68aab6a",
 			"status": "ok"
 		},
 		"fixtures/edit/group-resample": {
-			"digest": "93c158553b3ddebffc3be3cbae7898584fa26d44933630eb326716c511f9b169",
+			"digest": "f664ae31a11a627fb7d62bcf24b19d6d698a635ec863ed047e87a31a798b33da",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-decode": {
-			"digest": "d5a5b5767730977a23cec1200a94bbb6331600d2a7c8f26e3448521047b7f788",
+			"digest": "900c9eb3cfc2a3b50f1d4b88071e1427375109633ec78bbcd808a6bfc9012668",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-dpi": {
-			"digest": "a2b12000b992727f6a4d98f57d9e9fe12e48cd6d8f57eb22ccceb0d72f06c11f",
+			"digest": "a0227e6df29d5e90db6099764030affed98ab293c9b7f93420670e355448c0e1",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-editable": {
-			"digest": "e90b0fb21ef4efbeea0ddee0e9c3a6394d148c0781d0191c5f135d09dc1c7e89",
+			"digest": "7f6d34c9d86539b0896de047a52729162417c1a96f555d776f23bf1c177faba5",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-group": {
-			"digest": "f6ae9d02ce12e2477725d2c47aad1239e4faa448c6ea4a0b586c559e1dc35e3b",
+			"digest": "1bb3bfe0909fcc175231ede8cdd74e93684a6fbb33b8ccf0161d0f6a3c45f5ed",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-hscroll": {
-			"digest": "46668b06d21c305be0668628accf97e3adcc179bffca4d07e78d1ddd5a5c7c03",
+			"digest": "cc75a05576dbbf493337a6a72670cc3ea42cce46021257629cce5ea0640be286",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-mag": {
-			"digest": "82c78cdb3d02771578e1f56cecffbb3d9649593d5c09454767f195a74a283d7f",
+			"digest": "5886e374728994c40cdc4a16f854848fe0af5f20d2e3b798c5b047f561ba3910",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-min": {
-			"digest": "4e5f562003bddccae63cc57ef0902254c68ae666146ef20dd3085843e2fd51ec",
+			"digest": "935ba3b894bb3445cd28fa8ee7d1461d5c136a3ed9eee4dcec69c72be6c374a7",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-minnpot": {
-			"digest": "6fded277969554989fd391ba1642d12e33bf066bbc78ded42915e3e268a2523d",
+			"digest": "635de478edd7c2bc0ed9847edaf66539263fffd02a8c3da7bd451b37fc29e3a6",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-pixgroup": {
-			"digest": "38d84a5e381549fbeaef17c07e74ee1c1e6f7f953ea82d8e320920b5e91e4fd6",
+			"digest": "425dd02c3d698ead47cf763e3b432d81159b88d8eecd215a5c6d1d0f62c83ddf",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-rotfit": {
-			"digest": "016af6b27164f71ea3f2da2c68ff67f567254eb4054fd35bc6a88a65cac22b78",
+			"digest": "b461a67ee8090593aa589d9ea1e09f0d5803127bb83d69740f6fa4312e067dd1",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-rotlod": {
-			"digest": "a0bc19640cfc96a4958492cded760935fb1818c9c2179bf6de77bb8682f4c46c",
+			"digest": "fbc91a401bc592de4a79c0257b3c63e526996bbc3f07e2799ebe1bd302c5a965",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-roundturned": {
-			"digest": "506b0822de2a84ea55fec4e2a7e1d5133fb467622013b500777ba843e2ad9709",
+			"digest": "a361694e03fd7756d6ea0d9befa8fd34e8019e93af66ffbe5bac6e5d2fc37bc8",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-scroll": {
-			"digest": "0689fe90a4cc00eb1e1b29b74f04df73080a765b6d20c1c8cc6e639b98ba598c",
+			"digest": "933657e2e0b7ef38058a9dfb010f71feef83c8c426baa399f6a7e1d8279a3108",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-scroll-min": {
-			"digest": "b22dbe2fc044392a6ce8be26e59c9a78e81417cdbc8619956a90ce41d12ea07c",
+			"digest": "17a4720b55081f7dce4cf6206ffb51c551994a1bdb2c0d3cea5376c91518e931",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-scroll-scale": {
-			"digest": "cf894008fb13b1c8073f49650d42de087906a28d2d1c3732518aa4e1afe465c3",
+			"digest": "dbb90c511dbba2c178ebfe53cc7be18fdc7c6c46cc01782203cd3ad48ff00244",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-scroll-tiny": {
-			"digest": "ca3f3c29095c2e0efab4eddea43b2e1744c898e1a301130cd2840590c70566a9",
+			"digest": "4adbd42401fad5a659bc06d7d66a8a20698665bd39bf264ee645390724a7249b",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-scroll-tiny2": {
-			"digest": "281e5805c27208ea0c90bdc3afad04b24dbd482919bd0216fe07f8f3493e5323",
+			"digest": "33efa0868eb8ae863cac28b6dd26ff767aa45f6788319a33a9eaa83f17905d8e",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-scroll-tiny3": {
-			"digest": "cf390bada5784aab16f7b813b6260c195b20a0a341dd056382f3a4a1004e6870",
+			"digest": "68eb8a21caa6219d54a8b29c86443a2571942906280ad863c80a0180d4c800d7",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-scroll-tiny4": {
-			"digest": "bc57021479fa791155eb96b78402eb568daf48c3f6b7460b3ddc9d78eb7c36af",
+			"digest": "de6a1e6484ed91048ca4e918c006e7366a2c363a11453ba0c977f06976e48a4a",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-slice": {
-			"digest": "469d712a35f4ff02a4bd43e0c1030b5a3129923f5c98478b40a0af45e3183c5a",
+			"digest": "643e3e9e0ed2101542d9814d2ffa82afc4e552c0643810864255a2d5cf76f500",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-slicescale0": {
-			"digest": "a5685b0c64068a6c765402266ef7f5bbd158e62d6ba4f6d01b1c991bd56f45aa",
+			"digest": "118e904b2fe79b0dfe74b2b688e738eff05fdb02063cbefeee519fa259da8bd4",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-squarecorner": {
-			"digest": "8857b4216bf1a2493cd477caa939e70aea5c976777d7f73ed48ddf9640bdfa4c",
+			"digest": "fa2c8902e4bb49594b247c0654556dd8bd9e19f94bc4759cd4637cb73c6a94b0",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-squarecorner-turned": {
-			"digest": "812999d5effd3cff451ae62c07f63ff213b257deb7f2e9d86154f083aec4d0d1",
+			"digest": "fa8125ba5b47ef5a22c09d876fdd4c2d3c9583c574f33e681563a92fca0f95e8",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-thumb": {
-			"digest": "037737d76e7cc184c0097b7aadd232d5ed5b30b41c9b5172f36cab48c21f653c",
+			"digest": "3ef4265f388c22666ff2968620d867b00a81fe6d957517d826643047eaa7948c",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-thumb-blocked": {
-			"digest": "1c52fa117baaf120434420a47ef5a0d693e5a092e4d3c448efbf246cbb5caee7",
+			"digest": "3ab4d4a1baf86e6b644cbdfe46c2553106faee48c98f6e32b596cc80059761b7",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-ties": {
-			"digest": "2470f335436873537b32bf898c16931bf0aab452476286bc691986f6be0e7b8e",
+			"digest": "a8a2ac312fea822d0cdc3c13fcf4e44a6d0a5ff8d261b9e2f5260a3994512909",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-ties-far": {
-			"digest": "b17728e1cba82a33cd19fe6019fda07cb70c98e652e5d705b56549583de953b1",
+			"digest": "708250b7cabd57b9a5416607c5ef14d889989358836cd29962c8e17bd9b4db64",
 			"status": "ok"
 		},
 		"fixtures/edit/input-device-flow": {
-			"digest": "3d188c9301a2f16054aff8bca0c56f493505ce5d17e91c98f52c48b64f940753",
+			"digest": "67dce4d6e789b0a3e3ec6b7a955c7e9e7f09c3e3b4ce927ad658ec3e1f16bf3c",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-autobuttoncolor": {
-			"digest": "837e0d1e004afa70f35f710c8f6307c2e8476a55522020d4c88c76644f985eae",
+			"digest": "ef940490cc71ed5f4682a6e147a5c343e247ea4cbe5a83bfef0714c41a0fe4e1",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-scroll": {
-			"digest": "102130bf9d9a88f7010cb03ae48798d4fe07af95e0b2e2c8206168e8668d5eb6",
+			"digest": "dbaf464e07f4e076a96ffda4ed2b7bacf17d6e95d5622c89d36e4cd00824f41d",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-selection": {
-			"digest": "b39372019af1572c18854246cd242406728b3387ab232fe509aa3eb890853914",
+			"digest": "da1d3156b37db3c843129dda28a03c974fa0cead2d879977df8726e303962755",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-selection-custom": {
-			"digest": "9b89c6310d9bcf4561d4ccadd762b6cf684d0e95c5876ae787d120c8f98df868",
+			"digest": "2a812a14172c33ee2100a4c0d102650d43b4133027827c7f0511ac33d2e36835",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-selection-turned": {
-			"digest": "50d1ea853b46ddfdf195c37a074dd259d7724cbff0400e62512d786c95382f9d",
+			"digest": "239948b8d25ff1f773a6f04716f816fbfaf8858dc9b9bc936bfd79a92d6fb225",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-textbox": {
-			"digest": "c86cc8f9b731a378754715628e5794f95453500d5c2352c52b2cf3c5635c4e7b",
+			"digest": "507986b7227bd46c40c679deee6083f215704972dd10f7f6f1ed3cf49f091fbd",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-textbox+actions": {
-			"digest": "205fe3e50d58fadfd5f24ccde4e403c6b5f055f543f807eb8c59b63d58af2ff7",
+			"digest": "95ff13f3333d682860854b7b435c0a18c202884efe803e715e99737e7af5dc1e",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-touch-buttons": {
-			"digest": "4e17c2835c11c4966f0f2627bc59f1de44a9a94e9bbe9232e410e716629cdaeb",
+			"digest": "50c063cae6e4710e80b5645f7058965c291bb8dd7979904adc4d98735b95e85e",
 			"status": "ok"
 		},
 		"fixtures/edit/interaction-touch-scrollbars": {
-			"digest": "4fb2602f105c88b0c92205706ffb9bdcbf943c199466b7067f27d658acc01cb6",
+			"digest": "32097356523dcbe33bfacea457a732772073ba14fc1b2fea8dc479059646547c",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autolist-scalepad": {
-			"digest": "f682fd6f1fe4f4de16b6bd6649312881ecb55f86e29575ab6cb28eef055ab69a",
+			"digest": "1cdf673060e1e92ed90d3456af64b7612770d00f3b4cc5e78692aa231d8a5789",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autonested-scalepos": {
-			"digest": "54dbfe56300fbad4671d232aefefcd3557757b6a6f761bd0f9b997c11a4ad8c4",
+			"digest": "354dc9c22042aa4a1b996a2e10b1761f7e9aa8f1278be0fade62ce39bf586b09",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize": {
-			"digest": "d6cf2f6714a65a02a72647b4763fee42583ec104a584aeba8477786360aa687b",
+			"digest": "4b95e2897c6b31fe326c67f0914fc9935e6163dcb073e913897a58b81362c299",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect": {
-			"digest": "9b268a2a5a24b420d759fdb4d2cc0f0c666b254ee5b6a3834fdb401c5b7bb164",
+			"digest": "8163e3a07df9c05b032768a4a1f28df1b73ff9c2d79ba3cc3072908211c32c50",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect-panels": {
-			"digest": "00708adb7dfec21628f10637a1d0e92888de133352e3edf96cb42082c6bbf208",
+			"digest": "1ee89a80b82b02d05a3e5ead544ccb87ad712bc177ab64dad5b7b1910ae049b3",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect-probes": {
-			"digest": "29e694218564adeed3a6f49a4ea245fd480f52da75c32aa81d50d18aaad6b2a2",
+			"digest": "16860a45b4de175289abdbeca15e8af09d4b3bb7348413c68da3d51d348a833d",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect-view": {
-			"digest": "419b821e81d41b8325bcaeaad19aaa49779f95357aa26f272121500ca782fdb6",
+			"digest": "de1fa7f59ad8f1f109764e4b6418a6ea1532a638442cfc99b2783c4518f4b8c1",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect10": {
-			"digest": "2948873b0d5154ddc2353c9db65b358cd8df96b3bddaea4528cdfe220c24e42d",
+			"digest": "2e0a9c3093a30de0f94ff5462eb0586e053ce44691e7ee0fc22c1c823b6b42a4",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect11": {
-			"digest": "048cfd633e70f76ce3987902276c7072c0a53657f44d6403675d805b23997589",
+			"digest": "31794366c936de1e995002c71148572495aa550f5ab522dbb7d62054ad881a24",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect2": {
-			"digest": "0e2f2fef6f28e9424c1262e4ea50a9c14bb46727608918e370d38f1a87121928",
+			"digest": "93f9f9efe8988df8486bc4151a2e0d0c46a468952855b88a8126af7b735bbc52",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect3": {
-			"digest": "191b6c3e16d37f151edc965692990e8c7d138ab84c7ea1c9b56fdc6e6e053e9b",
+			"digest": "7a1c4645b732383f6eafbea39f202acd5255af812928e273d99a9d3692593049",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect4": {
-			"digest": "8976dcfcd36d7e727437eb06cc35ab7d18b57ca18b8d7e758b8b27dc29029c99",
+			"digest": "f2824b50d910d0eafdbb6dd1ccf205fa31dfbbf22d39b3805d72b026125185ab",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect5": {
-			"digest": "7324c8ff2a1dd5f206934b2aac4e3a25c11b223094860f53d6340db13ba58701",
+			"digest": "63e4fca65be61dd1dc99b4973cbce6dabaffee6b13f582da361d841ddc05ea79",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect6": {
-			"digest": "50c3fecde886506abe927cd0c945f33d26398aecd30c76d1fa22074520582b08",
+			"digest": "52add96b80461b6f1e4adb1a6f7c2df881d94834a87055517b5c0b3288c3f580",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect7": {
-			"digest": "2e806ceac3bce1ed49153b80626f19df69a349fdb0261013e614a8907d0c8cf3",
+			"digest": "db4da19fb6ff0e0b4d9a849c87ab2ef0f87eec407a56ff21c3c7dbb4307161cc",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect8": {
-			"digest": "a24e54def4031f9c05a1c4be6445b9370c04167a0c95045a7583ae54dfb92501",
+			"digest": "40a74e8125afa67783d13c3815d7c12bed2a34ed08cbbabb0ede44d4bf62f698",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect9": {
-			"digest": "9507e28f94854ebd5e1178531fbbca07c5cc3278bc4db77f4f4ed9255e4ec89d",
+			"digest": "d3b016ac9d11d96575ff92bd2707fafecee9ab14e7016ec86f2a11f7e9d57dd9",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint": {
-			"digest": "929ca4af2f29fdf02f03a6ac89d9f788d1fb97d009880d9e2566e5d4b2343066",
+			"digest": "a693759ecd23e61fec6afc740bef2ba0589faab6026474825ef83150d60b2359",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint2": {
-			"digest": "834255339e261b24ccf3ee60f49f6adc63b952e7ea508ff7e1f2f317a7a32cf2",
+			"digest": "9d02a98e0c76bda51f367dbc052ac6e5a6aa7964f20030b46d306a05a9f6f65c",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-constraint3": {
-			"digest": "ac23bfc264ea42df9f81472892665c4c6ec9e39a3b03591f326921cc006b8d24",
+			"digest": "cef3091e7d874d9ea5aff1361ea0e229a8f17e7506b917758a0b661d6880ecbc",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-offscreen": {
-			"digest": "9744345ebb20b6d548ad2144b892f0967feef0632fe7749f480ca14e6a6c7493",
+			"digest": "b78d2207a80207d2fa528602c813f0d11b9c8de085452af6b0de8b2a68fbd78f",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-prompt": {
-			"digest": "7d8bf06086f8e5c0dca988f7d8ef346b61e2bd3adcc074244fac6c7a821efd98",
+			"digest": "b9a8f140d24af926ba6036a372cd6b5ac9df6b45e1cd37c415d9e4e24b3872d3",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autotext-linefit": {
-			"digest": "158e367b31349b116e830c3c64c98be826d7d989634ab5dfbb619de17fab5ef3",
+			"digest": "643be35b5881c9d69acea10b593cb7f2f84d7e4cd7c2c09d409139388e09d715",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autotext-matrix": {
-			"digest": "969543b90a68def03477629ce8ce8ff3d1471d7984e97c68d70c7ec7aa975d34",
+			"digest": "f8669525d5d8558ab7cfb0e5445e0fd7d4034ba382f05d9f27095a28d3c67470",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-canvas-unparented": {
-			"digest": "8ba4efddcd422f083e6ba9d7d38d6c2d2db1a4a68f7c821aaa93824fdd7269dc",
+			"digest": "2192dc3d43eb3ae45edcd9269c86a857db23df11167550767ad795c5d9484ca9",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-dynamic": {
-			"digest": "3b941d8c087fbfefcff87d57489e275031974c5121c5c3d6147487fe9d63f9c5",
+			"digest": "651ccd2f46a871167c11a5cc11511925b0f925a17a34bac99137b85737b8ebf0",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-f32-grids": {
-			"digest": "1fbc7e57b586a1824d46fbad570103cacfa2c04db64565342d905fdd405058a0",
+			"digest": "f7eadbef394bd0c09990582d1b7b5dc646634beb21ae11bdc91147b192ec8df4",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-f32-lists": {
-			"digest": "6f8bb68fb03c78957399ac2566e4d896a7361283f7f620d794a15e6c2decb0cc",
+			"digest": "91e291ee8307530df4e097cd4fea1e4477b401a001c5d838d716e9228e6d348e",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-f32-lists2": {
-			"digest": "36581e0e909dad4b02540db207bc76d2708b5db4cbf3a390e66116bfebc4ba5f",
+			"digest": "0d517f4b49abef5a379decc49255ade7c716073582a0b31d818c62dad26348d7",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-flex": {
-			"digest": "3f161be2958483071b42d29a33c86d99efb12e9258f65842eaf2c9f0137d0dc3",
+			"digest": "4e3a0ac877a19f025ad9fa90b1db7d4fe66c7b1ec33a625dd0f5665dd00ea342",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-list": {
-			"digest": "1ef783b6273110838daba049516ef2a2898ba9dbb2243029cb343ca2813a326c",
+			"digest": "b9d715606712232c8eae17994e3060482806ef624be3bc8f410d3e227587b917",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-nested-screengui": {
-			"digest": "713a48cd759885a3b3b0be9a45251992da75d9c2476a494a6f26a10f25b5356f",
+			"digest": "e24ec3b51df029edba02030f6f744613cd418b2511a9fc9fde3b0f5878c41f0d",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-probe-scrollgap": {
-			"digest": "43f7b6443279fcbcf608060234c41c1f141859c8bd6f6f29800aa6eb1a3b7b60",
+			"digest": "58763ddddc4fb97d696099f27193b2eb44552346807c4e9a05bc4377a0d60a85",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-richscaled-quads": {
-			"digest": "d347a8b4852c3b61cdd2e4ee5ed61bd995ec28bc3675d01608a9feaaad3893d6",
+			"digest": "f659ade9c13a0f658b2d781aa60621b982e9b4b6837b93a4903b95a3b15c7a61",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-richscaled-quads@quarter": {
-			"digest": "063f5e3168d74752e03ac5e832615b6fe21589b14c479d504b8f6d84ec41b9c4",
+			"digest": "c1627cc95c872f9440bea21683aeac250821b37c5094b17eac23d49070093c01",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-narrow": {
-			"digest": "4938f77bc4153a635a6407cfe698c1310968c4fa447a07ca0bfcf11361f05eb1",
+			"digest": "c49983118393f49762799016cbaf4c5de84cb4b27868b9205eb370387a1af0bf",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-narrow@quarter": {
-			"digest": "067c03e35a7fa82ea33ec869046d78008293dc2d69cc562a96d66e2c06d0f7ae",
+			"digest": "26ec4acb1a31e5ae2aca2dd1476e4aababb501c5be27fa5bfb13657e459fbc6c",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-overflow": {
-			"digest": "f336fc2729a384b1731a83dacd3b442e042f94ff95043f07a2590069634cdba3",
+			"digest": "7a0e925fc9a4cfeb6f69a7bc914fb3578de48a545acb3cd9f4a2c664aa92cbd3",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-text-overflow@quarter": {
-			"digest": "96fe5f5bc74d87ba73fbf7d776206d9c3220e1737fa9f34799ae5b64cb9465eb",
+			"digest": "a5bc18e0b678e3ecfe9f058fd37c7ee4fd813a3382278a41f5815695b217fec5",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen": {
-			"digest": "e55e934e204c02264816f7dee65d5cf59df2443f4e6b4fc96bedb6f450981bbb",
+			"digest": "fd493dfe2ddce66ac80f121605bd5bcfcbd745b58abc2117eb017b535e10221c",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen2": {
-			"digest": "55c4291ab1d83748e74f89926083245b37a713498fc3f595f474dec6149b9579",
+			"digest": "3b294ecbdf8d84359c636d27e9fd02a2b764fc0193f234d028bad2ee4690987d",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen2@quarter": {
-			"digest": "f08e15108e7003ed4b9e0a0edbd7b74c7c034565f78644bb875cdaca62435261",
+			"digest": "cb74d2262766abe850b8cf9ea2a8cd9f2af398d03fab134bfe2125904a3f58db",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen3": {
-			"digest": "96bc74280671ba41cadd0ce2a1a6968df80dccf315f1313fe5ee58348d899bc7",
+			"digest": "a1533a346c2c9f471551ce791e769bf183bc37f3e54d13d5d29801d8dc1797da",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen3@quarter": {
-			"digest": "832cd265c8ac82b92822bd94c9d988d3b47e74a922aa42641d6294982ec61bfa",
+			"digest": "98d17a6da875f84e24b6962ed047b565b824f06d4efc8b5cfbf701eb0b2f644a",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-textpen@quarter": {
-			"digest": "5697126ff954933fac44099e8658059d3b58b53a015cbcab64c5f6f66f007626",
+			"digest": "d32b4bedd55fba7fb127367cbf8d7cc8237f20974773a680cc631c8115915b03",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate": {
-			"digest": "9ca6601053277fb51d9a9520dedc1118fbbc1657d34821e6c80eb0ab7b983dc4",
+			"digest": "a903263eed3b75a01726c84bc4ea78aba44cb039cc31b26db9f4d8d1d3ffcd76",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate2": {
-			"digest": "2eaf7ae1b09319e04cff78e813f79c650d4372adbd395142296adec2b9681e56",
+			"digest": "cac91420d757c9b6bb22f152e6ec63ef3b568e44173ce1f612951243e5f18da4",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate2@quarter": {
-			"digest": "fbd2eb2e3e3af89d2f005b9d0ae2136de9eff8047c53fb7df53b75ae3464a873",
+			"digest": "b765257252ecb9502242b3209040c20919389772bab6c7f3b6bb43ef011f4305",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate3": {
-			"digest": "7d8dcdf78b0d4d0a978849fbe180021440cd2316487554c96724cab1076d3343",
+			"digest": "481421422bc504b313d011581d116756d78425eee69dda24bf93fada220e27e7",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate3@quarter": {
-			"digest": "0cdb0f7bf021948b76461968b8adf9a4a8776f7e7657ce8b243cb53eaa098581",
+			"digest": "ce54cec483ecbe6fe4d9b608857e9b3a8c64fbc3fd384309d36920c1b8bd0c25",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-truncate@quarter": {
-			"digest": "1567ac5f77805a0bd8d9153944dda624b1b1d5fc360663cb24fdc1d8d4ef92ac",
+			"digest": "ecafe032f278ee4791852ab09062f34b0e5d61c926e9b4aa0bc2f512e8af4d95",
 			"status": "ok"
 		},
 		"fixtures/edit/live-rotated-cull": {
-			"digest": "f12c4da843f23f7b323b2b4ccee5ac3f3f2d2a5af2e5822d657614d796acd0ab",
+			"digest": "f9ed14b36f643e92a63596dcf2dc56a84bd52aae3f4ba37f1a0f43a1edce9042",
 			"status": "ok"
 		},
 		"fixtures/edit/live-scroll": {
-			"digest": "b25907675b3859e981be6190609195d655a3df85013f5e31d6c77543f92d301d",
+			"digest": "484403307b99e9aa5097b689a399ec3971c517293d1e8d2909094d9054d72cbe",
 			"status": "ok"
 		},
 		"fixtures/edit/live-stress": {
-			"digest": "4a00d3e37285b10c26946dca95306dfe432d7c6fbdd6292f4ec0f99242b66bcb",
+			"digest": "32a471075790baa9b7889669c5c041dccc9300d610c3c1488f77eae3d92f03b3",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-curves": {
-			"digest": "3f9693bf5e41fa92e261e3115c7ae8bb4db6c87334c463abf8d3607dfa829bb7",
+			"digest": "5df51b6782ff03d07a129fd65a807e7618223df6c248c64bd88fcd69a783c85e",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-edges": {
-			"digest": "e8163dd6436c3e10b4a07db70441448b8490eadd072e19d977d6b8be579df1a0",
+			"digest": "1655f40cfb503be3ff3fc99432a4132ea5f55638c869e1db87cde3773a8e8a9c",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-layout": {
-			"digest": "0108ff9a8f3483b6db93b2ef1ea7993181b1c71ce0c1bfa315f1663c98e107fa",
+			"digest": "247b16e6bc322d45767574fe314b52228e339291820135144f6a3b8ce62cefd6",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-order": {
-			"digest": "fcf39acbb289d91e33c1184b88fe90f901e94d8e2871e94a5ee88d3f682afe66",
+			"digest": "f33a786d298e713a6b00cf49239060fe27b85e1f24a381791038bccae9e188a9",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-probe-legacy-clip": {
-			"digest": "a0634ea02e4af7607980e30e8adcf48009b579ffd51d9025e87b8971fc7fba19",
+			"digest": "e5d03a513d64ffed4c3c243308637e38a2a799a0bde41b91fae0fb4915e600bb",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-probe-offscreen": {
-			"digest": "df93de2324583af1d5f778a1bcb6bfca714844c358d5277368df6e5d288533c3",
+			"digest": "d4e1322ae8591c96327a3ceaa1adf9d9b8751f3d439710a34e8a997f50eaa6d6",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-probe-snap": {
-			"digest": "2196da56ac673b65b2fbffe228f5fd614979c7e7257f2500ee76bc402815907a",
+			"digest": "48804307f79b04b3dafeb22af49d8d87493632b70a7b50646938d1d3510b1b5e",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-probe-wide": {
-			"digest": "57afea5828b8d3521e838582b6a511e2c8dc691ebf109283fec4a16814c4233d",
+			"digest": "a1827e686caeac3bbe944d32666b0b32ef799b4132da6af4ce75b792214b5dc6",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-strokes": {
-			"digest": "c7015d37eaefcf2a94ae26cb5b7e20902e3854372ec8c0e3388a3fde8dbe8e88",
+			"digest": "47851d8233861d79d723d70706533372045470b781b2927b12c8f726dd6c86d3",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-thick": {
-			"digest": "1059bf4b0a395125cf0d37770a63f187fb0fad777bbd6879d59fcb5f6ede0fcf",
+			"digest": "a8bfc6a2c6f1bb3e181b0ebb6c69b6380d13ccb4b88dc301620238ede1dc6562",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-zindex": {
-			"digest": "23bf74391da6f6c01a5de6246644d459b6dc66827c848e0125a4131c805fd585",
+			"digest": "ea4f73eda9e4f5cab1cae558dbe6a8853b1e64fd58de1c0f112a324ec24cc5f0",
 			"status": "ok"
 		},
 		"fixtures/edit/path2d-zindex-global": {
-			"digest": "05985e29e4b5bebfd20ff58ad5ac0e01ee6d672de1a3785dec2faf9a8ccf4ef1",
+			"digest": "425514334e14e2c9f7d199f20efa983c102a392113fc09015eed7df32b912c11",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-errors": {
-			"digest": "cbe34bdd4edf3a7b8d2a8a76d786389bd9ae9fff4d19c469c7f9d396e3bf89a8",
+			"digest": "994bee603f46e43a84a5f1fc39299868fa1ae82a41e9b037dd04ce54ec56846e",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-ids": {
-			"digest": "39511ad88ba0ba0d763269f97791e2134f8809927d3afebd817fa45ebf4da70e",
+			"digest": "04694c2ed1d3d0c6009166eb227ee20628693163b8e520a541e7b10ff9e260b4",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-input": {
-			"digest": "06bb1d829279417869f0e94bb94e77546edaadd230cb034187ad6319f185ab9c",
+			"digest": "5e1e685eb325d6a4a34bb5d371222a02f28b33f10c475be769514e72613555b2",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-scheduler": {
-			"digest": "d17c2b0a5777e15808de3dc76ec5529127ffccdd86ad471c8e6f9486f7fc1227",
+			"digest": "234c6dc3908e6b80d8578c4685fde915b0cfb6b7e585928cd8b89b819213b793",
 			"status": "ok"
 		},
 		"fixtures/edit/probe-services": {
-			"digest": "cd7b55c2f3d65767f77b0d4712c1830d08a4f0fe6dd899f94e03e93f51702875",
+			"digest": "27dce4cdf1e2d0acd3e79f3ff01669d56ff7252aa0962981a6cad20d6194db22",
 			"status": "ok"
 		},
 		"fixtures/edit/rects": {
-			"digest": "e2e1063b3599f847e619307c9a5823a5cdaecfb25412aa341b547757ba457ec6",
+			"digest": "56eee1dc68d097a988d40fa926de2d740fad635f8a020d284928b81a6bb12f41",
 			"status": "ok"
 		},
 		"fixtures/edit/rotation": {
-			"digest": "ef58a3a4d22a72e7a70c2b91dd397dfa175869cf5e440874b2bcbd9e41bcae97",
+			"digest": "fdfb0e8570584c789f9aa550ee541a279efe96cc273c087682336a1f2c850dc1",
 			"status": "ok"
 		},
 		"fixtures/edit/rotation-clip-offscreen": {
-			"digest": "157bb7e097a4aaafb71d9992fcc524364755e64138b955db7a541eb8fc22c65a",
+			"digest": "6d06707a49569c898bba5c26ab224083cad0f77b6f3a5e53d9b2d4326833b80a",
 			"status": "ok"
 		},
 		"fixtures/edit/rotation-probe-border": {
-			"digest": "76d1069bbe509263fe7136e89a12f89a94d6500a3dd0569e9c6de7c2619b32fb",
+			"digest": "4159baf433c136f6d1d5a2adec9a98b5d48be3de22c8cb2df65e6f836e326f86",
 			"status": "ok"
 		},
 		"fixtures/edit/rotation-probe-edges": {
-			"digest": "c45bfa28d27d0fdf93b413522cf4a8f5ad4c9083d951d883ff75d44eb3bab42c",
+			"digest": "3b7f30d1cbbcef24908ccd1a6f35ce50e227a451e8cf794daff8366a5a6c7290",
 			"status": "ok"
 		},
 		"fixtures/edit/screen-layers": {
-			"digest": "c22453cdb53c82b2c08e09051136bc555b6c4bc1aecf2b99ef773182e73e57a1",
+			"digest": "e04ce1a683770ac938d591e7b25229f968113203830d0e8fe07ea32a71c33a31",
 			"status": "ok"
 		},
 		"fixtures/edit/scrollbars": {
-			"digest": "e996b07d8492fc5299ccb07fecd639bc2214c8ad4724c96872a534db6599919a",
+			"digest": "0d781e0de56486c4cccc3924139e21b2b33c4791205f365491864dbf6c465049",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-a": {
-			"digest": "14614f707d13ec1199bfe7e5b87e17c2980b2ddbec90632647af03e40b9a3247",
+			"digest": "589675ee6e3f2fc94bbfa942f7b3ed791b21932207725863f3c3d3c717c33fdd",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-a-clear": {
-			"digest": "14fe7b25879e77e6d83e6cd6aa1bbf57d74322483999a07499d200bec24afeb7",
+			"digest": "7a06f9ee007651d7faf3278d7825abe3fbed92f77b6220c48386a38d015384e8",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-b": {
-			"digest": "063d93d6e2e53fb560f7b38556013cb44227b645427b6ac0b088165b1ce7c079",
+			"digest": "ce266b286c9ceea10621160e6bfe7c05ecdc2f2483d96c9db1106a0ea6424048",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-b-clear": {
-			"digest": "81872f0f26be1fd491d0e0b0128ca1dafe1207fdb1835a8b25e4ec590456802d",
+			"digest": "cdd19fa17f5384850fc9167340f12c35248ae97c2859422ac02e5b4b5ed53bb7",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-behind": {
-			"digest": "e7cd29ea353208934ef3609c341c93393cb98deb3b47f1ac59a083f271a0ec5a",
+			"digest": "0c6accc1c63d16bd0e0d0f4525c841f6b74b9f35687840410ef0dedaf6274309",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-c-clear": {
-			"digest": "80fc9d5414196ab6861a0c70ace374ac71c2944585667a9b82119c00c8d50439",
+			"digest": "2b1201279a2fa2ff2764ed8ac28a3245856b52c0d5f08b862016182585a14b92",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-d": {
-			"digest": "798383e08298226dd1feaa28865f2b22b77843dd8bd76c82a614619077e6abb8",
+			"digest": "bbd837de7258b2ce1b9c3936fc3cf5e0392994a84bb88e0a59d45662cccb1d85",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-e": {
-			"digest": "4ada938850e02777efbd9cb8eb7585413b26221027e229de579d05d3ddacd838",
+			"digest": "626c966934828bf54f496f7dc3af39e96ae453b906c0c6591befadd750376466",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-f": {
-			"digest": "d243619f731a083d70e9d3cc375412d60bbc69654bcbdfecf46bde1577ffac9b",
+			"digest": "c534e93c1cd7b0830995bae17124bfc7aa6605bdc95c8ac2e3862cd3f13e123f",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-field-a": {
-			"digest": "474825d2c0576dcf7d1dd9c0774a1559ce4d8e403fb029705e3ce193f1f57c7c",
+			"digest": "179804b79e6f3245d5d7e57f597da7ad02082d7397bb8b0f017efc8ac002bc95",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-field-l": {
-			"digest": "023b4b925ca7e681bf4cfcd45c42f864f735c3350958dc2a4545a4fe1ac13fa8",
+			"digest": "c3ad6e226429cf5d06df48e8a50c496d28bcc7e015e4d9fa7f68766659dd867e",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-field-l2": {
-			"digest": "484be24b6682ef477c37a88f0e5a0a26b4cf039030e8f6c52818dd7babd4dac6",
+			"digest": "63c9e7329862e29619437af9b86333b47ceb22fbb769a57d7c362cf8d198b49f",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-field-l3": {
-			"digest": "948b297b2c1456725d378464e19817108a3858acaa37efd74b056f3514d1f504",
+			"digest": "ef8d50d01da8397c346aa8578cb5e715cf939869dd717af658e56a2c56cffd91",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-field-l4": {
-			"digest": "317419b00cd193085c55a0407ca57421c441c1a40d02d017de6a0e96bcfe80fb",
+			"digest": "b833339c65aa0fe1c0b7079e0c6103b6fec71b4b189bea7fa93ed6b1cd3baf38",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-field-o": {
-			"digest": "33a8671c12dc26813836f7047b8c6e63fd97adc7eb1bf08d8d8c52210653bda4",
+			"digest": "a5ddb6eb9adf95614f946f3286406c6ab4854b5721950b2a647ab708fa343f90",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-g": {
-			"digest": "291d8ca27180e85b82e95a490fcf3d7f1a7664324deec266d5fac7831349352a",
+			"digest": "69a93b11d86f97a25b8e1be5e75f2c79c0008f14ea4eb227b19f245643ec4cbc",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-glow-marks": {
-			"digest": "8b828673c744bdaebbfed6120740df7f73f9eb25d6dc6ef77b2f816d6ff7a209",
+			"digest": "ef8fd8676d70fb615da89112da0f184c43c4d5615f81f7876bc5b324df7587c5",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-glow-pens": {
-			"digest": "d07ee5d763281a0545ebabf482535b4739d32803749cbf361adc070a9d920012",
+			"digest": "ad18dc7b69b1624dadc5d6017bfc80f130aa006fb48c851d98357a95d215b838",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-glow-sizes": {
-			"digest": "cb9b4350d54bcbbf69f2f7c04ce0543d237d65c36026806ac1dd097eba5afbaf",
+			"digest": "11798ad6dbf68324d43c7d2c690e96c80cc93c6d061bcc9419c548f5cfb2cfa2",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-h": {
-			"digest": "9ea9e1a3739ad40ed322e4adbe987a23dbbaeb26fc4716794044b2ad432ff88e",
+			"digest": "886e975760c55cf75730ed96bb447c7e25d7fd2ebadad77b305af76ed3dfa190",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-hard-transparency": {
-			"digest": "73ea001d8dbe10d3be2231e2b623d1e19bc49fab4a0334186e30aa22107cde70",
+			"digest": "b6297e2c3d3284fd803de3328e9e459587a9a244a77d9e284606f35748e69e5d",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-i": {
-			"digest": "1f5fa52a8dc86339efb9db0586f6ac182dd64d5de7d9df7f71101c7a453714a8",
+			"digest": "484656e01df662f7985f73300450d90a34025b5c8633ef4400a3241644ff5147",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-inset": {
-			"digest": "213a9bbec56117f115aec7035cd81453090ec65567242697c5bf7480af3500d1",
+			"digest": "71a7ba6ac5af1faf73323e5934ae0e8618cba0d129ca8ae7f228944ae9d45d42",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-inset2": {
-			"digest": "651e01f49db81575e0245eacb33ed7d6f7379a08f66fa3026b72121e71ba3649",
+			"digest": "0a88c2c3008acc32a50db225306421562ecf22a4ae0786caa28729f868d7c8ee",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-k": {
-			"digest": "390077ae2acf34f3681f760f18fd7b3200f2a5074437295c85eec93084bfc242",
+			"digest": "758ea36dafc5afe2737f4366d3e93442b31d9c7c8e8178d237d45c6d6c806ebb",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-l": {
-			"digest": "23de26c8d002b7aa7f57d8c912549f0fb33357700d96208619df0ff038ce091c",
+			"digest": "2b0c2d256d4bbaa6b33839266abbbd5e42f4519e5fefbd29438a9ccca2e86bd0",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-m": {
-			"digest": "55df3b34bc90423329a49d28cef8e7761f96c997f592dcd4f23b583530e43b23",
+			"digest": "c988f045cd916297620835b68cb9fff8f5c97b0f64ebd62ff2d8bff184e1fcc9",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-n": {
-			"digest": "fad58fa93135832d14948cac83cadf0d41f62001c55c37c2d5a3223a35aa057d",
+			"digest": "66f666caa28da0371f43b55c5dee7ea0a1dd8ab6e557adc2acdb1cdbb5cad7d5",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-o": {
-			"digest": "a9ad32428787407cd4c0a292dca9bd0d91c366bbdab7845b10011408dc226261",
+			"digest": "7fa78c3426b7c5fb703d6b73e639aaa1550392f057d33b1047d18254b6e77216",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-p": {
-			"digest": "19e3e8485dca35f3c01bce88eca1398516bdf52ad8d9a6c47bb0ca21c85fe2ba",
+			"digest": "58d5b19d73a5f207d770667fa9dfe09be0d9b8d7f849e8b4803150ecc15baf7e",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-q": {
-			"digest": "0b2004c4b696ff8f53160e19607e78ce248f788d682e251513b84deb4a5432f7",
+			"digest": "04f00442228bafe45cdeb9d16acc064d420ea02ed6b5379227dddf08d02c30d2",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text": {
-			"digest": "e926e92ba6872ee5261d60625cd2c09e28182881756c2ca80d036d00fee1f2f1",
+			"digest": "6474b00d4f8c54aeca588108089abeba71860ca71fd4bbcfa083cc83c6dab0bd",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text2": {
-			"digest": "1b6f429b81de1ec476a0cfd9e93ffe0c3d034a845693a019a035c5456f221aa1",
+			"digest": "3d701a9c07fac9701d265bf3ee69fa017b41c751017d17e07eab15436f2fa549",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text3": {
-			"digest": "88ae9e223daeadc3eb02ab9f0eee218c2a6a773d40f3c19f872e778eb6eb7bad",
+			"digest": "68ec762790fd349c5d320f7bb51e4ea0fb2b84002a5b0947809a486196af8ceb",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-text4": {
-			"digest": "536d5288743f599a6519d6e8423cc09167ea24c306723e7a176dfe714bcb3ac1",
+			"digest": "3465da13d948b7c2d7f612ee214a80586fe983f7f9c1b2240e5995884a3df086",
 			"status": "ok"
 		},
 		"fixtures/edit/shadow-probe-va": {
-			"digest": "40bfa8ffc303345a98c74f435a2f14fb292a3210c706a980b2f50f96f9cddc93",
+			"digest": "9a6310001935f2e16fa284d1ff7887f9f96a9cc396f10ce2ad96ad099e7bcec6",
 			"status": "ok"
 		},
 		"fixtures/edit/shadows": {
-			"digest": "8e330712db7124b40e96b1e8c6f48091689c8e0037402c39a1db561a09f82c3f",
+			"digest": "0ded9fcb97f0f1c00a41a491c6d45e3a42c6ff55936f1dcb1208e68be533ef62",
 			"status": "ok"
 		},
 		"fixtures/edit/shadows-isolated": {
-			"digest": "5828f201566477dc478fc5e1938d5f8ed85b65b9ffa366828547759b9a93b760",
+			"digest": "ad208d6d1e57a3a37693512b59fee2039272b139cec8c9a121e72cc278c02645",
 			"status": "ok"
 		},
 		"fixtures/edit/shadows-sizes": {
-			"digest": "ea9060af6c5466c24ff50209d2b52e9174fa0bf19fbb9274ffd5bed1de495236",
+			"digest": "9c5209ee4afdbfc3386bbec07778f9f249ba29a63cde33c63d731a13c34a3f1b",
 			"status": "ok"
 		},
 		"fixtures/edit/snap-probe-ties1x": {
-			"digest": "b94b62f240f34b963679499eced2e68842877abc22a42791cb0dc200c6662fb2",
+			"digest": "7ab55bf9375f02ed9ba5c1720fe73e611a0daafc94c966eff98d5e6484958427",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull": {
-			"digest": "8fef17bd351ce2f43679ce9b06ae8811ae8f71b789e420bfa1ecfe7374e72884",
+			"digest": "d6ed34d28d9d6b6d9d12c1ea5ad89f67ad45aa4190f3c29fe1e56c793086d740",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull3": {
-			"digest": "51a6c48f7d5783e2b6c2f245dc04e08049ccc1a4c6ea2ce77fbcf2ecf5cd43b3",
+			"digest": "2b05e8eb0e6a0f40e7714a68af41dac5b8f0732694139632c23709c477763fe5",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull4": {
-			"digest": "fc6907aaead85c894a601415c315f0000171b976a4f70c4407435f674332c864",
+			"digest": "b769eeb91409f95a741b0349d2c6403acda17110b39703a45c415baa3ad13a86",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-cull5": {
-			"digest": "dc615e4925346dcc5c95c5c72a43c38ea1f0a04718c1f428d6f979a3021bb2a7",
+			"digest": "736cbe97e3ac1b4883f7ba666496ef23014464fd0154d8c753ef8cf3180f9f54",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-autosize-surface": {
-			"digest": "9d4d5fef355d2a27897316356be3f39cd210b99686693ac957b3fdcba952ed8c",
+			"digest": "4fd650764cb7307551e1460c75ac3884d4d4a16445abdbbea807f4230d23842f",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-clipped-cards": {
-			"digest": "c9e2ac8ad83decea5e3eb0942ec099238a3a4c51020b5cf25b43931dcb31c4a2",
+			"digest": "b1db9b466c51719ec236e686687d7468a702f0a3f16e6e77dc49f82dcd990887",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-grid-scroll-padding": {
-			"digest": "b0f5939860c4df862b15e1ce6e2fa0a7f9f02985c39f3c59f7958b61c6c36963",
+			"digest": "ffd4ddd4fe61cf8bc3dd29c0fbd022310bd13d1f962b5576b35d054850d6e579",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-rotated-clip": {
-			"digest": "19c815115ba2d92df3639b046f1c5a98064f49a0df9a032daac9c3de3fdf3ff2",
+			"digest": "05cdda33240870fc7e1bf5e612528d251d5eb21846da4fde032e6582128aa5d2",
 			"status": "ok"
 		},
 		"fixtures/edit/stories-scroll-noclip": {
-			"digest": "2ef60c0c6394e82199c8d836be0a1a9607fa87c6d44082a2c0cc6ff902b4a15a",
+			"digest": "387eaaa020f779ab42ae187b87145b3bdd0f94c8ada1690921da79b1cc564b26",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-button": {
-			"digest": "2620fc572d15607652253612f4758c0da48acae68b2a558a42446a75fdfa055a",
+			"digest": "f050886e8e3749b72c893c4a44dd57b1aaed69d988d907e1da990f9bcb0080e3",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-fraction": {
-			"digest": "3e01629468186e0326b4a4f6e1824f917104323495e327ad639d2d418314bf5f",
+			"digest": "ce9339be3b4460f46add64f769b27d9ff2457bc8014fcd2f3a72601bc8aafcc0",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-fringe": {
-			"digest": "48508383fb82022aa182a01e81c56a86eec30fa98959eefa6aea05be0e34f6b7",
+			"digest": "965c0907144d5fd31f3c0c94229d945433f7e8a027ea343d42d80c8fea7b4417",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-gradient": {
-			"digest": "196441c548e95f5534f5977a8925756682a165c2fd0168bc41edffdcf7468e2c",
+			"digest": "1a7f882e7f14d7f83e48782cab884c229f015fd4f1a3ccc0cf26b6eb19bb0aff",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-joins": {
-			"digest": "34c679f41037e0312569649ed0d2fb4135b8176447d4e13225ac7c03e1c0473f",
+			"digest": "b2f0761b335778b845a02400c01f6ca2d528d8392031676a0df10d7d1279d000",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-margin": {
-			"digest": "46b2f3019322d197e0c6c9d762aeddae1d015fe2e767ce8420b4911a4a6333e0",
+			"digest": "3a9b9d31fa9aab874b220bb411d57869581bdce7ef786014183053d7b7888572",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-misc": {
-			"digest": "bcd5dfb6a5c0ada7594264c64f849f407f476293c6e60bc3adba72cd00ccf34f",
+			"digest": "f7a66999f436b9d4558f8c798b29950d5359382ebbc4f4487649cb8f39d6aa75",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-modes": {
-			"digest": "4be2dfd77075adc8292c42780f6c506c9a45282ed32721de809120d07813fb93",
+			"digest": "0864b11113dcac5d5a5e770902c84a3ebad1dc089d667b87e71e5e439d0d989a",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-order": {
-			"digest": "3158c2b613d9fc9a1d9b7e5d0e68c39ba3944fc9d54dbb67314f92b7553bbc74",
+			"digest": "ed9edaa36f4dd76422d0bfaf191037634d312cc379abf6be5283eb40ce0fe3e0",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-order2": {
-			"digest": "2412acd47e3fe58f80ee91e7e83767664a8fa30b47d044765857cf0e9c94bff2",
+			"digest": "c2d0c7c0fe23fba037b53ad7ea99bceab33f0a1be7d43559139a23695e3859f4",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-phase": {
-			"digest": "0c4d9ecbd380a07b1e15ce2373546e06ce7cd70ba6076104719e72ee58cd792a",
+			"digest": "a2cee9be2c3d3972b1d613c404573a2b2196b69ed1c978d3d52a9d4b6dbaba66",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-pill": {
-			"digest": "05094f5004afaa1605807d9ba8f034d50d73cd84d1111bb38305feca2f87349f",
+			"digest": "3b95a093b679d24e6f08b1818c253332653f5c52653aa03fb888a4422324657f",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-arcjoin-turned": {
-			"digest": "7e9ca0d7365de3a35e39a012e614f173bc3bfdbfb5cd2cd2a3667a3ad4593835",
+			"digest": "dc5b9f11e9c4fa5fa9195ff5dd1db299f4f6cf97ce15fc51adbbf99e974dbaaa",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-bigring": {
-			"digest": "41da566944edfa2aeb865b9ab9f128bb69ef75cdd73f524671f963505961e1e2",
+			"digest": "a95b6a35ccee4be5f511feb8cf6be4052db22951af358c12b011d86197809ba0",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-margin-scale": {
-			"digest": "891425614624a24e3fe59980bba3bf4c402f4e7f9db1b6836ed5b67e14a4c1eb",
+			"digest": "5e4653e523ee322ac6c900ad4a68c09c7215be4aa21625a6843c93e576b7f530",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-mixed": {
-			"digest": "dcd0705ffe0fc39b8097c660d0516a6e6db0bc6fc107f72c8ceec21e507591ca",
+			"digest": "8600f14e8c8462ea7e726bf51a31799ec063a2d52902c6aae03e194975e68639",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-mixed-turned": {
-			"digest": "4c0efc7bb5a4e83acacd23fd5b55316073836afc93b7948b95c66f4cf1156c66",
+			"digest": "7ddc87e58e571fc5fc6017f2fddebb4a21d263768e42e2ccdb29381d3ca2ff64",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-scaledui": {
-			"digest": "d9531af213b5dee1be908dc3777ba95af5eec50b7d7c041516eb9135e65e8b8d",
+			"digest": "41570a7bfb312ca77d8eba1737f3fe2b77a8bdbaf5ae5e7b90be9478cf41faa5",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-scaledui2": {
-			"digest": "808b02ec1b98c8dfdce01f2c6d229e1779f2f54d8b056166116f3a48a1457653",
+			"digest": "42becc3ff038bb56ab447fdacee0fae947473353054b9f3bc2cd505f976498ff",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-probe-snap": {
-			"digest": "2575365f053dac79805371c66643ec92c9c1be91f545230d4c1e161cc55f98c8",
+			"digest": "6e36cd6af6ea1b059c6db3973233fb027f436a0ba27ec713c629a68a14321e41",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-radius": {
-			"digest": "c3ab1ed41ab91e0018151fc5b62489ef7d1a63cf6f6c9e689db51fe5570f8a9d",
+			"digest": "f88796b831722f62aa3d6c42f482902bf66a5771ff80f732919bde78210fb9a9",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-sweep": {
-			"digest": "f45e671642dc90cf5cf4a696bf84e69c38129fee4d907333e6359e1eb6b03740",
+			"digest": "1260ef5fd6726753bc7972eba608d76c9fae2fd4037ff3ee49aaf1b4dfa84ef1",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-sweep-fine": {
-			"digest": "f912df7fba70803d0530c5fb77abae2d9705f5c98c29c16dafb468af21430459",
+			"digest": "49ba3cb610c39aabbc7a2c06029688ce1a007ce83cc0476d121d6d192798c31e",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-a": {
-			"digest": "43b69a3402468c18c88effbaad500445a1fc163bab98d361be9f733e407fd684",
+			"digest": "021e400f730f37891073bf315a66b7ff0e2e502c8137d2672f996491f042f323",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-a@quarter": {
-			"digest": "cdc825ec73c7060b0c89c66d3f8c8b33a6f769978b89d0ec0956d993d571bad8",
+			"digest": "6610c33474689e403bb2e88d07f60c6624ec9c24457fe51da34b81d01dc9ac0e",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-b": {
-			"digest": "c7a9376962ab65e4a9591d78018a719cdf0e0ddef7d0f0c71ac75d234955a1f7",
+			"digest": "12651dbede81ed70b53fec4a8a1e2a1f1f4ebc168d1b5ad2f424011b564baa09",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-b@quarter": {
-			"digest": "895e394f0b53efdb6b252299d230239375e6e09aa90315a10f85553bbce21315",
+			"digest": "cfee414b6d9d5982d49ad82a807e7608eae867f8f858a811f92860594b9bf037",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-c": {
-			"digest": "02a0f8ca51ebb266d7d14263d198592e73552577e53e992387873bb9b4fdbd12",
+			"digest": "30ee2ac3f16f643a97239ce4c3ff1bfcde9a966ad1e4fc86d486c6e904c7cb75",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-c@quarter": {
-			"digest": "65ac34a5a4d570a53e2af5f6d8a80c089be4ad2aa01afe77b2dc3952dcec0a71",
+			"digest": "34d02245ae33b44dc72b71f98353a597a5ded6c50c400c960f0f785635e36606",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-d": {
-			"digest": "08532dd01504ab38d12116431c92d01bf2862850b71a1a80f958f7c945611b8d",
+			"digest": "67fc5d2a417f2a90e02799cb40df18dc053f5239e14206fa6e289bfdd2b8f857",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-d@quarter": {
-			"digest": "97383d1404b5e70179b3b57935ff5d364e0bff10f669b93f8ff0923f936624a5",
+			"digest": "e2c84b3d46a3de03c7f53a02f788d417db48b3dd2b69784eede6985afcb10293",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-e": {
-			"digest": "0356956a563ccdbe8b3313ce7c39a1dd8f06973b7b6fbf27e12975ee484900de",
+			"digest": "c9737a78b05420cd6eeb757a8ffce1880f7f72aab112847ed6c2649d685fa7fa",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-e@quarter": {
-			"digest": "63dc27f6ae21de491c2fdb40a1ca862e68664668e08badf1a3fdd2d7c25810c7",
+			"digest": "44a2d32bd071e407eab2c6cab970be51a3cdee10608ecf90b4e1903ae190f6e1",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-probe-cap": {
-			"digest": "b55e473da431d759cf101a516b125351503330ef928fa388254322751fc3a2fb",
+			"digest": "c5e0d9517079c9b8447b97d044eead88cf77a648bb35489ac5ac70da780800f3",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-probe-cap@quarter": {
-			"digest": "5cde56ee22e6dbb39f8edfaeeb3adbb71cf99843feb456b33e8fc10c948f1ef8",
+			"digest": "9bc54c51bc6aa8b8347bf50c27b2afd4f6b6333974579feb3523cb5f17ade3f5",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-uiscale": {
-			"digest": "4f0a5068eda36f95c04cf0aa4b168d1e8d6c735e0650600aa72c3c071acb10fc",
+			"digest": "dabb26b7174b9bfb0a9338ce643a885296e98785968f82b34c393d94d8f58625",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-text-uiscale@quarter": {
-			"digest": "57d0eb2891beae174dab3f61afad28f8786c870cf3470245fb4fd85be85cb2f3",
+			"digest": "d8c30b3f1e942c32398a188850e1742681bec00be6546633da3e467cbf72a87c",
 			"status": "ok"
 		},
 		"fixtures/edit/stroke-zindex": {
-			"digest": "7e8c437e55d0cbd068e605f411c385341dacd8b9a463b455a93b5dafebd24399",
+			"digest": "c0925dbf39ee4c759618c35b49a3d32733d80aaff8f725893ca2ad506151dce3",
 			"status": "ok"
 		},
 		"fixtures/edit/strokes": {
-			"digest": "74a9ddb8b13b8f8f49928438e955cf156bdeda7e91eb2cec7679dcc3b828f1ae",
+			"digest": "4ccc19db3d3f0d56447dab8b96a8a96803a81585f89644e078fe29387dc54654",
 			"status": "ok"
 		},
 		"fixtures/edit/text-baseline": {
-			"digest": "b3dbac8afff4db3c035dd391fc31068221a6df6c1581f07732e8f3099134e4b7",
+			"digest": "f84642b3575c010de3d684406d8ea5f2158ce6ff8122593ce9185b0421f7e8b9",
 			"status": "ok"
 		},
 		"fixtures/edit/text-baseline@quarter": {
-			"digest": "8f9c9048e4dac159c4e8e0425793faa815c2df3b5665f1cf9b3f9571e0b51a08",
+			"digest": "003f543f52f1bc75a4cbf4a66cc8b39a6d1eee115776daf2751e740f644b2189",
 			"status": "ok"
 		},
 		"fixtures/edit/text-fontfaces": {
-			"digest": "a46ed5a1f63450c86c680a4c869eca5b55170a0de3a1594c7c9a8d12a9bb790a",
+			"digest": "8afef95bd928a9220a71680540353bffcb1ccbfe095b8678673ee667c3f1d604",
 			"status": "ok"
 		},
 		"fixtures/edit/text-fontfaces@quarter": {
-			"digest": "050ddd22203c81e3d667a04e89bc438be67f0ac00191747eb68ed993a6959f93",
+			"digest": "d998756fcfb12fc0b8f394d4ca6ae3aa1b04997bf25ec7c24fd572b95b33ce93",
 			"status": "ok"
 		},
 		"fixtures/edit/text-fonts": {
-			"digest": "68c3d4905e39eacd06be2dd7f17aa3f5e9e869febc8aa30f3ec81649e4dddf72",
+			"digest": "ae2dee63e1a730901c32f2f813c1905c5030cf0a5050e002f922975cd4f6e6bc",
 			"status": "ok"
 		},
 		"fixtures/edit/text-fonts@quarter": {
-			"digest": "41f3c6e949cfbf34053d0613d7935add8d1b338de3991940b663ac5304243e9e",
+			"digest": "8a6b38b953ac18d74b74a3b0929eb3e124a94f9a99f48c1a3eed1615a3ff65bc",
 			"status": "ok"
 		},
 		"fixtures/edit/text-glow": {
-			"digest": "493a115a21e2bf5a9cc8246d893aef0b9412e883fbde6307a01fbd0e93aff8ad",
+			"digest": "07f31bb45fbda87c5bac6190ff27c3dd76ef36af47b57f231f6ed8c305b6fc25",
 			"status": "ok"
 		},
 		"fixtures/edit/text-glow@quarter": {
-			"digest": "5a39ba2504f953426fe6c299790fac4264445102974cc98dbbee8dc2e2cfeb20",
+			"digest": "97fa4d8d36a644268da70490ceecf2aff8ec2b7367c4d9cbda99b320fd900f3e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-gradient": {
-			"digest": "9c13dd6abb9c80caf67bf4bafd1d14039878b3d4616454ac79424dadad98fd6b",
+			"digest": "a15041767a0dac34d8d03ded28e53f809a0d4c22575fdbb4befd58fc90d452e2",
 			"status": "ok"
 		},
 		"fixtures/edit/text-gradient-degenerate": {
-			"digest": "4bf651a099bf82e5a326b0f6023cfaabc1923927d9f55bc9886ccc9b04167536",
+			"digest": "c8ffcb7d6d4326daa749204669ecee5c1d2bb7d7fb5c0ff84359a62328d526c4",
 			"status": "ok"
 		},
 		"fixtures/edit/text-gradient-degenerate@quarter": {
-			"digest": "10db89f9a799e3a07b2c37ccf8a12747ac1f1e71a6ab820cc74ec446854ea849",
+			"digest": "a341409f70c47c7b77be6fcd6e11914b5dbe96f5c2dd216202909b364279989d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-gradient@quarter": {
-			"digest": "5868cba50615acc2b23ecf3d55c71f0aeac6b5985e7f85eb2b8a9299dc66ac87",
+			"digest": "6d51274e88b34eb36eb75881d0bf1db2e483e5d2444b99bd46a7154818308123",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-blend": {
-			"digest": "3c95e249cc173117fe0b4af53aaacb0c128c72e99a107b046ced42b57a80ab55",
+			"digest": "91505caeba1eb697b3e8f095e60edd930c2a37982d9cf7d3bced375c2869c240",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-blend@quarter": {
-			"digest": "ad702ec8a6169d3a8994385216a9b4754a492fe643420770929ca6d5642c3d3d",
+			"digest": "185061792eae5e306c2b02f3629c17fede21a58551b769c374faf9f7bfa6f087",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-boxwrap": {
-			"digest": "9040bc3e959668af882cbfcb18f4f9ac153d3c5340943a25c76451ee21d2520a",
+			"digest": "1ce24f2bf74149bb8f3b98fc1bdd49cd96e355c4a6e6969a1206386ddfbac02e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-boxwrap2": {
-			"digest": "87ed232b4d23b98bcec1987cbf2f4cae3167cf01dfe99c5f99130b19bf7f1250",
+			"digest": "6d5acd88c185556b0d34befb4060f8123adb36b14f77f93afc077f2590a9d5ff",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-boxwrap2@quarter": {
-			"digest": "800cd94e06d028c0af73cbe51dadf870dd994e3f3454a81e56f65f85a76c78e8",
+			"digest": "49d36536104c2e4781e0ea26f14f8888d6f04c6b9e31996275ab8eb7c834f10b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-boxwrap@quarter": {
-			"digest": "152ca93f1c715bd6d27fce5265c0171bbf533e237772ff3ea4577515e97fa9fd",
+			"digest": "ae353fd0993a5d41c209ff7fa897dce0c817a1ff7d0e962f91b2ff7081e52181",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-case": {
-			"digest": "2808f9f35fd1a2c56dba5dbc03a601d547e585713b5af64cc88391de910a3ba5",
+			"digest": "1b20cc8cfdb9741eb4dfb9de41148e690b7e3b91d79477fe522d955ffd4d8d68",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-case@quarter": {
-			"digest": "9f9d27d071de0b2b7be4fbafa2840b2238ae17a67b7c36b3f6afa9d45e2a8eb8",
+			"digest": "f6d11b6775184f96329e47fab1f603185d2467fe607d7d6f959b2ee4430f7782",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor": {
-			"digest": "a46696d013103d5535ed349b3a8417b9e7c4a58a2712cb3d0f3a472423608ae7",
+			"digest": "04741a14d21f5519e8307d59a4a1e69bc764b2a292c7a02592f763b65d4a388a",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor2": {
-			"digest": "3e1633ae7172f565c138a5bcce1d61db1320c751572739413a82c6669234b988",
+			"digest": "24a61e2149def2c981a118a2e29411b493d5345d1265d2f6a182941e57c98af5",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor2@quarter": {
-			"digest": "9767fa59cb8f8eb0e0bfa36ed9eef41cc73bb3ba756e678a26c34ddbcafdeb86",
+			"digest": "878942857f988994dfc57af76372ac673f48dfa8a1d85306dfc66141b044074a",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-decor@quarter": {
-			"digest": "6a722b3151b2de6c5f251e35c7c7f1c42ea54039d35bf01a2e163961e31d584d",
+			"digest": "fcf4ca81d3e4cb9742381af07423399fb4f4bb4abb833505aa4296718026ae64",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-emoji": {
-			"digest": "dfbb9e70c0d3d64fc5b19e8c25c9916f97dbf0b074ab2f62250967e830f0b5ed",
+			"digest": "aaf7b6495ac47d75684aafe44728d7bf908249f6072e780461df2223db070cc0",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-emoji-line": {
-			"digest": "6b4b9f30f873231e8ab50eafb33042e52949b840e4b270945f9f40c277e44994",
+			"digest": "f5dbe4feb09ada9782ec17869eb48144f9154d01eb9b37f449679824ecb59da3",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-emoji-line@quarter": {
-			"digest": "992f3e58c94d4bbfa7d204ed554c7fcfa83451d367328f2ba17b883ebe5eeef3",
+			"digest": "ac883a64863621c45105beccd6d9fc21404cd6df21157f401f7220272599e21a",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-emoji@quarter": {
-			"digest": "2351eb854948ec244c2ac2a369b67ff15cb5236c00d28f36f6ceac41841182f2",
+			"digest": "cb4e9d54709e2179ed90e939f343d2a59b50f5dc9232c9fdb805c12e11a49fc9",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fallback-block": {
-			"digest": "2054ce764e8b8ecee828a6dd2dcac80afa28864e45478bf51aee9fd607703853",
+			"digest": "5ccf8745ef857b10bcb68cabbf4639184e1bc9930cb7c84d5b235fd8e217e661",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fallback-block@quarter": {
-			"digest": "1ca51a812c85c1e209528d07f0b01f9064e579ae32013f9b41a212e47a29c121",
+			"digest": "346a47d90ec2c51b3256a9b5334ff30079746428a651de30936ff02b5109699b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize": {
-			"digest": "1e439f03387041cfd5d0bfa6a5de0a00ea79dc5ebab158e37154dce689582a34",
+			"digest": "a094cfbe24cd6f4855832e7338125a21ffbfa6dbf185f5dab5fd5c41d499ead7",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize2": {
-			"digest": "f3514e58b0e04091f97948dff87e393255ce122036ec2baf3f0cd4619b387119",
+			"digest": "70a0f54099e91ab11187bb0835366479bd97ee3d57c7eb398acd0af60e3bc781",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize2@quarter": {
-			"digest": "23a34c3144c613b05cc9a8d3e91c982f2de310cadee4aea3627324b8a274f92c",
+			"digest": "be46f5a1e9debe1e3b3cb890ee43804fdf306a4f52b39a56a10a3c8b0330fe7e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-fracsize@quarter": {
-			"digest": "48fe8727895ec0c83ad5faed90042d7cc1849d60684b6cede7d5668df22bbe1a",
+			"digest": "89094c1894d75c42702b228d4171ba68dfb3ea768095eece9cc8598f93c24208",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gapfaces": {
-			"digest": "e69dc3f93b6fb23ba19e3dd0ba16b0c63d5c6d3e75463c1d143c24d16cc492a7",
+			"digest": "56b3c00a00af97c8867f4e6d867d6939741323c6fb0087d48504b919b6cd9913",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gapfaces@quarter": {
-			"digest": "11b72b023359004b382e7a92fbb0b7c72cb44067e6a69336d4f24801cf9cf517",
+			"digest": "06859a25f7c6f96324e8c9aeea3b64dbf83f20d547039b3aa10c97338d559d74",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradient": {
-			"digest": "45bed490aad26a1dbaaacefa1812fccbdd1315885237a4a343530bc6b2aeeba3",
+			"digest": "8b621a0198e68f540b2745c226b236e31a68d351fc41d3df1a255892c2b15ddf",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradient2": {
-			"digest": "983e9e9cb59545238933aac71adf1ac7c31eaa8b2c8b2fadc55c491fbc2a2db9",
+			"digest": "96dd4d34f3a3dcbce7721862a7ea951929b9b43020921cd24b543235ab6aee78",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradient2@quarter": {
-			"digest": "6dcdeb5defdc3e2ed0573de8f55f48ced3309dfa335cd215317f379df033ac20",
+			"digest": "6747eb4353e260ed87098be4c398c8f01c49589329dd2a772814b826ea0cdfe9",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradient@quarter": {
-			"digest": "57ebd9802e813bcbd231ef268a85bac2788d92709cc0afc3467d39d4312ade91",
+			"digest": "c685563b81e46497ffa749d39f0148dde6e001c482179acb52d9950725ea407d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradstroke": {
-			"digest": "6859b63c192a298716ed209f28112e449ee3c88b0605a6c6d95198cee0884041",
+			"digest": "8f2a568b870e2bb0dbdea74939807b70869f4b6e7e92a8717d56071a93dac777",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-gradstroke@quarter": {
-			"digest": "822e9f405352ac109e734a01a532d74a400701fa0fe815fec29231ac481478fd",
+			"digest": "49c851f4ad02204c2aae32d1968f385a5c4c5ec09880f0b469cd33933a58c96b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-graphemes": {
-			"digest": "db129fabecc84c0ef1ed5281cd375782389a60db4acfdf8293fd3312bff772c1",
+			"digest": "d7f11e90c2fbecbeb7f60665ea8fe16656638936a8cf4d381593ed88be9b1beb",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-graphemes@quarter": {
-			"digest": "2d43087b6541777a4f3168d33bae83bb17897ce9056f4bacf54c5aea0cd31d6a",
+			"digest": "8361b6f1aefcc7413a2491b44c51f33296386cdb7a06a5fdbed0b5c67a04d9cb",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-grouptext": {
-			"digest": "3c979bf929abbb29c6c6bf5fba9a80e6b0452781ebcc2463bf74dc953f8cb959",
+			"digest": "3f7c7b48f5aef390432484a4a4844a75dbb086bd3e8f80023a84a5d129a52264",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-grouptext@quarter": {
-			"digest": "1c6c55dfdedfbfee91e0e9efba7026202d7457044d74a8d79584aa9131c0ac5a",
+			"digest": "afa758d45010e467e68eccce126fab34e5fe8936cfc1a3b32d033dc955d2a3aa",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned": {
-			"digest": "f0ca2c3265bf5757a6a11f04efaa1b9d7915ac20773ebdcb7c740c0b35808079",
+			"digest": "d0f13ee8377ab5625befda311b651d6f29328da4954936f1da73563027167fd6",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-even": {
-			"digest": "ff89b6c4ee1cea3411286c7f95147aabb0e3846a3f70f035805a8ae7addfdd3c",
+			"digest": "5c819eb146f792141da7d125fba0b92f338c2ddbb940a8cf99247a72b3bda0c3",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-even@quarter": {
-			"digest": "56210ec72a3351d6652bd8ed5a0ef03c245c6655f3e9e2b4fd96e8a53d2fc61e",
+			"digest": "f4ce069d86127001cbdd7a2a372b4d9753f8c1c4b31fe340651c44154d6b05b4",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-pos": {
-			"digest": "bb44ce6ec257139f4dc407f00b192531e1475c06eef3e506b251554c1b82792d",
+			"digest": "aa877d878908a3f65a422e12a12cf0bfa6945133af53a3f08d77b0bd0560040f",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-pos@quarter": {
-			"digest": "50b60372156e15c92d9e9950fb240ef8b86d9a957b68443b4453e9c94dbe85c2",
+			"digest": "dfc687e7757d776592bdd201aca2dd8ac0536780ddd7b05c613aec6827f33c3e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-quarter": {
-			"digest": "18ecd92238f1a24b221ee09cba59b7bb87d66647057956d6f471035beb9ed6e7",
+			"digest": "ad1ab4f089adb0e8f3323858a76d780b837adadfdd5a28bd2ea68498cf17aa59",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-quarter@quarter": {
-			"digest": "19580ea70d6f784ac2c1d2c27e49f3aa50c37f924c17bd727ae986f99f5e085d",
+			"digest": "9833d875e598918bbb764547698d5b934d36a4dafae28f6c10917436b0ae9945",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-sizes": {
-			"digest": "8ba421e21c958857025c4eb5a5f261949ce5b3867e2a928d97acbaeaa31c1f0b",
+			"digest": "77aca67d0c150e3b6020d55eddc4ba4709110a544ec805cf327d08654318663a",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned-sizes@quarter": {
-			"digest": "aa0aec4f3e15d8f2ca79c5f4ca0b7489784540266d3963bc238bff0427208aaa",
+			"digest": "6c58d7e282fecddc2839030384e85f49ffdd9964c1b8566bd612b1efeab0aeb4",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-groupturned@quarter": {
-			"digest": "39645fb11e24eefc1a43b88ca8892c03f3d1a5fb74a380f8c174bdfa4a38f33b",
+			"digest": "5129a2537942ac798a44dbf2db1d0f067e16585dec502bba5b955882f175c402",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-kernoffset": {
-			"digest": "8fe4a5eaed281db3218ee2c12f2468c34a04892c2c8d6b3a9b8e76d81bf556f8",
+			"digest": "de2ece8fb35491c44cce6f6dc3bd2df81a33d4622e06b06efa137cee2eeb9561",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-kernoffset@quarter": {
-			"digest": "3d3d43e9cbff0a8b00b117221b58fcfeb11f139370acac2a294d79180417b638",
+			"digest": "dc2be509fbabe08f7ee9435c76c2162fd89d3805571c289ff384b59955a41b68",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-large": {
-			"digest": "b8c4c2d0f29aaf1a7ab45aa84e8f5f5fcacb7c9e589485a03a9240eef62936c4",
+			"digest": "49325d196402746d97ba3a3164e4eef625a97a2c8b3f5ab9890c94e5753be0e6",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-large2": {
-			"digest": "5e2413246d20bbfa82d767c4e71ae459ea8390ca8c6cacc562b26e28d37d6158",
+			"digest": "ad0778b7d6ea79c1c01cf364299d819e1b3e6502c73a13cde59bd921074b4105",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-large2@quarter": {
-			"digest": "76a44b9715d686928830201db906c6003df81cc6df9555b7fda90bb32d48c400",
+			"digest": "fc25550a8e24b1abfd04e5c6f1fd7c449baa36d460df035ef4379060278c5baf",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-large@quarter": {
-			"digest": "4d895d77ad165b63b695d39802ffe560542cc27bd6f5242c68e2bcd7852dd082",
+			"digest": "ad6837b0d8559397036006c759f50d4099dce87c6a8b9699bef8ae7d83661bef",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-linepitch": {
-			"digest": "8035a77ec47d8d878343599eb803a5c476efa77776f5f537339a32182499a5bb",
+			"digest": "98088902b706ad240f0dd8f89690eebc65a1ee2446659f8590caa0ccb95fc2b8",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-linepitch@quarter": {
-			"digest": "f001d92bab0fe172f1845d87b04f72647546c62e0ac8e5671d00442f417507cf",
+			"digest": "1a6012a82fa73cd259c0462f00a32f7f6000930fadd2b4a838e5d454d32ee543",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-overlap": {
-			"digest": "cacd780a74809ee403a3dbeaf079d2e4457606b3c48317ee7cf2ecd13ca821a6",
+			"digest": "df3b0997087395674bf62da22c28ae1f1d94944930e79756cd39b393ac63cd22",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-overlap@quarter": {
-			"digest": "262d06060139d2aa7ce3e28e612d932c3e527ee55475b4eea0971113670ed6d6",
+			"digest": "2bd0ee2583dc39f172c4d25e57132922003b532d2ab8a3cfd0980d64edf9edd2",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-place": {
-			"digest": "14daf14a3cf478005604384b8c5a2b23cacab44cf841a3458d7311e39e684bb2",
+			"digest": "385e07255453262a662388724d7f278f79c50c2a866a374edbff957f63600233",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-place@quarter": {
-			"digest": "4617c093b413e9f9f3759c7dd2178ab4e9240cdf3939e8743f8b616beedb5fe1",
+			"digest": "8b56de4d9565c307d45f421e680516f71048976dd1996460de9cc4ad4e9d3585",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-placeholder": {
-			"digest": "6f1ff31ea3c01bcdb5af4cce0c1e5464bc46d856688dc550e8892d1e9d8bff67",
+			"digest": "4eca4cb1da89f30d44bb58b60da350990743b101f3c2b3d6962cab4c70258d02",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-placeholder@quarter": {
-			"digest": "a53382df6f80f3f87578d50b2fd03f337e816470feb42c95cf72a3abbef233bc",
+			"digest": "b58e0c790f689b304a4f5418ff4fbb188f48425e09fbab56a0b2cdcf62ea0d62",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-quadties": {
-			"digest": "17262a33e95325e36e252dce5e00f824763ef1ead9bdc8e54d312b478c522dfa",
+			"digest": "114bfc1b4d8c156fef999f604663eb65a886136922693440374bd9d085d9c280",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-quadties@quarter": {
-			"digest": "165fe1f31c1b4dbdd05f7c59636764ad80f15a4b85204c7642e8b5e826af2e52",
+			"digest": "042fc9c3e7fc27714a581c2520da77b71fb14deeef7d10cd608b15e068a30557",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rich": {
-			"digest": "c48c348fb0278959842e6306dc25fb9fbe786ad3824237245cb8b153d39a4a8c",
+			"digest": "f627a5389570a5600aca0d50bac2c48060f641df09418a009a8f9398325c852e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rich@quarter": {
-			"digest": "e0f99d06b5d6bb99cc5b6cccb872f22a891ec5b773e0ebdf075a53e4e2f71a3b",
+			"digest": "e31095f156dc0f95840c7992891d5be357b07e3e1aabc585b728f82dca170805",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richcap": {
-			"digest": "ebfdc713ed9df86194dd7ad75073f842240fb02d4fd9c8936c62675d30fa8c3b",
+			"digest": "d7de3790aad08c383fc6d9201bccddce63658ec3db21eefbd6275b73c80780f2",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richcap@quarter": {
-			"digest": "8c4bcd77a9fcd1ee0d0e5f0fedc01715399a8445d0396a318614e251a9944bf4",
+			"digest": "6c7390fa1fad5c82747fa3812b38d10b687aafaace4d5fc75d18122cd48b6afe",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled": {
-			"digest": "2bd38f894ac6ceecd6a1c72176f8cbb61981af29d0fdb8bc528f96d7a85c246c",
+			"digest": "d6f8211a2bfb345be39e6d56051fe7a5dafa27ee2d326d6a7649a9b9b5c2902b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled1": {
-			"digest": "043a4e54ffc6578e0f319d1dfbb32df2059417d02a7337bdf273e64389c34e9b",
+			"digest": "d13960ad4bd261f6a26cd38e732cf4d0f785826380b07cfd6b87182012701cea",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled1@quarter": {
-			"digest": "d45f91b3f9dd45c5a7d1df049579e2727b7adf78cf7dbc97cd3c7ad666ffa2cf",
+			"digest": "fad8dd27971d826b401a292b5327bb88f3973d5855222fd27a2c57eb04a8e36d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richscaled@quarter": {
-			"digest": "eef277491f67dbd48a0576eab95d47d970e965629ace30a11775d2af06de4f0c",
+			"digest": "ab0fb456f76efbcaef799450f9459451363c47afd3a71c88cc0606edba017938",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc": {
-			"digest": "53b8f8f0b7a500e9cbef95e41e369ae881215f970fca02dde7a7de9e146e8a67",
+			"digest": "567c128c200335c3f84c7132f0ca86f63fdc6e1bcf66d7429d4d4e4cbb305f23",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc-band": {
-			"digest": "d453e6deda66b2257d49904868a69e7da831c56ffc329ea519122f29862bf2d0",
+			"digest": "022a20aeade6fd71e358162177a0e4061ada56f3d91c6a363fd2463ad76ab234",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc-band@quarter": {
-			"digest": "df050c5e31df3ec405398f793f63b6d4286a42c63d6098b20bd1c302f9929af3",
+			"digest": "1e3c6dfc7fcb8b274dcf9c9dea872a6d70d3ba45167a29c70514c852b18b8855",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc-edge": {
-			"digest": "fc207a430397e5fdc7d50694e9eded1fdffe3600122e6755eb64764e5415b7a3",
+			"digest": "7d8010839f52562d69ed4d8842100254af8460ec0563ec3a99d526c14106672d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc-edge@quarter": {
-			"digest": "0c0b309e66af10c6f85cf0d9a80adeaf2ef952301bce0f776cb9178d430661e9",
+			"digest": "00cceb265994c1413c326f8c4e72eb48c0860f023d89640172d220a4248ec2c0",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc-scaled": {
-			"digest": "e648180e23d1071a9fdf7f91d367bf3a6f3cd339d94c0253d90b9f6f6e438343",
+			"digest": "c62321b47702f01025d058eed1ba5536cccdd22212563e8927a2de0338eba364",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc-scaled@quarter": {
-			"digest": "d88389f436ca1297731ccbb4e20c5f1143b01ac7b104a80c1df7e8d36191f170",
+			"digest": "8d8346ff8efce329210ac48231ec6a6bbc299d1612d51b516342f37f6d2e4b5f",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-richtrunc@quarter": {
-			"digest": "305f5d5535fb6d837a7fd3d575c4478cf85a00e969d53cf4479d46cf6c261dbd",
+			"digest": "cb1dc0419c62114898bde4679fb695d765dda8bb8adf6edffacd5dcd99f64135",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate": {
-			"digest": "2322bc5c485b8cbd7e81706a34047a0e8d776de26161a9c08a8d134e23cda960",
+			"digest": "d146a31788e6323cf105cb375ae20fe027e55d1adf4189ce281d39891c49b37e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate-quarter": {
-			"digest": "ff09bd63f09f7b76f250f61138ff8432434687d4e916272c3914c06ce860a616",
+			"digest": "12fdaace3d5cba530457dd56712046f0c22e293c5d7255472da1492ce781c1ab",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate-quarter@quarter": {
-			"digest": "de2b2fb449b4905123945f6cc86a9863dff8bd64851e3347e842e72dcfcf02a6",
+			"digest": "6516b859c4da311874c6b13194155aa2723e62f75df245c81d964a1c544c3b1e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotate@quarter": {
-			"digest": "57e4c5613c99f8d9b88289737c994b6913023c54358278a7a98a9f1d616d8dfa",
+			"digest": "8983f38f70f7e78d543a31a46ce10fe5125020e1db22301aa649f7fbd0cfdd09",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotation-size": {
-			"digest": "39bf7db365cff2e2bdc08f1ebd9013b67e1a6e1c606dbf85025eb867d34ec8d1",
+			"digest": "e269c74dc1db921ace19e62580f84e5fa2aefa913fdb6bae6ba135f86faaf74b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-rotation-size@quarter": {
-			"digest": "6dabc2071d135cf7b4075539a6f660ca0017a42b5c64e1c5d6b514b9820488a0",
+			"digest": "676f4bda4c42007de21d45b881d813d939f36734ee9a5db175adcdf01a08d3ef",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-selfclip": {
-			"digest": "2100a6dfd29839e4729895f48312b4a8ee708fe6e04a7d27437109c723cc97cd",
+			"digest": "c1a3fbcf0db2b7a789787fa52e2116777338fe7e92e7afba180d608465323492",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-selfclip-turned": {
-			"digest": "88984361fd6904999211911bd0831960a5e35bb48df707540363198478ffa8ac",
+			"digest": "13b2a605ec7aa695e6144c5ad99994caa8270f401c88ad462ef4d094cbe00661",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-selfclip-turned@quarter": {
-			"digest": "4521d2bcadac6002775009643d4901218ecca6e4c51f7d9ebac1f88e4741338a",
+			"digest": "53ceb4f3149b37f2888770361e7684ed338c31856b83bcbc3021472ac5acb786",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-selfclip@quarter": {
-			"digest": "c3cba51e46840c8ab495eff3732bd9edea19bae5bd2aedf343189cebe8505cbd",
+			"digest": "ef4e3f592a1441decdb27022c455229d59a5ad5f036a4e56901a3ff31dcb08e9",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-strokequad": {
-			"digest": "d9f202c9ccc73493127a94b7f26162139403041265e8d8fd14cf25de3dfadbb9",
+			"digest": "ddd3d5a06116a4ba658ae1807e6a05a72a7aa60a2c9042bb3bc2fa37c49613f9",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-strokequad@quarter": {
-			"digest": "6ee54aab34a926468294abacc1a1d41e325097ddc841b587da9aa9fed0185cc6",
+			"digest": "98baa6e11757f9bb9b1244f5160d0a36cfea359087bcd4c1f9a582ec0cdddbea",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-subpixel": {
-			"digest": "aa2c0e93e059bf22a67d49c60fa761ea34d084a45bba5d1d6113979a67dcf97f",
+			"digest": "23af17d3d28b7ab2ff5fcbc1761f9b8a50ccc50d81c687a673acf8f831120bde",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-subpixel-size": {
-			"digest": "59257aa4ae2a39f51415f06b643c4db20605cfdf77cc9bee4d3f185a4f6f7fa8",
+			"digest": "b71444dffbe483c1a55c48826993459d16c2164c70b0ff4a46609c4de8213f44",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-subpixel-size@quarter": {
-			"digest": "864b885a5f5de462ef5459e1388d8262301069ca0370b2484ed2cd99a5764f49",
+			"digest": "05270a222c957fdad2b6ca24be23d9ea862497adbc217a872f22bd0f4b4d0905",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-subpixel@quarter": {
-			"digest": "a0f675d68da20d2fa690a98f793e9bd208d7f4861d9121a203461e4b7cc31535",
+			"digest": "fa5f9fd547db3e47e5dc3409dfcc230897bc0d8ec8224dfcf28b5ca7bdf66c48",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-synth": {
-			"digest": "613a03f26399fa895d740ad3f3bb29b674146aa3fb70a5bec97cfb766fb3b166",
+			"digest": "be9dd727f53f4930540e8aeb89fc84bbc33a77735abe0827375ff2e902a9ef02",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-synth-rotated": {
-			"digest": "952768eb9c42e8cd2239da48afe60fc2570b4402d0ace9063f0c40547214f61e",
+			"digest": "2dcb41885d605a6391297e4558c79fb63557c959cfbfc214b46d5647c9760883",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-synth-rotated@quarter": {
-			"digest": "e06e62bc6c4cda3a68fdb5b41234a22f931406711b7a26d7da901063584296a8",
+			"digest": "ade4892e8deb7feb17e3e65ca04c56ac523e7bb7f80c54a79acbad8e4c662d54",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-synth@quarter": {
-			"digest": "e9c37b395a21592a2e45ca065a11fe227f82bbdfc8110473c371f0e2aeab40e5",
+			"digest": "a1854ca781128164672ed82c671088c56140d80dfd628ed4f09c8e970d224ca0",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-synthscaled": {
-			"digest": "27ea624e0a51b6cbd59ab5980158ccaed5467c2ff4b9f3c119af20d7842fb633",
+			"digest": "b52dcc6b669b71f746a7282f29a0a48e08a8739ab32814279458bade0012a4b2",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-synthscaled@quarter": {
-			"digest": "aea168b27f884c3aaf47615d0591867dc9a1ed5f59a000575ab995bb61122332",
+			"digest": "ef6e699fbaaef3789f9e7e17f55ddf84fb13aed91dcbb11bbb08f33a8f446e45",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-tie": {
-			"digest": "31ecd126fe32cecd56a2449d0ab62ae1e87625cddda47fdbe1b17f5666f0910e",
+			"digest": "6decce0053a72bb127e8288742ce4e43080911fe828f2b56a9627e95ef2fd73c",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-tie-size": {
-			"digest": "a300c6167efdcee84f71d4f2bbc24fd10081bb7939875bea104c2abec4ef66f2",
+			"digest": "383372f6368e13dae3cdad54ac84be16b49068c23d958614db2cc2f97cfc0955",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-tie-size@quarter": {
-			"digest": "84e58cdb4cc7b42404bf3d6d185273e596275734cca795c20fc852af3c51877f",
+			"digest": "27b1528bea20bf05b8cfab4f2241432ecc3c31a8198de5cd1d49ed1a866a8f0e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-tie@quarter": {
-			"digest": "33abd6f0141a720763caa79bfadbdbb4766f354483f86296fd2091356f92058b",
+			"digest": "b0a803717bb662b7517b9197ec2f228e2df99a65070f047e494a1fd12a01ff2f",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-toptie": {
-			"digest": "b192be03f6c0543af87941f10d5afa356d8bcbc7b58f26ce314dd1de3fb085dd",
+			"digest": "33002e0c24d7f68d360651bfe14ffb9413a40b66476a9415916e8083c3016013",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-toptie@quarter": {
-			"digest": "6ec5751a8c0478200724d5ce4bf2fc99a49eea585d2b817d0d89f13be22f6e89",
+			"digest": "4dc7a43881787eb38f7db1178276f34269976e3d1f87506d998f60589f3764a4",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-trailspace": {
-			"digest": "67cf6db2f5fca6b1bc074c072c0b5a6da66e9e5c6831f17e50d5b9dc22e2c4cb",
+			"digest": "af3bc0ca2cf16d79d5e85cff3e2e18f9646bdacc8034be2b2267d2e4c997ef06",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-trailspace@quarter": {
-			"digest": "efb117c8f5651766f7730b3a34505d725458486c05c4d0fd44fc40af6f779aa6",
+			"digest": "eb40c6518d5ce4dd3352c4db69bb62bea2da34338939512155352193ae2fd4b4",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-uiscale": {
-			"digest": "e8e27ea9fa07ad86de9474dc234a55677abe3ec1fe370cf2f2be29ba406240b9",
+			"digest": "3144fe18ae8ad6781701aaa79b026498b064191f12cd2deefc2c406bc59d02b2",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-uiscale@quarter": {
-			"digest": "94963e2569f110dfc6ba41ba574fa91269ca964b9b48c1363c0600bfab0e726d",
+			"digest": "87a3276c7d54b8350c8fe458522df96969ebae5722a55eae02a1175d971a4c87",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-view": {
-			"digest": "aaa6a417ecafa5260103dc9629d68a3949c2d2900668945dc7fdafc57c7fabbe",
+			"digest": "d67e8324466ddc58852da88c841dc7060c140d250854af43608a147fd58ebdfe",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-view@quarter": {
-			"digest": "9ffa7ac94bc803f9ee1443a18a4be0f0b0a3c68bb5ee17ba9be9d1e51c57b97e",
+			"digest": "1777770d1e462570a1a4fbafad00ef9f26ede8a33e73ab26e64f93fef467363d",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-wrapspaces": {
-			"digest": "e47a8cdd55a4bb28ce2311ce7bc017ca16c16a928c7c5638ede80dbb4d30f37d",
+			"digest": "88334d39d8bcf9694a66c1d8d78fae2136fd31103f11f8139b03e642e85791b3",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-wrapspaces@quarter": {
-			"digest": "370c986280416dff8b538fd99ccbfc801cca2e95c3605dc24a6d522af94819bf",
+			"digest": "70ae5ebcd2989173d85d39b89a920cf63bc8d6d4e48fa7a6fca142899a6c7f08",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-zwj": {
-			"digest": "4307627a4c86cd1a0b4cc702cd18d36189ef2c9edfef56bc74770db79c57b9e0",
+			"digest": "ca37fa88e28be06a3c2f36c849bd78f5e562ac041dd326697165bf92a38a9b08",
 			"status": "ok"
 		},
 		"fixtures/edit/text-probe-zwj@quarter": {
-			"digest": "b9696dd1890e274a8726196d7a8547836945f95f158095696a31c612f7cf2f50",
+			"digest": "5a02eed9c4ae1b385cc55d4d2e9e466d52f3cddead1422c15cb38ee8f69b6b47",
 			"status": "ok"
 		},
 		"fixtures/edit/text-raster": {
-			"digest": "458dd29edc559349136fb588d493a7543763dfea5e90f4246fcacf5c3d387dae",
+			"digest": "c9f704a5bd3e6f21542cef6aca8f6729bc7e4c018723a9d99f5e995f4903157e",
 			"status": "ok"
 		},
 		"fixtures/edit/text-raster@quarter": {
-			"digest": "ac1ce6af0af96554f450e3fbf2062b6cb5c3503b519e5ff1993778dea4945680",
+			"digest": "ae945b60bd452e9364325b64d2a05c650337c7a408ab2107c4aa77cf1fd8700b",
 			"status": "ok"
 		},
 		"fixtures/edit/text-stroke": {
-			"digest": "13228b6478760013d19bc65588ce328741ea0cfabf143b727d9fa04814994254",
+			"digest": "1eae8c218e575bf764bf3bc0a15e5ba4273e837b6b285ed5cd25950b4b1ed915",
 			"status": "ok"
 		},
 		"fixtures/edit/text-stroke@quarter": {
-			"digest": "f043104406b795bb0e84aab430023c4b83234743a5eb038b5b93984a5ed6552a",
+			"digest": "774564b232decf3c6578f385fd455f866d61a4f2a81c310b5193094e4a4dfb19",
 			"status": "ok"
 		},
 		"fixtures/edit/viewport-models": {
-			"digest": "cc24b126d0adfaa695eff01b03ebf5dfb7021423714e1c6d57a5f02b85e160cd",
+			"digest": "ba2349d014d9f2c8ff1ee914ce137d37161da0083ee4f6e4f65e3eb32b29ed57",
 			"status": "ok"
 		},
 		"fixtures/edit/viewport-probe-fade": {
-			"digest": "2194cfedad30aa8ae9d8cded94b0e5c533f84bf689b5979ac332f2748b97257a",
+			"digest": "b87354ca1e2b764d1c1ba01ca9a0f5cabed76a856867b1a5ed4554b3bd074194",
 			"status": "ok"
 		},
 		"fixtures/edit/viewport-probe-layer": {
-			"digest": "5811f7ed212cb9ffbcc9cc7e1b4d5a607a7e38c5db03691b4cd8b832ab21793c",
+			"digest": "1d4617fe0d1e2a54427478c0cff8412074e233e21235686024665be2062efa8a",
 			"status": "ok"
 		},
 		"fixtures/edit/viewport-probe-materials": {
-			"digest": "97909133bc08f217ac718cd3d37aa47f80e1aea35e38001541a2feb97328100e",
+			"digest": "03c5529a74d82ef6c051fdfc4760ddd5c5efece0b19fab108ad41da92baef865",
 			"status": "ok"
 		},
 		"fixtures/play/anim-mount": {
-			"digest": "d60c060c4e6484e8e2139ed380a112f4c5f4de956a8ebc2d3158326488ab6e18",
+			"digest": "058014a09b12406ccb107f69848cf3de72cfc1ccfa1bfc56668b99a3f9096d96",
 			"status": "ok"
 		},
 		"fixtures/play/anim-probe-springs": {
-			"digest": "f32a4cfc7cb2beb8e8ae71963a6be0b8ed3591a354c40646d961c4ee2836f712",
+			"digest": "1da01e287b72a4f2e10314bf1db987d80b2276c7ec3b1ce58a8042506d277c4a",
 			"status": "ok"
 		},
 		"fixtures/play/anim-tweens": {
-			"digest": "6e851792543ff523b5ffffef98cb0d0a5bf01c35e6800ea9edba4586dbd8b4b8",
+			"digest": "ed30f82a898d0a2de3a7f9f75c20b539c8281792e331708f6d479f356571f854",
 			"status": "ok"
 		},
 		"fixtures/play/canvasgroup": {
-			"digest": "22c3b2950f3279c7b1a85980ee0ce025d45f18e12171dd6a6e655afbb44df539",
+			"digest": "a306f0f3e30e2565807f8188cbb1e330456874e91a335bddf430daaedcf92255",
 			"status": "ok"
 		},
 		"fixtures/play/canvasgroup-rotated-gradient": {
-			"digest": "1f8d36af9ad59417ae5299f87ccce7efc18c21a365d1428ca6433ce54192d652",
+			"digest": "2d4dbe3ee22c017c84ca16620593ea30bb321ec5a89a18ed82d21c8c02a4517e",
 			"status": "ok"
 		},
 		"fixtures/play/corners": {
-			"digest": "e609904a1a1c307fc67314b6308284e5c96b05564088a57b0171ddca33757d94",
+			"digest": "a06094dc3b3b056509c2941492e1156e67be87f2712530812eb93af4a12239ea",
 			"status": "ok"
 		},
 		"fixtures/play/device-probe": {
-			"digest": "20c435126172094921920ce4518ecf217220974fd658198c50d1f75efcd7778d",
+			"digest": "36ae6c04c6228280bd9c56698bcfbb000046abca2b6e061390b49e2b4954ace8",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-edges": {
-			"digest": "631022f30c144c26bddca28741f28a34af6f2ca3fee25d4da538805171d66447",
+			"digest": "832e68a83e43ed9e482e380732dc8e3f8f6bbc4efcacbbed38f855fa993bed0b",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-clear": {
-			"digest": "c23a150a315ddb0c5f3c21398b9d43cb2e46163fa37773a60320b63b52f59856",
+			"digest": "ec3d614e0e5749c0d2fc178a287fef2e775ce906a6e5ced2ed231691c61cdd22",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-close": {
-			"digest": "ec13d5a74e5f1810790241adc9e5169fa361225bb39f3324ba7caa77e2a9d16e",
+			"digest": "7153d1e2f0b8949ce747c0e078511a091f7c1c3d650d9d778905074e629a73d7",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-cut": {
-			"digest": "92005ebf9bb8e5bae0aa88a76280f5a5d108e9b18786dc5b6f9f11719ff61b7e",
+			"digest": "9fc3a419ac16182b544c16ed5cc5c0e8323a4ec27922a06409b477b86bce7516",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-elliptical": {
-			"digest": "5b4cccff69fd841da367038b3ede2a700efda16841a27f32dc17f278117e3e77",
+			"digest": "1f37d08676b3846ceeb75d8f44c06de09462ece601e85f18c3d861a3d28ea372",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-ends": {
-			"digest": "67f851d909c6b453cbd982e7e608f5553475030859103b99293a9e78b154d504",
+			"digest": "1bd17c69c0eed78b591168b34d5b8d6615df71871ac4f5b2dc90c1f7dbba07d7",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-ends2": {
-			"digest": "6d9e1e6fb1375cb8a5c4d28bc77a0e42551eceef212a86fe03893036b0b601d4",
+			"digest": "51a26c872870bf993cfc6461ce9b40d6cf66c3d36d680bfb5ac8709805be7c15",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-keys": {
-			"digest": "6a12bd378c1b2837751bc466a7973dccc7d99eb3490e0e98d5a7f3db808e7356",
+			"digest": "ca476246d12f9a91ed5741e5e4c8756da9ab2baf8492d8d506010fb4590dfdb3",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-lut": {
-			"digest": "6fee969b489011fff2d81005380283f1f6ce3086c4af5028131934dc5d49660f",
+			"digest": "b2806ee352858606e94e7e5fac34c46c823ed0b28bfd46ab5e585869ff62c65f",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-panel": {
-			"digest": "03d7d9a36b2c3a0cb0730adce5a92e53e7856236ff4b11771fb945e35e59145d",
+			"digest": "d7941ac0b704be74ed9c250a350293782e3852d469474a10a632b09e4594be73",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-table": {
-			"digest": "5b5ba03ef33c29281c408ab7cefd2ac84630bfe48a29b3e1847ff67121501679",
+			"digest": "5d9024709c40f1699a05502a31bb509fbde83801b9795b24f62b5f105e738e3f",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-turned": {
-			"digest": "9f42898b8e8605fc3b6f82046ed0802d9e3fd08e2ebada0600e0d37922b98d17",
+			"digest": "d94a606122e4765e01ba8edfd245334e49d123aacee091ffcb4d9540b61da975",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-types": {
-			"digest": "97d773db7438fdf8fbd9d8b652313fcc7aece675214486e0e8813dd38f107d9b",
+			"digest": "7caa129b08486becdd59c0c061d46409d85b478f9f2a7c17805254431d2d3287",
 			"status": "ok"
 		},
 		"fixtures/play/gradient-probe-valley": {
-			"digest": "fa39aba888bddb75711fbb54d07b5c5d58f739185b4c4894bc08c0c7acbdbb7c",
+			"digest": "44251294c627a6106ab719f34a831e7905718af7530df58af47f01cbbf31a5ce",
 			"status": "ok"
 		},
 		"fixtures/play/gradients": {
-			"digest": "6a29dbe803191daf6e302a9435302eaafaaeb3c2fd4106b193ecb4e95b7c9936",
+			"digest": "d8dd37af15ed1da17612edc407db755e48a70a2c73f4c938c445d4ab7787bd6b",
 			"status": "ok"
 		},
 		"fixtures/play/group-blend": {
-			"digest": "9cc13c47a4191da09acd55a116070bf2b65a7e4d29b6decf575e5fafed326b37",
+			"digest": "472993304421e123e60cdc39ee87cb4eba92a740a840fc4b35fa4487d01d1c5e",
 			"status": "ok"
 		},
 		"fixtures/play/group-misc": {
-			"digest": "5ded6e3fa97ea43caf04be29bd9eaa312322c5a55d8a7543498d312a181fd716",
+			"digest": "b190aef839ab4ef7039e245e2b0c7c5ce36bd9d4085c96d879431b9d3250beea",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-bigarea": {
-			"digest": "a4f1b217f1ff73d3649b29a5fbabb906dbb153b974bf6026a725a5aadcb69c8c",
+			"digest": "d91c55e56f98529e6a2b981c424349f54517202498ad89602982262891bd0e25",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-bigtex": {
-			"digest": "2c4cc9c500c29cfbc238cd63c02fd932f7e82dbf0460c23b70e40f6fdbb6229a",
+			"digest": "fd7fe3d1fab3fa45b6445d03c075580a1f3f8f7dccb29d9a25e9b0a2261923db",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-bigtex3x": {
-			"digest": "04c2d76ee9586281caf5bc6215d10da5a68d0dc8f6a727ec6b705085843a5f3b",
+			"digest": "a3f328a57af6b557a3c85db3892f9f6297ab7a4895d1c280d029040b83c92fb7",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-border": {
-			"digest": "e4ee832494934092af8d84c8719586a25c153832a17f02f71349b78d1a3c2448",
+			"digest": "695a992bcfadda092500f674a35d776d0cdc4065624adf7cff9016c2145e779e",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-corner": {
-			"digest": "7c5d91b21101d29cfff84541f72d717c952ab5157851d429dbb73e468774d75e",
+			"digest": "54e69c43f6ed1e12fe415e5353af42b66524fe92cbb7b3fc7a0af6088f585616",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-orbits": {
-			"digest": "2d7bcada9de2c4cd2702d1c86983bf424bc3a8f2543b800dbcea0b13373eabc5",
+			"digest": "f41d8d04d134b090ec1daa0aa8175e1873ca07dfd6bda53ae530b83a73f2f0a8",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-slicenegative": {
-			"digest": "ce2e0ffa52cf8dc2347ba12c04561e41324f8b377b4488b2d886eb66587a2221",
+			"digest": "3bc3451cc2ed503235417f1af9f8665a1876076cd50b996a04eb81f4a4de6ff8",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-stroke-gradient": {
-			"digest": "cfb1a0f63832685db64c85751ef329d27d6ec4f2dd00a80b5699f1751762f922",
+			"digest": "f65442e14d0eb335ad25946ae719e0fa78d9f8e3567997ff9a976f596ba6c260",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-turned": {
-			"digest": "6ba2b0c2935ebf5207dacdd27fd01ce92ebfc02a8895d89b76b394baeef6a4b0",
+			"digest": "7ad87726a80596b02d040d89e596f93d3fa7005526fba3f85270e4476bcfc9a2",
 			"status": "ok"
 		},
 		"fixtures/play/group-resample": {
-			"digest": "91174ccb031c8c9d06e6efe1d71d27d7deadf7878f7090356a32d486e04500f8",
+			"digest": "6cb367872d0cffc88bfa22dca497284e9d703b800359ab5b71fe7bdb1d82a587",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-decode": {
-			"digest": "d11d47df7abf46590289604a81741e43a2cea859f75ec43a7d520a468ff754bd",
+			"digest": "52532f1e6d4c0e64733ba54707246733af525c5fe4bb9edc3d7c766b380a0976",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-dpi": {
-			"digest": "63fe6ac829becde7f12d3249401dfecfe9bf60bf394c91de087828f6fbe2407d",
+			"digest": "1113046929d9e11661d0813098150b68de35dac6919b9be74297969ca3938a89",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-editable": {
-			"digest": "548d302c59549e6e29335c5a10529ab6d160a5cc37cd6843dc83e855886bfdfc",
+			"digest": "b5c974c89ae435a89493b2371ba22c3d1a20924e2b5854e86a94c7a7cff5294a",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-group": {
-			"digest": "a3d636458249ba23f02433fc3e45cd212a82b2e0b29785507a062ffe63365a1a",
+			"digest": "cc549d61d547c32f3a7f01b883736c577b72f8ce1711709fc437bddddcc76164",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-hscroll": {
-			"digest": "01f5c7796d626484fa70b2c5eadebce94ca8e78cf7472c6db0816281b974fd25",
+			"digest": "fb52caa0e16b81159d3b834783011728f9c4f3b8af9f9f9e082b1ff7209a3a54",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-mag": {
-			"digest": "c6c7a00356e9400cb1a87a7824322eeeef709676514efebe75510a25fee62e2d",
+			"digest": "865a171cfb6338c907f68a19d6d3d1a44644035ae3125aa6a834693c4dabdacb",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-min": {
-			"digest": "d123c5b65e8a1405cf92aa3c8811f0b9efc4d3a76351155c2ebf749a0d73d22e",
+			"digest": "ec9b03b368dbb006a7061c11c90993edd2c8111022c872252ab89f9b25409803",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-minnpot": {
-			"digest": "2069c8a1ea79330ed31666039e84ffa13cefcb669554bb9849732178eb3af408",
+			"digest": "96b47b0a882d14e0036805fbe5ee84e3514cabe9b03f0c9e2c5cace77f3d4c43",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-pixgroup": {
-			"digest": "d8ec6d55aacd2e750f9775c92100eababe71fcf841b015dc8361d1caa1e61db2",
+			"digest": "c6a531024547db304a34d4f51d284c76e4bff4da0af0455f373f58f16ec5648d",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-rotfit": {
-			"digest": "edec7a107f9b6c3211f68c12ef8a5e4d3f9ad6736deda6100a9b0e284eba0952",
+			"digest": "109bd4c4acba990128f5dd491441830cd35ed4dd4f966d62f675c6a061c90daf",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-rotlod": {
-			"digest": "b690cd8495e4a1eeb009e7ef69e14dcffc6f9922c1f03aaf8515f32dc6da1612",
+			"digest": "c5fdac13708e0e076336ff68875323e6f6bd150616e304349cb332cb19965cf7",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-roundturned": {
-			"digest": "f4f8a363ebe96005768e803beb24cbc8ee1f3d43a186dd0cd093cad050198508",
+			"digest": "914977c0fcdd27215bdee5bc3767d58e050ee94c35c42b0192f52598df829105",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-scroll": {
-			"digest": "8afc8536646624e723b929268b06a3a02f62a715b543508e8666db08b64f783c",
+			"digest": "bf313238c83dd4cb6b389e450072de118c1a3ebf182987c980de81772b600758",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-scroll-min": {
-			"digest": "0c15ff024a591d51d0f90225152c6c0683ce63bb8115e9ae5cd808ddf4b62ba5",
+			"digest": "3c699db7b7a50c452cdb76306debca6b30349845a5f2e7b89b4886277070df7d",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-scroll-scale": {
-			"digest": "a834909a62790eb22c2d7afbc9b54dc873a55a85c5d9b5a7fff7e45e5902bea6",
+			"digest": "d11d452f75de5285a147c49bcb59d13c85997a0a717a26d5c4937a69cb566f4e",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-scroll-tiny": {
-			"digest": "bfb4280e927a5e6e158121740788e82fb3dcd33207ea15822f87acc4dc03686a",
+			"digest": "05bd78fcded3cad833838037809410cef8575055470a3958a17e3e7698d16b72",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-scroll-tiny2": {
-			"digest": "4a511c500c92986b4bd6650599322077085aacf8c1264da6154179ee2d65e206",
+			"digest": "188809534a4033dd91249c533d706c3d3c91868005a5221ee13773d070c204aa",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-scroll-tiny3": {
-			"digest": "ef4a511915b6d8c6d1b86e3d74a5fa54ab164fad3107e912a1a75d5253da5af2",
+			"digest": "5e2a91b31207e1e18342c08cb1955b81352fa71c99280c483fa1eb5361400a87",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-scroll-tiny4": {
-			"digest": "6e960d952b106c2eebc8ccf0fe966871af85c7c4e2d936935f9b802128d715d7",
+			"digest": "2d329853ec3c14ab72f686156b4c95f5ad7525f6bdd8ffb0b5cc04329cb511de",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-slice": {
-			"digest": "c77f4f98c6328e51521b1f280f91132d9f4b064157e23475a383eb668ece6937",
+			"digest": "2aa38e1ec424636fc7affd1f882b099104046f2b68c767ed08b2850073cde7bb",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-slicescale0": {
-			"digest": "d7e3c588cad3285ca9cf242ca7ef65e11a1dc70cd6b566ee310c477cfc1b5a55",
+			"digest": "456b4a0c5338a623b0d1c3880bafe2afd64b4f97de8dfe8fb039404b55894433",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-squarecorner": {
-			"digest": "1463aba06c79476555420ee194d8c863b608933fc37d5e1d8feb1b3594591fd8",
+			"digest": "facc8f010f8a72c9d03605511afe110d6c88f3381b98eeb443a94cfd199cba48",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-squarecorner-turned": {
-			"digest": "cfaffae91c4c881a32319310c08bb58ff66f9844142570631696431146093e77",
+			"digest": "928134429ed81c02d1b807593edb6f0cd76374b858f73c3565ad29d9cbe2432d",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-thumb": {
-			"digest": "69dfc08f54d3cc86a4960a0c425a892b9fa3f4328863b8e31d85183afce72b0e",
+			"digest": "2efaffb15e11a3497b5319b9163b31420724e41c779820a48ea090577a5269ff",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-thumb-blocked": {
-			"digest": "c5444051ee798394990c51621e41d215e202e476f7b590930db80c32f6e88886",
+			"digest": "5affb7c2475916e0660f8f1fd9503e100625154a9921f6351db22f42e89353af",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-ties": {
-			"digest": "70d79c7072e83ed65132cb686d0abd3b081ffce0e49e497ced3476d8034ac508",
+			"digest": "6872bd97c31ca8203485f4707737ec8e2964e7404647c7020d3520df1633fdc7",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-ties-far": {
-			"digest": "43a2b44e13d56a03bcce72127d6d106122a118a1a638d0dfe37faf41fa405c24",
+			"digest": "faacf21e8abe7adea7cf029b8844e4cfc8693c9676c1942af6d3074ef62ea5b0",
 			"status": "ok"
 		},
 		"fixtures/play/input-device-flow": {
-			"digest": "a164fd67d04f98c2f00c0c53c0e616f3d1dc136638e2bbfbd9e0112677686b81",
+			"digest": "f08a8ae124421a2552bb21f976f01e3149ac0caa36743ce31a1db2f90b516bd5",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-autobuttoncolor": {
-			"digest": "51004bcbde6349cd708e2d1dda05716985deb2005de76549a5385d8f7ce428a3",
+			"digest": "d32c1b842fda8d6f59388177b88310331640620215b9cf1b5a956d506b3b154b",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-scroll": {
-			"digest": "8de6c703c9f6543eb116dde5b6b60a568c30aa69a2afaed81be2fbd204f0b53c",
+			"digest": "e250eb20b4a2702f7969860b0e2cc9d2d8e5add13b91819ae1b0865c25ca399f",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-selection": {
-			"digest": "89c35de99fedf72e7aa01a9c00cbff6bbd7ad7c82221c22dd4a00e284a9b6ef4",
+			"digest": "0c4a08ca2a80bc8f34d8b6a570aa47ffa4e14d5e5636d57e037fa8fd7efdba8e",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-selection-custom": {
-			"digest": "0da0c49e8b8d2aa0b2f9c2575e43bb7355db5bf787ccb4212a75e1df87964cf4",
+			"digest": "f44ec7fe67cd637cc56422ccc5c6fb6bf4b9c79b9ae9ffb27e39c4a4a84f323a",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-selection-turned": {
-			"digest": "c9b6fe24a0a5bb8f9bc6ac81c2bec92e0a66f935070dbdfe02ca3e2b592bddb0",
+			"digest": "3e50f55e9508c1b03eec6c685aae2eabb366d0f969400c380d3e1f73be97f715",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-textbox": {
-			"digest": "bce535e4f9bc8d1a52269e2f9149790b0c539315617975bd9b2d0aa61360d99a",
+			"digest": "855e167ab150a4ab9d6827cef2379aac70bd59c8ce9f4f1a4f724d97960180fa",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-textbox+actions": {
-			"digest": "836a52ed00d23aa530bbf27e37a103864dc1734dab57d2fb5147d7a470640cb8",
+			"digest": "24d026d8360eeebffc1a02c34970366e0f9033df68fc79a4abc3a8cfad0fb955",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-touch-buttons": {
-			"digest": "6e438b238c6232fefb124a6ec2ee832787a09a46937e2d465c526f9fa459288e",
+			"digest": "d6853b4d33572dc6c3f45646444d21575aa11d35f40af8411f91235a084e15b1",
 			"status": "ok"
 		},
 		"fixtures/play/interaction-touch-scrollbars": {
-			"digest": "59ec4fd9a7a358faa9d1a07eae4dc9c2feacf3d5037076040f1d1e38b1bfce0d",
+			"digest": "15281e0a43190009ed9462145692f558bf351dbfd887f0d871b53aac399b2067",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autolist-scalepad": {
-			"digest": "1c918d5765b195f7317e6f04982ad5068d6ee91b2301d1ad0c433cc1851638f4",
+			"digest": "2e7ca342a4ed925bfd15cd07957becd44c9604b586817bece21b140d273fafce",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autonested-scalepos": {
-			"digest": "442323177fc67c634aec4312d1c352208d83c21b9a36f80a5ef1930db478ed31",
+			"digest": "e47bd390d49969235c9107c526b7e0f784fad47cae30d18f3be751bcb9b3480b",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize": {
-			"digest": "72cccd5b8bfd648bb1a568974a6bd0af0a8415b3e8e5562388550e9c7567819b",
+			"digest": "b0efb5782371d0aafb1700fc0264de655ba1f4fdd8872bfab2de7dd2e1d2acf6",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect": {
-			"digest": "5dc1ef82d375410163b8fccbd079eb4a40dd0af9e191dd2652d70e47428a163e",
+			"digest": "562696ec2c742e801eee6a32456998c3adb8e00ad3afaa662ff0acce821f0bd1",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect-panels": {
-			"digest": "2ccc852b1cb329632a568927d8b3b38a49b2e6037b1dac6be1ec4185f980fd0f",
+			"digest": "4ad00afb1cc3a767fe03304335cb11d8d069d60b68d16a693975a850b66b9e14",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect-probes": {
-			"digest": "2517388311741115cc1397658e3877186f3a79bc0fa5526254a529354f7f6e61",
+			"digest": "74ecc8eeb8bc7308635e39e860287e9c822412c79994f2d8b3f7e4f1b05aa92c",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect-view": {
-			"digest": "7e2f18bff4840c2e9c9f082045d82c1f2d9a8a007d3bbd588ba71dac261499f1",
+			"digest": "c61e13b98674b483f41cfe78be3761d6ca8ec07dfa6d1f3fc2209064093065bf",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect10": {
-			"digest": "93c0e6e0adc5b9b322edf2d0ff45dfd0ae65cde23e0067f0bfc97224754b745d",
+			"digest": "a02472137c24af42b3561f7f40b3ce93deac797eb9cb160453fa94f0f9fff452",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect11": {
-			"digest": "26c4369b03300cd245429d0e15cc7ad5ac50c009d34d526e294ef30bbf243e5a",
+			"digest": "f2964a115be6a775aa11d827bace280c0e6e3cb5f6ae9501fe197e6ac71e58f3",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect2": {
-			"digest": "73313786768dab5b0da8f75a5dd9e765f46367baa93176694b15943de2de7955",
+			"digest": "6a0b023988542aa5dab7a8fa5570a483523cacf2168972ceb5be2c52031a37a4",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect3": {
-			"digest": "1dacddf83f0eb7cff1aed83284856a76fbe85b7e1f4221decdf1ffbd3f29f69a",
+			"digest": "db429643fafcd0c49a0c309ff07ccd45b932240d3fb906f8b4a86cf81d1850cc",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect4": {
-			"digest": "4e4761980f369325c52420f89ec3b8a26c6ceaeb399af893e7c7f03b4c19e335",
+			"digest": "bb311533f58fc92bd19313d999b814b59f86d360a15c568eb2f8b2bff7570a0a",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect5": {
-			"digest": "3749dce1b24267123c152cc9b9f7b04343025f6d803a03dd4a474527bd0abd5f",
+			"digest": "03d5a680884fa37f84b5c5c6154837e16b48167789d533cbaf4424b4adce20ed",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect6": {
-			"digest": "12c8c3f46fbd5bebd5c90ad786b217b97093ccae741ccc193921c521e3b287e1",
+			"digest": "eb4495b82f5de80610d722b651ac1be43b3aec1d2da7730951396cbc156aa334",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect7": {
-			"digest": "eabade507c08695ec809d8994db6dd0d38c3f0f8ddfa00e92646194a7a9612b4",
+			"digest": "24896a3fb1cf80b126db3464d7f270dd8db347537d4776cecf139d9e5c5ee870",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect8": {
-			"digest": "de0910dced5ee4778c2ecdd460aae5811cfb520782746650129f7abf70858acf",
+			"digest": "bd81f321d5abee49205a5b4e69c588209159046079258e97bb5965f41ca725c9",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect9": {
-			"digest": "d14e18bbfa120b86a6cec7edc3268fb52e68d6b3f445c8f6b47ba5892f7bf293",
+			"digest": "3a892c96e9a9b590190853e3ce63aeec62a6d725e1be12416ce89a584b4cee7f",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint": {
-			"digest": "244d723fd4cd10f1ee78ebd70381205203235c909e9a8fdb784b85dbbc6c9ec0",
+			"digest": "e134cdbd8c6379711f66276f2b767481de05a49afb89fd5130219a8cdb6bad98",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint2": {
-			"digest": "7912960222efc2d02588c3b5ac5887ef0ac5ed8b81a420e439d2bf3363375d47",
+			"digest": "5d28b94ca10baf5a60fc5925ebe41d3acca98b620a6763cbc64d453479a09301",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-constraint3": {
-			"digest": "2f988a6e87fe253b39feb664b09700dbd1397056b9af85267abdb31a377af3a5",
+			"digest": "9a4c0dadb5accdc0d775f92de6fea02186cf65687be92e32bf29e307a8f17cd2",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-offscreen": {
-			"digest": "430a8907bf47afb253851bdb7b31987c0728e624743197b239c7e336f34db7ba",
+			"digest": "7fbf4c655038c1d696f116305e43277d1eabd484ae2c3c878862a914dd4333c5",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-prompt": {
-			"digest": "b9115793414b223fddd4a72c128bc803d77c18cd9dadc11a80dd0354f595f06a",
+			"digest": "c8c4ef7fd94c24addc02501bc258ecd0ec2e89da00a0dd56f8c2c5bb909ffccb",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autotext-linefit": {
-			"digest": "7e31d401caecf95cdbaad604bbb9020fdcf70068129b81d52fc6776e7fc2b2ba",
+			"digest": "b9dc21a5d8177f9c83785c1df540b00187f60a94d2c5fa806fc1d633dc0482fd",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autotext-matrix": {
-			"digest": "8b711024bdd488590f8dadd6e463c68630116a3ca7f606663e5d7de19b768f03",
+			"digest": "e390ebe0d9ffe7229c409c0e4476c7ffbb256f34f9801365cffc2fd50dda49c5",
 			"status": "ok"
 		},
 		"fixtures/play/layout-canvas-unparented": {
-			"digest": "644179fa4ccdab50f072c18440f24a03183c533b7bbc5cb3d82f5a3860f09436",
+			"digest": "a2f62efb419843288fa28ce3e757a69479e98a39a54849b3205f916f214cf631",
 			"status": "ok"
 		},
 		"fixtures/play/layout-dynamic": {
-			"digest": "4c54ee4e7fbeb844520f30f0bb568ff528b5947cf637a5ebc9016a05024602be",
+			"digest": "75c9b3a83ce842b2f08acd73d1fc72ba1a6fae5a19c8de08c1f25b860b885392",
 			"status": "ok"
 		},
 		"fixtures/play/layout-f32-grids": {
-			"digest": "2840924070abb6ec6443a13dab320236903fdb09814d90e7e26cf9bcecb5eeed",
+			"digest": "82d6e551eac3de17bfaa8d1caca98b7b598d82377fb88319433cb5438a74c4b7",
 			"status": "ok"
 		},
 		"fixtures/play/layout-f32-lists": {
-			"digest": "744e13864ecc6f29371ab284b43e12e099900d322ec51541aecbda47c3860be0",
+			"digest": "cbf4642c89e9f48c63c58cd418d49fc31505190785f90890086b92a11f448889",
 			"status": "ok"
 		},
 		"fixtures/play/layout-f32-lists2": {
-			"digest": "a2ce55ea0b6a518b05222ecb5ff4d6e296b7cff1e6379bd2ca52619d28384a48",
+			"digest": "f6566f4a7f512b05c46f3d379fd4e90cf668c02e7895220e159efcae13fb2b91",
 			"status": "ok"
 		},
 		"fixtures/play/layout-flex": {
-			"digest": "821507f3b7fbf84ebc4ab43207787d03f64448efc281b1ce533b8688fcc2b05c",
+			"digest": "aa56d0423ba7b3372f34108256bcb0f12c64bc90963442f4590f8dc9470a0d19",
 			"status": "ok"
 		},
 		"fixtures/play/layout-list": {
-			"digest": "e72fbf20308b0e222d3791367a9ebf6112c4cb2826ab2c0e979f2a27a7f6bc1b",
+			"digest": "c1fb67a9b93790f8ab7edc90bbce5bb35dca551dc7494e24079f22b15f1c10c1",
 			"status": "ok"
 		},
 		"fixtures/play/layout-nested-screengui": {
-			"digest": "84931074f9a359fcea1ce0ea3cdafedde8463f4fe4557bdc1a18c8c952d520f2",
+			"digest": "d82ed00a26b25e0153552940fb4d81a7275044443647593f0fb4e91205b376ce",
 			"status": "ok"
 		},
 		"fixtures/play/layout-probe-scrollgap": {
-			"digest": "21f72d0dc7da42f1345ea920781fd2a70f196c23ad795aba075d18de8982c93c",
+			"digest": "5962dbd80f8f9acfed8ac64dfc22bf64b30320fc27c684a5863199b817d61428",
 			"status": "ok"
 		},
 		"fixtures/play/layout-richscaled-quads": {
-			"digest": "c0a826e98736ea553fd559fa022e1c7afe15aa40eb5f0ce8835d8e3b9b5b4960",
+			"digest": "b8b4e5b60225a0dd9ff2954c6aad8d32c9b124b0360b72ef62ffe6e02e7f0ba6",
 			"status": "ok"
 		},
 		"fixtures/play/layout-text-narrow": {
-			"digest": "0ff7b23d9d0c0b74e7f9f215a76e05f830bf1bac61b4189c6e1f9995b6cc4e64",
+			"digest": "1108ce6ee81d167ee9b9fd85a9ecf5e91844b91c5ff9d5c7cd9e169f46fdfc3b",
 			"status": "ok"
 		},
 		"fixtures/play/layout-text-overflow": {
-			"digest": "fa385fc8df901cd1bb8f69c7138a439d755b9301358fb26d496034a009e543da",
+			"digest": "79ccb2447391450d9f4122416a049e912b63dfe3353307a34c2f903d8d0f288c",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen": {
-			"digest": "f747b7a8a4a89b487b9fe23bc2b457afd10e23a26576d41be36acbff0e459242",
+			"digest": "a8939d0488664c7b582853ffded0a69302c802fef5c3477d04fbf3ef23a1587b",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen2": {
-			"digest": "6841884d2ba918b99540ec7d68eedcf22d09ee5be0116d201aa4bb5cee0ed678",
+			"digest": "09456cf723c39dca96425ce91fedfd2a84a422ca66c47bad64f7adadb0ece828",
 			"status": "ok"
 		},
 		"fixtures/play/layout-textpen3": {
-			"digest": "261b392aeafcd1eb52275e04c038933b3f9806fac71dd9677e3f6e6f1d22fb1d",
+			"digest": "21e9edcf2e930587e8c82b4911b8aad9f721dafc1ec9e1cf9c9de4f74b3efbd1",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate": {
-			"digest": "c4e49eed4764193403c0908178edba3606849e972723aa30d982afb8602d477d",
+			"digest": "0c16bcdbf3b1743363f6a819339d1035d973be4d67374d64f37dd375b90975cc",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate2": {
-			"digest": "aefcad7a64e42e222f1d01328613f0f551985da69a6cf3126bacbff731f62428",
+			"digest": "c35f544a20197e6b9130c8b5022b549bd4e9e2207e493766f59a9f1034889876",
 			"status": "ok"
 		},
 		"fixtures/play/layout-truncate3": {
-			"digest": "7f94db4cf147a0d4a19608c747b647e05dbe481d3a03d86893d1b2f84a926528",
+			"digest": "433f05533f381932069f5e70c639e3918b1d4f08e036dffcdc763381b88ad426",
 			"status": "ok"
 		},
 		"fixtures/play/live-rotated-cull": {
-			"digest": "ca3f833a769c1bc9e8b6ca812786765f8c011ae64881c07e7b64feb768cbb45e",
+			"digest": "fc9e7124841f81f5a51978770a08847df3e569e4b9da527f07a1163bba80a7c6",
 			"status": "ok"
 		},
 		"fixtures/play/live-scroll": {
-			"digest": "10ae86ba3655580f41e3bf74c1f8798e5a17944aaaaaa2fe8ea4bf1d2e70dec6",
+			"digest": "74c213a00aa64b830d70ac0b7d653753340e3bab1f315248ac72a8a44e98560d",
 			"status": "ok"
 		},
 		"fixtures/play/live-stress": {
-			"digest": "b109b872aa97ff07095a1888f85376f206c5293c04177cec7a8827d72f9d06be",
+			"digest": "12942d008612afc14af36df07289c343a719f63731fd7c808b1d6895e05db3ad",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-curves": {
-			"digest": "35cf0a21b203d32572f4f1838679ef0fb9c14f92609e1b437061b327b489ea07",
+			"digest": "c3ed57979a6840d06473d52c39d734f913ca6f77726284d04ed51a8b0cc851e9",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-edges": {
-			"digest": "0b6715873f6edff63a83126b5cdd6f10f3915e0f01433b992c55ca132e598b72",
+			"digest": "a1f3fa5f05d73b3cd5e2581aa20ef23c5bd8398040986dc5541ee2d9894f5204",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-layout": {
-			"digest": "4626f0671c3031f791d474498dcdacb8bfaef37774c333ba26d8e36e990a6e5c",
+			"digest": "7c7de3ed3f280e2c6fb2af8ee8e1f8eaa53f9985f42e2a929df9d28493f6de23",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-order": {
-			"digest": "18a81274e672db873a2232993b0da8babaebbca0d06d03933d8178820127892e",
+			"digest": "8cd4e4a4c44467288bc846238b3dc1d9644dfc50164158665f1079c7e9254a55",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-probe-legacy-clip": {
-			"digest": "5ff023a31bc252df34b4058049c68f6c8e913c104930733ec57532c2ca2df52a",
+			"digest": "5d1a283f416b5a10b30824360c018c68d2148a5c2953da785f44063b363e2244",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-probe-offscreen": {
-			"digest": "a621b5b435ab4be3bdf19ab725c758ce14f94e42be0aaad50b3b834fd9eb263b",
+			"digest": "57c18bdbc030c505602bb1eef35535b043f0e8cdf79a4c492980fa75247d13a4",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-probe-snap": {
-			"digest": "1cea36b901a242cfe30414496ce79c3072658e91f05dd56a4a5a79fa751a9c08",
+			"digest": "f8aad82c29a3f064aff719e487e8644524ee74f9b7fac50db92e6ae9f9e8e959",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-probe-wide": {
-			"digest": "a61385be4cbd523da1fd54f4c354128a01921d085cc89d4a759fa19d7d560751",
+			"digest": "1987b929c7401812e29b5e89fcf2500de65d278bf697060e1222a71f9cb9a0b8",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-strokes": {
-			"digest": "175f2c6b73285fa699ad3ce5e7986b66604d6c9718f20e24fdef9bdcba866a8a",
+			"digest": "0185b7107a8e3151373f25033ca26bdb3841a0551456b4623438d3e3151493fc",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-thick": {
-			"digest": "f0f97f52b6bb768331725aad7c3ed27e6e7f31cab92e28de1b63207d388d57eb",
+			"digest": "abb95863e83c666b6a9b3fbf73a92ff3b933f4ccc5763f75056f1703ef51ae97",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-zindex": {
-			"digest": "6a129e8f5f34d4794a90e85fe053d055a9c512e70875da6b5c83046f8503f959",
+			"digest": "95ea02f164c11f65f6529f662a3f70ec64e24e52774cbf381ab0be4b073ef09b",
 			"status": "ok"
 		},
 		"fixtures/play/path2d-zindex-global": {
-			"digest": "7c8fde7b3d20baf10d43e145021f9bdfb3c8e9e60b44d3ff761772a70b92d7e8",
+			"digest": "18440a7dc28f18965d73f66c255ab683c99b99354e97eea0185094a58a1c8d7a",
 			"status": "ok"
 		},
 		"fixtures/play/probe-errors": {
-			"digest": "bf38289ce847499d9622ace4705e9a0461f541e33465c0f97a3624d09aa4365c",
+			"digest": "30a48c35c2d2d55a36142934b1695bfd58aeb15e84973e2de72b2b7a0425872d",
 			"status": "ok"
 		},
 		"fixtures/play/probe-ids": {
-			"digest": "4a55e497bfd45f09894d371c7e718c321b09285469dea04e6b2924e4d90e6f55",
+			"digest": "89b992cd642a5f4e96d118528306631c3478d9628fcf90b2482fbf756c0c66ec",
 			"status": "ok"
 		},
 		"fixtures/play/probe-input": {
-			"digest": "1d7946091b609059b754c9f35c7a1ec2bf4c10f51c0a650c72bb377b07837d49",
+			"digest": "950fbd691ae19937499b93745282b2d8382a7158e768394788f3d92c93fbcf92",
 			"status": "ok"
 		},
 		"fixtures/play/probe-scheduler": {
-			"digest": "3aac845275bf6f72929b7c7bc525dc06ee4d9f38301c3821da1db79b87ab7370",
+			"digest": "aa4116321201481fe883580bf806e1167b75b94e8c4db7510ff1afb956b5bdbc",
 			"status": "ok"
 		},
 		"fixtures/play/probe-services": {
-			"digest": "c1ffe36a10a8f00ed3817a8c7a090ee224a8ef373420c1a327d1683a895ccb8a",
+			"digest": "d5af07f88c926c51507d2ca3a15afc1001d6c934594a78656d85e02646961c11",
 			"status": "ok"
 		},
 		"fixtures/play/rects": {
-			"digest": "d6d09eef309136aa33615d3d974d14237a3242c83c13a175cdc35b7380e23e71",
+			"digest": "8a39be1f7bbd37253f0446a5239ec0f70b33f6fe3b1caf26c26e97d1562dad4c",
 			"status": "ok"
 		},
 		"fixtures/play/rotation": {
-			"digest": "585a7c094bb760baba168066dfcdd0bd419ac10432aac5b3d9f559627a564256",
+			"digest": "8661712af684d2c76f55f264709caa251be3f0ebaee85ac38584f44f57127667",
 			"status": "ok"
 		},
 		"fixtures/play/rotation-clip-offscreen": {
-			"digest": "2052451325816f16e49d6c77cd67308a9f152ccb89a2cf8c3111d732483c9962",
+			"digest": "05258b2d574c9fa8fbe297fb27a308eb0302b2c6ed8bc09f62a28bcf3748890f",
 			"status": "ok"
 		},
 		"fixtures/play/rotation-probe-border": {
-			"digest": "614322b5b3527c7a585282a5fcdffdfc9ff3e65e1bd04e6ae09e369d9b587f4e",
+			"digest": "ea4f1d66c92fef0e4c92335cf1ea5860fb549de218aab2e68b230e04189d25e2",
 			"status": "ok"
 		},
 		"fixtures/play/rotation-probe-edges": {
-			"digest": "31ca11e1fc157dd607011ee871bcd722db17482782dedd07d1c5129054230c99",
+			"digest": "32ca3b83a6b8a63a16b8072cde5aa6934fc08960fe3c1c2ef48625d6c7f095b0",
 			"status": "ok"
 		},
 		"fixtures/play/screen-layers": {
-			"digest": "d114ca16557bb06f11ffef26ce4f6dd66b963ba0300c7b94611b737aa02e7903",
+			"digest": "cbd21bd411dbbb667bf410c35d36fdf4e273534a200a26b7c70ca6f08f4a8fd0",
 			"status": "ok"
 		},
 		"fixtures/play/scrollbars": {
-			"digest": "17bef812694ba920d9b8063d6c6a574bff1e4a824780cc6371a0995e954c8378",
+			"digest": "c4f8d6f69590aba15658e731a6d702959811f710f2d30803a887a4f002c3fd11",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-a": {
-			"digest": "47ccbbe27929c83c2fa9df88f872d4ddcc8d9e3ede13b9e69168c7e521b7d82b",
+			"digest": "c1d6569f069bfa1396ccb05d966ad7b1e5c3123241d5ca26bfcc6aa5e5624040",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-a-clear": {
-			"digest": "f19c59fb2b778aa9a0358dc2fe6b0c004877c7c4cf14bbeb275ed20db1c18984",
+			"digest": "fa8c911a3ffeb745abec14d87585b2ca5039bf7ddbbaa11c3de4288530e004f7",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-b": {
-			"digest": "804856341f7ffd405963bef446e6a30fc68340cb3f2de12aafa6ac1798d35c0f",
+			"digest": "c188287b4217d93f5060661f1dc4e2588ffd2e9b270bb0d4968766cc8a357486",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-b-clear": {
-			"digest": "717100f90800de3bf1a0fb9954d3f42e1efd11fd14134dc746ff9f78348d615e",
+			"digest": "2cf079cd499a6bead6987f618a2b9ae9daf850c477a1a83b761a56389ca45704",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-behind": {
-			"digest": "59006b8f5bdc281d945684b83cdde4e9b2408ae98b38618fd9f8e38589d7e9fe",
+			"digest": "b49037043b41929787f39f2790b69a5f8f9471011c6ce4585462024d8c0b90ba",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-c-clear": {
-			"digest": "4843b396827a906e3c509a3433517260ba59a0ea2e987e2d585aec0a1525e6f1",
+			"digest": "33bd5227bf9b36cfb14403a36689c644b21cebe093721779665c8eceb53ca7e4",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-d": {
-			"digest": "a017b3f661650fafa9cf8bfed42ba6682c739a85514bf1048156ea5769792f0b",
+			"digest": "5ceb50bcd670bf47740dd220249fa54a6c2bccfcc7730ec90e6ca2a69b87e529",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-e": {
-			"digest": "7cae7dcb404d4582655b28e4650a0414f709420b65749b7908d7b69be93a9a10",
+			"digest": "e0dfccde1f39a9c0f76b0f2ef896faf3421afde5afff239443670f478b1d26c1",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-f": {
-			"digest": "d5685b2a064092ec30f197f686aff19593b731647a501ac3c53ec639def7f766",
+			"digest": "74ea49f97fb548c29c68b5c176a1b50b6c07094235d8c9c0a5b0a710572892f8",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-field-a": {
-			"digest": "1e7289f4f045f78649a37693e3992213b74782af52ef67897abb2988a3325aca",
+			"digest": "ad46760a62461d1bb2353543351f6cdf9277a0a8784c74fbfa5d6f226c37316d",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-field-l": {
-			"digest": "9ad2b973894cb7f37c5cffb3447aaa7a7089ffad3a43e5e40d050cd4d50611f2",
+			"digest": "6c71afb8d5d403e799395ba2359ed2ede460aaaf44bc53e42451b3a8e63aa0c0",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-field-l2": {
-			"digest": "f43c997b8853360f103a3691bed79e7fda26067bc81df01f1fcee6bb083f7f0e",
+			"digest": "6e90113a02d400d6726fe08c8988518e952fc69324efce09fe83ed9bdce26bf4",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-field-l3": {
-			"digest": "cf84ad3c9946d2d775027c8b01ddd523a798d1812bb5391b2a8d45e815d846d6",
+			"digest": "51bc94429737e3b77f0d10997eddd0903cacdd0dfdec875c7115412cc21eb3b3",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-field-l4": {
-			"digest": "4ac345205890feef90e1612ada2b799d4ff501dc59d9989838367e2a6e971f0e",
+			"digest": "08eda2429e56e7b53f9d568abe57db46955f6378bd00634cea77197fb23da19e",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-field-o": {
-			"digest": "b3bdab81411b30980908a1c78a2d2e174602b690ce040af0cff8b4c1906bed3b",
+			"digest": "732785e611dca5d104696db17d92fab905e838b7c197c555a446e6bc80d87c47",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-g": {
-			"digest": "33e48258e8411e8a49b26d3fcf986eae970a7d95a93d49cd4c23516c4dc51fbc",
+			"digest": "87389a2ce77b3f016f2f08582ddf270b64fea5b0cc75428e640e5c43f25778cf",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-glow-marks": {
-			"digest": "f50fa9bff99774f7e77fe4f6f7d3fe621db3fc717a169db01052fb61cbadfb59",
+			"digest": "b00ea5365605e04589cce8cf4cb6ce58b93ad83b5c016a4b229ce160b3731944",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-glow-pens": {
-			"digest": "864e513f199c374b100024653032c1f895cf5037c8e04118c1b5fe13449e4e3b",
+			"digest": "c8ecbb45477452c199a79a25b7adece2fcf0c26aae7260b1c4fa87365c9234b1",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-glow-sizes": {
-			"digest": "273b09f632ebb74d697942dd6e9c65d88d4fe9d974c00b2ecc0eaeee2965b17d",
+			"digest": "3b91e021560dcf431d92fe2b4b45d9738c427cf7e31a6edca8958f4aedfaad9d",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-h": {
-			"digest": "bde5c5c3fe1d63d98978753ec8dd4962e27825ef6e607a5022c8a0320f13fac8",
+			"digest": "a74247c45b7dcca71dc7580a21f539f60dc8e2afab4fc70ca9162c101859d96e",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-hard-transparency": {
-			"digest": "45369a89819afcd0ceb49de7f2a7722e8f2141df2373776ff8df0728057d040b",
+			"digest": "4d792f87fca655b51aaa8bcaf31f740a18f3e5b3d7eeaa43fb281fafd9b4c242",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-i": {
-			"digest": "307f61e27b2049cb334bbfef6e6bce121bbe766cfa89719db5094eae8b5f67cb",
+			"digest": "72e86ddcb3be499c70e1756306489906a1e9ef73f1916e5f3ff32574f0b77a68",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-inset": {
-			"digest": "e4d940fe513cf288936c55c763c7357b4d360edbecd37f6454a3025424e8a640",
+			"digest": "fe49aa6790b326f43f6073b74d27ca367c69d0e4972053e2026ef5910255615a",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-inset2": {
-			"digest": "b1ed5f30561dc98288498050823c2bd018689968cfcc99b431dd88771c85fe0d",
+			"digest": "4407e73edd33d260a4cfd794de4af43060e186ff47086ea39ebf3c5c60c80479",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-k": {
-			"digest": "2c2c59d1ec3b3d89adbd616fb54539890fb3c8abd73eba3203eba3c5ac4b4cea",
+			"digest": "26599fbb32ff307968e0150b3eddb49ab6a8412a5f8a0dee2f98a09962f05cb4",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-l": {
-			"digest": "fc55b6efe22cae23f4c1afd4d243d1076676372c8c0a592710a1ac18888675a1",
+			"digest": "593a3aedc520a3da5b9b33fea12debd34b279e217cf7bdfeee26af0faeb32fb9",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-m": {
-			"digest": "d1f84536fff574fe9544669c2ed86cb895a12d665859417b45c8a98d9c374d72",
+			"digest": "e254d8045f1ef8cb2c2f27cda42a6a6ddcaa2670b5cdf6fb214528259c16d20f",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-n": {
-			"digest": "6856a791eb2cd6283d834690d3b76cc8dfce061c44db546531049bd22955087f",
+			"digest": "ff889090c23a635058919afc02c0beabfa122a290a8332a79c7b85803463b17b",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-o": {
-			"digest": "3d0a9b4e681fe40d95ce1b7018e3f64243d44ee108264091cc728db1b9b6c59b",
+			"digest": "76cf696b44343bd85a79705ec4ad370d3546a5153a60d6672d8b09a3b449d3ad",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-p": {
-			"digest": "e10c116744b6485b8851c1e4c2a1f46157a7c450191284acaa5d72dbf87d5fd5",
+			"digest": "8980d3bdee3b6eea177ab468d97cdbb0727eb1e37eca2bd24630f662744d609c",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-q": {
-			"digest": "6394b919d8110890cc9ce97ec2f7f4d677f58986d7bfe8ef65beb0dbc3c7cbfd",
+			"digest": "e035a19eed6788839c2b9dfd709cc330370cd438334e33d18a7570caf1f729ec",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text": {
-			"digest": "8889ce873ea120224c327df74cbd3a3ff2c0b1ee55f93de2d0fae24dc8659100",
+			"digest": "2091b47d435aac36678344a4e03f3ef9ea3756592e60cf8423f1f5402dd3de46",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text2": {
-			"digest": "32eb730ddeaf499db61fc7eeedd021bbfe88f12bed989298110373f416c50fdb",
+			"digest": "62ced8aca5b786d172dce511558c6f78727d84a6f1f986023464632d40e99c4e",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text3": {
-			"digest": "4a2436e6d52e7135bf6895b06c3c323b0b2268f2477bf5ad965e54a00dabc325",
+			"digest": "b31295400aaf54e8bf16bdd1c18d04d5645c425f3b610ac3b9dc20dac2a620ae",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-text4": {
-			"digest": "fdb9b3a5b81d3fd3f94e869facedfd5d638949dafee7204a6369367f95a249f8",
+			"digest": "8eb60242faa89e995a061b1394ddc08964f4aeb953b0ef2c1228582b706bbb01",
 			"status": "ok"
 		},
 		"fixtures/play/shadow-probe-va": {
-			"digest": "ec39a3f042162c9a9efc81d465441cddb21570b6509d3478973e61a37b00bcd8",
+			"digest": "dd5537bb9a65212d05bf6e0030e49fdb86a1e6966f474474a2acd206dc239ceb",
 			"status": "ok"
 		},
 		"fixtures/play/shadows": {
-			"digest": "d183945173db72b6dc7b7a31bf9b66f1a8b03ea22f4ead9593f3ef3051343265",
+			"digest": "9eaf17ef45f53b0b46a5c3dd80dceee222f417d2a823150e1b16d20650ee4b78",
 			"status": "ok"
 		},
 		"fixtures/play/shadows-isolated": {
-			"digest": "f78650367aac991caa01aa1ee07314b07b034204e33f462c5b62426d6ec7840a",
+			"digest": "914cdc8d63cf11ea2522c36214a43f02de696aab166c1746859741ab0b12531c",
 			"status": "ok"
 		},
 		"fixtures/play/shadows-sizes": {
-			"digest": "f98ede5b1e9c97feb9b325d48d8b0d67f4c4f019739e22b6405851aec2aa92c1",
+			"digest": "189c20c7700d53af4af029d06eed5787d4fb2f2406d1ab0406cac6fa48664e46",
 			"status": "ok"
 		},
 		"fixtures/play/snap-probe-ties1x": {
-			"digest": "a6ed83fa290a82414ad5f652aa8e203613647c71253d412860d6062af0f121f0",
+			"digest": "4ac810ba538ec80a85401409545304a51df1fe3025cef8c3dbdaedc308dbdd98",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull": {
-			"digest": "998007b80f1d693fab01d289009d798b6b33230f22c215e1dfa5ef7160897a90",
+			"digest": "8c966b89629cace6075e1f2c6e7e91344f460c3c5377ac4b21516b898ced9c4c",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull3": {
-			"digest": "52e6102f983290d333232b099a6711a88b8fd7bc9573cab7d153a23886a0483e",
+			"digest": "1ab8e74cb365ea6f1b5f3bd46e85439b73565b9ea80ce50cef8c267ac1666264",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull4": {
-			"digest": "ed0a418de88f15ad4b9f295d9b522ad044bbb42e9a182ab165b5d6a313a47736",
+			"digest": "2468222452c97a68bed0ab7f5319c44a7a2d28a2c556a4054a72183addcd4de7",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-cull5": {
-			"digest": "ee4f7a039e9c2de0b7b05c633ad301aae9ec13da8e80ba53059e83b123a8d959",
+			"digest": "3913eeae6535f9b526e063d81bf5208ad11a30631eabb48ae36450173172042e",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-surface": {
-			"digest": "31b0115a9996469c8fbd0d026ee96a9eadc702256b9f95196870b3c7bc1061e6",
+			"digest": "e7095e26e35c709bf0916478840699e8de03ab416967e544a820542fb97f2431",
 			"status": "ok"
 		},
 		"fixtures/play/stories-clipped-cards": {
-			"digest": "92995647d453943eb73de8f61f9a9f4f5c1575b47f559b1629a53db53569d888",
+			"digest": "8cddd26bf1fce35ebe1c5aa1dd0baee16e37da54489a18b938952e16fbf9a3de",
 			"status": "ok"
 		},
 		"fixtures/play/stories-grid-scroll-padding": {
-			"digest": "9f102cda608eee95c2ee1ce88018427fc011c016cfb41813c732eddb2b4cbc74",
+			"digest": "37c7f4cc88e9e416997e4f72c1dc2ae18fca4d500df3d21b2a89f0b95e7afc9d",
 			"status": "ok"
 		},
 		"fixtures/play/stories-rotated-clip": {
-			"digest": "ebadde05ce09b4f0a8a615efa38a3a2f7a2b5001c943b206f7aa6bd1a9414a2e",
+			"digest": "a82d0e5fcbc77853b1f681e5a4bab09df943f053e1906d446ec3b231eb968777",
 			"status": "ok"
 		},
 		"fixtures/play/stories-scroll-noclip": {
-			"digest": "55fa11bcbab4dc0b7dcd53fed345fcc7e522b31a8533c6d8e894d4f882db130f",
+			"digest": "424568dcff945a9dc85cf5d7d08d5fcd090b71c6e240a41fe8eb9d8f70dc4655",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-button": {
-			"digest": "5f0ef821bffcca66364d712b561740560288aa105744d91a41238c3a38d50ee0",
+			"digest": "f99f6a1ae01b94a8887d6c38aee93fbbdef93246968bcfbfcb44d603293176ff",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-fraction": {
-			"digest": "ca53cca5055a1959db19735e31de66ee587a0f1fb390ca27700d17a5cef2b727",
+			"digest": "e056e16ddf70c52209ed221c1b63df3cacfc1073c7197c2ec33f3da134e59cdb",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-fringe": {
-			"digest": "f34828566b964d090d220f41e647c5ab5cdd8edc77cfb23a75ef1877bbc9a635",
+			"digest": "7bebad5178c609823758e37734a3dec22373876797996804fc02f66222ffb257",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-gradient": {
-			"digest": "650796819cf79cb1facd2b4d5cde13a1a928e90ec9151153721a584a13c951b0",
+			"digest": "64b83b7341cdd7c8b7fce4be68984956cf489843ba8e19a651e68490efc5a89d",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-joins": {
-			"digest": "1941b9b527438c0b326961185b6797f07e76c1fcbc6f2ef867cc59bc94eb8ac1",
+			"digest": "01c666ceb3c51089c35ee4bf44fd9b2471b9a8095cde521a8a42d42715f10ac8",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-margin": {
-			"digest": "b090a1539b00b4c182125bf451b9b043c801016940b2d8818a62eda3460c5ea8",
+			"digest": "5b151597a0d5c15cab43f132f421e753b8af932dbff37651985ae13a18b0f864",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-misc": {
-			"digest": "b4599e8e391e912985eefccbecb3f0568cfda84ed8216a9b06fbbbf7f1032d8d",
+			"digest": "de76c2d67fdf3d53cf3f9f35145bfaf99bdea50a587c729f53255b7710669311",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-modes": {
-			"digest": "caac22dbbf887e1c750860737ede54c644edca096660700bef6a3a58a8c85f1c",
+			"digest": "88bb4637115233079b84e1d092e95ee40d35e0c792347c8ba8d3bd37bf39644b",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-order": {
-			"digest": "9230a0b40645ea014552b9ee4101b5aeb3f808d30265ecd9641bb932b910b902",
+			"digest": "26266ec413560c1cd7aafbc4a5fbb7e746d182c37297784d20ce61155988fe05",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-order2": {
-			"digest": "794fd70372ca28d5184af40b64ec616fb19b75eaacd74d991eceb796f16705c8",
+			"digest": "4b593e3e33b5de6fba507ff04276cf1f41aac0459f42f9a6123c08ec84ff0be4",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-phase": {
-			"digest": "36960fe313e4901cbe22df0edc80297f96bba8ab96144cebdcc3892f7808396f",
+			"digest": "912e0456b299c8074a3b1a0a7e9df1629ec332c56e62983fe9f001f700b4f67e",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-pill": {
-			"digest": "f6ca84524aa512e503de491fc50956c6d84618f38f7af3d550d076b7f62e2bfb",
+			"digest": "e7de0bf4c8621576f08ec2c98156b685fa6dd3f711d16a2b47ebfda573ecae09",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-arcjoin-turned": {
-			"digest": "309787fd1201071bf726ddd8f2233e430ebd6a212f0f40b2a20a175070292b67",
+			"digest": "c355a2b9da93cbdbbff1ef71a6ce82599b1eadc5534d297254902b89ad496357",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-bigring": {
-			"digest": "8c7805e000cb2029fe36c75cdce9dba611bdfa66534cba8e1d15cbe9cbadbe8c",
+			"digest": "7d188bdb0ce57d4cd854c5d44a438596fa0de013f028fd0ca20694b95ac61d38",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-margin-scale": {
-			"digest": "1525803e0b57601bd8858acdab8bf60554e968f790531326fc8c29ec8f635dff",
+			"digest": "6dc5324f5d464af33645e2011355a0407e76c170492e4c6b13e326993be08231",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-mixed": {
-			"digest": "0b38dc25050ec9132ee05211a142e8ba251e80eb7ad98d24b373ba58624ec5e3",
+			"digest": "fb71635b794fbf2feb50e2b5c439272617f3ef3aff9c9ea637b41c7016d72a4b",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-mixed-turned": {
-			"digest": "722349e62de4c8882ece4db87db8485ff44e94bc8b8fe0ce200a5a7b7d5f2a94",
+			"digest": "b79b835f5cb66589ae54a0bd59aa197a52161a9a22ff9ccc9d8b1cfb5888c2ba",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-scaledui": {
-			"digest": "11a1eabf642e4ac05c10b27f0fa6a0e55fd45f2db6c0c9f99632e6d8b0f7411e",
+			"digest": "9250b5cada109cca9798cb2f378a7dde703f010f18847df09ad799b669cbe92b",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-scaledui2": {
-			"digest": "9a230ef22432b8f345fd8f1c608e2f2835fb35812cbccbbbb75d2fbc9bed6ae0",
+			"digest": "ae959535aad03fab8dcdf61f4de3ffc804d0b11c90853b5b86672484c9ecfce4",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-snap": {
-			"digest": "413e13421cd8ad76e66afa0e263fb64bc5342d26d8ec1aed7c5650742cc630a0",
+			"digest": "f649668b397aa2d2772e85263add0e84873e5028239238f969008cfa23c1699d",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-radius": {
-			"digest": "57b52de1b8b3178cbadb2a5909ca5cb58a90e0b9cd32c7d8eea66a4fb8eb6dca",
+			"digest": "49fe7961a06a2daa95c4bd8e12781cd844dc90699d91d22d20170f586913da76",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-sweep": {
-			"digest": "ace0feb4c7aab14e3095a8c7fd3ea2f0f47877d651e8dfeee85f4f824689763a",
+			"digest": "5eaf25dbfe0346d339a4869aefa48fbb016a10480b9363f710f6b67b502ec3d7",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-sweep-fine": {
-			"digest": "0e4e49a5be243e1f7f2bc0a0fbe41ba597f5169e297b84697f5d4add54efa6d5",
+			"digest": "ec782cf4028d999ffdaa16b35b83906eb2022e0005bf19050d0fadd3034984b2",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-a": {
-			"digest": "29672070db21e0a03836dcd92db63921a0f389654c9fbb36e6fbb6c7a0a2abc1",
+			"digest": "28eb6e29f646fa3c2acce1b6f85c1905f182eeb483079d2df8b3de756fc643f4",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-b": {
-			"digest": "87de8f647fe755498b318e0f8a38c6f8ed42fab0285f6278a055175f244a07c1",
+			"digest": "41bef6ab5532d79b91410d3c4e2c2be0df6dd5545f8ac7ce5d482ff60d69fbca",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-c": {
-			"digest": "2d08ea7e67dc7bd46a76c81e7cca0b5e10847e5224de338b1df89665a7768dc0",
+			"digest": "4642f85d59dca41192c2d9ed5da81001a6fbe8efb6b223ff2cd2cbc789f56c4d",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-d": {
-			"digest": "83820e821fedd96f57028cd95ac345593c74a173f0ec93a0e29adfd9eebcf144",
+			"digest": "1ac9828b6848e1cde90c5b7a460cabf42171cfa45ad64df78f3d6b3975d3f6fe",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-e": {
-			"digest": "3ff02a92fd0b014f377637c46d4fc737e7197f8db854cca11b8500e2a0068adb",
+			"digest": "2f35c86bd7a78538cd4de40d0196fb7362119deabd87761816970dcf524bb1ad",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-probe-cap": {
-			"digest": "b62b37c0cd6536e612e58e564dcaf8d34cca87704c4ebb8654ce320a6f16cfab",
+			"digest": "3573478e1ead291abb2ae014edc8baa60edbde1eb213ef9b4554b4ba0b8af4fa",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-text-uiscale": {
-			"digest": "85371f07e3e8617c04a723dda8a54f94d2af2d83e91cd1102963a56a9873e378",
+			"digest": "7c2cea871db11a94edfeacadb316ae3eb2b75ef7952e363169f58a27715a7bb2",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-zindex": {
-			"digest": "d430f5f5dda0822d338de9307f444c8695d12d13e8cc9608771350acc2742fa7",
+			"digest": "18930af68622f18c804919a293981e9a87ca9a970267eaf5615e67b837f80b98",
 			"status": "ok"
 		},
 		"fixtures/play/strokes": {
-			"digest": "bfa337fae72cd2aca8a74e8bbe8991d1d34d039c5d556551ad243715de3f9649",
+			"digest": "66b1877f0245a74c62db00776fd0d5e2702c5cd6aef63bb70e6babb335645103",
 			"status": "ok"
 		},
 		"fixtures/play/text-baseline": {
-			"digest": "863454f5200cc8d7e1a65fb374562b91b3d6b2e88d96b84a70352efed56a75fc",
+			"digest": "218e193e78e77e4dcd12f6b263dbc8df2344a8e444f954f7325f59a2d71faee8",
 			"status": "ok"
 		},
 		"fixtures/play/text-fontfaces": {
-			"digest": "f3cfce102252442fa5f986ad3820c30b97803c419469d6a4848ddc691c5e765b",
+			"digest": "8f3d7de224b9cad8d602aecf226a1912bbfce116d68c8c748e51889fc5a2eb60",
 			"status": "ok"
 		},
 		"fixtures/play/text-fonts": {
-			"digest": "21b5728d46b562baebe1d768adfb753783b61abb237b58e41328546a3d78e283",
+			"digest": "5308ce233935821b4df322764473db335371b0c59f0113af882a9da9c30b21dc",
 			"status": "ok"
 		},
 		"fixtures/play/text-glow": {
-			"digest": "eebf1499a57cecd9c05fc7813a4bfed9b7b57acdd041e48c8a4411d9784ed1a6",
+			"digest": "2ab1d7631c715abb351d8cc023a2d88eb9cc7f249f0a92772c37d88c4c1af3f4",
 			"status": "ok"
 		},
 		"fixtures/play/text-gradient": {
-			"digest": "7d9813a1df88403ac00bc9f7241eefdf33e055aceae158da0b684caccdd63945",
+			"digest": "de8d6d79d1f241b0f078f9f235a92768d18ed16dae7ec0f29809f7edfc6325cf",
 			"status": "ok"
 		},
 		"fixtures/play/text-gradient-degenerate": {
-			"digest": "9177038e3efe7140e2335787f89ef3c66f275d413a259d81e8a625a6189a6b21",
+			"digest": "397fc0a6dd64bc1228c086815dd9e853aa901251b14192a48ad4740376bacba7",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-blend": {
-			"digest": "3c8443f410180c6e0d3a5a1481af3fe3e549dce7255a73d03530088b9049e630",
+			"digest": "113f89019b599543669779f032ebbeabe1ccc65c55ca874d5ed9fbda959a6227",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-boxwrap": {
-			"digest": "7bdd0dd54ceba46b3aabd230e8c4369bcf33b17c07952e556585dd22a3d6fe8c",
+			"digest": "eba3d5e99caebb24a538039bd90d96b6ad4cce2b5ff7c420729091cbeae5c04c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-boxwrap2": {
-			"digest": "5764eb08c9443118043e914211741c2c7c305df42d26f9130ec122e766d20ab2",
+			"digest": "24e38cdd2ade9c695383616a09839f2221de0cf4b3d5b2b96d7b1353b73ebd53",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-case": {
-			"digest": "df642325aa3dc59ebea815d71d92116bd0e67a614df337291ac9f561cc13e387",
+			"digest": "46dcd14134b7e22dc0e64cd7ac5f2e8a57c42c28e65777fba5931443342ce12c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor": {
-			"digest": "b179fd9ed85c1cbae75a421422e5cee4e476ecf5b68ce804e40e412a652c4e4f",
+			"digest": "6e479e4701aaab2fc8ccf93d480e501d066794dbdc3facd7fa09876abbf9a93c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-decor2": {
-			"digest": "0043d4e90fa200da645d65e3ca6f462cf9acc1a1855792c126de219e6089a629",
+			"digest": "b7fecaf2db15d06d5bfa657bc2898e541a1d14070adb5033143cea440c972327",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-emoji": {
-			"digest": "2f87d721b53d7074e341efb5ddc8dc843f5e1ff564f85e2767e5d61997d73145",
+			"digest": "b961f88021b05fb1f5c22206115e1e3a94dfa44be2df0b34973ec489b13fa3ba",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-emoji-line": {
-			"digest": "483505e577dc2ce9c68ab48d8bde1b9684933119a66abb760ae26033dfe64209",
+			"digest": "d03d0b637836079b189e59513651c882c13e6312fa57575e9a2e309b29ff9f85",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fallback-block": {
-			"digest": "f509103b0128d93309bd9f48e8e4245c2c42ff38c6e3566dca72002eb2426e8b",
+			"digest": "f70f0486952f4c458bc334310cfe3e33920e8ab7b1b7393a7305ea7f04d9e80e",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize": {
-			"digest": "37b712108d861a71fca6828260c57adfe523d10694f4943bb5ec6ce8b65ea1d6",
+			"digest": "94bec25407c53249b2dd0ff101d99ea7ef6a93bc5b32aaa6af6d336fde4ad6d0",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-fracsize2": {
-			"digest": "634047ed397aa8a574488db8864c29db6c54cdd7c1aaff3b35b6a9e532cb24fa",
+			"digest": "51a21ee5d695929f1fb8099500e2145bb382019e4e3c7e80fc227f23497881cc",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gapfaces": {
-			"digest": "8cf532e57c0465d63805cc4e2c8fd257f2c94f48af37dd6978dfd191738eb7e5",
+			"digest": "b8d709524760548b649cc110db7cc60a265e999fb7802731a923cc5292ace8d8",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradient": {
-			"digest": "2a9f99e66f68af14e2e888409e88af9d3553e75a7def3980a6968b6804a6cdb5",
+			"digest": "31de642a02c3da94fecc1b79572ee45bceb009cd23d064dd9b832dc64dd625f5",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradient2": {
-			"digest": "1389ad001da67a6439708898b73b6dd7100dbbe51f7a64fd9d259016c6e229e6",
+			"digest": "8ce77b4bc755b0a97d4eb5e4d9899d7d91f4fa2837bfc984b2120f6a0294a812",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-gradstroke": {
-			"digest": "5f05674f1f10f8860a506da9d148e67ee6198c68db8b3c31f6acf6dff3ee83fb",
+			"digest": "fd9a378a19f55f9a4678f6f373f8a4acbf4adfc27c30a691c972f538415b51d6",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-graphemes": {
-			"digest": "bed292bdbfec45712a159247a6ab6b982dad403ffe418070e06cc8babf880840",
+			"digest": "3071c4aba30b8d65d604e6481900520702793f0308ad2e7b1f9540c086607ed9",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-grouptext": {
-			"digest": "16d9d43efc7a4a0835e5a94649e95dd45f54363f6cc95f7197796c72d056bcf9",
+			"digest": "548b1abdcadc93aace03380f463c29c8f04bcc2b8b0d6b7d1fb2f38d1dc3f8f0",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-groupturned": {
-			"digest": "9c23e02e9877aee77193a4eae68662ca7fe31fc1139d78cb943bce9fd7171066",
+			"digest": "8dc199b8d0bf87a8b1954049b7b42eb758739954718d38ddb8dfcf581f79315c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-groupturned-even": {
-			"digest": "31437ec2215b36b2e31bde12b5e99a50c0330a8b7968e4e58d197e4c0faf856b",
+			"digest": "720c494a44d91aa07768f683d694491c74430559a9373de0054e1798111c19db",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-groupturned-pos": {
-			"digest": "5556e9727a96c6ef41437c22b42c457f52c112cc7ba07fa2683c68ab502fface",
+			"digest": "f8dc18662299ce2c061a2a5cbfaff3d50a4640807084c1e3042191cdd04b5739",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-groupturned-quarter": {
-			"digest": "b263b7502119bd8219deb1f3228ec0cc16cf264ce1c63e378179f0c5b0f98e71",
+			"digest": "99fdb316cf22047c0b65e96b87bbbde29c84fbbbc3cd3d011001321690022d54",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-groupturned-sizes": {
-			"digest": "e3ce3971ce5fd3965c9f5779d6045f0edbae3d676caca375aa6451832b922aa0",
+			"digest": "bef4f35759e28ab4fefe03d4474147a8af8f38869db9ecaf7aed87f631e4c2d9",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-kernoffset": {
-			"digest": "9e5f1e3058fa856abe4af9384fda1ad3d528149618fba352190389c1bda64eb4",
+			"digest": "dbab93b15ffc7e973fe82547fe0eb5750b3f9b0647cff7ff93c6708f94b3f229",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-large": {
-			"digest": "26ecd742e43fd0da4947ee80d816d20b4eb2f029054000f9c756b4e3d77d24ed",
+			"digest": "f6f8727db2bea5411c874b88cdfc24f4b0fe72fb56fcaab85fb75cb7e9de111d",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-large2": {
-			"digest": "f2c61aba350303d9536b60b9050a771848fb74d8394860b8c8b98d2e8e7bae6c",
+			"digest": "c3bb0170fef0b8c00a808a313cffd3dd9759e5314ad2b25cb3e37f7d2ccc2100",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-linepitch": {
-			"digest": "c7868712bce611114804bee250fed5b96d09855ae78c23fc3917b9d964066065",
+			"digest": "b8e3764fdbad1e4cb88126d37b1daba01ef5f8584e7d4074df17b9ca700ab831",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-overlap": {
-			"digest": "b3f97c01a1d4369a44daabc273a6ee1ce400be827932d3cb1bce1fed011fe825",
+			"digest": "bffce9116e24918f7eb3ea5f66bbf082ea93302ba3d3b552cce695e43af09fc0",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-place": {
-			"digest": "8a5ad2f24951df5ac8a72e11a01a0b4c7908aeb1d8f399e5cd144711ff6cbf03",
+			"digest": "2e65b4706fa95bde9b2f2243cafed94806805d51e5f3e764f61107729f95928c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-placeholder": {
-			"digest": "1c89c2736fe75965a59a2ed34d58807fd223cd15f24cd1a69048abc0044d4df9",
+			"digest": "7f95eefb41b3b006ddfed997ee6e91e2f79b195d7927b76c619836454e4b7e37",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-quadties": {
-			"digest": "53e653c6d727ac9ea6d870089b651d899785f923a48fb426aedae66ac346db91",
+			"digest": "19572547f7f99900d1170b69067060d4b556fe63f241694fdac9550c37334a41",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rich": {
-			"digest": "638e7f23dcf490cc3b2624a85d64bb7e961d263baadaef5dd241fd65143eafd2",
+			"digest": "885dd687e17acc0e958d78523dd0da2912469e0d57112b2f846568afce0e0a1d",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richcap": {
-			"digest": "13a687d0497642525ab8513cf281fa5ffc33cba6ce53432ec4baf4eb33272726",
+			"digest": "a6fb3d82406d1ff7b81772356f9d38b9ed1271d06008ed7dec34ffc4e886974c",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richscaled": {
-			"digest": "654f2f7daa3ed867d241ff99d9280f9575fd1b5ced6af841a22aac22ac82aac3",
+			"digest": "46bb4c8523bac6e7974775571821bb72517f7dba57414b601c745c8be4f6d252",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richscaled1": {
-			"digest": "54f64eb3e2494996afeae440a0c5abe1314a757cbca306cdfd9185c78fa7b229",
+			"digest": "6f837812389215717aed8eb45ec217df8c59dde5f4c68f4273dbdfc90d4c309d",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richtrunc": {
-			"digest": "900d5b0c55c93e5de6eb77e8964942c47b7604c1ac02efe64cd229463e4a9e8f",
+			"digest": "bcdd8b30758447fbb6bd030aa32a4f780e464cfb50fc78e001535ae7a1ebf508",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richtrunc-band": {
-			"digest": "46af7c0c3bcbbe8beae5dccfcfdcbef8d8afe060c9026d945599ee1702a7314a",
+			"digest": "722756dd52fa8c8e749e2ebadc801d6c62438b511049b6997302c9967abf0051",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richtrunc-edge": {
-			"digest": "c6de17146298e36c746fcf76c282e65ad06aab7efb79357bd90680e3649086d4",
+			"digest": "2812bdade0d879de7c06986d58487fd5007fbc3cace5267f496de932d0a634d6",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-richtrunc-scaled": {
-			"digest": "916ff03cbdb263384140e83c86190bdcdae43756c4d67a0d576eedd77146df7c",
+			"digest": "d3d48481380bda1f1e901eca5c6f6bc04b8fd0436855acf0ddb1141ff79d8422",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotate": {
-			"digest": "bc8f96294b235fa73fd3e822d8651b88bfb11c261e14f416c3d02faf8984d90c",
+			"digest": "ecab33a0c58fe639ff542b533a4145e3d494272d398d22938716fcf17110c8e5",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotate-quarter": {
-			"digest": "6eeaec6558aef981c4e8d3d189002dc5eefb391f68bb08f63fff22db6bbed965",
+			"digest": "b6daa90e3f6a896a5da50025aea5eb2b561676babeced6052e5a1f497e55f4de",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-rotation-size": {
-			"digest": "7208b39c57f4c447544d3cf837778479e45e2361b8bc31299dd226f53118a471",
+			"digest": "368a9fe962712f64eda62ad3fb2a7ccdabd6fd25e7d0a937f2b5952791ef2fb7",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-selfclip": {
-			"digest": "bcce86133e11c99021974dea9a63dca558cf7493b5b914b6b82c8f3fa0995f83",
+			"digest": "d49364b9ed2842f41d488a7d6ba30e350d1642e5cf6b272de5b96da645f69869",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-selfclip-turned": {
-			"digest": "d2ca68b11faa00e15b865289c55dc4b28a1e0aad31869455eff194af824e88f3",
+			"digest": "539257bf796a1bf4a0d5b6bd5d1b3b7067767c493bdf2835ef6e706366753d62",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-strokequad": {
-			"digest": "ee9c43247e18966e0a3d4520c0e11acd290be5d7d4b67b2a1f9a91717f3a7ed5",
+			"digest": "07ed89253cb3aba0082149f4d0da01370dd4a357981bed2b3fdab74682bf38c0",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-subpixel": {
-			"digest": "d6d930697d710ccc3f0d86eaa04fcbed88cac59d6cf96fa520e3583c4fc66d3b",
+			"digest": "06895b7500e8ee9c6e639b2a75de5127646576aba440bd4bb8fb0ab4019b2d27",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-subpixel-size": {
-			"digest": "603c5ae3ba44d050c925f7407ad1db227ea5ac367a9c0ddaa0f1d8bd75cc082c",
+			"digest": "27cc55020520668c51879474dcbdddede9432f02d35ab30c5a853a9c32d79f8b",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-synth": {
-			"digest": "bb701ffe4643dbf579624dfad93fb3cebbf67dd193ce949af69747e4549943bc",
+			"digest": "063b8fb61d0cf63c35d1203f8cfc8980b10de2cb353cd9916f718450229c6ebd",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-synth-rotated": {
-			"digest": "48051d021be62d83b61db1b485843f4e72d454a165950f93184c76c7629547dd",
+			"digest": "518899de1eea74a9d782cd013a78154deb0447792caa14fefc60752df7f1b55d",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-synthscaled": {
-			"digest": "77273b978eff11c7ff0197684f33907b4317d0d06f5183f053eb7827c0003637",
+			"digest": "d0fdd4bdc517ae571c8a2d96ff5fc4e2f81ed2b1e60c61bd2d634216b13560ba",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-tie": {
-			"digest": "c58b65d831e7612b33db5b38ddc16d48bcdecdca5fe29b9740bc1a8006467ebf",
+			"digest": "1ca0865f3c7749047e902e6129056134275461ead03804a79eb5c07a071bf746",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-tie-size": {
-			"digest": "a49ce5a3326232ccbd17bf05c02ae2662dc78ab22431ea045093dc92698e9054",
+			"digest": "1830974576f696f682b4ff77911e84549979b07336165ca92c396f30802175c8",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-toptie": {
-			"digest": "2e87adafd506563cbd3da757d1863fc1164fb1ae41bb6cc01e299108d660df68",
+			"digest": "30ab1c443603d19976d6c78fe78396ea99b25faa66d96426c344a1b8a7915056",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-trailspace": {
-			"digest": "fe000489a2c896d986d7c258e480bd209091b34fa53ba58b3d2461686358ad69",
+			"digest": "bd5ce57ee218623cbd79e47d5a3bdaa8242ed6fcb9e1b78bb490148a88c2a208",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-uiscale": {
-			"digest": "5c8ff389e7e9d44fcc3dc4775f2f1f87725bfae38ee2e78967295e4b2a3f7ca8",
+			"digest": "6a721ba1e20fd20b5de2e929fbc63cd3c3e4fd51eae22c02f463337e920ae00f",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-view": {
-			"digest": "3f30b02b5a418688918ae1b56e629cad391083c9acc2d51408be882a7df5e8f0",
+			"digest": "a73a275cc5a908cb25c887fbb0cab1e21c4abeb65c39101939c58fe3911f596a",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-wrapspaces": {
-			"digest": "64718a45dfbca5e39fa582c141313e7d6709ed888e443ad401b5b0141ed56a8e",
+			"digest": "74eb6de6b5fe60ad374abe2f7a860d45e8023f75fbc9408ec5c0c2a7401ed9e8",
 			"status": "ok"
 		},
 		"fixtures/play/text-probe-zwj": {
-			"digest": "ba429420c5b7da903cc6d9e11e5319f484b5be15676fafb57a24238788127bd4",
+			"digest": "1ad10c95f48a3b42cc80ce78de2769566e719fd0a0a987e83dceeadf3136d0af",
 			"status": "ok"
 		},
 		"fixtures/play/text-raster": {
-			"digest": "11a8c2df5ba62cbed8940e1bf63aa43696a58fdbcb01743bd52089fde8836967",
+			"digest": "c299fe6e019690477d14915a6aaee10466ff9e438809643541e4208ba14e834f",
 			"status": "ok"
 		},
 		"fixtures/play/text-stroke": {
-			"digest": "cc22e2ac6f95d4640bfa6450d7da5ab6ebf32ea319c1c78d00591557eafe0c90",
+			"digest": "b2e63ea1975146f754663710264c18ffe641b7ff819ed8f26909983e1fad6491",
 			"status": "ok"
 		},
 		"fixtures/play/viewport-models": {
-			"digest": "4d2d63627f060fa2417b98316251b917d879bf9fc046360e2463421f088e046b",
+			"digest": "c04879f545d2d3882aee080ede6f042252c2bc6f13e7905b9e3e63678f620bc1",
 			"status": "ok"
 		},
 		"fixtures/play/viewport-probe-fade": {
-			"digest": "71144271e44c9bc2ad3f11ae0fcd03f82b663c2cc446ea9f7b674317cc40ae43",
+			"digest": "982d503b7f3e9e3134f4b9d5b553014066a066369e9ab5554193879cf527fc7b",
 			"status": "ok"
 		},
 		"fixtures/play/viewport-probe-layer": {
-			"digest": "38f6018011721b090ae12cd88ba4ea4c4230771b55bd339ad1e17ee8e6ba564e",
+			"digest": "378b2b9536ace2b49ea9e08d20e7397e160be5918c70d4655dff735bee33d7cb",
 			"status": "ok"
 		},
 		"fixtures/play/viewport-probe-materials": {
-			"digest": "a3d26c8a900b942a07008674203eb2484c3e8bdbc9023211c05c31c65a0ab5b3",
+			"digest": "ad5d081021abcbcc1945acba423ab17ae8aff9f80fdd9ea0afe305c9b914ae98",
 			"status": "ok"
 		},
 		"live/input/120hz-input-probe": {
-			"digest": "423372fa054d1907fdd374bd6ab3c0fc1f16eb677b4c354a8fbc7f68eaacdb1d",
+			"digest": "6f701e829f00bad119fc1fc8ba834303d79ccd1b9524c03ffb2ebad2fa2927a2",
 			"status": "live"
 		},
 		"live/input/144hz-input-probe": {
-			"digest": "1be95aae99c34975b1a418173bb96b3f112c7d96bb7bb7e18921000732830efd",
+			"digest": "856a4e0c2ce329197af02693fa8f67a0f01add6a6d886b13822ca2375baa62dd",
 			"status": "live"
 		},
 		"live/input/60hz-input-probe": {
-			"digest": "bec8d6a62297a49093a3b55762164cc6351310319d5d9583dfd486ec470df9b9",
+			"digest": "b8b084d980afa9963393bcb36923b0a5aca7b6377dddc7d3a85a554b28595a71",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-click": {
-			"digest": "707d55cb3ea0115ab7e6cb4966e327934a7711db2e9b66be6805b361914f3a49",
+			"digest": "a98c6499791a6d50d343fdefd0e4f03d086c3d66c0c865631ce272eaffe893de",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/120hz-default": {
-			"digest": "8005b886ff50831949b98268a10931a81a8e82fd1e997cfa55b6c3b32b455f02",
+			"digest": "d4e91dcb03718aaad538c7a2c09f29923ad52d84bb86923450ae8b677f593cec",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/144hz-click": {
-			"digest": "67f61dce15fede711e94665d198e3bdcd13e1de4725056aaffcf0d910e297aa4",
+			"digest": "b1d527b0477318b11fd4529a9fbb5d84ae39573c7918a4593b0d54379bbd2efc",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/144hz-default": {
-			"digest": "6d63eee7407b10be41c1727b2a46c40b0a422ca9c7c8b23a0d24e192ac87f60d",
+			"digest": "d3820e250abee82571c84486b9e5997926a46c0b0999c643b1d84d89da603300",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-click": {
-			"digest": "eea52648fab513c9e169b5113cf79521ac7e5f21517c507f64d49459c44f9d25",
+			"digest": "dafbeb7f0aa1dbc5c9d6f45d77d7196e922676a024fbe53c94a1f516b4f3a655",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-default": {
-			"digest": "57f5fb64e513d647ffd6f64e76a52f629ec83f5d435e74a566664c9bcf37477e",
+			"digest": "38bc1c7eeae1b6dbdc2e38e28b7fdf419db5586a7e576b5e9a617819d7fc1938",
 			"status": "live"
 		},
 		"live/interaction-autobuttoncolor/60hz-no-input": {
-			"digest": "8a020371103202eee25e21d30760d226b890484b215583612407d164eb74cbd8",
+			"digest": "e28f400047f673b3df09ec5c44151aa69539ae8c0a3263b96b2b7c9d5fd96884",
 			"status": "live"
 		},
 		"live/interaction-scroll/120hz-click": {
-			"digest": "aa098869479af6726db6f7fa88640ee6902cc6b883bd27ad0ee6de1cc83981d9",
+			"digest": "a01ed371a1c52ae56be9c2ae3ceb8fc1b25dee7e7682f7eea6dd71c416bb6d90",
 			"status": "live"
 		},
 		"live/interaction-scroll/120hz-default": {
-			"digest": "4c2ea14881cd7ffae5f571539af8ff66c82c706c55b9852c260cd83dca07d66c",
+			"digest": "7e290ab8695c90d7332ba3997e429b54c5251105ac6676d5cbefb0756729263d",
 			"status": "live"
 		},
 		"live/interaction-scroll/144hz-click": {
-			"digest": "4107063f801862b597c4eb12eea567919145c7f01a0b8987d5c0c4abb99aa63e",
+			"digest": "90540d607de8949f38a2ef5f20a8bd2cea80220369d8db6c854d4941982e04bf",
 			"status": "live"
 		},
 		"live/interaction-scroll/144hz-default": {
-			"digest": "3f98e7e70d7a3e4f5cc2079d459c0786418bb424dd4998ebe9915ad9514c7281",
+			"digest": "bfd2ac958156b52e997a55617dbeae81a0d82ff682cd9ad10ff295f5956a4126",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-click": {
-			"digest": "816e2a0558c8db1ee765d8bbff3d4a93a34e4b236cb1928a667df9ec306e0703",
+			"digest": "1aec7d996f17c5548d8decf39ffb49eebfaa57b357997f51f798192a71ca8990",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-default": {
-			"digest": "d75e3d5a1f7f469a9acc9c3e336e392dc02eabe4f1b28ca11cc9df64ee36a0e5",
+			"digest": "51b51967ee4065724928a7998e098788673a245df81cdf28563b9d9464add1f6",
 			"status": "live"
 		},
 		"live/interaction-scroll/60hz-no-input": {
-			"digest": "84959058dad4bb9df50b2608387c491407d94262e5460df798f12dcc156119d9",
+			"digest": "46abe33eaadd75e64b1b4c992889a9a1ae232abcc97f422a42b52b36b1381b0f",
 			"status": "live"
 		},
 		"live/interaction-textbox/120hz-click": {
-			"digest": "fe6766fbcf2756be4e0bd5724e96ecf5e85238cb4d5efe5296ad7b0873d1f4bd",
+			"digest": "555145b05037691862a896fb06ca8f767a8b43999a01f86142787ecdd4d19751",
 			"status": "live"
 		},
 		"live/interaction-textbox/120hz-default": {
-			"digest": "7c6edb8fd968a1578f06864e8edc172e399a212c160e4e3a1f785c1ed90e0de1",
+			"digest": "678198e3157fd279ea367b33eaa2fab91f98b1eb5c4089c6d49cef0b85dd1e03",
 			"status": "live"
 		},
 		"live/interaction-textbox/144hz-click": {
-			"digest": "b8891282c3861d952b9143c974d352464460983f6bd7938999c01c92241216af",
+			"digest": "08811681ce9d4b21c5dee88b09102c319a07ebd99719d3bd47428356e0d581b4",
 			"status": "live"
 		},
 		"live/interaction-textbox/144hz-default": {
-			"digest": "22f88c86088533c093ac0c3b950927ca6a9aee7b88e5aad6b16a006908b2d54c",
+			"digest": "ad4341165bf6ec595f820c6aad3cc105f3ff515fdd8859f52677f4f6ed5ede02",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-click": {
-			"digest": "e57034e2db3616ff9c6be5d45d3d8fff8cce39277944ec36efa6864e0b66b123",
+			"digest": "a84ee8c85faaf025719f198401b61e3e44b1c12714262d4cc1278d29d6abaaf9",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-default": {
-			"digest": "8f958ead354b6a0a80995aa8360db14982046ee2a9483f43c9affadfe4e1e606",
+			"digest": "219ebb967bd30356a2963d41ba6db51a24616f255835eaacd0ca26e1ab1333af",
 			"status": "live"
 		},
 		"live/interaction-textbox/60hz-no-input": {
-			"digest": "1a58d3940a3e6d1f582f141e9b3c3307798a59074072d2f748c97c030ddb51b4",
+			"digest": "12fb5d4d81eff4fc6cf2b8490b3c5cbbff7f91bdf84f38d7bd78e3f8fe5f92f9",
 			"status": "live"
 		},
 		"live/live-rotated-cull/120hz-click": {
-			"digest": "62bf6ffde6a3aec73f8653cdf2e33962f0a4a948ea178c90450312362f0be2d0",
+			"digest": "93ff1e5494e53bba12609f867e27326719681cb19afb24b87b8f5df20147464b",
 			"status": "live"
 		},
 		"live/live-rotated-cull/120hz-default": {
-			"digest": "2028d8ca0920fd8778633b73c76472f614833a069f89d7892093971d4044ed2c",
+			"digest": "fde3509396b9f75b6b5069231fe5bf4771c8f01f7a3036ff5fce1aace1f42a60",
 			"status": "live"
 		},
 		"live/live-rotated-cull/144hz-click": {
-			"digest": "7973c63f3cd9b1f51fb5991dd4b68eae89e1b257535787f8737c40baead0f71c",
+			"digest": "26c2690dda0e395b25f25665f1073ea36be080bbca08129f2a083d0b467ccd7d",
 			"status": "live"
 		},
 		"live/live-rotated-cull/144hz-default": {
-			"digest": "8513b23c8aecb68fa98a86b3baf9d24493386df479a5a2ef45a320322c51c110",
+			"digest": "526a3f712030ca35f5bc629d8acba31de0ca9f209827c753c273b27169ad6461",
 			"status": "live"
 		},
 		"live/live-rotated-cull/144hz-presentation": {
-			"digest": "7e47caa2dafa5846095584f5d1989a9c74ac171ff79ade24a2521069833fc419",
+			"digest": "29a396184e742ce4e148201fe61c6176266153e08109a09819ea0f7cb8a7ad72",
 			"status": "live"
 		},
 		"live/live-rotated-cull/60hz-click": {
-			"digest": "fbb6dc98f38e3b9f7946d9a30de60eec5ac86d18188d4b234be020c271fbf4a7",
+			"digest": "e45512011c1601b5cb8d0900496c049d05972542018b7eee458fccac673a493f",
 			"status": "live"
 		},
 		"live/live-rotated-cull/60hz-default": {
-			"digest": "686dd5ac534f484683cee3148921ac1e4ced55b2550212e517d7b0268bf16acd",
+			"digest": "b765c95080ffe57d40eb2d0ae929378325363020abe99341afd38d59434233c7",
 			"status": "live"
 		},
 		"live/live-rotated-cull/60hz-no-input": {
-			"digest": "13cff1ba241d2ca5ada8e7e54f72c9a947374fa53033bd26c4a358595e474e24",
+			"digest": "af6a51372b23a8118375e25b73130a5ce6eb656836835c247d3addd1d7b0b559",
 			"status": "live"
 		},
 		"live/live-rotated-cull/60hz-presentation": {
-			"digest": "af114823ae80b465f37915d2cab6bf1a9e3a8a324915724a4635e4bec218a531",
+			"digest": "e96f34477b100058b0bdb885bd7ead88b002a664e9aa6ffe2be6993536284975",
 			"status": "live"
 		},
 		"live/live-scroll/120hz-click": {
-			"digest": "c105c22be7ab2ad104f732db1c8d217828a043c9ad5620dab90d55e245fe46bd",
+			"digest": "d41e7757939b21b114edb8686b0ed3ed2b5cf77796a858ea0e555075e61bd1b1",
 			"status": "live"
 		},
 		"live/live-scroll/120hz-default": {
-			"digest": "7bc9be2e41329a97a5d91bd3fd7e8d10cdea25b299610aeb99feadf5008e58aa",
+			"digest": "fac16c4cd28396a961fd74a3be6f6357253a0311e19f5f75ef1e1a3533eab921",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-click": {
-			"digest": "9af86ab9fdb7cc8f3cbedd33869b1610d9a995cbfe5010dc93e853e2797f88b5",
+			"digest": "97734a4e70381ffcd694087ede296e5dd0fa21ffb322b89796b6aa1634300a5b",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-default": {
-			"digest": "35de7d1ebde0044d9d48b9dd4a5b1c10fe9300265d1e09e4ac404eb6e7fd7a0c",
+			"digest": "b85fbdf5b02a12a1ce3b5a9e114633eb9c32c075adefb0c31184648be25a48d8",
 			"status": "live"
 		},
 		"live/live-scroll/144hz-presentation": {
-			"digest": "2bab2b18733d5546f73cf728d15aab45d1cac7a0ca53b81411eda01f8e5be319",
+			"digest": "f8013f96b820ada1e931ceb0dd2019a42b5d5cea9f7e9a4df650a06301307ae1",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-click": {
-			"digest": "5e390d4cc3fd36ff2f34acd2064ef699971f96e1b30bde946f78011c8165930a",
+			"digest": "6ddc3097a3f6f1407c99556d389d702bf912a53507055d50fbcb9473ebb1a2c4",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-default": {
-			"digest": "5e5240d3907caa7450e120a6a2ae70133d451e90906071028f70b1d3f6c9c383",
+			"digest": "98bd23f5ea2be9ac5c04e245a17517f5c6de0c10d3b057ca9394f212a61bb6a4",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-no-input": {
-			"digest": "a53ddf781c942f0f3c00900f22d42fd62766e8198daaffe66d180eb2d0201b3d",
+			"digest": "6f2222de546f2573dd1635e63260b92584e90c7a166840c217ce3f0c64ea955f",
 			"status": "live"
 		},
 		"live/live-scroll/60hz-presentation": {
-			"digest": "f3e0da6cb5a25bab9223ae420c7fabdf3a4b6b66b664ce79f0e3d44f7145f3a1",
+			"digest": "2f53ba15bbe1dbb51ac366bdccf0436f9014c49a7ba52b72e152d1c588919517",
 			"status": "live"
 		},
 		"live/live-stress/120hz-click": {
-			"digest": "0bad94a306154872f0aba26e5224416e9941d1a0d2aedb3a17dec6ad3f016909",
+			"digest": "1377bd3659da333b6bcbb67b004480d1d40729890ced7930c5a05dee3891127f",
 			"status": "live"
 		},
 		"live/live-stress/120hz-default": {
-			"digest": "1772be933f4942b75effac31c21200221d230bc58b4615e5720e208e31e94617",
+			"digest": "590cf1ece2fe75d0d6e4e6f9de437ba593197096eeacb3cb72024d54d2f91583",
 			"status": "live"
 		},
 		"live/live-stress/144hz-click": {
-			"digest": "3f8998fc0ef26e6d47d3e0478dd1857ce5b3ebe8fa7a31eaca279c610cf3adf6",
+			"digest": "ce31abc01452f676e0726729e20d76841edda9c89d37cbf35ecc7be7fba71c1e",
 			"status": "live"
 		},
 		"live/live-stress/144hz-default": {
-			"digest": "841751944585979335d41aeb3cbb4a7b3ae42b4d953a180630d86d330c1c1c33",
+			"digest": "5f7422b242a41e380e136328f6a9e561d1d8e2530e7a9cd090be8eafbb1fdcaa",
 			"status": "live"
 		},
 		"live/live-stress/144hz-presentation": {
-			"digest": "ac84e56cd30d89f0263cace19b93c2eacc6d66739783625bb582dfb8328530f9",
+			"digest": "7711afcab111cf60760fe00d62bb324dfd7f4ecd18d2a1d973b49b0be6e5424d",
 			"status": "live"
 		},
 		"live/live-stress/60hz-click": {
-			"digest": "fb9ff2fa6df84662502abc61c8217e12431a2625fcfe89fca167aa69c287f90f",
+			"digest": "04a049c491833099aca97efe26f78424efc0511a4aad460809cd5e0bc6a1232f",
 			"status": "live"
 		},
 		"live/live-stress/60hz-default": {
-			"digest": "d8437741388147ca1f3e2bfb7c35bab4ee398837a8dd24a2ed1821f5798bb677",
+			"digest": "1d3308393ac64f42e69006ec3ee6c813c96237fc690e44091faa7c99316cc728",
 			"status": "live"
 		},
 		"live/live-stress/60hz-no-input": {
-			"digest": "6d38d744e8b9e18f70479d1f45e0421e42353d1a67ca0419f45148009b9aba6a",
+			"digest": "a4e1279cebbf3c03484c31e0fa239bb6ab5534e037f3eac16a7378e82f53d9f1",
 			"status": "live"
 		},
 		"live/live-stress/60hz-presentation": {
-			"digest": "e5a5898da6a58017e76bedfd8a1faf592fb260ce6ebb7a423af2a2af244468f4",
+			"digest": "5b1c3a526c9734faf0e4827a29fde241136578030367ee0572e7c7bed35d2c91",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-click": {
-			"digest": "faffe1f6b36c123013304a42e220193e62fadc26f6cdff6b1d49a0fa5e684114",
+			"digest": "30c2b0f65b54fa75cca305fcf46b706b5c3dbdbff8e5f17c26e9f5e9c8dc80f0",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/120hz-default": {
-			"digest": "cb8c394cf7d69517f592c676671683ff094d028684c761c23a50766eed1a54c8",
+			"digest": "a3bf9fc41eaa09da230dc45328fa7a6e5d5943a839067e918d39704ec4869949",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-click": {
-			"digest": "251361682537a18a11f74a797306f1335dc4cec4edbc82f817338f9ed1c25280",
+			"digest": "b06df2112f925249eb3fc706abc1cdf7243445e3708bcc313e4848b27db0e6ca",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-default": {
-			"digest": "9af4b567dde610e55e335893270fe096012a764908cd1ba82e8b2e4f0bda63b0",
+			"digest": "d422f97450539ed035a559d48bfc62b2a6020913895fc437c28de59b4c7f8d82",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/144hz-presentation": {
-			"digest": "a927f4e9ddf687d259f751a2dcfc906c0722482968d5cc501818e0119ec8b9a0",
+			"digest": "f88a57510d562683beabc4d10c9064219ac6e233795663d0d195f56c663df0f6",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-click": {
-			"digest": "19dd8702b29f95f774dd327068d133faa8a5e48f5c92ef69a768c82b9728d01d",
+			"digest": "e04f8eb67a2babea0bfd19f2437265285bcb96c4bd120a7b760829e2a9c76451",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-default": {
-			"digest": "dbdd48931051d3da8542402587c9985af76da087f3f62f709fa51d8dac71958a",
+			"digest": "3ad2d7a56227a9a1bc8629277d8c3c66a67f3e000d8eec9e4df2baa8b5aa6541",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-no-input": {
-			"digest": "d5a7b56bd9075bf88754caf18bfc626e7e1dbdd3aad718a92e6b7ac403df9968",
+			"digest": "fc43b51e9a48fd450fdd7dd126e00ef4257445599b57f5f29dee0134af42e157",
 			"status": "live"
 		},
 		"live/stories-autosize-cull/60hz-presentation": {
-			"digest": "a817ac643280f850731f6b8b6092926b73cb09b03f61ad5cd482276195a56a5c",
+			"digest": "ce797514853dc6a30eeabca1bfaefed265e63481ee17680257f350569120137d",
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-28T02:29:38.238Z",
+	"recorded": "2026-11-28T03:50:50.698Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

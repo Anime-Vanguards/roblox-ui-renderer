@@ -39,8 +39,8 @@ try {
 	const files = {
 		"src/client/Ui/Hud.story.luau": STORY,
 		"src/client/init.client.luau": "-- client entry\n",
-		"src/shared/Panel/init.luau": "return {}\n",
-		"src/shared/Panel/init.server.luau": "-- the folder's script: init.server.luau comes first\n",
+		"src/shared/Panel/init.luau": "-- the folder's script: init.luau comes first\nreturn {}\n",
+		"src/shared/Panel/init.server.luau": "-- after the folder's first init script: not mounted\n",
 		"src/shared/Card/init.luau": STORY,
 		"src/shared/Card/Parts.luau": "return {}\n",
 		"src/shared/Run.server.luau": "-- a server script\n",
@@ -50,6 +50,9 @@ try {
 		"src/shared/.luau": "return {}\n",
 		"src/shared/.git/Inside.story.luau": STORY,
 		"src/shared/init.story.luau": STORY,
+		"src/shared/Odd.Server.luau": STORY,
+		"src/shared/Helper.plugin.luau": "-- a plugin's script\n",
+		"src/shared/Upper.LUAU": STORY,
 		"src/shared/Kit/default.project.json": JSON.stringify({ name: "UiKit", tree: { $path: "lib" } }),
 		"src/shared/Kit/lib/Button.story.luau": STORY,
 		"src/shared/Kit/Other.story.luau": STORY,
@@ -70,11 +73,16 @@ try {
 	const expected = {
 		"src/client/Ui/Hud.story.luau": "StarterPlayer.StarterPlayerScripts.Client.Ui.Hud.story",
 		"src/client/init.client.luau": "StarterPlayer.StarterPlayerScripts.Client",
-		"src/shared/Panel/init.server.luau": "ReplicatedStorage.Shared.Panel",
+		"src/shared/Panel/init.luau": "ReplicatedStorage.Shared.Panel",
 		"src/shared/Card/init.luau": "ReplicatedStorage.Shared.Card",
 		"src/shared/Card/Parts.luau": "ReplicatedStorage.Shared.Card.Parts",
 		"src/shared/Run.server.luau": "ReplicatedStorage.Shared.Run",
 		"src/shared/Legacy.story.lua": "ReplicatedStorage.Shared.Legacy.story",
+		// (an init file that isn't the folder's script mounts by its own rule; a suffix takes the rule only in lower
+		// case, so `.Server.luau` is a module's name; `.plugin.luau` is a Script)
+		"src/shared/init.story.luau": "ReplicatedStorage.Shared.init.story",
+		"src/shared/Odd.Server.luau": "ReplicatedStorage.Shared.Odd.Server",
+		"src/shared/Helper.plugin.luau": "ReplicatedStorage.Shared.Helper",
 		// (names that start with a dot mount as Rojo builds them: a dot folder is a Folder, and a file named only
 		// by a module's suffix keeps it)
 		"src/shared/.hidden/Hidden.story.luau": "ReplicatedStorage.Shared..hidden.Hidden.story",
@@ -87,10 +95,10 @@ try {
 	};
 	const name = file => instancePathOf(at(file), { roots, mounts })?.join(".") ?? null;
 	for (const [file, full] of Object.entries(expected)) assert.equal(name(file), full, file);
-	// Not mounted: an init script after the folder's first one, what a .git holds (an empty Folder), init.* files that
-	// aren't the folder's script, what a nested project doesn't map, a service folder's own init script, a file at a
-	// root's top, a file outside every mount
-	for (const file of ["src/shared/Panel/init.luau", "src/shared/.git/Inside.story.luau", "src/shared/init.story.luau", "src/shared/Kit/Other.story.luau", "src/server/init.luau", "layout/Loose.story.luau", "stories/Outside.story.luau"]) {
+	// Not mounted: an init script after the folder's first one, what a .git holds (an empty Folder), a script suffix in
+	// upper case, what a nested project doesn't map, a service folder's own init script, a file at a root's top, a file
+	// outside every mount
+	for (const file of ["src/shared/Panel/init.server.luau", "src/shared/.git/Inside.story.luau", "src/shared/Upper.LUAU", "src/shared/Kit/Other.story.luau", "src/server/init.luau", "layout/Loose.story.luau", "stories/Outside.story.luau"]) {
 		assert.equal(name(file), null, file);
 	}
 
@@ -140,7 +148,7 @@ try {
 	});
 	write("probe/Probe.story.luau", `for _, Item in game:GetDescendants() do
 	if Item:IsA("LuaSourceContainer") then
-		print("MOUNTED " .. Item:GetFullName())
+		print("MOUNTED " .. Item.ClassName .. " " .. Item:GetFullName())
 	end
 end
 return function() end
@@ -149,9 +157,15 @@ return function() end
 		"--roots", at("layout"), "--story", at("probe/Probe.story.luau"), "--no-png", "--offline", "--json", "--out", at("out/probe")]);
 	assert.equal(probe.status, 0, probe.stderr);
 	const output = JSON.parse(fs.readFileSync(at("out/probe/scene.json"), "utf8")).diagnostics.output || [];
-	const mounted = new Set(output.map(entry => String(entry.message)).filter(message => message.startsWith("MOUNTED ")).map(message => message.slice("MOUNTED ".length)));
+	const scripts = output.map(entry => String(entry.message)).filter(message => message.startsWith("MOUNTED ")).map(message => message.slice("MOUNTED ".length).split(/ (.*)/s));
+	const mounted = new Set(scripts.map(([, full]) => full));
 	for (const [file, full] of Object.entries(expected)) assert.ok(mounted.has(full), `the engine mounts ${file} at ${full} (it mounted ${[...mounted].join(", ")})`);
-	for (const unmounted of ["Inside.story", "init.story", "Other.story", "Loose.story"]) assert.ok(![...mounted].some(full => full.endsWith(unmounted)), unmounted);
+	for (const unmounted of ["Inside.story", "Upper", "Other.story", "Loose.story"]) assert.ok(![...mounted].some(full => full.endsWith(unmounted)), unmounted);
+	// (the folder's first init script alone makes Panel; the plugin's is a Script, `.Server.luau` a module)
+	const classes = full => scripts.filter(([, name]) => name === full).map(([kind]) => kind);
+	assert.deepEqual(classes("ReplicatedStorage.Shared.Panel"), ["ModuleScript"]);
+	assert.deepEqual(classes("ReplicatedStorage.Shared.Helper"), ["Script"]);
+	assert.deepEqual(classes("ReplicatedStorage.Shared.Odd.Server"), ["ModuleScript"]);
 
 	// A stand-in Studio MCP bridge (cli/studio.mjs: newline-delimited JSON-RPC, execute_luau results paged through
 	// _G.__RUR_RESULT): it has the modules `present` names, answers the mount script as Studio's would and captures a
