@@ -297,7 +297,11 @@
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-aspect10": {
-			"digest": "93cecb6ba35263ffa01f3ee6a9018bad5cf075f33e4731fa6a72188b2a33a45a",
+			"digest": "0e5e719e00aed7b15e96cf7427fc052f2727309b90e6b18ed517e9d27dac020b",
+			"status": "ok"
+		},
+		"fast/edit/layout-autosize-aspect11": {
+			"digest": "5d1dad8765cc1ded14718cf5274dad64fb828f2753a59767047274d5af00d0e1",
 			"status": "ok"
 		},
 		"fast/edit/layout-autosize-aspect2": {
@@ -1769,7 +1773,11 @@
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect10": {
-			"digest": "d01d95fd157fae9b3a1ea6e53c70148dfabc4801f0956dc20381394cd309be7b",
+			"digest": "2948873b0d5154ddc2353c9db65b358cd8df96b3bddaea4528cdfe220c24e42d",
+			"status": "ok"
+		},
+		"fixtures/edit/layout-autosize-aspect11": {
+			"digest": "048cfd633e70f76ce3987902276c7072c0a53657f44d6403675d805b23997589",
 			"status": "ok"
 		},
 		"fixtures/edit/layout-autosize-aspect2": {
@@ -3229,7 +3237,11 @@
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect10": {
-			"digest": "b8204da397337c5e39ce6b74aacf2aae81c7199f2f1125c3e117f01aed8a6e4c",
+			"digest": "93c0e6e0adc5b9b322edf2d0ff45dfd0ae65cde23e0067f0bfc97224754b745d",
+			"status": "ok"
+		},
+		"fixtures/play/layout-autosize-aspect11": {
+			"digest": "26c4369b03300cd245429d0e15cc7ad5ac50c009d34d526e294ef30bbf243e5a",
 			"status": "ok"
 		},
 		"fixtures/play/layout-autosize-aspect2": {
@@ -4309,7 +4321,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T23:44:34.300Z",
+	"recorded": "2026-11-28T02:29:38.238Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

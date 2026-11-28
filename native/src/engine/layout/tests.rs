@@ -825,7 +825,7 @@ fn aspect_measured() -> serde_json::Value {
 }
 
 /// The AutomaticSize + UIAspectRatioConstraint fixtures the client was measured on.
-const ASPECT_FIXTURES: [(&str, &str); 14] = [
+const ASPECT_FIXTURES: [(&str, &str); 15] = [
     ("layout-autosize-aspect", include_str!("../../../../fixtures/layout-autosize-aspect.luau")),
     ("layout-autosize-aspect2", include_str!("../../../../fixtures/layout-autosize-aspect2.luau")),
     ("layout-autosize-aspect3", include_str!("../../../../fixtures/layout-autosize-aspect3.luau")),
@@ -840,19 +840,11 @@ const ASPECT_FIXTURES: [(&str, &str); 14] = [
     ("layout-autosize-aspect8", include_str!("../../../../fixtures/layout-autosize-aspect8.luau")),
     ("layout-autosize-aspect9", include_str!("../../../../fixtures/layout-autosize-aspect9.luau")),
     ("layout-autosize-aspect10", include_str!("../../../../fixtures/layout-autosize-aspect10.luau")),
+    ("layout-autosize-aspect11", include_str!("../../../../fixtures/layout-autosize-aspect11.luau")),
 ];
 
-/// Not reproduced (LA9d): the children of an XY frame of a 0-wide base whose ratio box is shorter than its top and bottom
-/// padding (0 x 0 of ratio 2 with 20 + 20 px around a 60 x 80 box: the frame is 60 x 80 as in the client, its box 60 x 30)
-/// start 10 px down in the client (the box less the bottom padding), 20 here, and a (1, 1) frame there is 50 tall (to the
-/// frame's height less the bottom padding), 30 here.
-const ASPECT_KNOWN: [&str; 5] = [
-    "/b0x0_r2_t20b20_b60x80/H/B",
-    "/b0x0_r2_t20b20_full_b60x80/H/B",
-    "/b0x0_r2_t20b20_full_b60x80/H/F",
-    "/b0x60_r2_t20b20_full_b60x80/H/B",
-    "/b0x60_r2_t20b20_full_b60x80/H/F",
-];
+/// Rects the renderer does not reproduce yet (none since LA9d, 2026-11-28).
+const ASPECT_KNOWN: [&str; 0] = [];
 
 /// Automatic frames with a UIAspectRatioConstraint against a Roblox 0.747 client's rects
 /// (data/studio/whole/autosize-aspect.json): the content's natural size inside the padding, fitted to the ratio, plus

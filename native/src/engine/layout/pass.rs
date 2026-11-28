@@ -73,6 +73,15 @@ impl ParentPlace {
     }
 }
 
+/// Moves a placed record's content origin to `start` local units below its top (an aspect holder whose box is shorter
+/// than its padding, ComputeSize's `start_y`).
+fn start_at(record: &mut Record, start: f64) {
+    if let Some(place) = record.place.as_mut() {
+        place[5] = f32r(start * record.scale);
+        record.content.y = f32r(record.y + place[5]);
+    }
+}
+
 /// Positions a record inside its parent from its placement terms, its content origin and its
 /// rotation transforms (Locate). Measured (layout-probe-f32): the engine works in float32 and stores
 /// the centre; AbsolutePosition reads back through it.
@@ -353,6 +362,7 @@ pub(crate) struct Resolved {
     measure: Option<(f64, f64)>,
     grow: Option<(Option<f64>, Option<f64>)>,
     basis: Option<(Option<f64>, Option<f64>)>,
+    start_y: Option<f64>,
 }
 
 type Collect<'c> = &'c mut dyn FnMut(&mut Pass, InstanceId, &Record);
@@ -970,6 +980,7 @@ impl<'a> Pass<'a> {
         let mut measured_bounds = None;
         let mut grow = None;
         let mut basis = None;
+        let mut start_y = None;
         if is_automatic {
             // Measured: when an ancestor's UIAspectRatioConstraint shrank its automatic size,
             // automatic content is still measured against the ancestor's unconstrained size.
@@ -1445,7 +1456,21 @@ impl<'a> Pass<'a> {
                     let (inner_w, inner_h) = (lmax(box_w - pad_left - pad_right, 0.0), lmax(box_h - pad_top - pad_bottom, 0.0));
                     let basis_h = lmax(inner_h, lmin(held_y, box_h));
                     basis = Some(match (auto_x, auto_y) {
-                        (true, true) => (Some(lmax(ratio * basis_h, inner_w)), Some(basis_h)),
+                        // Measured (fixtures/layout-autosize-aspect11.luau, -aspect10, -aspect9; a 0.747 client, 37 of 37 XY
+                        // holders with scale children): automatic on both axes, the height a scale child sizes against
+                        // is what the content holds up to the height of the box less the side padding at the ratio
+                        // (inner_w / ratio, not the box's: an 80 x 40 box of ratio 2 with 10 + 10 px of side padding sizes
+                        // a (1, 1) frame 60 x 30), at least the box less the padding; a box shorter than its top and
+                        // bottom padding adds twice what it lacks (60 x 30 with 20 + 20 px: 30 + 2 x 10 = 50 tall)
+                        (true, true) => {
+                            // (its children start at the box less the bottom padding, as a plain frame's do with more
+                            // padding than height: layout-probe-negcontent)
+                            if pad_top + pad_bottom > box_h {
+                                start_y = Some(box_h - pad_bottom);
+                            }
+                            let held = lmax(inner_h, lmin(held_y, inner_w / ratio));
+                            (Some(lmax(ratio * held, inner_w)), Some(held + 2.0 * lmax(pad_top + pad_bottom - box_h, 0.0)))
+                        }
                         (true, false) => (Some(lmax(inner_w, lmin(held_x, box_w))), None),
                         _ => (None, Some(basis_h)),
                     });
@@ -1472,6 +1497,13 @@ impl<'a> Pass<'a> {
                 second.size_w = basis_w.map(|v| v * scale);
                 second.size_h = basis_h.map(|v| v * scale);
             }
+            // Measured (fixtures/layout-autosize-aspect11.luau; a 0.747 client): the children of an automatic XY holder
+            // whose ratio box is shorter than its top and bottom padding start where a plain frame's would, at the box
+            // less the bottom padding (layout-probe-negcontent: [H - bottom, top]): 60 x 30 with 30 + 10 px starts them
+            // 20 down, with 10 + 30 px at the top
+            if let Some(start) = start_y {
+                second.content.y = start * scale;
+            }
             // Measured (fixtures/layout-autolist-scalepad.luau): the second pass resolves a scale list Padding against
             // the box less the whole padding, its scale resolved against the constrained box (a 0.1 scale top pad
             // and a 0.1 gap make 50 px of items 54.5 tall; with MaxSize 40 and 0.1 + 4 and 6 px of padding the gaps
@@ -1494,7 +1526,7 @@ impl<'a> Pass<'a> {
             held_h = if auto_y && asked_h > height { Some(asked_h) } else { None };
         }
 
-        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h, bounds: measured_bounds, grow, basis }
+        Sized { w: width, h: height, text_box, base_w, base_h, measure_w: child_measure_w, measure_h: child_measure_h, held_w, held_h, bounds: measured_bounds, grow, basis, start_y }
     }
 
     /// ComputeSize, memoized for AutomaticSize objects: a result stays valid while the object's
@@ -2316,6 +2348,7 @@ impl<'a> Pass<'a> {
                 measure: sized.measure_w.map(|w| (w, sized.measure_h.unwrap_or(0.0))),
                 grow: sized.grow,
                 basis: sized.basis,
+                start_y: sized.start_y,
             };
             // Measured (fixtures/layout-autosize-constraint.luau): an automatic parent measures a child its
             // MaxSize cut at the size the child's content asked for (a 30 px capped frame holding 24 px inside
@@ -2529,6 +2562,15 @@ impl<'a> Pass<'a> {
             if let Some((basis_w, basis_h)) = entry.basis {
                 child_record.size_w = basis_w.map(|v| v * child_record.scale);
                 child_record.size_h = basis_h.map(|v| v * child_record.scale);
+            }
+            // (and its children start where its box puts them when the box is shorter than its padding, their Position's
+            // scale resolving against the height basis too: a (0, 0.5) frame there is 10 + 0.5 x 50 down)
+            if let Some(start) = entry.start_y {
+                start_at(&mut child_record, start);
+                if let Some((_, Some(basis_h))) = entry.basis {
+                    child_record.local_sizing_h = Some(basis_h);
+                    child_record.sizing_h = Some(f32r(basis_h * child_record.scale));
+                }
             }
             if let Some(rects) = &cell_rects {
                 child_record.cells = rects[index].clone();
@@ -3282,6 +3324,13 @@ impl<'a> Pass<'a> {
             });
             let parent = Record { scale: 1.0, visible: true, generation: self.l.generation, ..Record::default() };
             let mut record = self.place_child(root, &parent, sized.w, sized.h, None, false, Some((sized.base_w, sized.base_h)));
+            if let Some(start) = sized.start_y {
+                start_at(&mut record, start);
+                if let Some((_, Some(basis_h))) = sized.basis {
+                    record.local_sizing_h = Some(basis_h);
+                    record.sizing_h = Some(f32r(basis_h * record.scale));
+                }
+            }
             // Measured (fixtures/layout-canvas-unparented.luau U_*, a 0.747 client): a ScrollingFrame with no GUI above it
             // (unparented, or in a Folder of ReplicatedStorage) takes its CanvasSize's scale against its own size, not
             // against the empty parent its Size's scale reads (100 x 80 with a (2, 3) canvas is 200 x 240).

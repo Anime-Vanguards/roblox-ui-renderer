@@ -168,6 +168,9 @@ pub(crate) struct Sized {
     /// What the plain children of an automatic object with a UIAspectRatioConstraint size their scale Size against on
     /// its automatic axes, instead of its box less its padding (local units); see ComputeSize.
     pub basis: Option<(Option<f64>, Option<f64>)>,
+    /// Where the children of an automatic XY object with a UIAspectRatioConstraint start below its top when its box is
+    /// shorter than its top and bottom padding: the box less the bottom padding (local units); see ComputeSize.
+    pub start_y: Option<f64>,
 }
 
 /// ComputeSize's inputs (the memo key; compared with Luau `==`).
