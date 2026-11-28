@@ -411,7 +411,13 @@ pub fn border_stroke_alpha_modes(
     // local origin's device position); a turned frame's are exact and its ties fall by the nudge below
     let shift = [-to_local[4], -to_local[5]];
     let snap = |v: f64, axis: usize| if turned { v } else { gpu_snap(v, shift[axis]) };
-    let (hx0, hx1, hy0, hy1) = (snap(x0 + inset, 0), snap(x1 - inset, 0), snap(y0 + inset, 1), snap(y1 - inset, 1));
+    // An Inner stroke's hole lies 0.001 GUI px less 0.0017 device px further right and down than its exact place, before
+    // the snap (a 0.747 client, fixtures/stroke-probe-snap.luau Inner rows, two captures each: the hole edges' 1/512 px
+    // windows sit between -0.00095 and -0.00045 px off at 1x, 0.00005 and 0.00055 at 2x, 0.00105 and 0.00155 at 3x, and
+    // none of the 1.5x rows tells them apart; Center strokes' inner edges stay where they are)
+    let hole = if position == "Inner" && !turned { 0.001 * scale - 0.0017 } else { 0.0 };
+    let (hx0, hx1, hy0, hy1) =
+        (snap(x0 + inset + hole, 0), snap(x1 - inset + hole, 0), snap(y0 + inset + hole, 1), snap(y1 - inset + hole, 1));
     let [lx0, ly0] = apply(to_local, gx as f64 + 0.5, gy as f64 + 0.5);
     // The hole's half width left or right of cx in quadrant q on a row at local y (negative: none)
     let hole_half = |q: Quadrant, y: f64| -> f64 {
