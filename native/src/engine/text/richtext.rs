@@ -81,11 +81,33 @@ fn entity(name: &[u8]) -> Option<u8> {
 }
 
 /// `string.gsub(Text, "&(%w+);", Entities)`: known entities replaced, others kept.
+/// A numeric character reference's byte: `&#66;` and `&#x42;` are "B". Measured (a 0.747 client, fixtures/text-probe-tags
+/// .luau): the client keeps the number's low byte only (`&#9731;` is the control character 0x03, not a snowman), and a
+/// reference that is not a number (`&#xZZ;`) stays as it is written.
+fn numeric_entity(text: &[u8]) -> Option<u8> {
+    let (digits, radix) = match text.strip_prefix(b"#")? {
+        [b'x', rest @ ..] => (rest, 16),
+        rest => (rest, 10),
+    };
+    if digits.is_empty() || !digits.iter().all(|&byte| (byte as char).is_digit(radix)) {
+        return None;
+    }
+    let value = digits.iter().fold(0u32, |value, &byte| value.wrapping_mul(radix).wrapping_add((byte as char).to_digit(radix).unwrap()));
+    Some(value as u8)
+}
+
 fn unescape(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut index = 0;
     while index < text.len() {
         if text[index] == b'&' {
+            if let Some(length) = text[index + 1..].iter().take(12).position(|&byte| byte == b';') {
+                if let Some(byte) = numeric_entity(&text[index + 1..index + 1 + length]) {
+                    out.push(byte);
+                    index += length + 2;
+                    continue;
+                }
+            }
             let start = index + 1;
             let mut end = start;
             while end < text.len() && text[end].is_ascii_alphanumeric() {
@@ -111,78 +133,142 @@ fn is_space(byte: u8) -> bool {
     super::num::c_isspace(byte)
 }
 
-/// `string.gmatch(Source, "([%w_]+)%s*=%s*([\"'])(.-)%2")`, keys lowercased, later keys win.
-fn parse_attributes(source: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
-    let mut attributes: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-    let mut position = 0;
-    while position < source.len() {
-        let matched = (|| {
-            let mut key_end = position;
-            while key_end < source.len() && (source[key_end].is_ascii_alphanumeric() || source[key_end] == b'_') {
-                key_end += 1;
-            }
-            if key_end == position {
-                return None;
-            }
-            let mut cursor = key_end;
-            while cursor < source.len() && is_space(source[cursor]) {
-                cursor += 1;
-            }
-            if cursor >= source.len() || source[cursor] != b'=' {
-                return None;
-            }
-            cursor += 1;
-            while cursor < source.len() && is_space(source[cursor]) {
-                cursor += 1;
-            }
-            if cursor >= source.len() || (source[cursor] != b'"' && source[cursor] != b'\'') {
-                return None;
-            }
-            let quote = source[cursor];
-            let value_start = cursor + 1;
-            let value_end = value_start + source[value_start..].iter().position(|&byte| byte == quote)?;
-            Some((key_end, value_start, value_end))
-        })();
-        match matched {
-            Some((key_end, value_start, value_end)) => {
-                let key = source[position..key_end].to_ascii_lowercase();
-                let value = source[value_start..value_end].to_vec();
-                match attributes.iter_mut().find(|(existing, _)| *existing == key) {
-                    Some(entry) => entry.1 = value,
-                    None => attributes.push((key, value)),
-                }
-                position = value_end + 1;
-            }
-            None => position += 1,
-        }
-    }
-    attributes
+/// XML's white space (a vertical tab is none: `<b\v>` makes the source show raw)
+fn is_markup_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
 }
 
-fn attribute<'a>(attributes: &'a [(Vec<u8>, Vec<u8>)], name: &[u8]) -> Option<&'a [u8]> {
-    attributes.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_slice())
+/// XML's NameStartChar, bytewise: a letter, `_`, `:` or any non-ASCII byte (`<_x>`, `<a:b>`, `<é>` are tags; `<1>`,
+/// `< b>` and `<>` are none)
+fn is_name_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_' || byte == b':' || byte >= 0x80
+}
+
+/// XML's NameChar, bytewise (`<foo-bar>`, `<foo.bar>`, `<f1>`; `<foo$>` is no tag)
+fn is_name_char(byte: u8) -> bool {
+    is_name_start(byte) || byte.is_ascii_digit() || byte == b'-' || byte == b'.'
+}
+
+/// One tag of rich text markup, read as a 0.747 client reads it: XML's syntax.
+struct Tag<'s> {
+    closing: bool,
+    self_closing: bool,
+    name: &'s [u8],
+    /// `name="value"` / `name='value'` pairs in source order; a repeated name keeps its first value
+    attributes: Vec<(&'s [u8], &'s [u8])>,
+    /// The index after the tag's `>`
+    end: usize,
+}
+
+/// The tag at `source[start]` (a `<`), or None where the `<` starts no well-formed tag, which makes a client show the
+/// whole source raw. Measured (fixtures/text-probe-tags.luau): a name follows the `<` or `</` at once; a closing tag
+/// holds its name and white space only (`</b x="1">`, `</b/>` show raw); attributes are white-space separated
+/// `name="value"` or `name='value'` (no value, no quotes, an open quote or none between two show raw), `=` may have
+/// white space around it, and a quoted value may hold `>`; `/>` closes an empty tag (`<br/ >` shows raw).
+fn read_tag(source: &[u8], start: usize) -> Option<Tag<'_>> {
+    let at = |index: usize| source.get(index).copied();
+    let mut index = start + 1;
+    let closing = at(index) == Some(b'/');
+    if closing {
+        index += 1;
+    }
+    let name_start = index;
+    if !at(index).is_some_and(is_name_start) {
+        return None;
+    }
+    while at(index).is_some_and(is_name_char) {
+        index += 1;
+    }
+    let name = &source[name_start..index];
+    let mut attributes: Vec<(&[u8], &[u8])> = Vec::new();
+    loop {
+        let space_start = index;
+        while at(index).is_some_and(is_markup_space) {
+            index += 1;
+        }
+        match at(index)? {
+            b'>' => return Some(Tag { closing, self_closing: false, name, attributes, end: index + 1 }),
+            b'/' if !closing && at(index + 1) == Some(b'>') => return Some(Tag { closing, self_closing: true, name, attributes, end: index + 2 }),
+            byte if !closing && index > space_start && is_name_start(byte) => {
+                let key_start = index;
+                while at(index).is_some_and(is_name_char) {
+                    index += 1;
+                }
+                let key = &source[key_start..index];
+                while at(index).is_some_and(is_markup_space) {
+                    index += 1;
+                }
+                if at(index)? != b'=' {
+                    return None;
+                }
+                index += 1;
+                while at(index).is_some_and(is_markup_space) {
+                    index += 1;
+                }
+                let quote = at(index).filter(|&byte| byte == b'"' || byte == b'\'')?;
+                let value_start = index + 1;
+                let value_end = value_start + source[value_start..].iter().position(|&byte| byte == quote)?;
+                if !attributes.iter().any(|(existing, _)| *existing == key) {
+                    attributes.push((key, &source[value_start..value_end]));
+                }
+                index = value_end + 1;
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// An attribute's value by its exact name (`<font SIZE="30">` sets no size)
+fn attribute<'s>(attributes: &[(&'s [u8], &'s [u8])], name: &[u8]) -> Option<&'s [u8]> {
+    attributes.iter().find(|(key, _)| *key == name).map(|(_, value)| *value)
+}
+
+/// A whole number attribute value as a client takes it (`<font size>`): white space around it and a minus sign, no plus
+/// sign, fraction, exponent, hex or unit (" 30", "30 ", "-5"; not "+30", "22.5", "1e1", "0x1E", "30px" or "")
+fn whole_value(value: &[u8]) -> Option<f64> {
+    let text = std::str::from_utf8(value).ok()?.trim_matches(|c: char| c.is_ascii() && is_markup_space(c as u8));
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())).then(|| text.parse().ok()).flatten()
+}
+
+/// A number attribute value (`transparency`, `thickness`, `weight`): as [`whole_value`] with a decimal fraction (".5",
+/// "0.5 "); its exponent and sign forms are assumed to follow `size`'s (not measured)
+fn number_value(value: &[u8]) -> Option<f64> {
+    let text = std::str::from_utf8(value).ok()?.trim_matches(|c: char| c.is_ascii() && is_markup_space(c as u8));
+    let unsigned = text.strip_prefix('-').unwrap_or(text);
+    let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    let digits = |part: &str| part.bytes().all(|byte| byte.is_ascii_digit());
+    (!(whole.is_empty() && fraction.is_empty()) && digits(whole) && digits(fraction) && !(unsigned.ends_with('.') && whole.is_empty())).then(|| text.parse().ok()).flatten()
 }
 
 fn hex_digit(byte: u8) -> Option<f64> {
     (byte as char).to_digit(16).map(|digit| digit as f64)
 }
 
-/// `RichText.ParseColor`: "#rrggbb" / "rrggbb" or "rgb(r, g, b)" (0-255) as 0..1 channels.
+/// A colour attribute value as 0..1 channels: "#rrggbb", "#rgb" (each digit doubled: "#F80" draws 255, 136, 0) or
+/// "rgb(r, g, b)" (0-255), the whole value. Measured (a 0.747 client, fixtures/text-probe-tags.luau): anything else
+/// ("FF0000" without its "#", "red", "x rgb(1,2,3)", "rgb(1,2)", "") makes the source show raw.
 pub fn parse_color(value: &[u8]) -> Option<Color> {
-    let hex = value.strip_prefix(b"#").unwrap_or(value);
-    if hex.len() == 6 && hex.iter().all(|byte| byte.is_ascii_hexdigit()) {
-        let channel = |index: usize| (hex_digit(hex[index]).unwrap() * 16.0 + hex_digit(hex[index + 1]).unwrap()) / 255.0;
-        return Some([channel(0), channel(2), channel(4)]);
-    }
-    // "rgb%(%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*%)", unanchored: the leftmost match.
-    for start in 0..value.len() {
-        if let Some(channels) = match_rgb(&value[start..]) {
-            return Some(channels);
+    if let Some(hex) = value.strip_prefix(b"#") {
+        if !hex.iter().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
         }
+        return match hex.len() {
+            6 => {
+                let channel = |index: usize| (hex_digit(hex[index]).unwrap() * 16.0 + hex_digit(hex[index + 1]).unwrap()) / 255.0;
+                Some([channel(0), channel(2), channel(4)])
+            }
+            3 => {
+                let channel = |index: usize| hex_digit(hex[index]).unwrap() * 17.0 / 255.0;
+                Some([channel(0), channel(1), channel(2)])
+            }
+            _ => None,
+        };
     }
-    None
+    match_rgb(value)
 }
 
+/// "rgb%(%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*%)", the whole text
 fn match_rgb(text: &[u8]) -> Option<Color> {
     let rest = text.strip_prefix(b"rgb(")?;
     let mut cursor = 0;
@@ -208,7 +294,7 @@ fn match_rgb(text: &[u8]) -> Option<Color> {
         }
         cursor += 1;
     }
-    Some(channels)
+    (cursor == rest.len()).then_some(channels)
 }
 
 fn weight_keyword(name: &[u8]) -> Option<f64> {
@@ -248,14 +334,20 @@ fn resolve_face(fonts: &mut FontRegistry, name: &[u8]) -> Option<(String, Option
     None
 }
 
-/// `RichText.Parse`. Measured: unknown tags are dropped (their text stays); malformed markup
-/// (unclosed / mismatched tags, unknown font faces) makes Roblox show the raw source, which callers
-/// handle through the returned valid flag.
+/// `RichText.Parse`. Markup a client rejects makes it show the raw source, which callers handle through the returned
+/// valid flag. Measured (a 0.747 client, 138 cases in fixtures/text-probe-tags.luau): the markup is read as XML. Every
+/// tag, known or not, needs its closing tag of exactly the same name (case and all: `<B>AW</b>` shows raw), or `/>`;
+/// an unclosed, stray or crossed tag shows raw (`A<foo>V`, `A</foo>V`, `<b>A<foo>V</b>A</foo>`). Only the lowercase
+/// names format: other names (`<foo>`, `<B>`, `<UC>`) are dropped with their text kept. `<br>` without its slash is a
+/// tag like any other (`A<br>V` shows raw, `A<br>V</br>` breaks the line once). A `<` that starts no tag (`A < V`,
+/// `<1>`, `<>`, a `<` at the end) and an unclosed comment show raw; a lone `>` and an unknown entity are text. A known
+/// attribute's value must parse (`<font size="30px">`, `color="red"`, `transparency="x"`, stroke `joins="zzz"`
+/// show raw); attributes are matched by exact name, a repeated one keeps its first value, unknown ones are ignored,
+/// and so is an unknown `<font family>` (fonts fall back) where an unknown `<font face>` shows raw.
 pub fn parse(fonts: &mut FontRegistry, source: &[u8]) -> (Vec<Run>, bool) {
     let mut runs: Vec<Run> = Vec::new();
     let mut stack: Vec<(Vec<u8>, Style)> = Vec::new();
     let mut current = Style::default();
-    let mut valid = true;
     let mut buffer: Vec<u8> = Vec::new();
 
     // Measured (a 0.747 client, 1.5x: four faces, three texts, each character in a tag of its own): runs next to
@@ -287,60 +379,48 @@ pub fn parse(fonts: &mut FontRegistry, source: &[u8]) -> (Vec<Run>, bool) {
     let mut index = 0;
     while index < length {
         let character = source[index];
-        if character == b'<' {
-            if source[index..].starts_with(b"<!--") {
-                if let Some(close) = find(b"-->", index + 4) {
+        if character != b'<' {
+            buffer.push(character);
+            index += 1;
+            continue;
+        }
+        if source[index..].starts_with(b"<!--") {
+            match find(b"-->", index + 4) {
+                Some(close) => {
                     index = close + 3;
                     continue;
                 }
+                None => return (runs, false),
             }
-            let Some(close) = find(b">", index + 1) else {
-                buffer.push(character);
-                index += 1;
-                continue;
+        }
+        let Some(tag) = read_tag(source, index) else {
+            return (runs, false);
+        };
+        flush(&mut runs, &mut buffer, &current);
+        index = tag.end;
+        if tag.closing {
+            match stack.pop() {
+                Some((name, style)) if name.as_slice() == tag.name => current = style,
+                _ => return (runs, false),
+            }
+            continue;
+        }
+        let known = KNOWN_TAGS.contains(&tag.name);
+        if tag.name == b"br" {
+            push(&mut runs, b"\n".to_vec(), &current);
+        }
+        if tag.self_closing {
+            continue;
+        }
+        let mut next = current.clone();
+        if known {
+            let attributes = &tag.attributes;
+            let number = |name: &[u8], parse: fn(&[u8]) -> Option<f64>| -> Result<Option<f64>, ()> {
+                attribute(attributes, name).map(|value| parse(value).ok_or(())).transpose()
             };
-
-            let inner = &source[index + 1..close];
-            let closing = inner.first() == Some(&b'/');
-            let self_closing = inner.last() == Some(&b'/');
-            let body = if closing { &inner[1..] } else { inner };
-            let body = body.strip_suffix(b"/").unwrap_or(body);
-            let mut name_start = 0;
-            while name_start < body.len() && is_space(body[name_start]) {
-                name_start += 1;
-            }
-            let mut name_end = name_start;
-            while name_end < body.len() && body[name_end].is_ascii_alphanumeric() {
-                name_end += 1;
-            }
-            let name = body[name_start..name_end].to_ascii_lowercase();
-
-            if name.is_empty() {
-                buffer.push(character);
-                index += 1;
-                continue;
-            }
-
-            flush(&mut runs, &mut buffer, &current);
-            if !KNOWN_TAGS.contains(&name.as_slice()) {
-                index = close + 1;
-                continue;
-            }
-            let attributes = parse_attributes(body);
-
-            if name == b"br" {
-                push(&mut runs, b"\n".to_vec(), &current);
-            } else if closing {
-                if stack.last().is_some_and(|top| top.0 == name) {
-                    let (_, style) = stack.pop().unwrap();
-                    current = style;
-                } else {
-                    valid = false;
-                }
-            } else if !self_closing {
-                stack.push((name.clone(), current.clone()));
-                let mut next = current.clone();
-                match name.as_slice() {
+            let color = |name: &[u8]| -> Result<Option<Color>, ()> { attribute(attributes, name).map(|value| parse_color(value).ok_or(())).transpose() };
+            let applied = (|| -> Result<(), ()> {
+                match tag.name {
                     b"b" => next.bold = true,
                     b"i" => next.italic = true,
                     b"u" => next.underline = true,
@@ -348,68 +428,59 @@ pub fn parse(fonts: &mut FontRegistry, source: &[u8]) -> (Vec<Run>, bool) {
                     b"uc" | b"uppercase" => next.uppercase = true,
                     b"sc" | b"smallcaps" => next.small_caps = true,
                     b"font" => {
-                        if let Some(color) = attribute(&attributes, b"color") {
-                            next.color = parse_color(color);
+                        if let Some(value) = color(b"color")? {
+                            next.color = Some(value);
                         }
-                        if let Some(size) = attribute(&attributes, b"size") {
-                            next.size = tonumber(size);
+                        if let Some(size) = number(b"size", whole_value)? {
+                            next.size = Some(size);
                         }
-                        if let Some(face) = attribute(&attributes, b"face") {
-                            match resolve_face(fonts, face) {
-                                Some((family, weight, style)) => {
-                                    next.family = Some(family);
-                                    next.face_weight = weight;
-                                    next.font_style = style;
-                                }
-                                None => valid = false,
-                            }
+                        if let Some(face) = attribute(attributes, b"face") {
+                            let (family, weight, style) = resolve_face(fonts, face).ok_or(())?;
+                            next.family = Some(family);
+                            next.face_weight = weight;
+                            next.font_style = style;
                         }
-                        if let Some(family) = attribute(&attributes, b"family") {
+                        if let Some(family) = attribute(attributes, b"family") {
                             next.family = Some(text_of(family));
                         }
-                        if let Some(weight) = attribute(&attributes, b"weight") {
-                            next.weight = tonumber(weight).or_else(|| weight_keyword(weight));
+                        if let Some(weight) = attribute(attributes, b"weight") {
+                            next.weight = Some(number_value(weight).or_else(|| weight_keyword(weight)).ok_or(())?);
                         }
-                        if let Some(transparency) = attribute(&attributes, b"transparency") {
-                            next.transparency = tonumber(transparency);
+                        if let Some(transparency) = number(b"transparency", number_value)? {
+                            next.transparency = Some(transparency);
                         }
                     }
                     b"stroke" => {
+                        let joins = attribute(attributes, b"joins").unwrap_or(b"round");
+                        if !matches!(joins.to_ascii_lowercase().as_slice(), b"round" | b"bevel" | b"miter") {
+                            return Err(());
+                        }
                         next.stroke = Some(Stroke {
-                            color: match attribute(&attributes, b"color") {
-                                Some(color) => parse_color(color),
-                                None => Some([0.0, 0.0, 0.0]),
-                            },
-                            thickness: tonumber(attribute(&attributes, b"thickness").unwrap_or(b"1")).unwrap_or(1.0),
-                            transparency: tonumber(attribute(&attributes, b"transparency").unwrap_or(b"0")).unwrap_or(0.0),
-                            joins: text_of(attribute(&attributes, b"joins").unwrap_or(b"round")),
+                            color: Some(color(b"color")?.unwrap_or([0.0, 0.0, 0.0])),
+                            thickness: number(b"thickness", number_value)?.unwrap_or(1.0),
+                            transparency: number(b"transparency", number_value)?.unwrap_or(0.0),
+                            joins: text_of(joins),
                         });
                     }
                     b"mark" => {
                         next.mark = Some(Mark {
-                            color: match attribute(&attributes, b"color") {
-                                Some(color) => parse_color(color),
-                                None => Some([1.0, 1.0, 0.0]),
-                            },
-                            transparency: tonumber(attribute(&attributes, b"transparency").unwrap_or(b"0")).unwrap_or(0.0),
+                            color: Some(color(b"color")?.unwrap_or([1.0, 1.0, 0.0])),
+                            transparency: number(b"transparency", number_value)?.unwrap_or(0.0),
                         });
                     }
                     _ => {}
                 }
-                current = next;
+                Ok(())
+            })();
+            if applied.is_err() {
+                return (runs, false);
             }
-            index = close + 1;
-            continue;
         }
-
-        buffer.push(character);
-        index += 1;
+        stack.push((tag.name.to_vec(), std::mem::replace(&mut current, next)));
     }
     flush(&mut runs, &mut buffer, &current);
 
-    if !stack.is_empty() {
-        valid = false;
-    }
+    let valid = stack.is_empty();
     (runs, valid)
 }
 
@@ -650,13 +721,181 @@ mod tests {
 
     #[test]
     fn attributes_and_entities() {
-        let attributes = parse_attributes(br#"font  color = "red" size='4' x="a'b" y=  ""#);
-        assert_eq!(attributes.len(), 3);
-        assert_eq!(attribute(&attributes, b"x"), Some(&b"a'b"[..]));
-        assert_eq!(unescape(b"&amp;&lt&gt;&#39;&AMP;&quot;"), b"&&lt>&#39;&AMP;\"".to_vec());
+        let tag = read_tag(br#"<font  color = "red" size='4' x="a'b" size="5">"#, 0).unwrap();
+        assert_eq!((tag.name, tag.closing, tag.self_closing), (&b"font"[..], false, false));
+        assert_eq!(tag.attributes.len(), 3);
+        assert_eq!(attribute(&tag.attributes, b"x"), Some(&b"a'b"[..]));
+        assert_eq!(attribute(&tag.attributes, b"size"), Some(&b"4"[..]));
+        assert_eq!(unescape(b"&amp;&lt&gt;&#39;&AMP;&quot;&#x42;&#9731;&#xZZ;"), b"&&lt>'&AMP;\"B\x03&#xZZ;".to_vec());
         assert_eq!(parse_color(b"#ff8000"), Some([1.0, 128.0 / 255.0, 0.0]));
-        assert_eq!(parse_color(b"xrgb( 1 ,2,3 )"), Some([1.0 / 255.0, 2.0 / 255.0, 3.0 / 255.0]));
-        assert_eq!(parse_color(b"#fff"), None);
+        assert_eq!(parse_color(b"#F80"), Some([1.0, 136.0 / 255.0, 0.0]));
+        assert_eq!(parse_color(b"rgb( 1 ,2,3 )"), Some([1.0 / 255.0, 2.0 / 255.0, 3.0 / 255.0]));
+        for bad in [&b"xrgb(1,2,3)"[..], b"ff8000", b"red", b"", b"rgb(1,2)", b"#ff80"] {
+            assert_eq!(parse_color(bad), None, "{}", String::from_utf8_lossy(bad));
+        }
+        assert_eq!([whole_value(b" 30"), whole_value(b"30 "), whole_value(b"-5")], [Some(30.0), Some(30.0), Some(-5.0)]);
+        assert!([&b"+30"[..], b"22.5", b"1e1", b"0x1E", b"30px", b""].iter().all(|value| whole_value(value).is_none()));
+        assert_eq!([number_value(b".5"), number_value(b"0.5 "), number_value(b"700")], [Some(0.5), Some(0.5), Some(700.0)]);
+        assert!([&b"x"[..], b".", b"-", b"1e1", b""].iter().all(|value| number_value(value).is_none()));
+    }
+
+    /// What a 0.747 client shows of rich markup (fixtures/text-probe-tags.luau, read back as each label's ContentText):
+    /// the raw source where it rejects the markup, else the text without its tags.
+    #[test]
+    fn markup_a_client_rejects_shows_its_source() {
+        let dir = std::env::temp_dir().to_string_lossy().replace('\\', "/");
+        let mut fonts = FontRegistry::new(super::super::fonts::FontPaths { root: dir.clone(), cache: dir, content_root: Some(String::new()), fonts: None });
+        let cases: &[(&str, &str)] = &[
+            ("A<foo>W<foo>A", "A<foo>W<foo>A"),
+            ("A<foo>W</foo>A", "AWA"),
+            ("A<foo/>W", "AW"),
+            ("A</foo>W", "A</foo>W"),
+            ("<b>A<foo>W</b>A</foo>", "<b>A<foo>W</b>A</foo>"),
+            ("<foo x=\"1\">AW</foo>", "AW"),
+            ("<FOO>AW</foo>", "<FOO>AW</foo>"),
+            ("<b>A<foo>W</foo></b>", "AW"),
+            ("<foo>A<bar>W</bar></foo>", "AW"),
+            ("A<foo>W", "A<foo>W"),
+            ("<foo>", "<foo>"),
+            ("A<b>W<foo></b>", "A<b>W<foo></b>"),
+            ("A<foo>W</bar>", "A<foo>W</bar>"),
+            ("A<foo-bar>W</foo-bar>", "AW"),
+            ("A<foo>W</foo >", "AW"),
+            ("A<foo>W<foo>A<foo>W<foo>A<foo>T<foo>o<foo>", "A<foo>W<foo>A<foo>W<foo>A<foo>T<foo>o<foo>"),
+            ("A<foo x=\"1\"/>W", "AW"),
+            ("<foo><foo>A</foo></foo>", "A"),
+            ("<b>A</b></foo>", "<b>A</b></foo>"),
+            ("<foo x=\">\">A</foo>", "A"),
+            ("A<foo />W", "AW"),
+            ("<b>A<i>W</b></i>", "<b>A<i>W</b></i>"),
+            ("<b>AW", "<b>AW"),
+            ("A</b>W", "A</b>W"),
+            ("<B>AW</b>", "<B>AW</b>"),
+            ("A<b>W</B>", "A<b>W</B>"),
+            ("A<b/>W", "AW"),
+            ("A<i/>W</i>", "A<i/>W</i>"),
+            ("A<b>W</b></b>", "A<b>W</b></b>"),
+            ("<B>AW</B>", "AW"),
+            ("<FONT size=\"30\">AW</FONT>", "AW"),
+            ("<UC>av</UC>", "av"),
+            ("<uc>av</uc>", "av"),
+            ("<sc>Av</SC>", "<sc>Av</SC>"),
+            ("<font>AW</font>", "AW"),
+            ("A<b >W</b >", "AW"),
+            ("<font size=\"30\">A</font >", "A"),
+            ("<font size=\"30\">A", "<font size=\"30\">A"),
+            ("<b>AW</b>", "AW"),
+            ("AW", "AW"),
+            ("A<br/>W", "A\nW"),
+            ("A<br>W", "A<br>W"),
+            ("A<br>W</br>", "A\nW"),
+            ("A<br />W", "A\nW"),
+            ("A<br/ >W", "A<br/ >W"),
+            ("A<br x=\"1\"/>W", "A\nW"),
+            ("<b>A<br>W</b>", "<b>A<br>W</b>"),
+            ("A < W", "A < W"),
+            ("<b>A</b><1>", "<b>A</b><1>"),
+            ("<b>A</b><1>W</1>", "<b>A</b><1>W</1>"),
+            ("<b>A</b>< b>", "<b>A</b>< b>"),
+            ("<b>A</b><>", "<b>A</b><>"),
+            ("<b>A</b> < W", "<b>A</b> < W"),
+            ("<b>A</b><", "<b>A</b><"),
+            ("<b>A</b>>", "A>"),
+            ("<b>A</b><foo", "<b>A</b><foo"),
+            ("<b>A</b></>", "<b>A</b></>"),
+            ("<b>A</b>1<2", "<b>A</b>1<2"),
+            ("A<>W", "A<>W"),
+            ("A<1>W</1>", "A<1>W</1>"),
+            ("A< b>W</ b>", "A< b>W</ b>"),
+            ("<b>A</b>&foo;", "A&foo;"),
+            ("&foo;AW", "&foo;AW"),
+            ("A<!--x-->W", "AW"),
+            ("A<!--x W", "A<!--x W"),
+            ("<b>A</b><!--x", "<b>A</b><!--x"),
+            ("<foo>A<!--x-->W</foo>", "AW"),
+            ("<foo-bar>W</foo>", "<foo-bar>W</foo>"),
+            ("<foo.bar>W</foo.bar>", "W"),
+            ("<foo_bar>W</foo_bar>", "W"),
+            ("<f1>W</f1>", "W"),
+            ("<b>A</b><_x>W</_x>", "AW"),
+            ("<b>A</b><a:b>W</a:b>", "AW"),
+            ("<b>A</b><foo$>W</foo$>", "<b>A</b><foo$>W</foo$>"),
+            ("<b>A</b><x->W</x->", "AW"),
+            ("<b\t>A</b>W", "AW"),
+            ("<b\n>A</b>W", "AW"),
+            ("<b>A< /b>W", "<b>A< /b>W"),
+            ("<b>A</ b>W", "<b>A</ b>W"),
+            ("<b>A</b x=\"1\">W", "<b>A</b x=\"1\">W"),
+            ("<b>A</b/>W", "<b>A</b/>W"),
+            ("<font size=30>A</font>W", "<font size=30>A</font>W"),
+            ("<font size='30'>A</font>W", "AW"),
+            ("<b>A</b><foo x='>'>W</foo>", "AW"),
+            ("<font size=\"30>A</font>W", "<font size=\"30>A</font>W"),
+            ("<b>A</b><foo bar>W</foo>", "<b>A</b><foo bar>W</foo>"),
+            ("<b x>A</b>W", "<b x>A</b>W"),
+            ("<font size=\"x\">A</font>W", "<font size=\"x\">A</font>W"),
+            ("<font size=\"30\"color=\"#FF0000\">A</font>W", "<font size=\"30\"color=\"#FF0000\">A</font>W"),
+            ("<font size = \"30\">A</font>W", "AW"),
+            ("<b>A</b><foo a-b=\"1\">W</foo>", "AW"),
+            ("<font SIZE=\"30\">A</font>W", "AW"),
+            ("<font foo=\"1\">A</font>W", "AW"),
+            ("<b x=\"1\">A</b>W", "AW"),
+            ("<font color=\"zzz\">A</font>W", "<font color=\"zzz\">A</font>W"),
+            ("<font color=\"\">A</font>W", "<font color=\"\">A</font>W"),
+            ("<font color=\"rgb(1,2)\">A</font>W", "<font color=\"rgb(1,2)\">A</font>W"),
+            ("<font color=\"rgb(255, 0, 0)\">A</font>W", "AW"),
+            ("<font color=\"FF0000\">A</font>W", "<font color=\"FF0000\">A</font>W"),
+            ("<font color=\"#F80\">A</font>W", "AW"),
+            ("<font color=\"red\">A</font>W", "<font color=\"red\">A</font>W"),
+            ("<font color=\"x rgb(1,2,3)\">A</font>W", "<font color=\"x rgb(1,2,3)\">A</font>W"),
+            ("<font transparency=\"x\">A</font>W", "<font transparency=\"x\">A</font>W"),
+            ("<font transparency=\".5\">A</font>W", "AW"),
+            ("<font transparency=\"0.5 \">A</font>W", "AW"),
+            ("<font weight=\"zzz\">A</font>W", "<font weight=\"zzz\">A</font>W"),
+            ("<font weight=\"bold\">A</font>W", "AW"),
+            ("<font weight=\"Bold\">A</font>W", "AW"),
+            ("<font weight=\"700\">A</font>W", "AW"),
+            ("<font face=\"Nope\">A</font>W", "<font face=\"Nope\">A</font>W"),
+            ("<font family=\"rbxasset://fonts/families/Nope.json\">A</font>W", "AW"),
+            ("<font size=\"30px\">A</font>W", "<font size=\"30px\">A</font>W"),
+            ("<font size=\" 30\">A</font>W", "AW"),
+            ("<font size=\"30 \">A</font>W", "AW"),
+            ("<font size=\"\">A</font>W", "<font size=\"\">A</font>W"),
+            ("<font size=\"1e1\">A</font>W", "<font size=\"1e1\">A</font>W"),
+            ("<font size=\"22.5\">A</font>W", "<font size=\"22.5\">A</font>W"),
+            ("<font size=\"+30\">A</font>W", "<font size=\"+30\">A</font>W"),
+            ("<font size=\"0x1E\">A</font>W", "<font size=\"0x1E\">A</font>W"),
+            ("<font size=\"30\" size=\"20\">A</font>W", "AW"),
+            ("<stroke thickness=\"x\">A</stroke>W", "<stroke thickness=\"x\">A</stroke>W"),
+            ("<stroke color=\"zzz\">A</stroke>W", "<stroke color=\"zzz\">A</stroke>W"),
+            ("<stroke transparency=\"x\">A</stroke>W", "<stroke transparency=\"x\">A</stroke>W"),
+            ("<stroke joins=\"zzz\">A</stroke>W", "<stroke joins=\"zzz\">A</stroke>W"),
+            ("<mark color=\"zzz\">A</mark>W", "<mark color=\"zzz\">A</mark>W"),
+            ("<mark transparency=\"x\">A</mark>W", "<mark transparency=\"x\">A</mark>W"),
+            ("<b>A</b><é>W</é>", "AW"),
+            ("<b>A</b><:x>W</:x>", "AW"),
+            ("<b\u{b}>A</b>W", "<b\u{b}>A</b>W"),
+            ("<b>A</b\t>W", "AW"),
+            ("<b>A</b> & W", "A & W"),
+            ("<b>A</b>&amp;", "A&"),
+            ("<b>A</b>&#66;", "AB"),
+            ("<b>A</b>&#x42;", "AB"),
+            ("<b>A</b>&#9731;", "A\u{3}"),
+            ("<b>A</b>&#xZZ;", "A&#xZZ;"),
+            ("<b>A</b>&lt", "A&lt"),
+            ("<b>A</b>&LT;", "A&LT;"),
+        ];
+        for &(source, content) in cases {
+            let (runs, valid) = parse(&mut fonts, source.as_bytes());
+            let shown: Vec<u8> = if valid { runs.iter().flat_map(|run| run.text.iter().copied()).collect() } else { source.as_bytes().to_vec() };
+            assert_eq!(String::from_utf8_lossy(&shown), content, "{source:?}");
+        }
+        // Only lowercase names format; attributes are matched by exact name, the first of a repeated one counts
+        let style = |fonts: &mut FontRegistry, source: &str| parse(fonts, source.as_bytes()).0.first().unwrap().style.clone();
+        assert!(!style(&mut fonts, "<B>AW</B>").bold);
+        assert_eq!(style(&mut fonts, "<font SIZE=\"30\">A</font>V").size, None);
+        assert_eq!(style(&mut fonts, "<font size=\"30\" size=\"20\">A</font>V").size, Some(30.0));
+        assert_eq!(parse(&mut fonts, b"A<br>V</br>").0.iter().map(|run| String::from_utf8_lossy(&run.text).into_owned()).collect::<Vec<_>>(), ["A\nV"]);
     }
 
     #[test]
