@@ -258,11 +258,22 @@ pub fn parse(fonts: &mut FontRegistry, source: &[u8]) -> (Vec<Run>, bool) {
     let mut valid = true;
     let mut buffer: Vec<u8> = Vec::new();
 
+    // Measured (a 0.747 client, 1.5x: four faces, three texts, each character in a tag of its own): runs next to
+    // each other with the same formatting are one run, laid out (kerned) as one: every glyph in the same
+    // `<font color>`, `<b>`, `<font size>` or `<font transparency="0">`, or in `#F0F0F0` and `rgb(240,240,240)`
+    // in turn, is as wide as the untagged text; alternating colours are not (48 of 108 TextBounds off by
+    // 1 to 15 px before)
+    fn push(runs: &mut Vec<Run>, text: Vec<u8>, style: &Style) {
+        match runs.last_mut() {
+            Some(last) if last.style == *style => last.text.extend_from_slice(&text),
+            _ => runs.push(Run { text, style: style.clone() }),
+        }
+    }
     fn flush(runs: &mut Vec<Run>, buffer: &mut Vec<u8>, current: &Style) {
         if buffer.is_empty() {
             return;
         }
-        runs.push(Run { text: unescape(buffer), style: current.clone() });
+        push(runs, unescape(buffer), current);
         buffer.clear();
     }
     let find = |needle: &[u8], from: usize| -> Option<usize> {
@@ -318,7 +329,7 @@ pub fn parse(fonts: &mut FontRegistry, source: &[u8]) -> (Vec<Run>, bool) {
             let attributes = parse_attributes(body);
 
             if name == b"br" {
-                runs.push(Run { text: b"\n".to_vec(), style: current.clone() });
+                push(&mut runs, b"\n".to_vec(), &current);
             } else if closing {
                 if stack.last().is_some_and(|top| top.0 == name) {
                     let (_, style) = stack.pop().unwrap();
@@ -646,5 +657,25 @@ mod tests {
         assert_eq!(parse_color(b"#ff8000"), Some([1.0, 128.0 / 255.0, 0.0]));
         assert_eq!(parse_color(b"xrgb( 1 ,2,3 )"), Some([1.0 / 255.0, 2.0 / 255.0, 3.0 / 255.0]));
         assert_eq!(parse_color(b"#fff"), None);
+    }
+
+    #[test]
+    fn runs_of_the_same_formatting_next_to_each_other_are_one_run() {
+        let dir = std::env::temp_dir().to_string_lossy().replace('\\', "/");
+        let mut fonts = FontRegistry::new(super::super::fonts::FontPaths { root: dir.clone(), cache: dir, content_root: Some(String::new()), fonts: None });
+        let mut texts = |source: &str| -> Vec<String> {
+            let (runs, valid) = parse(&mut fonts, source.as_bytes());
+            assert!(valid, "{source}");
+            runs.iter().map(|run| String::from_utf8_lossy(&run.text).into_owned()).collect()
+        };
+        // The same tags in turn, and the same colour written two ways: one run, laid out (kerned) as one
+        assert_eq!(texts("<b>T</b><b>o</b><b>T</b>"), ["ToT"]);
+        assert_eq!(texts("<font color=\"#F0F0F0\">T</font><font color=\"rgb(240,240,240)\">o</font>"), ["To"]);
+        assert_eq!(texts("<font transparency=\"0\">T</font><font transparency=\"0\">o<br/>W</font>"), ["To\nW"]);
+        assert_eq!(texts("<i>T</i><br/><i>o</i>"), ["T", "\n", "o"]);
+        assert_eq!(texts("T<b></b>o"), ["To"]);
+        // Other formatting, or a tag next to untagged text that sets the label's own value, stays apart
+        assert_eq!(texts("<font color=\"#FF2020\">T</font><font color=\"#20FF20\">o</font>"), ["T", "o"]);
+        assert_eq!(texts("T<font transparency=\"0\">o</font>"), ["T", "o"]);
     }
 }
