@@ -2804,4 +2804,99 @@ mod tests {
         assert_eq!(&straight[16..20], &[255, 0, 0, 128]);
         Ok(())
     }
+
+    /// A turned text layer (TEXT_QUAD mode 4: one glyph quad's padded image) whose record asks for hard edges is
+    /// sampled up to the quad's own edge, as a client's rasterizer draws a glyph quad; without the flag (a turned
+    /// glow or shadow layer) its edge ramps over a pixel. Measured: the faint outer pixel of a turned stem was 12
+    /// in rur and 14-15 in a 0.747 client (text-probe-rotate-quarter at 30 and 45 degrees)
+    #[test]
+    fn a_turned_glyph_layer_has_hard_edges() -> Result<()> {
+        let mut gpu = match pollster::block_on(GpuRenderer::headless()) {
+            Ok(gpu) => gpu,
+            Err(error) => {
+                eprintln!("skipped: no GPU adapter ({error})");
+                return Ok(());
+            }
+        };
+        // A 38 x 38 opaque white block in a transparent 1 texel border, a texel a pixel, turned 30 degrees about a point
+        // off the pixel grid
+        let mut image = vec![0u8; 40 * 40 * 4];
+        for y in 1..39 {
+            for x in 1..39 {
+                image[(y * 40 + x) * 4..(y * 40 + x) * 4 + 4].copy_from_slice(&[255; 4]);
+            }
+        }
+        let k = 1.0f64;
+        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let centre = [32.37f64, 31.81f64];
+        let m = [c / k, -s / k, s / k, c / k];
+        let draw = |gpu: &mut GpuRenderer, hard: bool| -> Result<Vec<u8>> {
+            let mut p = packet(
+                &[
+                    [0., 0., 64., 64.],
+                    [0., 0., 64., 64.],
+                    [15., 0., 6., 0.],
+                    [4., 0., 0., 0.],
+                    [0., 255., if hard { 1. } else { 0. }, 0.],
+                    [0.; 4],
+                    m.map(|v| v as f32),
+                    [20., 20., centre[0] as f32, centre[1] as f32],
+                    [40., 40., 0., 0.],
+                ],
+                64,
+                64,
+                DrawBatch {
+                    image_slots: [Some(TextureId(8)), None, None, None, None, None, None, None],
+                    ..batch()
+                },
+            );
+            p.textures.push(TextureUpload {
+                id: TextureId(8),
+                revision: 1,
+                format: TextureFormat::Rgba8,
+                levels: vec![TextureLevel { width: 40, height: 40, bytes: image.clone().into() }],
+            });
+            gpu.reset_scene_resources();
+            gpu.render(&p)?;
+            gpu.readback_rgba()
+        };
+        let hard = draw(&mut gpu, true)?;
+        let ramped = draw(&mut gpu, false)?;
+        let (mut checked, mut brighter) = (0, 0);
+        for j in 0..64 {
+            for i in 0..64 {
+                // The pixel centre in texels, and the bilinear sample there with 8-bit weights (no edge ramp)
+                let (dx, dy) = (i as f64 + 0.5 - centre[0] as f32 as f64, j as f64 + 0.5 - centre[1] as f32 as f64);
+                let l = [m[0] * dx + m[2] * dy + 20.0, m[1] * dx + m[3] * dy + 20.0];
+                if !(l[0] > 0.0 && l[0] < 40.0 && l[1] > 0.0 && l[1] < 40.0) {
+                    continue;
+                }
+                let weight = |v: f64| -> (i64, i64) {
+                    let s = v - 0.5;
+                    let (mut base, mut w) = (s.floor() as i64, ((s - s.floor()) * 256.0 + 0.5).floor() as i64);
+                    if w == 256 {
+                        base += 1;
+                        w = 0;
+                    }
+                    (base, w)
+                };
+                let ((bx, wx), (by, wy)) = (weight(l[0]), weight(l[1]));
+                let inside = |v: i64| (1..=38).contains(&v.clamp(0, 39));
+                let texel = |x: i64, y: i64| -> i64 { if inside(x) && inside(y) { 255 } else { 0 } };
+                let v = (texel(bx, by) * (256 - wx) + texel(bx + 1, by) * wx) * (256 - wy)
+                    + (texel(bx, by + 1) * (256 - wx) + texel(bx + 1, by + 1) * wx) * wy;
+                let expected = ((v / 4080) as f64 / 4096.0 * 255.0).round() as i64;
+                let got = hard[(j * 64 + i) * 4 + 3] as i64;
+                assert!((got - expected).abs() <= 1, "({i}, {j}): {got}, the sample is {expected}");
+                checked += 1;
+                let edged = ramped[(j * 64 + i) * 4 + 3] as i64;
+                assert!(edged <= got, "({i}, {j}): {edged} with a ramped edge, {got} without");
+                if edged < got {
+                    brighter += 1;
+                }
+            }
+        }
+        assert!(checked > 1000 && brighter > 10, "{checked} pixels, {brighter} brighter without the ramp");
+        Ok(())
+    }
 }

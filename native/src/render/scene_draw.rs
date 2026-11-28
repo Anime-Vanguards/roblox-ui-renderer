@@ -2082,10 +2082,11 @@ impl DrawPreparer {
         opacity: f64,
         mode: u8,
         selection: &[[f64; 4]],
+        hard_edges: bool,
     ) {
         let start = self.begin(ctx, transformed_bounds(m, r, 1.), clip, 15);
         self.push([4., 0., 0., 0.]);
-        self.push([0., opacity * 255., 0., 0.]);
+        self.push([0., opacity * 255., if hard_edges { 1. } else { 0. }, 0.]);
         self.selection(mode, selection);
         self.packet.texels[start + 2][2] = (self.packet.texels.len() - start) as f32;
         let inv = invert(m);
@@ -2983,6 +2984,7 @@ impl DrawPreparer {
                     q.opacity,
                     q.selection_mode,
                     &selection,
+                    true,
                 );
             }
         }
@@ -3022,7 +3024,7 @@ impl DrawPreparer {
                 if m == [1., 0., 0., 1., m[4], m[5]] && q.opacity == 1. && q.w == q.width as f64 && q.h == q.height as f64 {
                     self.layer(ctx, qr.translated(m[4], m[5]), id, clip, 0, &[]);
                 } else {
-                    self.text_quad(ctx, qr, q.width, q.height, id, m, clip, q.opacity, 0, &[]);
+                    self.text_quad(ctx, qr, q.width, q.height, id, m, clip, q.opacity, 0, &[], false);
                 }
             }
         }
@@ -3241,7 +3243,7 @@ impl DrawPreparer {
             if translation {
                 self.layer(ctx, rect.translated(m[4], m[5]), id, clip, 0, &[]);
             } else {
-                self.text_quad(ctx, rect, width, height, id, m, clip, 1., 0, &[]);
+                self.text_quad(ctx, rect, width, height, id, m, clip, 1., 0, &[], false);
             }
         }
         Ok(())

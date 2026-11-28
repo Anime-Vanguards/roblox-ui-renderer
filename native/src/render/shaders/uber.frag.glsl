@@ -1338,7 +1338,7 @@ ivec4 quadImageTexel(int mode, vec4 h, ivec3 colour, ivec2 ij, ivec2 size) {
 }
 
 // A glyph quad (or rotated shadow layer) through a rotation or a scale: the quad's image sampled like Chrome's drawImage
-// (bilinear, 8-bit weights, clamped to the image, 12-bit truncation, anti-aliased edges), times
+// (bilinear, 8-bit weights, clamped to the image, 12-bit truncation, anti-aliased edges; hard ones for a glyph layer), times
 // globalAlpha (the vertex alpha for tinted glyphs, 1 for shaded ones). Transform block at rec(2).z:
 // target pixel -> image texel, (W, H, 0, 0)
 vec4 resampledQuad(int mode, vec4 h, vec2 X) {
@@ -1347,7 +1347,10 @@ vec4 resampledQuad(int mode, vec4 h, vec2 X) {
 	vec2 l = toLocal(m, t, X);
 	float du = min(l.x, size.x - l.x) / (abs(m.x) + abs(m.z));
 	float dv = min(l.y, size.y - l.y) / (abs(m.y) + abs(m.w));
-	float coverage = clamp(min(du, dv) + 0.5, 0.0, 1.0);
+	// A glyph layer of turned text (TEXT_QUAD with rec(4).z set) has hard edges, as a client's rasterizer draws a quad:
+	// its 1 px transparent border keeps the outside empty, and an anti-aliased edge dimmed the faint outer pixel of a
+	// stem (text-probe-rotate-quarter at 30 and 45 degrees: 12 in rur, 14-15 in a 0.747 client)
+	float coverage = mode == 4 && rec(4).z > 0.5 ? 1.0 : clamp(min(du, dv) + 0.5, 0.0, 1.0);
 	if (coverage <= 0.0) {
 		DISCARD
 	}
@@ -1384,7 +1387,7 @@ vec4 resampledQuad(int mode, vec4 h, vec2 X) {
 	return value * G * coverage;
 }
 
-// TEXT_QUAD (scene_draw.rs text_quad, one glyph quad of rotated text): (mode, a, x, y), (rgb packed),
+// TEXT_QUAD (scene_draw.rs text_quad, one glyph quad of rotated text): (mode, a, x, y), (rgb packed, a, hard edges),
 // selection block. Modes (resampledQuad): 3 the glyph (texture x, y) tinted with the colour at globalAlpha
 // a / 255, 4 a CPU image (atlas slot, atlas x, y: gradient shading or a tinted decoration rect) at
 // globalAlpha rec(4).y / 255.
