@@ -840,6 +840,10 @@
 			"digest": "86790e8bf04f0b1cd31eaf16aeb0bcc23c2eca1ab0341dda5934bad506c0a03f",
 			"status": "ok"
 		},
+		"fast/edit/stroke-probe-arcjoin-turned": {
+			"digest": "c3c92692b841f3ea7e0f9446ab80c48c3e7127e7fb828beaeee568b806aa20d3",
+			"status": "ok"
+		},
 		"fast/edit/stroke-probe-bigring": {
 			"digest": "822dba403e99f08133727bb642f37d890827b34054c069301b3f237ab079d17f",
 			"status": "ok"
@@ -2332,6 +2336,10 @@
 			"digest": "05094f5004afaa1605807d9ba8f034d50d73cd84d1111bb38305feca2f87349f",
 			"status": "ok"
 		},
+		"fixtures/edit/stroke-probe-arcjoin-turned": {
+			"digest": "7e9ca0d7365de3a35e39a012e614f173bc3bfdbfb5cd2cd2a3667a3ad4593835",
+			"status": "ok"
+		},
 		"fixtures/edit/stroke-probe-bigring": {
 			"digest": "41da566944edfa2aeb865b9ab9f128bb69ef75cdd73f524671f963505961e1e2",
 			"status": "ok"
@@ -3774,6 +3782,10 @@
 		},
 		"fixtures/play/stroke-pill": {
 			"digest": "f6ca84524aa512e503de491fc50956c6d84618f38f7af3d550d076b7f62e2bfb",
+			"status": "ok"
+		},
+		"fixtures/play/stroke-probe-arcjoin-turned": {
+			"digest": "309787fd1201071bf726ddd8f2233e430ebd6a212f0f40b2a20a175070292b67",
 			"status": "ok"
 		},
 		"fixtures/play/stroke-probe-bigring": {

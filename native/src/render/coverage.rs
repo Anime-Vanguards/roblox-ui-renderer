@@ -535,6 +535,14 @@ pub fn border_stroke_alpha_modes(
                 {
                     continue;
                 }
+                // A turned frame's corner draws its ring only outside the chord between its inner arc's two ends:
+                // a pixel centred on the hole's side of that chord is empty, where the arc's ramp would leave it up to
+                // 0.4 (fixtures/stroke-probe-arcjoin-turned.luau: 181 pixels near the joins at 1x all as the client,
+                // 1.5x and 2x off only within 0.005 px of the chord; image-probe-squarecorner-turned.luau's stroke
+                // rows). The rule above is this chord's tie on an unturned frame.
+                if mixed && rotated && qx > 0.0 && qy > 0.0 && qx + qy < q.r - inset {
+                    continue;
+                }
                 // (one device pixel wide at any scale: Studio 0.747, notes/strokes.md Round 8)
                 let mut a = (distance - (q.r - inset) + 0.5).clamp(0.0, 1.0);
                 if round {
@@ -919,7 +927,9 @@ mod tests {
     fn rounded_and_stroke_masks_match_javascript_reference() {
         // Frozen 8-bit mask hashes from cornerCoverage / SceneRenderer.borderStrokeAlpha; the ring strokes at
         // scales other than 1 are this renderer's own since their ramp stopped taking the scale (Studio 0.747), and
-        // corner cases 4, 10, 16 and 22 since a corner of radius 0 stays square (square_corner).
+        // corner cases 4, 10, 16 and 22 since a corner of radius 0 stays square (square_corner), stroke cases 1, 9,
+        // 11, 17, 22 and 23 since a turned corner of a frame whose corners differ draws its ring outside its inner
+        // arc's chord.
         let corners = [
             4054628274u32,
             2025123922,
@@ -948,7 +958,7 @@ mod tests {
         ];
         let strokes = [
             2436972246u32,
-            2606528217,
+            743449833,
             450504576,
             3430542588,
             3047246943,
@@ -956,21 +966,21 @@ mod tests {
             1819584623,
             53136845,
             1574060111,
-            3385404916,
+            2408787472,
             2035116723,
-            3934129946,
+            838393008,
             2878728380,
             191019786,
             3194569309,
             3606728384,
             4211294253,
-            3420604382,
+            2086035853,
             187267678,
             1804581695,
             1153362503,
             2377840651,
-            694274846,
-            3842631073,
+            110664882,
+            1100339963,
         ];
         let hash = |values: Vec<f64>| {
             values.iter().fold(2166136261u32, |h, v| {
@@ -1020,11 +1030,15 @@ mod tests {
                 seed % 4 != 0,
                 1.0 + (seed % 3) as f64 * 0.25,
             );
-            assert_eq!(
-                hash(mask.iter().map(|v| *v as f64).collect()),
-                strokes[seed],
-                "stroke case {seed}"
-            );
+            let stroke_hash = hash(mask.iter().map(|v| *v as f64).collect());
+            // (RUR_RECORD_GOLDEN_FIELDS lists them as "s<case> hash", as the corners)
+            if let Some(out) = std::env::var_os("RUR_RECORD_GOLDEN_FIELDS") {
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new().create(true).append(true).open(out).expect("the list");
+                writeln!(file, "s{seed} {stroke_hash}").unwrap();
+            } else {
+                assert_eq!(stroke_hash, strokes[seed], "stroke case {seed}");
+            }
         }
     }
     #[test]
@@ -1145,6 +1159,25 @@ mod tests {
         assert_eq!(at(90, 223), 1.0);
         assert_eq!(at(90, 225), 1.0);
         assert_eq!(at(90, 226), 0.0);
+    }
+
+    #[test]
+    fn a_turned_mixed_corner_draws_its_ring_outside_the_inner_arcs_chord() {
+        // fixtures/stroke-probe-arcjoin-turned.luau at 1x (a 0.747 client): a 52 x 36 frame centred at (689, 48), turned
+        // 53 degrees, corners 0, 10, 10, 10, an Outer stroke of 2. Near the bottom-right corner's join, the pixel at
+        // (684, 71) lies 0.26 px inside the inner edge and inside the chord between the inner arc's ends: the client
+        // leaves it empty (the arc's ramp gives 0.24). With every corner rounded the frame keeps the ramp there, and
+        // (666, 32), 0.06 px inside the edge but outside its corner's chord, keeps it on the mixed frame too.
+        let (angle, cx, cy) = (53f64.to_radians(), 689.0, 48.0);
+        let (cos, sin) = (angle.cos(), angle.sin());
+        let to_local = [cos, -sin, sin, cos, cx - cos * cx - sin * cy, cy + sin * cx - cos * cy];
+        let stroke = |radii: [f64; 4]| border_stroke_alpha(Rect::new(663.0, 30.0, 52.0, 36.0), radii, 2.0, "Outer", "Round", [660, 25], [40, 55], to_local, true, 1.0);
+        let at = |a: &[f32], x: usize, y: usize| a[(y - 25) * 40 + x - 660] as f64;
+        let mixed = stroke([0.0, 10.0, 10.0, 10.0]);
+        let equal = stroke([10.0; 4]);
+        assert_eq!(at(&mixed, 684, 71), 0.0);
+        assert!((at(&equal, 684, 71) - 0.237).abs() < 0.01, "{}", at(&equal, 684, 71));
+        assert!((at(&mixed, 666, 32) - 0.442).abs() < 0.01, "{}", at(&mixed, 666, 32));
     }
 
     #[test]
