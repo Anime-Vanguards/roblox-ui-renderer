@@ -208,6 +208,11 @@ fn placements(text: &Value, fonts: &Value, rotated: bool, device_scale: f64) -> 
         let mut largest = f64::NEG_INFINITY;
         let mut asc = 0.0;
         let mut main = None;
+        // A rich line's tallest whitespace taller than its glyphs (export.rs tallest_space) places its baseline
+        let space = line["space"].as_array().filter(|space| space.len() >= 3).and_then(|space| {
+            let font = &fonts[num(&space[0], 0.0) as usize];
+            (!font.is_null()).then(|| (font, num(&space[1], 0.0), space[2].as_u64().map(|v| v as usize)))
+        });
         let glyphs = arr(&line["glyphs"]);
         // MaxVisibleGraphemes (export.rs reveal_line): the first `shown` entries and the last `ellipsis` are drawn
         let shown = line["shown"].as_u64().map_or(glyphs.len(), |v| v as usize);
@@ -296,6 +301,12 @@ fn placements(text: &Value, fonts: &Value, rotated: bool, device_scale: f64) -> 
                 main = Some(p.clone());
             }
             local.push(p);
+        }
+        if let Some((font, ppem, run)) = space {
+            if font_size(font, ppem) > largest {
+                let (face, face_ppem) = line_face(text, run, font, ppem);
+                asc = ascent(face, face_ppem);
+            }
         }
         for p in &mut local {
             p.baseline = top + asc;
@@ -2721,6 +2732,24 @@ mod tests {
         assert_eq!(top_at(31.4986, 1.5), 32.0);
         assert_eq!(top_at(31.4983, 1.5), 31.0);
         assert_eq!(top_at(31.5, 1.0), 32.0);
+    }
+
+    /// A rich line's tallest whitespace (`space`, export.rs tallest_space) places the line's baseline when it is taller
+    /// than every glyph drawn on it, as a client places it by the tallest run (fixtures/text-probe-tabs.luau B*_richsize,
+    /// text-probe-richspace.luau)
+    #[test]
+    fn a_rich_lines_tallest_whitespace_places_its_baseline() {
+        let fonts = serde_json::json!([{"file":"Arimo-Regular.ttf","ascender":1854,"descender":-434,"lineGap":67,"sizeUnits":2355,"unitsPerEm":2048,"weight":400}]);
+        let baseline = |space: serde_json::Value| {
+            let text = serde_json::json!({"size": 24, "runs": [{}, {}], "lines": [{"x": 0, "px": 0, "top": 0, "glyphs": [[0, 43, 0, 21.56059, 0]], "space": space}]});
+            super::placements(&text, &fonts, false, 1.0).0[0].baseline
+        };
+        let own = baseline(serde_json::Value::Null);
+        assert_eq!(own, super::ascent(&fonts[0], 21.56059));
+        assert_eq!(baseline(serde_json::json!([0, 35.93432, 1])), super::ascent(&fonts[0], 35.93432));
+        assert!(baseline(serde_json::json!([0, 35.93432, 1])) > own);
+        // whitespace no taller than the glyphs leaves the baseline
+        assert_eq!(baseline(serde_json::json!([0, 10.78029, 1])), own);
     }
 
     #[test]

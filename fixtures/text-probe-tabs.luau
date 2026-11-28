@@ -1,8 +1,8 @@
 -- Tabs: what a tab is in a client's text (four spaces of its run's face and size, drawn as nothing). Staircases (a
 -- growing prefix before a tab, and the same without it) in four faces, tabs alone, several tabs, a tab between words,
 -- wrapped, rich (<b>, <font size>), other sizes and places, alignment, TextBox, and TextScaled labels, plain and rich.
--- Left: the <font size="40"> tab cells (B*_richsize) draw their line's text higher than a client, which takes the
--- baseline from the tallest run even when it is only whitespace (notes/text.md, TAB-SCALED).
+-- The <font size="40"> tab cells (B*_richsize) take their line's baseline from the tab's run, the tallest, as a client
+-- does (notes/text.md, "Alignment anchors and rich whitespace baselines").
 -- compare: --viewport 1830x1000 --time 0.2 --background 0,0,0
 return function(Target)
 	local Faces = { "SourceSansPro", "FredokaOne", "Arimo", "RobotoMono" }

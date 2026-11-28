@@ -1162,6 +1162,14 @@ fn text_lines(
         entry.insert("top".into(), number(exported_top(line_top, rotated, pixel_scale)));
         entry.insert("height".into(), number(line.height));
         entry.insert("width".into(), number(line_width));
+        if rich {
+            if let Some(space) = tallest_space(line, size) {
+                let (space_size, face, run) = space;
+                let font_index = registry.font_index(text, face);
+                let face_ppem = ppem(&text.face(face).font, space_size);
+                entry.insert("space".into(), json!([font_index, number(round(face_ppem, 5)), run]));
+            }
+        }
         let cut = reveal.as_ref().and_then(|lines| lines[index]);
         // Measured (fixtures/shadow-probe-glow-pens.luau with FFlagLegacyTextSubpixelRendering on, 1.5x): a glyph's
         // glow quad lies at the line's whole pixel `px` plus the glyph's exact 26.6 pen, not its quarter pixel
@@ -1190,6 +1198,34 @@ fn text_lines(
     }
     let content = numbers(&[round(content_x, 3), round(content_y, 3), round(content_w, 3), round(content_h, 3)]);
     Some((Json::Array(lines), content))
+}
+
+/// A rich line's tallest whitespace (a tab or spaces in a larger `<font size>` than every glyph drawn on the line), as
+/// (its pixel size, face, 0-based run), when it is taller than they are. A client places the line's baseline by the
+/// tallest run, whitespace or not (sim client 0.747, fixtures/text-probe-tabs.luau B*_richsize: "Hello<font
+/// size="40">\t</font>|" at TextSize 24 draws "Hello|" lower than the 24 px glyphs alone place it); the scene's glyphs
+/// leave whitespace out, so a line that draws a glyph names it (`space`, render/text.rs placements). The whitespace a
+/// wrapped line ends with counts too (fixtures/text-probe-richspace.luau: leading, trailing, a wrapped line's end, two runs, another
+/// face, bold, centred and bottom-aligned labels).
+fn tallest_space(line: &Line, size: f64) -> Option<(f64, FaceId, u32)> {
+    let (mut run, mut drawn) = (0u32, 0.0f64);
+    let mut tallest: Option<(f64, FaceId, u32)> = None;
+    for glyph in &line.glyphs {
+        if glyph.run != 0 {
+            run = glyph.run - 1;
+        }
+        if glyph.is_ellipsis() {
+            continue;
+        }
+        let glyph_size = if glyph.size != 0.0 { glyph.size } else { size };
+        if !is_space(glyph.code) {
+            drawn = drawn.max(glyph_size);
+        } else if tallest.map_or(true, |(tall, ..)| glyph_size > tall) {
+            tallest = Some((glyph_size, glyph.face, run));
+        }
+    }
+    // (a line that draws no glyph has no baseline to place)
+    tallest.filter(|(tall, ..)| drawn > 0.0 && *tall > drawn)
 }
 
 /// Whether a text object glows: an enabled UIShadow child with Mode = Text.
