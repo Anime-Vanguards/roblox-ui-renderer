@@ -1004,6 +1004,22 @@
 			"digest": "bec8761784f5a910f40903ea074761768dd9df68ae051b12545040ed4c4e4500",
 			"status": "ok"
 		},
+		"fast/edit/text-probe-anchor-ties": {
+			"digest": "b258dbf8ed680ec31a6bbefde9878d837cac993a287726d968639164f9816257",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-anchor-ties2": {
+			"digest": "2c689069d1093b6fc7621e9a57d8d9dbac788ca82459e5287a52b54324b10fc5",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-anchor-ties2@quarter": {
+			"digest": "457b6cbb77015f0897e6734e9f957c27bc07ebb93bbec94398a2d9aa27cec629",
+			"status": "ok"
+		},
+		"fast/edit/text-probe-anchor-ties@quarter": {
+			"digest": "75ad2a411bf95ada54d7e922a49be88dbc3618454a0f588905e604632f8d688d",
+			"status": "ok"
+		},
 		"fast/edit/text-probe-blend": {
 			"digest": "0d9ebc0d0230f9e8819d6e53ef7b2c6fa37ed790bbc81ddef76c588caff89002",
 			"status": "ok"
@@ -2532,6 +2548,22 @@
 			"digest": "6d51274e88b34eb36eb75881d0bf1db2e483e5d2444b99bd46a7154818308123",
 			"status": "ok"
 		},
+		"fixtures/edit/text-probe-anchor-ties": {
+			"digest": "c89d1e4d7af9ee8e43ebc4feaeb68aaae4214b9901f0da8ea403f3eb88284932",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-anchor-ties2": {
+			"digest": "0f66cd2876ffbbfa0f0d1fcb195c9798c9e6954c8a9e57e1942a19a6af42d58f",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-anchor-ties2@quarter": {
+			"digest": "ad72cced4e6f99b7eafbf7d357c202e340660c7850f4405652de34e9756db366",
+			"status": "ok"
+		},
+		"fixtures/edit/text-probe-anchor-ties@quarter": {
+			"digest": "28a02130d36d54131a0ff371715226ac7b6ae6717148c6aaece6847f8522c20a",
+			"status": "ok"
+		},
 		"fixtures/edit/text-probe-blend": {
 			"digest": "91505caeba1eb697b3e8f095e60edd930c2a37982d9cf7d3bced375c2869c240",
 			"status": "ok"
@@ -3956,6 +3988,14 @@
 			"digest": "e972dab0192dce86ceb334d501f31e2039525d5a4cb3a252903e013d1c019471",
 			"status": "ok"
 		},
+		"fixtures/play/text-probe-anchor-ties": {
+			"digest": "adf700fd5d392b8a0cda79f139515f6f90157d3e6df6e25aa53ea2482c2d1799",
+			"status": "ok"
+		},
+		"fixtures/play/text-probe-anchor-ties2": {
+			"digest": "aebf002679ff957847ded499ed0ada7a50c7165eea70636971b5a330a77b1d77",
+			"status": "ok"
+		},
 		"fixtures/play/text-probe-blend": {
 			"digest": "21ba97f4a39163b63f4ae871e007f2bb67881c3292e845f494686d108fc6ee20",
 			"status": "ok"
@@ -4461,7 +4501,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-28T08:14:45.651Z",
+	"recorded": "2026-11-28T09:47:59.682Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

@@ -1129,11 +1129,14 @@ fn text_lines(
                 }
             }
         } else if pixel_scale != 1.0 && pens.iter().any(|&(exact, _, steps, _)| tied(exact, steps)) {
-            let anchor = super::text::layout::snap_pixel(match alignment {
-                XAlign::Left => content_x,
-                XAlign::Right => content_x + content_w,
-                XAlign::Center => content_x + content_w / 2.0,
-            });
+            let anchor = super::text::layout::snap_anchor(
+                match alignment {
+                    XAlign::Left => content_x,
+                    XAlign::Right => content_x + content_w,
+                    XAlign::Center => content_x + content_w / 2.0,
+                },
+                pixel_scale,
+            );
             if let Some(list) = glyphs.as_array_mut() {
                 for (index, (entry, &(exact, size, steps, stretch))) in list.iter_mut().zip(&pens).enumerate() {
                     if tied(exact, steps) {

@@ -216,14 +216,27 @@ pub fn luau_number(value: f64) -> String {
     }
 }
 
-/// Whole device pixel where a line's pen starts. Measured (fixtures/layout-textpen.luau 192/192,
+/// Whole device pixel a position rounds to (a LineHeight line's top). Measured (fixtures/layout-textpen.luau 192/192,
 /// tools/analysis/layout_textpen.py): Studio snaps the alignment anchor of the content box (left
 /// edge, right edge or centre, device px) half up to the pixel grid, then places the line from it in
 /// whole pixels. Rounded to 1/1000 px first: positions that are exactly .5 in Studio's float32
-/// arithmetic can land just below .5 in the layout's double arithmetic.
+/// arithmetic can land just below .5 in the layout's double arithmetic. Alignment anchors take `snap_anchor`.
 #[inline]
 pub fn snap_pixel(value: f64) -> f64 {
     ((value * 1000.0 + 0.5).floor() / 1000.0 + 0.5).floor()
+}
+
+/// The whole device pixel a line's alignment anchor (`value`, device px at device scale `scale`) snaps to: 0.001 GUI
+/// px added to the anchor in GUI px and the sum scaled back, each in float32, then rounded half up, so an anchor up
+/// to 0.001 GUI px below a half device px rounds up. Measured in a sim client 0.747 (fixtures/text-probe-anchor-ties.luau
+/// and -ties2.luau, 384 left edges, centres and right edges of labels a UIScale puts at N + 1/2 - e device px, 1x to
+/// 3x: all 384 pens; the threshold reads 0.000998-0.001009, 0.001001-0.001012, 0.000999-0.001007 and
+/// 0.000987-0.001002 GUI px at 1x, 1.5x, 2x and 3x). A centred label at 3x whose anchor is 1751.4975 px starts its
+/// lines one device px right of `snap_pixel`'s (layout-autotext-linefit).
+#[inline]
+pub fn snap_anchor(value: f64, scale: f64) -> f64 {
+    let f = |v: f64| v as f32 as f64;
+    (f(f(f(value / scale) + f(0.001)) * f(scale)) + 0.5).floor()
 }
 
 /// `TextLayout.LinePen`: Left = round(x), Right = round(x + w) - width, Center = round(x + w / 2) -
@@ -248,7 +261,7 @@ pub fn line_pen(alignment: XAlign, content_x: f64, content_w: f64, line_width: f
 /// 137 truncated rich lines at 2x and 3x, 101 with the width floored whole).
 #[allow(clippy::too_many_arguments)]
 pub fn line_pen_cut(alignment: XAlign, content_x: f64, content_w: f64, line_width: f64, ellipsis: f64, rich: bool, exact: bool, pixel_scale: f64) -> f64 {
-    let snap = |value: f64| if exact { value } else { snap_pixel(value) };
+    let snap = |value: f64| if exact { value } else { snap_anchor(value, pixel_scale) };
     let aligned = || rich_align_width(line_width - ellipsis, pixel_scale) + rich_align_width(ellipsis, pixel_scale);
     match alignment {
         XAlign::Left => snap(content_x),
@@ -1702,5 +1715,21 @@ mod line_pen_tests {
         // 1x: every width is whole
         assert_eq!(center(0.0, 300.0, 101.0, true, 1.0), 100.0);
         assert_eq!(rich_align_width(11.0, 1.1), 11.0);
+    }
+
+    /// An alignment anchor rounds up from 0.001 GUI px below the half (sim client 0.747,
+    /// fixtures/text-probe-anchor-ties2.luau; layout-autotext-linefit's centred "Claim your" label at 3x, its centre
+    /// at 1751.4975 device px, starts its 272 px line at 1616)
+    #[test]
+    fn alignment_anchors_round_up_from_a_thousandth_of_a_gui_px_below_the_half() {
+        assert_eq!(snap_anchor(30.4991, 1.0), 31.0);
+        assert_eq!(snap_anchor(30.4989, 1.0), 30.0);
+        assert_eq!(snap_anchor(45.4986, 1.5), 46.0);
+        assert_eq!(snap_anchor(45.4984, 1.5), 45.0);
+        assert_eq!(snap_anchor(90.4971, 3.0), 91.0);
+        assert_eq!(snap_anchor(90.4969, 3.0), 90.0);
+        assert_eq!(snap_anchor(90.5, 3.0), 91.0);
+        assert_eq!(line_pen(XAlign::Center, 1575.0, 352.99498, 272.0, false, false, 3.0), 1616.0);
+        assert_eq!(line_pen(XAlign::Left, 30.4989, 80.0, 40.0, false, false, 1.0), 30.0);
     }
 }
