@@ -43,15 +43,31 @@ pub fn texture_levels(width: usize, height: usize, data: Arc<[u8]>) -> Vec<MipLe
     }];
     while levels.last().is_some_and(|l| l.width > 1 || l.height > 1) {
         // Measured: a level with both sides even averages texel pairs rounding half up ((a + b + 1) >> 1:
-        // 1000 x 1000 / 1024 x 1024 icons bit-exact); a level with an odd side takes the floored 2-tap path on
-        // both axes, whose even axis rounds down ((a + b) >> 1: an item grid's 442 x 677
-        // icon 236 -> 2 px > 2; notes/images.md)
+        // 1000 x 1000 / 1024 x 1024 icons bit-exact), the horizontal pass first; a level with an odd side takes
+        // the floored 2-tap path on both axes, the vertical pass first, whose even axis rounds down
+        // ((a + b) >> 1: an item grid's 442 x 677 icon 236 -> 2 px > 2). Every texel of every level of three
+        // semi-transparent textures with odd levels and an even one read back from a 0.747 client
+        // (notes/images.md "Tenth round")
         let last = levels.last().unwrap();
-        let round_up = u16::from(last.width % 2 == 0 && last.height % 2 == 0);
-        let next = halve(&halve(last, true, round_up), false, round_up);
+        let even = last.width % 2 == 0 && last.height % 2 == 0;
+        let next = if even {
+            halve(&halve(last, true, 1), false, 1)
+        } else {
+            halve(&halve(last, false, 0), true, 0)
+        };
         levels.push(next);
     }
     levels
+}
+
+/// Where an odd side's 2-tap reduction samples output texel `k` (n source texels into m = n / 2): the
+/// source texel below and the 8-bit weight of the next one. The client steps n / m in 16.16 fixed point,
+/// truncated, from the first output texel's centre: (k + 1/2) step - 1/2 (the exact n / m put 1,119 of a
+/// 473 x 287 level's 33,748 texels a level off; the fixed step none)
+fn odd_tap(k: usize, n: usize, m: usize) -> (usize, u32) {
+    let step = ((n as u64) << 16) / m as u64;
+    let p = k as u64 * step + step / 2 - (1 << 15);
+    ((p >> 16) as usize, ((p & 0xFFFF) >> 8) as u32)
 }
 
 fn halve(level: &MipLevel, horizontal: bool, round_up: u16) -> MipLevel {
@@ -65,12 +81,11 @@ fn halve(level: &MipLevel, horizontal: bool, round_up: u16) -> MipLevel {
     let (nw, nh) = if horizontal { (m, h) } else { (w, m) };
     let mut out = vec![0; nw * nh * 4];
     for k in 0..m {
-        let (a0, a1, f) = if even {
-            (2 * k, 2 * k + 1, 0.0)
+        let (a0, a1, weight) = if even {
+            (2 * k, 2 * k + 1, 0)
         } else {
-            let pos = (k as f64 + 0.5) * n as f64 / m as f64 - 0.5;
-            let i = pos.floor() as usize;
-            (i, (i + 1).min(n - 1), pos - i as f64)
+            let (i, weight) = odd_tap(k, n, m);
+            (i, (i + 1).min(n - 1), weight)
         };
         for line in 0..if horizontal { h } else { w } {
             let a = (if horizontal {
@@ -97,8 +112,7 @@ fn halve(level: &MipLevel, horizontal: bool, round_up: u16) -> MipLevel {
                     // fixtures/image-probe-snap 29 -> 6, image-probe-fit 4 -> 0; rounding the weight or the blend
                     // is worse)
                     let (x, y) = (level.data[a + c] as u32, level.data[b + c] as u32);
-                    let w = (f * 256.).floor() as u32;
-                    ((x * (256 - w) + y * w) >> 8) as u8
+                    ((x * (256 - weight) + y * weight) >> 8) as u8
                 };
             }
         }
@@ -573,6 +587,46 @@ pub fn sample_at(
             }) as f32
         }
     })
+}
+
+#[cfg(test)]
+mod mip_chain_tests {
+    use super::*;
+
+    /// notes/images.md "Tenth round": a client reduces an odd side with a 2-tap sample whose place steps n / m in
+    /// 16.16 fixed point, truncated. Over 147 texels (an odd level of a 2,352 px sprite sheet) the exact place of
+    /// output texel 36 is source texel 73 itself; the fixed step puts it 1/65536 below, 255/256 of the way from
+    /// texel 72, which a client read back as a level one darker there
+    #[test]
+    fn an_odd_side_steps_in_sixteen_bit_fixed_point() {
+        assert_eq!(odd_tap(36, 147, 73), (72, 255));
+        assert_eq!(odd_tap(38, 147, 73), (77, 6));
+        assert_eq!(odd_tap(0, 147, 73), (0, 129));
+        let mut row = vec![0u8; 147 * 4];
+        for (i, texel) in row.chunks_exact_mut(4).enumerate() {
+            texel.copy_from_slice(&[if i >= 73 { 255 } else { 0 }, 0, 0, 255]);
+        }
+        let levels = texture_levels(147, 1, row.into());
+        assert_eq!(levels[1].width, 73);
+        // (0 x 1 + 255 x 255) >> 8, where the exact place gave texel 73's 255
+        assert_eq!(levels[1].data[36 * 4], 254);
+    }
+
+    /// A level with an odd side is reduced vertically first, then across (every texel of four textures' chains read
+    /// back from a client: notes/images.md "Tenth round"); in one with an even side and an odd one the even axis
+    /// takes the same floored 2-tap path
+    #[test]
+    fn a_level_with_an_odd_side_is_reduced_down_first() {
+        for (w, h) in [(5usize, 5usize), (13, 11), (10, 7), (8, 11)] {
+            let data: Vec<u8> = (0..w * h * 4).map(|i| ((i * 97 + i / 4 * 31) % 251) as u8).collect();
+            let levels = texture_levels(w, h, data.clone().into());
+            let level = MipLevel { width: w, height: h, data: data.into() };
+            let down_first = halve(&halve(&level, false, 0), true, 0);
+            let across_first = halve(&halve(&level, true, 0), false, 0);
+            assert_ne!(down_first.data, across_first.data, "the {w} x {h} texture must tell the orders apart");
+            assert_eq!(levels[1].data, down_first.data, "{w} x {h}");
+        }
+    }
 }
 
 #[cfg(test)]
