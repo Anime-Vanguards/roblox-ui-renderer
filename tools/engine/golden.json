@@ -196,6 +196,22 @@
 			"digest": "4cbd5df19e24700be0cb375310e54eb898b4b73be120b77f05aa79101041cd97",
 			"status": "ok"
 		},
+		"fast/edit/image-probe-scroll-tiny": {
+			"digest": "2e0799da86d14e7a37da007fddbfde87af9e76c892079319a6f0985923279d9f",
+			"status": "ok"
+		},
+		"fast/edit/image-probe-scroll-tiny2": {
+			"digest": "ec0afcc7e62b8a2999d90be71b0fe129d641d09c621c70efa2bdd846bda1597a",
+			"status": "ok"
+		},
+		"fast/edit/image-probe-scroll-tiny3": {
+			"digest": "676c6a202e9a792b020830486cdb82dde78ed4f576b8adca6dbd2e525eb5e0e8",
+			"status": "ok"
+		},
+		"fast/edit/image-probe-scroll-tiny4": {
+			"digest": "2dd232983b5dfa6d7086f07b3773ac5725434fa667eb0c1f7884e778bea50762",
+			"status": "ok"
+		},
 		"fast/edit/image-probe-slice": {
 			"digest": "39e0e7ad1f5c5ebb3ed9437ee0df2975939bb4c58b7b8cb4469d7702b19690e8",
 			"status": "ok"
@@ -1672,6 +1688,22 @@
 			"digest": "cf894008fb13b1c8073f49650d42de087906a28d2d1c3732518aa4e1afe465c3",
 			"status": "ok"
 		},
+		"fixtures/edit/image-probe-scroll-tiny": {
+			"digest": "ca3f3c29095c2e0efab4eddea43b2e1744c898e1a301130cd2840590c70566a9",
+			"status": "ok"
+		},
+		"fixtures/edit/image-probe-scroll-tiny2": {
+			"digest": "281e5805c27208ea0c90bdc3afad04b24dbd482919bd0216fe07f8f3493e5323",
+			"status": "ok"
+		},
+		"fixtures/edit/image-probe-scroll-tiny3": {
+			"digest": "cf390bada5784aab16f7b813b6260c195b20a0a341dd056382f3a4a1004e6870",
+			"status": "ok"
+		},
+		"fixtures/edit/image-probe-scroll-tiny4": {
+			"digest": "bc57021479fa791155eb96b78402eb568daf48c3f6b7460b3ddc9d78eb7c36af",
+			"status": "ok"
+		},
 		"fixtures/edit/image-probe-slice": {
 			"digest": "469d712a35f4ff02a4bd43e0c1030b5a3129923f5c98478b40a0af45e3183c5a",
 			"status": "ok"
@@ -3134,6 +3166,22 @@
 		},
 		"fixtures/play/image-probe-scroll-scale": {
 			"digest": "a834909a62790eb22c2d7afbc9b54dc873a55a85c5d9b5a7fff7e45e5902bea6",
+			"status": "ok"
+		},
+		"fixtures/play/image-probe-scroll-tiny": {
+			"digest": "bfb4280e927a5e6e158121740788e82fb3dcd33207ea15822f87acc4dc03686a",
+			"status": "ok"
+		},
+		"fixtures/play/image-probe-scroll-tiny2": {
+			"digest": "4a511c500c92986b4bd6650599322077085aacf8c1264da6154179ee2d65e206",
+			"status": "ok"
+		},
+		"fixtures/play/image-probe-scroll-tiny3": {
+			"digest": "ef4a511915b6d8c6d1b86e3d74a5fa54ab164fad3107e912a1a75d5253da5af2",
+			"status": "ok"
+		},
+		"fixtures/play/image-probe-scroll-tiny4": {
+			"digest": "6e960d952b106c2eebc8ccf0fe966871af85c7c4e2d936935f9b802128d715d7",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-slice": {

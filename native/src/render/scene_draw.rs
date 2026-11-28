@@ -108,6 +108,31 @@ impl DrawStats {
     }
 }
 
+/// A scroll bar's thumb length (GUI px) along a window of `visible` px over a canvas of `canvas`, thickness `t`. Measured
+/// (fixtures/image-probe-scroll.luau): max(2t + 1, round(visible^2 / canvas)). A vertical bar's window shorter than that
+/// least thumb, or negative, keeps the whole least thumb, at the window's start whatever the scroll, over the border and
+/// the other bar (a 0.747 client; fixtures/image-probe-scroll-tiny.luau: t 4 on a 3, 5 or 8 px window is 9 long,
+/// scrolled to the end it stays at 0; -tiny2.luau: windows of -4 to 1 px). A horizontal bar's thumb is no longer than its
+/// window, or than a negative window's size (-tiny4.luau: t 7 on 3 to 14 px windows, at the start and the end;
+/// -tiny2.luau: windows of -4 to -2 px are 4 to 2 long).
+fn bar_thumb(visible: f64, canvas: f64, t: f64, horizontal: bool) -> f64 {
+    let thumb = (2. * t + 1.).max(snap(visible * (visible / canvas).min(1.)));
+    if horizontal { thumb.min(visible.abs()) } else { thumb }
+}
+
+/// The opacity a ScrollingFrame's bars are drawn at, by the frame's longer side `length` and the bar's thickness `t`
+/// (GUI px): none up to 2t, then 1.52 (1 - e^(-0.8 u)) with u = (length - 2t) / t, full from u = 1.34. Measured in a
+/// 0.747 client (fixtures/image-probe-scroll-tiny2.luau, -tiny3.luau: thickness 4, 7 and 12, 16 levels fitted within 1
+/// of 255, 100 cells; the same at 1x and 1.5x and at 0.2, 0.5 and 2 s, times ScrollBarImageTransparency): a 7 px bar on a
+/// 16 x 12 frame is 80 / 255, on 20 x 12 (or 20 x 20) 192 / 255, on 14 x 12 or 12 x 12 not drawn, on 4 x 40 full.
+fn scroll_bar_opacity(length: f64, t: f64) -> f64 {
+    if t <= 0. {
+        return 1.;
+    }
+    let u = (length - 2. * t) / t;
+    if u <= 0. { 0. } else { (1.52 * (1. - (-0.8 * u).exp())).min(1.) }
+}
+
 /// A touch device's scroll bar thumb while the canvas is past an edge (`pos` outside 0..`range`): round(thumb (1 - past /
 /// 100)), no shorter than 2t + 1 (it stays against that edge). Measured in 0.747 touch clients (P6e): 11 cases, windows of
 /// 150, 300 and 450 px, e.g. a 90 px thumb is 72 px 20.497 px past the top and 76 px 15.64 px past the bottom.
@@ -123,6 +148,21 @@ fn touch_thumb(thumb: f64, t: f64, visible: f64, pos: f64, range: f64) -> f64 {
 mod tests {
     use super::*;
     use serde_json::json;
+    /// Scroll bars of frames about as small as their bar, against a 0.747 client (fixtures/image-probe-scroll-tiny*.luau,
+    /// white caps over black): the bar's level by the frame's longer side and the thickness, and the thumb's length
+    #[test]
+    fn small_frames_fade_their_scroll_bars_and_keep_the_least_thumb() {
+        for (length, t, client) in [(14., 7., 0.), (15., 7., 42.), (16., 7., 80.), (20., 7., 192.), (22., 7., 232.), (24., 7., 255.), (40., 7., 255.), (12., 7., 0.), (10., 4., 128.), (13., 4., 246.), (30., 12., 128.), (26., 12., 49.), (34., 12., 188.)] {
+            let level = (scroll_bar_opacity(length, t) * 255.).round();
+            assert!((level - client).abs() <= 1., "{length} {t}: {level} where the client draws {client}");
+        }
+        // a vertical bar keeps its least thumb in a short or negative window; a horizontal one is no longer than its window
+        assert_eq!(bar_thumb(5., 300., 4., false), 9.);
+        assert_eq!(bar_thumb(-4., 7., 7., false), 15.);
+        assert_eq!(bar_thumb(8., 300., 7., true), 8.);
+        assert_eq!(bar_thumb(-3., 4., 7., true), 3.);
+        assert_eq!(bar_thumb(300., 1000., 12., false), 90.);
+    }
     /// The thumb of a touch device's scroll bar past an edge, against a client's captures (P6e: the length between the
     /// thumb's half-coverage edges plus the 11 px its caps leave clear): (window, canvas, CanvasPosition, client thumb)
     #[test]
@@ -3912,12 +3952,18 @@ impl DrawPreparer {
         if touch.is_some_and(|strength| strength <= 0.) {
             return Ok(());
         }
-        let transparency = 1. - (1. - number(&scroll["transparency"], 0.)) * touch.unwrap_or(1.);
         let t = (number(&scroll["thickness"], 0.) - 1e-6).ceil();
+        let [fx, fy, fw, fh] = std::array::from_fn(|i| component(&node["rect"], i, 0.));
+        // A frame too small for its bars draws them faded, by its longer side (scroll_bar_opacity); faded out, it draws
+        // neither the bars nor the border line beside them
+        let fade = scroll_bar_opacity(fw.max(fh), t);
+        if fade <= 0. {
+            return Ok(());
+        }
+        let transparency = 1. - (1. - number(&scroll["transparency"], 0.)) * touch.unwrap_or(1.) * fade;
         if t <= 0. || alpha8(1. - transparency) == 0 {
             return Ok(());
         }
-        let [fx, fy, fw, fh] = std::array::from_fn(|i| component(&node["rect"], i, 0.));
         // The frame's border also runs between the window and each bar: a line BorderSizePixel thick in the
         // border's colour along the window's edge, across the whole frame (the window is that much smaller:
         // AbsoluteWindowSize is the frame less the bar and the border). Measured, Studio 0.747
@@ -3963,7 +4009,7 @@ impl DrawPreparer {
             // floor((visible - thumb) * CanvasPosition / (canvas - visible)) (fixtures/image-probe-scroll.luau:
             // e.g. 350 / 449 -> 273); a clamped thumb keeps a 1 logical px middle
             // (fixtures/image-probe-scroll-min.luau; max(2t, ...) missed every clamped bar)
-            let thumb = visible.min((2. * t + 1.).max(snap(visible * (visible / canvas).min(1.))));
+            let thumb = bar_thumb(visible, canvas, t, horizontal);
             let range = canvas - visible;
             let pos = component(
                 &scroll["canvasPosition"],
@@ -3976,7 +4022,7 @@ impl DrawPreparer {
             } else {
                 0.
             };
-            let offset = ((visible - thumb) * progress).floor();
+            let offset = ((visible - thumb).max(0.) * progress).floor();
             let x = if horizontal {
                 fx + offset
             } else if scroll["verticalPosition"] == "Left" {
@@ -3985,10 +4031,13 @@ impl DrawPreparer {
                 fx + fw - t
             };
             let y = if horizontal { fy + fh - t } else { fy + offset };
-            let middle = (thumb - 2. * t).max(0.);
+            // The middle part is at least one GUI px, centred on the thumb: a horizontal thumb shorter than its two caps
+            // (a window of 12 px for t 7) still shows a 1 px middle at its centre (fixtures/image-probe-scroll-tiny.luau,
+            // a 0.747 client, at 1x, 1.5x and 2x)
+            let middle = (thumb - 2. * t).max(1.);
             for (key, start, length) in [
                 ("topImage", 0., t),
-                ("midImage", t, middle),
+                ("midImage", (thumb - middle) / 2., middle),
                 ("bottomImage", thumb - t, t),
             ] {
                 let Some(uri) = scroll[key].as_str() else {

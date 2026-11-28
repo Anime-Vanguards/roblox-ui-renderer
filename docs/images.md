@@ -89,11 +89,17 @@ Fixtures: `path2d-strokes`, `path2d-edges`, `path2d-curves`, `path2d-thick`, `pa
 ## Scroll bars
 
 Rendered as three image quads (top, middle, bottom) tinted by `ScrollBarImageColor3` and `ScrollBarImageTransparency`:
-- **Thumb length:** `max(2 * thickness + 1, round(visible * visible / canvas))` logical px.
-- **Thumb offset:** `floor((visible - thumb) * position / (canvas - visible))`.
+- **Thumb length:** `max(2 * thickness + 1, round(visible * visible / canvas))` logical px. A vertical bar keeps that
+  whole length in a window shorter than it, or negative (it runs over the border and the other bar); a horizontal bar's
+  thumb is no longer than its window (than a negative window's size).
+- **Thumb offset:** `floor(max(0, visible - thumb) * position / (canvas - visible))`: a thumb longer than its window stays
+  at its start.
+- **Small frames:** a frame not much larger than its bar draws its bars faded, by its longer side `L` and the thickness
+  `t`: not at all up to `2t` (nor the border line beside them), then at `min(1, 1.52 (1 - e^(-0.8 u)))` of their opacity,
+  `u = (L - 2t) / t` (a 7 px bar on a 16 x 12 frame at 80 / 255, on 20 x 12 at 192 / 255, full from about `3.34 t`).
 - **Thickness under `UIScale`:** `ceil(ScrollBarThickness * UIScale)`. Horizontal bars rotate the vertical artwork by 90°.
 
-Fixtures: `scrollbars`, `image-probe-scroll*`, `image-probe-hscroll`.
+Fixtures: `scrollbars`, `image-probe-scroll*` (`-tiny` to `-tiny4`: small frames), `image-probe-hscroll`.
 
 ## Draw order and layers
 
