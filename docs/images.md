@@ -93,7 +93,7 @@ Rendered as three image quads (top, middle, bottom) tinted by `ScrollBarImageCol
   whole length in a window shorter than it, or negative (it runs over the border and the other bar); a horizontal bar's
   thumb is no longer than its window (than a negative window's size).
 - **Thumb offset:** `floor(max(0, visible - thumb) * position / (canvas - visible))`: a thumb longer than its window stays
-  at its start.
+  at its start. A press grabs the thumb there, faded or not ([interaction.md](interaction.md)).
 - **Whole turns:** an element turned a whole turn (`Rotation` 360, -360, 720, or 180 under a parent turned 180) is drawn as
   a turned one: its edges stay where they are, a pixel whose centre is on its left or top edge is drawn and one on its right
   or bottom edge is not, where an unturned element's edges round half up (`fixtures/rotation-probe-whole.luau`). A turn

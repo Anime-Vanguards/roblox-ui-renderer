@@ -5435,3 +5435,79 @@ S.Parent = g
 fn activated_click_counts_match_a_client() {
     stacked_cases(&["clicks_touch", "clicks_mouse", "clicks2_touch", "clicks2_mouse"]);
 }
+
+/// Scroll bar thumbs as a sim client 0.747 grabs and drags them (parity backlog SC-TINYBAR-INPUT): a press grabs the
+/// thumb where it is drawn (at least 2t + 1 long, a horizontal one no longer than its window, a vertical one longer than
+/// its window at the window's start), a faded-out bar's too, and 10 px of movement scroll 10 x canvas / window. Each
+/// expected CanvasPosition is the client's.
+#[test]
+fn scroll_bar_thumbs_grab_where_drawn_and_drag_by_canvas_over_window() {
+    let (lua, engine) = start(1600.0, 1000.0);
+    run(
+        &lua,
+        &engine,
+        r#"
+local Root = Instance.new("ScreenGui")
+Root.IgnoreGuiInset = true
+Root.Parent = game:GetService("CoreGui")
+local X = 20
+local function case(name, w, h, t, horizontal, start, offsets)
+	local f = Instance.new("ScrollingFrame")
+	f.Name = name
+	f.Position = UDim2.fromOffset(X, 40)
+	f.Size = UDim2.fromOffset(w, h)
+	f.CanvasSize = if horizontal then UDim2.fromOffset(1000, 0) else UDim2.fromOffset(0, 1000)
+	f.ScrollBarThickness = t
+	f.BorderSizePixel = 0
+	f.ScrollingDirection = if horizontal then Enum.ScrollingDirection.X else Enum.ScrollingDirection.Y
+	f.Parent = Root
+	X += w + 20
+	local function place()
+		f.CanvasPosition = if horizontal then Vector2.new(start, 0) else Vector2.new(0, start)
+		UpdateAll()
+	end
+	for _, case in offsets do
+		local offset, expected = case[1], case[2]
+		place()
+		local p, s = f.AbsolutePosition, f.AbsoluteSize
+		local x, y
+		if horizontal then
+			x, y = p.X + offset, p.Y + s.Y - t / 2
+		else
+			x, y = p.X + s.X - t / 2, p.Y + offset
+		end
+		-- (one display frame after each event, as the client probe moved: a frame applies the waiting movement)
+		Dispatch({ type = "move", x = x, y = y })
+		StepDisplay(1 / 60)
+		Dispatch({ type = "down", x = x, y = y, button = 1 })
+		StepDisplay(1 / 60)
+		if horizontal then
+			Dispatch({ type = "move", x = x + 10, y = y })
+		else
+			Dispatch({ type = "move", x = x, y = y + 10 })
+		end
+		StepDisplay(1 / 60)
+		local got = if horizontal then f.CanvasPosition.X else f.CanvasPosition.Y
+		Dispatch({ type = "up", button = 1 })
+		StepDisplay(1 / 60)
+		assert(math.abs(got - expected) < 1e-3, string.format("%s at %g: %g, client %g", name, offset, got, expected))
+	end
+	f:Destroy()
+end
+case("normal", 100, 200, 12, false, 0, { { 3, 50 }, { 38, 50 }, { 41, 0 }, { 100, 0 } })
+case("normal400", 100, 200, 12, false, 400, { { 79, 400 }, { 81, 450 }, { 119, 450 }, { 121, 400 } })
+case("least40", 100, 200, 40, false, 0, { { 3, 50 }, { 41, 50 }, { 60, 50 }, { 80, 50 }, { 82, 0 } })
+case("least40at400", 100, 200, 40, false, 400, { { 58, 400 }, { 61, 450 }, { 120, 450 }, { 138, 450 }, { 141, 400 } })
+case("least50", 100, 300, 50, false, 0, { { 3, 33.3333333 } })
+case("fadehalf", 30, 30, 12, false, 0, { { 3, 333.3333333 } })
+case("fadeout", 20, 20, 12, false, 0, { { 1, 500 }, { 10, 500 }, { 18, 500 } })
+case("fadeout500", 20, 20, 12, false, 500, { { 1, 980 }, { 10, 980 } })
+case("long", 100, 20, 12, false, 0, { { 1, 500 }, { 10, 500 } })
+case("long500", 100, 20, 12, false, 500, { { 10, 980 } })
+case("long2", 100, 10, 6, false, 0, { { 3, 990 } })
+case("hshort", 30, 100, 12, true, 0, { { 3, 333.3333333 }, { 20, 333.3333333 }, { 26, 0 }, { 29, 0 } })
+case("hshort485", 30, 100, 12, true, 485, { { 1, 485 }, { 3, 818.3333333 }, { 20, 818.3333333 }, { 29, 485 } })
+case("hnormal", 200, 100, 12, true, 0, { { 3, 50 } })
+"#,
+    );
+}

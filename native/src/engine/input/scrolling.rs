@@ -904,16 +904,34 @@ pub(crate) fn stop(cx: &Cx, id: InstanceId) {
     }
 }
 
-// Scroll bar thumbs, measured (tools/interaction/experiments/thumb.mjs): pressing the thumb and
-// moving scrolls immediately by mouse delta * max / (track - thumb) (track = AbsoluteWindowSize
-// along the bar, thumb = max(2 * thickness, track * track / canvas)); the drag continues outside
-// the frame and clamps; a press on the track outside the thumb does nothing; dragging the content
-// does nothing with a mouse.
+// Scroll bar thumbs, measured (tools/interaction/experiments/thumb.mjs; a sim client 0.747 for the least, faded and
+// short-window thumbs, parity backlog SC-TINYBAR-INPUT): a press grabs the thumb where it is drawn (`thumb_length`, at
+// floor((track - thumb) x CanvasPosition / max) along the track, render/scene_draw.rs), a faded-out bar's too; moving
+// scrolls immediately by mouse delta x canvas / track (track = AbsoluteWindowSize along the bar), which is
+// max / (track - thumb) only while the thumb is track^2 / canvas long; the drag continues outside the frame and clamps;
+// a press on the track outside the thumb does nothing; dragging the content does nothing with a mouse.
 
 enum Thumb {
     None,
     Track,
     Axis(bool, f64),
+}
+
+/// A scroll bar thumb's length (GUI px) along a track of `track` px over a canvas of `canvas` px, thickness `t`, as a
+/// client draws it (render/scene_draw.rs bar_thumb) and takes presses on it: max(2t + 1, round(track^2 / canvas)), a
+/// horizontal one no longer than its track. Measured in a sim client 0.747: a 40 px bar on a 200 px window over 1000 px
+/// is grabbed up to 81 px from its start (80.5 grabs, 81.5 does not), and from 59.5 to 140.5 px scrolled half way; a
+/// 12 px horizontal bar on a 30 px window up to 25 px, scrolled half way from 2.5 to 27.5 px.
+fn thumb_length(track: f64, canvas: f64, t: f64, horizontal: bool) -> f64 {
+    let thumb = (2.0 * t + 1.0).max((track * (track / canvas).min(1.0) + 0.5).floor());
+    if horizontal { thumb.min(track.abs()) } else { thumb }
+}
+
+/// Where along its track a thumb starts: floor((track - thumb) x the scroll's progress), none when the thumb is longer
+/// than its track (a vertical one stays at the track's start)
+fn thumb_start(track: f64, thumb: f64, position: f64, max: f64) -> f64 {
+    let progress = if max > 0.0 { (position / max).clamp(0.0, 1.0) } else { 0.0 };
+    ((track - thumb).max(0.0) * progress).floor()
 }
 
 fn thumb_at(cx: &Cx, id: InstanceId, x: f64, y: f64) -> Thumb {
@@ -930,11 +948,10 @@ fn thumb_at(cx: &Cx, id: InstanceId, x: f64, y: f64) -> Thumb {
         let left = if bars.left { rx } else { rx + rw - thickness };
         if x >= left && x < left + thickness && y >= ry && y < ry + window.1 {
             let track = window.1;
-            let thumb = (2.0 * thickness).max(track * track / canvas.1);
-            let travel = (track - thumb).max(0.0);
-            let top = ry + if max_y > 0.0 { position.1 / max_y * travel } else { 0.0 };
-            if y >= top && y < top + thumb && travel > 0.0 {
-                return Thumb::Axis(true, max_y / travel);
+            let thumb = thumb_length(track, canvas.1, thickness, false);
+            let top = ry + thumb_start(track, thumb, position.1, max_y);
+            if y >= top && y < top + thumb {
+                return Thumb::Axis(true, canvas.1 / track);
             }
             return Thumb::Track;
         }
@@ -944,11 +961,10 @@ fn thumb_at(cx: &Cx, id: InstanceId, x: f64, y: f64) -> Thumb {
         let left0 = if bars.left && bars.vertical { rx + thickness + 1.0 } else { rx };
         if y >= top && y < top + thickness && x >= left0 && x < left0 + window.0 {
             let track = window.0;
-            let thumb = (2.0 * thickness).max(track * track / canvas.0);
-            let travel = (track - thumb).max(0.0);
-            let start = left0 + if max_x > 0.0 { position.0 / max_x * travel } else { 0.0 };
-            if x >= start && x < start + thumb && travel > 0.0 {
-                return Thumb::Axis(false, max_x / travel);
+            let thumb = thumb_length(track, canvas.0, thickness, true);
+            let start = left0 + thumb_start(track, thumb, position.0, max_x);
+            if x >= start && x < start + thumb {
+                return Thumb::Axis(false, canvas.0 / track);
             }
             return Thumb::Track;
         }

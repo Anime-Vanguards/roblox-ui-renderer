@@ -96,7 +96,7 @@ On `--device touch`, `ContextActionService:BindAction(name, handler, true, ...)`
   Snaps to `target` when `|x - target| < 1 px`. Verified against 55 Studio recordings / 3,648 frames in `tools/interaction/reference/scroll-physics.json`.
 - The topmost `ScrollingFrame` under the pointer with room to scroll claims the wheel; a frame already at its limit passes the event down. Writing `CanvasPosition` from Luau cancels any active spring animation.
 - `gameProcessedEvent` of the wheel is `true` when an `Active` element or a `ScrollingFrame` with `ScrollingEnabled` is under the pointer, whether or not anything scrolled (measured in a 0.747 client).
-- Dragging a scroll bar thumb scrolls by `mouse_delta * max_scroll / (track - thumb)`; clicking the empty track does nothing.
+- A press grabs a scroll bar's thumb where it is drawn ([images.md](images.md#scroll-bars): at least `2 × ScrollBarThickness + 1` long, a horizontal thumb no longer than its window, a vertical one longer than its window at the window's start), also on a frame so small its bars are faded out. Dragging it scrolls by `mouse_delta × canvas / window` along its axis (the canvas over `AbsoluteWindowSize`), clamped; clicking the empty track does nothing (measured in a 0.747 client).
 - The desktop storybook predicts scroll positions at display refresh rate between engine ticks using the same spring (`native/src/presentation.rs`).
 
 ## TextBox and dragging
