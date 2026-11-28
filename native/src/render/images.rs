@@ -1350,12 +1350,18 @@ pub fn plan_texture_image(
     // A quad's edges on the rasterizer's 1/256 texel grid (geometry.rs texel_edge); a clip, a scissor, in whole texels
     let tx = move |e: f64| super::geometry::texel_edge((e - space.l) * space.sx);
     let ty = move |e: f64| super::geometry::texel_edge((e - space.t) * space.sy);
-    let (mut x0, mut y0, mut x1, mut y1) = (
-        tx(rect.x),
-        ty(rect.y),
-        tx(rect.x + rect.w),
-        ty(rect.y + rect.h),
-    );
+    // What the image may cover: its rect, and the far corner a negative SliceScale draws out past its top and left,
+    // in a group's texture as on the screen (image_records.rs; fixtures/group-probe-slicenegative.luau)
+    let mut area = [rect.x, rect.y, rect.x + rect.w, rect.y + rect.h];
+    if image["scaleType"] == "Slice" && n(&image["sliceScale"], 1.0) < 0.0 {
+        for q in &quads {
+            let [qx0, qy0, qx1, qy1] = [q.x0, q.y0, q.x1, q.y1].map(|v| snap_device(v, scale));
+            if qx1 > qx0 && qy1 > qy0 {
+                area = [area[0].min(qx0), area[1].min(qy0), area[2].max(qx1), area[3].max(qy1)];
+            }
+        }
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (tx(area[0]), ty(area[1]), tx(area[2]), ty(area[3]));
     if node["clip"].is_array() {
         let [cx, cy, cw, ch] = a(&node["clip"], [0.0; 4]);
         let [cl, cr] = device_span(cx, cw, scale);
@@ -1696,6 +1702,31 @@ mod texture_mask_tests {
         let mut cache = ImageCache::default();
         let layer = prepare_texture_image(&node, &texture, rect, [0.; 4], space, 3.0, &mut cache).unwrap();
         assert_eq!((layer.y, layer.height), (153, 140));
+    }
+
+    /// A negative SliceScale draws the far corner out past the image's top and left in a CanvasGroup's texture as on
+    /// the screen (fixtures/group-probe-slicenegative.luau: a client draws it there, 143,524 px over 2 levels at 1.5x
+    /// while it was clipped to the image's rect). A 64 x 64 logical image of a 32 px texture with 8 px borders at -1
+    /// covers 696..876 x 81..261 px for its rect at 780..876 x 165..261 (slice_scale_tests)
+    #[test]
+    fn a_group_textures_negative_slice_reaches_past_the_image() {
+        let texture = TextureAsset {
+            id: crate::assets::AssetId("white".into()),
+            width: 32,
+            height: 32,
+            rgba: vec![255; 32 * 32 * 4].into(),
+        };
+        let node = serde_json::json!({"image":{"uri":"white","scaleType":"Slice","sliceCenter":[8, 8, 24, 24],"sliceScale":-1}});
+        let rect = ImageRect { x: 780., y: 165., w: 96., h: 96., raw: [780., 165., 96., 96.], snapped: true };
+        let space = ImageSpace { l: 0., t: 0., sx: 1., sy: 1., nw: 1000, nh: 400 };
+        let mut cache = ImageCache::default();
+        let layer = prepare_texture_image(&node, &texture, rect, [0.; 4], space, 1.5, &mut cache).unwrap();
+        assert_eq!((layer.x, layer.y, layer.width, layer.height), (696, 81, 180, 180));
+        assert!(layer.rgba.chunks_exact(4).all(|p| p[3] == 255));
+        // A positive scale stays within its rect
+        let node = serde_json::json!({"image":{"uri":"white","scaleType":"Slice","sliceCenter":[8, 8, 24, 24],"sliceScale":1}});
+        let layer = prepare_texture_image(&node, &texture, rect, [0.; 4], space, 1.5, &mut cache).unwrap();
+        assert_eq!((layer.x, layer.y, layer.width, layer.height), (780, 165, 96, 96));
     }
 }
 

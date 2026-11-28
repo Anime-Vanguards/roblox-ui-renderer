@@ -120,6 +120,10 @@
 			"digest": "78308be5e04bd08999c2d095aca1bf79217132271e66b126f21f4fcdcaeaa1dd",
 			"status": "ok"
 		},
+		"fast/edit/group-probe-slicenegative": {
+			"digest": "cb4d7c8adc11aff04d035ae93c6ab1c432e56a24403f9e78d7cf682c6fd28758",
+			"status": "ok"
+		},
 		"fast/edit/group-probe-stroke-gradient": {
 			"digest": "3dd23b83b6e0b9c5a6ae0d0e2de03e862793c82e1158dcf94655d159730056de",
 			"status": "ok"
@@ -1580,6 +1584,10 @@
 			"digest": "ce444b090ff7a455561aa23d2c07077bcf2c2c9415d5e948e4029ab324597a43",
 			"status": "ok"
 		},
+		"fixtures/edit/group-probe-slicenegative": {
+			"digest": "8574d777832e655ac689ac513cb3cb11e9e86c5c803f3c38162cca1224bc8ca1",
+			"status": "ok"
+		},
 		"fixtures/edit/group-probe-stroke-gradient": {
 			"digest": "9375c852f91c89e2e297ebef3038d411dc6b3e80afec6a3c787ac43c1e26c804",
 			"status": "ok"
@@ -3026,6 +3034,10 @@
 		},
 		"fixtures/play/group-probe-orbits": {
 			"digest": "2d7bcada9de2c4cd2702d1c86983bf424bc3a8f2543b800dbcea0b13373eabc5",
+			"status": "ok"
+		},
+		"fixtures/play/group-probe-slicenegative": {
+			"digest": "ce2e0ffa52cf8dc2347ba12c04561e41324f8b377b4488b2d886eb66587a2221",
 			"status": "ok"
 		},
 		"fixtures/play/group-probe-stroke-gradient": {
