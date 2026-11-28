@@ -780,6 +780,10 @@
 			"digest": "f2fc59e30e9eba6a6019c37c73ae80e993d46bfaf5067ec2b8898e3591090956",
 			"status": "ok"
 		},
+		"fast/edit/stories-autosize-cull6": {
+			"digest": "e785c0bad8eef236f265c430dae615ad5d8604d1c605ab2a86fd918baae52ee7",
+			"status": "ok"
+		},
 		"fast/edit/stories-autosize-surface": {
 			"digest": "4f6f540a92b4d4cdca3422b4de397c8fee4e0c66f0e7ce5085bb47e8f7af4e40",
 			"status": "ok"
@@ -2324,6 +2328,10 @@
 			"digest": "736cbe97e3ac1b4883f7ba666496ef23014464fd0154d8c753ef8cf3180f9f54",
 			"status": "ok"
 		},
+		"fixtures/edit/stories-autosize-cull6": {
+			"digest": "df734bf71b41c0cd03b11602408a5b387d6db2a3e5e08e8a6e38ab024da73d04",
+			"status": "ok"
+		},
 		"fixtures/edit/stories-autosize-surface": {
 			"digest": "4fd650764cb7307551e1460c75ac3884d4d4a16445abdbbea807f4230d23842f",
 			"status": "ok"
@@ -3814,6 +3822,10 @@
 		},
 		"fixtures/play/stories-autosize-cull5": {
 			"digest": "f191dd904f2aa7620128c143e8ed30d6a63bdd9694da2388d91048aad3d1d2f7",
+			"status": "ok"
+		},
+		"fixtures/play/stories-autosize-cull6": {
+			"digest": "df2cd72dafe2b34b628d3aa256add0809722c9f95f29949d321cea983d44791a",
 			"status": "ok"
 		},
 		"fixtures/play/stories-autosize-surface": {

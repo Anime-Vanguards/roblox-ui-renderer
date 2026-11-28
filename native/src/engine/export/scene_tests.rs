@@ -582,6 +582,50 @@ Check("Global", { "AChild", "B", "AutoChild", "A", GroupDraw, "Clip" })
     );
 }
 
+/// A culled AutomaticSize object (its centre outside its clip, turned or not) and its own children draw nothing, their
+/// children do; a culled text object keeps itself; a culled CanvasGroup takes its whole content (sim client 0.747,
+/// fixtures/stories-autosize-cull6.luau)
+#[test]
+fn culled_automatic_size_objects_leave_their_grandchildren_drawn() {
+    run(
+        Options { clips_descendants_supports_rotation: true, ..options(800.0, 600.0, 1.0) },
+        r#"
+local Root = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Root.IgnoreGuiInset = true
+local Names = {}
+local function Make(Class, Name, Parent)
+	local Object = Instance.new(Class, Parent)
+	Object.Name = Name
+	Object.Size = UDim2.fromOffset(100, 100)
+	Names[Id(Object)] = Name
+	return Object
+end
+local Clip = Make("Frame", "Clip", Root)
+Clip.Size = UDim2.fromOffset(20, 20)
+Clip.ClipsDescendants = true
+local function Card(Name, Class, Rotation)
+	local Card = Make(Class, Name, Clip)
+	Card.Position = UDim2.fromOffset(0, 15)
+	Card.AutomaticSize = Enum.AutomaticSize.Y
+	Card.Rotation = Rotation or 0
+	local Mid = Make("Frame", Name .. "Mid", Card)
+	Make("Frame", Name .. "Grand", Mid)
+	return Card
+end
+Card("Plain", "Frame")
+Card("Turned", "Frame", 3)
+Card("Text", "TextLabel")
+Card("Group", "CanvasGroup")
+local Draw = {}
+for _, Entry in Fresh(Root).layers[1].draw do
+	table.insert(Draw, if type(Entry) == "table" then "group" else Names[Entry])
+end
+assert(Same(Draw, { "Clip", "PlainGrand", "TurnedGrand", "Text", "TextGrand" }), table.concat(Draw, ","))
+"#,
+        &[],
+    );
+}
+
 /// runtime/tests/scene_presentation.luau: presentation mode retains culled nodes with their clip
 /// provenance and scroll metadata (range, direction, zeroSensitive / enabled), without changing
 /// the canonical node fields or draw lists; normal mode carries none of it.

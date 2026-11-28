@@ -1884,13 +1884,32 @@ const KEY_ENABLED: u16 = 1 << 14;
 const KEY_PLACEMENT: u16 = 1 << 3 | 1 << 4;
 const KEY_Z: u16 = 1 << 10 | 1 << 11 | 1 << 12 | 1 << 13 | 1 << 14;
 
+/// What a culled AutomaticSize object (its centre outside its clip, `auto_culled`) takes with it, for the children of
+/// a node. Measured in a sim client 0.747 (fixtures/stories-autosize-cull6.luau): its own children draw nothing,
+/// turned ones too, unless its layout places them; their children and everything below draw as usual (a marker,
+/// a TextLabel and a ScrollingFrame two or three levels down, under a culled Frame, TextLabel, ImageButton, a
+/// turned card, an AutomaticSize X card and a card in an unscrolled ScrollingFrame window); a culled CanvasGroup's
+/// whole content draws nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Cull {
+    /// Drawn as usual
+    No,
+    /// Drawn as usual under a parent that draws nothing of its own (a culled object's own child): a Path2D, drawn
+    /// with its parent, is not
+    UnderSkipped,
+    /// A culled object's own children: nothing of their own is drawn; their children are
+    Own,
+    /// A culled CanvasGroup's content: nothing is drawn
+    All,
+}
+
 /// The walk inputs of a child subtree (the arguments of the `visit` that reaches it).
 #[derive(Clone, PartialEq)]
 pub(crate) struct SubtreeInputs {
     parent_id: u32,
     matrix: Option<Transform>,
     clip: Option<[f64; 4]>,
-    suppressed: bool,
+    cull: Cull,
     scrolled: bool,
     owners: Option<Rc<[u32]>>,
 }
@@ -2147,7 +2166,7 @@ impl Walk<'_, '_, '_, '_> {
         tree: &mut Vec<GlobalItem>,
         matrix: Option<Transform>,
         clip: Option<[f64; 4]>,
-        suppressed: bool,
+        cull: Cull,
         scrolled: bool,
         owners: Option<&Rc<[u32]>>,
     ) {
@@ -2157,10 +2176,10 @@ impl Walk<'_, '_, '_, '_> {
         // recorded it, visited with the same inputs, adds that build's nodes (all reused), draw
         // entries and ids again without being walked (see `Subtree`)
         let skippable = retained && !self.global;
-        let inputs = skippable.then(|| SubtreeInputs { parent_id, matrix, clip, suppressed, scrolled, owners: owners.cloned() });
+        let inputs = skippable.then(|| SubtreeInputs { parent_id, matrix, clip, cull, scrolled, owners: owners.cloned() });
         for &child in children.iter() {
             if self.ctx.is_exactly(child, self.ctx.c.path2d) {
-                self.visit_path(child, id, parent_id, flat, tree, clip, suppressed, owners);
+                self.visit_path(child, id, parent_id, flat, tree, clip, cull != Cull::No, owners);
                 continue;
             }
             if let Some(inputs) = &inputs {
@@ -2169,7 +2188,7 @@ impl Walk<'_, '_, '_, '_> {
                 }
             }
             let before = (flat.len(), self.sequence, self.cache.as_ref().map_or((0, 0), |c| (c.exported.len(), c.misses)));
-            self.visit_child(child, parent_id, flat, tree, matrix, clip, suppressed, scrolled, owners);
+            self.visit_child(child, parent_id, flat, tree, matrix, clip, cull, scrolled, owners);
             if let Some(inputs) = &inputs {
                 self.record_subtree(child, inputs, before, flat);
             }
@@ -2333,7 +2352,7 @@ impl Walk<'_, '_, '_, '_> {
         tree: &mut Vec<GlobalItem>,
         matrix: Option<Transform>,
         clip: Option<[f64; 4]>,
-        suppressed: bool,
+        cull: Cull,
         scrolled: bool,
         owners: Option<&Rc<[u32]>>,
     ) {
@@ -2362,8 +2381,12 @@ impl Walk<'_, '_, '_, '_> {
         let node_clip = if escapes { None } else { clip };
         let is_text = ctx.is_text_object(child);
         let canvas_group = ctx.is_exactly(child, ctx.c.canvas_group);
-        let cull_self = !suppressed && !child_rotated && !scrolled && auto_culled(ctx, child, record, node_clip);
-        let base_skip_self = suppressed || (cull_self && !is_text);
+        // A culled AutomaticSize object, turned or not, and its own children draw nothing of their own (a text object
+        // culled by its centre keeps itself); a culled CanvasGroup's content draws nothing (`Cull`)
+        let suppressed = cull == Cull::All;
+        let own_child = matches!(cull, Cull::Own | Cull::All);
+        let cull_self = !suppressed && !scrolled && auto_culled(ctx, child, record, node_clip);
+        let base_skip_self = own_child || (cull_self && !is_text);
         let rotation_culled = child_rotated && outside(record, clip);
         let skip_self = base_skip_self || rotation_culled;
         // Presentation: the clip owners of this node (an escaping rotated node keeps only the
@@ -2371,7 +2394,15 @@ impl Walk<'_, '_, '_, '_> {
         // (shared lists: most nodes pass their parent's on unchanged)
         let node_owners: Option<Rc<[u32]>> = if presentation && escapes { Some(Rc::from(Vec::new())) } else { owners.cloned() };
         let draw_skip_self = if presentation { base_skip_self } else { skip_self };
-        let child_suppressed = suppressed || (cull_self && (canvas_group || !has_grid_layout(ctx, child)));
+        let child_cull = if suppressed || (canvas_group && (cull_self || own_child)) {
+            Cull::All
+        } else if cull_self && !has_grid_layout(ctx, child) {
+            Cull::Own
+        } else if own_child {
+            Cull::UnderSkipped
+        } else {
+            Cull::No
+        };
         let canvas_position = if ctx.is_exactly(child, ctx.c.scrolling_frame) {
             ctx.get(child, K::CanvasPosition as NameId).and_then(Value::as_vector2)
         } else {
@@ -2429,14 +2460,14 @@ impl Walk<'_, '_, '_, '_> {
                     children: Vec::new(),
                 };
                 let mut unused = Vec::new();
-                self.visit(child, serial, &mut unused, &mut item.children, child_matrix, child_clip, child_suppressed, child_scrolled, child_owners.as_ref());
+                self.visit(child, serial, &mut unused, &mut item.children, child_matrix, child_clip, child_cull, child_scrolled, child_owners.as_ref());
                 // A subtree that draws nothing is still visited (its nodes are exported) but not listed
-                if !(base_skip_self && child_suppressed) {
+                if !(base_skip_self && child_cull == Cull::All) {
                     tree.push(item);
                 }
             } else {
                 let group = canvas_group && !draw_skip_self;
-                let hidden = base_skip_self && child_suppressed;
+                let hidden = base_skip_self && child_cull == Cull::All;
                 let mut own = Vec::new();
                 let target: &mut Vec<Draw> = if group || hidden { &mut own } else { flat };
                 if !draw_skip_self {
@@ -2446,7 +2477,7 @@ impl Walk<'_, '_, '_, '_> {
                     }
                 }
                 let mut unused = Vec::new();
-                self.visit(child, serial, target, &mut unused, child_matrix, child_clip, child_suppressed, child_scrolled, child_owners.as_ref());
+                self.visit(child, serial, target, &mut unused, child_matrix, child_clip, child_cull, child_scrolled, child_owners.as_ref());
                 if group && !hidden {
                     flat.push(Draw::Group { group: serial, draw: own });
                 }
@@ -2505,7 +2536,7 @@ fn traverse(ctx: &Ctx, out: &mut Export, roots: &[InstanceId], mut cache: Option
         walk.node(root, root_record, None, &None, None, z, None);
         let mut flat = Vec::new();
         let mut tree = Vec::new();
-        walk.visit(root, serial, &mut flat, &mut tree, None, None, false, false, root_owners.as_ref());
+        walk.visit(root, serial, &mut flat, &mut tree, None, None, Cull::No, false, root_owners.as_ref());
         nodes.append(&mut walk.nodes);
         let draw = if !enabled {
             Vec::new()
