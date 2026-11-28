@@ -67,9 +67,10 @@
 // --load Service/Name=<file.rbxm|.rbxmx|.rbx> (repeatable): a saved model's top-level instances (a SerializationService
 // blob) in a Folder at that path for the story to clone, keeping the default project. --all-layers: draw every enabled
 // ScreenGui the run leaves under the PlayerGui and CoreGui (DisplayOrder, then the order they were
-// parented or enabled), not only the story gui. --topbar-inset <px>: GuiService's top inset (default 0, as
-// in Studio's Edit mode), which ScreenGuis with IgnoreGuiInset false start below; scripts read AbsolutePosition
-// from below it, as in a Roblox client. --run-context loopback --server-harness <file> [--latency <frames>] (with
+// parented or enabled), not only the story gui. --topbar-inset <px>: GuiService's top inset (default 58 in play
+// mode, a client's top bar, and 0 in edit mode, as in Studio's edit viewport), which ScreenGuis with IgnoreGuiInset false
+// start below; scripts read AbsolutePosition from below it, as in a Roblox client. A play run with an inset draws
+// Roblox's own GUI (top bar, player list, health bar) over the game's (docs/render.md "Roblox's own GUI"). --run-context loopback --server-harness <file> [--latency <frames>] (with
 // --mode play): the story is the client of a server and client in one run (the engine's "Loopback run context"); the
 // server mounts the project and runs the harness's Server, and the client's DataModel is the server's replicated copy.
 // --glyph-scale <r>: the GUI is laid out and its text rasterized at r device px per GUI px, and the picture drawn at

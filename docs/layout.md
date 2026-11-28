@@ -13,7 +13,8 @@ How `rur`'s layout engine (`native/src/engine/layout/`) computes `AbsolutePositi
 
 ## Top-bar inset
 
-With `--topbar-inset <px>` (e.g., `58`), scripts read `AbsolutePosition` in Roblox client space (shifted upward by the inset relative to physical screen coordinates):
+In play mode the inset is a client's top bar, 58 px, unless `--topbar-inset <px>` gives another (`0`: none); edit mode
+has none unless given. With an inset, scripts read `AbsolutePosition` in Roblox client space (shifted upward by the inset relative to physical screen coordinates):
 - An `IgnoreGuiInset = true` `ScreenGui` reads `(0, -58)` with full screen height.
 - A default `ScreenGui` reads `(0, 0)` with height reduced by `58 px`.
 - `InputObject.Position`, `Mouse.Y`, and `GetGuiObjectsAtPosition` use the same inset coordinate space, while layout records, rendering, hit tests, and exported rects remain in screen pixels.

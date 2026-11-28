@@ -255,7 +255,8 @@ impl Session {
         let _reply_scope = crate::microprofile::scope("Build reply");
         let layout_before = profile.layout_before.unwrap_or_else(|| layout_time(&self.engine));
         let mut message = self.message(kind, frames, &profile, layout_time(&self.engine) - layout_before);
-        if kind == "frame" && !self.dirty.get() {
+        // (Roblox's own GUI moves on its own: chrome.rs)
+        if kind == "frame" && !self.dirty.get() && !super::chrome::animating(&self.engine) {
             message.insert("unchanged".into(), Json::Bool(true));
             self.insert_presentation(lua, &mut message);
             message.extend(extra);

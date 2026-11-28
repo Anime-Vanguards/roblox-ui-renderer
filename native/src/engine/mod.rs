@@ -9,6 +9,7 @@
 pub use roblox_engine_emulator::*;
 
 pub mod cache_counts;
+pub mod chrome;
 pub mod cli;
 pub mod export;
 pub mod input;
@@ -57,6 +58,8 @@ pub struct Gui {
     /// With `--glyph-scale` (the engine then lays out at that scale): the device scale the picture is drawn at
     /// (`--scale`), the scene header's `viewport.scale` beside its `glyphScale` (export.rs viewport_json); None without
     pub draw_scale: std::cell::Cell<Option<f64>>,
+    /// Roblox's own GUI on a playing client's screen (chrome.rs): the core GUI switches the game set, the instances drawn
+    pub chrome: chrome::Chrome,
 }
 
 impl Extension for Gui {
@@ -83,6 +86,7 @@ impl Layer for GuiLayer {
         path2d_layout::install(engine);
         input::install(engine);
         layers::install(engine);
+        chrome::install(engine);
     }
 }
 

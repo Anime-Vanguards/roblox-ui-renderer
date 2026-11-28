@@ -1854,6 +1854,9 @@ pub(crate) struct Layer {
     /// Under a PlayerGui: drawn in Roblox's PlayerGui pass, below every CoreGui layer whatever their
     /// DisplayOrders (`playerGui: true`: a play run's story gui, a touch device's buttons and `--all-layers`' layers)
     player_gui: bool,
+    /// Roblox's own GUI on a playing client's screen (`roblox: true`, chrome.rs): drawn, not the game's (`rur cost` leaves
+    /// it out)
+    roblox: bool,
 }
 
 impl Layer {
@@ -1866,6 +1869,9 @@ impl Layer {
         });
         if self.player_gui {
             layer["playerGui"] = Json::Bool(true);
+        }
+        if self.roblox {
+            layer["roblox"] = Json::Bool(true);
         }
         layer
     }
@@ -2594,7 +2600,8 @@ fn traverse(ctx: &Ctx, out: &mut Export, roots: &[InstanceId], mut cache: Option
         let player_gui = ctx.c.player_gui.is_some_and(|class| {
             std::iter::successors(ctx.state.dom.at(root).parent, |&id| ctx.state.dom.at(id).parent).any(|id| ctx.class(id) == class)
         });
-        layers.push(Layer { root: serial, display_order, draw, global, player_gui });
+        let roblox = super::chrome::is_root(ctx.engine, root);
+        layers.push(Layer { root: serial, display_order, draw, global, player_gui, roblox });
     }
     if let Some((index, node)) = selection_highlight(ctx, out, &layers) {
         nodes.push(node);
@@ -2725,7 +2732,7 @@ fn text_engine(engine: &Engine) -> std::cell::RefMut<'_, TextEngine> {
 /// (input/touch_buttons.rs) when the run made one, which a client draws whatever else is on screen (in the PlayerGui
 /// pass: under an edit run's story gui, which sits in CoreGui; above a play run's, which came into the PlayerGui
 /// first; `--all-layers` orders it among the PlayerGui's ScreenGuis), and the ScreenGuis nested in GuiObjects of those,
-/// each a layer of its own (layers.rs `with_nested`).
+/// each a layer of its own (layers.rs `with_nested`); in a play run Roblox's own GUI last (chrome.rs).
 pub(crate) fn drawn_roots(engine: &Engine, roots: &[InstanceId]) -> Vec<InstanceId> {
     let mut drawn = roots.to_vec();
     if let Some(gui) = super::input::touch_buttons::gui(engine) {
@@ -2733,7 +2740,10 @@ pub(crate) fn drawn_roots(engine: &Engine, roots: &[InstanceId]) -> Vec<Instance
             drawn.push(gui);
         }
     }
-    super::layers::with_nested(engine, &drawn)
+    let mut drawn = super::layers::with_nested(engine, &drawn);
+    // (Roblox's own GUI on a playing client's screen, in the CoreGui pass: chrome.rs)
+    drawn.extend(super::chrome::roots(engine));
+    drawn
 }
 
 /// Scene.Build (one-shot, uncached): the scene JSON of `roots` (and [`drawn_roots`]) plus `extra` top-level fields.

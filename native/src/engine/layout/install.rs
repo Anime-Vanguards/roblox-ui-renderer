@@ -93,6 +93,21 @@ pub fn ensure(engine: &Engine, id: InstanceId) {
     }
 }
 
+/// Lays out `id`'s tree when it changed, at no price: Roblox's own GUI (chrome.rs), which a client's core scripts lay out
+/// on their own time, not a game script's.
+pub fn ensure_uncharged(engine: &Engine, id: InstanceId) {
+    with_pass(engine, |pass| {
+        if pass.state.dom.get(id).is_none() {
+            return;
+        }
+        let root = pass.find_root(id);
+        pass.l.owed.remove(&root);
+        if !pass.is_laid_out(root) {
+            pass.run(root);
+        }
+    });
+}
+
 /// What a client spends laying a changed GUI out for a script's read (`ensure`): a pass, the records it stored or moved, the
 /// texts it laid out when the read object is among what changed (`texts_read`: a label's TextBounds after its Text), and
 /// after a geometry write the written objects' unchanged siblings, which the read lays out again (`Stats::relaid_near`; one

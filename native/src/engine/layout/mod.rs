@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub use install::{displayed_roots, ensure, ensure_with_state, install, invalidate, mark_changed, pages, set_track_churn, stats_snapshot, take_churn, update_all};
+pub use install::{displayed_roots, ensure, ensure_uncharged, ensure_with_state, install, invalidate, mark_changed, pages, set_track_churn, stats_snapshot, take_churn, update_all};
 pub use record::{Rect, Record, ScrollBars, TextInfo, Transform, absolute_position};
 
 use crate::engine::GuiEngine;
@@ -351,6 +351,9 @@ pub struct Layout {
     pub viewport_width: f64,
     pub viewport_height: f64,
     pub top_inset: f64,
+    /// Where the top bar's band right of Roblox's buttons starts (GuiService.TopbarInset's Min.X: 164, 120 with chat off,
+    /// 0 on a gamepad; chrome.rs), None without Roblox's top bar: a TopbarSafeInsets ScreenGui is laid out in that band
+    pub topbar_start: Option<f64>,
     pub clips_descendants_supports_rotation: bool,
     /// `Layout.Generation` (Invalidate forces a full pass)
     pub generation: u64,
@@ -427,6 +430,7 @@ impl Layout {
             viewport_width: options.profile.device.viewport().0,
             viewport_height: options.profile.device.viewport().1,
             top_inset: options.profile.device.topbar_inset(),
+            topbar_start: super::chrome::band_start(options, true),
             clips_descendants_supports_rotation: options.clips_descendants_supports_rotation,
             generation: 1,
             clock: 0,

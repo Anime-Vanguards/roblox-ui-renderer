@@ -19,10 +19,11 @@
 //! (lua/plugin.luau) and exports its dock widgets. `--all-layers 1` exports every enabled ScreenGui
 //! the run leaves under the local player's PlayerGui or CoreGui, in Roblox's draw order (layers.rs).
 //! `--load` puts a saved model's top-level instances in a Folder at that path before the story runs.
-//! `--topbar-inset px` is GuiService's top inset (default 0, as Studio's Edit mode): ScreenGuis with
-//! IgnoreGuiInset false start that far down, and GetGuiInset reports it (a running client reserves
-//! the topbar's height, 58). `--device` is the input hardware UserInputService reports
-//! (TouchEnabled, MouseEnabled, GetLastInputType...; default desktop).
+//! `--topbar-inset px` is GuiService's top inset (default 58 in play mode, a playing client's top bar, and 0 in edit
+//! mode, as Studio's edit viewport): ScreenGuis with IgnoreGuiInset false start that far down, and GetGuiInset reports
+//! it. A play run with an inset shows Roblox's own GUI over the game's (chrome.rs); `--topbar-inset 0` shows none.
+//! `--device` is the input hardware UserInputService reports (TouchEnabled, MouseEnabled, GetLastInputType...; default
+//! desktop).
 //!
 //! `--out` (alias `--dump-scene`) writes the scene JSON (else stdout) and a
 //! `rur: <status>; <n> nodes; <n> output lines; <s>s -> <out>` line on stderr.
@@ -698,6 +699,10 @@ fn install_test_hooks(lua: &Lua, engine: &Rc<Engine>) -> LuaResult<()> {
     shared.raw_set("rur", rur)
 }
 
+/// GuiService's top inset in a play run unless `--topbar-inset` or the client profile gives one: the height of a client's
+/// top bar (GetGuiInset (0, 58) on a 0.747 client running its core scripts, desktop and touch, every device scale)
+pub const TOPBAR_HEIGHT: f64 = 58.0;
+
 /// main.luau's option handling: engine options, roots, snapshots and target size of `args` (the
 /// emulator's launch::prepare, with the story's --margin around the viewport and this checkout as the
 /// default repo).
@@ -715,6 +720,11 @@ pub fn prepare(args: &Args) -> Result<Prepared, String> {
     let mut options = prepared.options;
     if let Some(inset) = args.topbar_inset {
         options.profile.device.topbar_inset = Some(inset);
+    }
+    // (a playing client shows Roblox's top bar: GuiService's inset is its height unless an option or the client profile
+    // says otherwise; chrome.rs draws the bar)
+    if options.profile.device.topbar_inset.is_none() && !options.edit_mode() && !options.server() {
+        options.profile.device.topbar_inset = Some(TOPBAR_HEIGHT);
     }
     Ok(Prepared { options, roots: prepared.roots, snapshot_dir: prepared.snapshot_dir, target: (width, height), mounts: prepared.mounts })
 }

@@ -3257,15 +3257,23 @@ impl<'a> Pass<'a> {
             // (a ScreenGui that is not displayed, in ReplicatedStorage or inside a frame there, reads the screen's size too:
             // measured in a 0.747 client, notes/layout.md "ScreenGuis inside GuiObjects")
             if class == c.ScreenGui {
-                let below_topbar = match self.get(root, n.ScreenInsets) {
-                    Some(value) => value.as_enum() == self.l.ids.core_ui_safe_insets,
-                    None => true,
-                };
+                let insets = self.get(root, n.ScreenInsets).map(|value| value.as_enum());
+                let below_topbar = insets.is_none_or(|item| item == self.l.ids.core_ui_safe_insets);
+                // (TopbarSafeInsets with Roblox's top bar shown: the band right of its buttons, the inset's height; measured
+                // in a 0.747 client, ror P9b and notes/interaction.md "Roblox's own GUI")
+                let band = self.l.topbar_start.filter(|_| insets.is_some_and(|item| item.is_some() && item == self.l.ids.topbar_safe_insets));
                 let inset = if below_topbar { self.l.top_inset } else { 0.0 };
-                x = 0.0;
-                y = inset;
-                width = self.l.viewport_width;
-                height = self.l.viewport_height - inset;
+                if let Some(start) = band {
+                    x = start;
+                    y = 0.0;
+                    width = (self.l.viewport_width - x).max(0.0);
+                    height = self.l.top_inset;
+                } else {
+                    x = 0.0;
+                    y = inset;
+                    width = self.l.viewport_width;
+                    height = self.l.viewport_height - inset;
+                }
             } else if class == c.DockWidgetPluginGui || class == c.PluginGui {
                 // `--plugin` dock widgets (story.rs install_plugin): docked over the whole viewport
                 x = 0.0;

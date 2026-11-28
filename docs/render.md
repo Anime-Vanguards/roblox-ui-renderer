@@ -47,7 +47,7 @@ node cli/rur.mjs render --story path/to/Button.story.luau --viewport 1200x900 --
 | `--controls JSON\|file` | Initial control values (e.g., `'{"Group.Name": 2}'`). List available controls with `node cli/controls.mjs`. |
 | `--actions JSON\|file` | Scripted mouse/keyboard input timeline ([stories.md](stories.md#timed-input---actions)). |
 | `--rotation-clipping enabled\|disabled` | Toggle modern Roblox clipping of rotated descendants (default `enabled`). |
-| `--mode edit\|play`, `--device desktop\|touch\|gamepad`, `--player <name>`, `--place-id <n>`, `--topbar-inset <px>` | Emulated client environment settings. |
+| `--mode edit\|play`, `--device desktop\|touch\|gamepad`, `--player <name>`, `--place-id <n>`, `--topbar-inset <px>` | Emulated client environment settings. In play mode the top-bar inset is 58 (a client's top bar) unless given, and Roblox's own GUI is drawn over the story's ([Roblox's own GUI](#robloxs-own-gui)); `--topbar-inset 0` shows a client without it. |
 | `--run-context loopback`, `--server-harness <file>`, `--latency <frames>` | With `--mode play`: the story runs on the client of a server and client in one run (the engine's "Loopback run context"). The server mounts the project and runs the harness's `Server` (`{ Server = function(Context) ... end }`; without it, the place's own server scripts); the client's DataModel is the server's replicated copy, kept up to date, and remotes cross both ways. `--latency` delays each way by that many frames (default 1). |
 | `--snapshot-dir <dir>` | Mount Studio-only instances previously exported via `tools/sweep/studio-assets.mjs`. |
 
@@ -97,6 +97,44 @@ Pass `--plugin` (or `--plugin '{"Theme":"Dark"}'` / JSON file to seed plugin set
 ```powershell
 node cli/rur.mjs render --fixture clone-playergui.luau --load "ServerStorage/Saved=playergui.rbxm" --all-layers --viewport 844x390 --scale 1
 ```
+
+## Roblox's own GUI
+
+A playing Roblox client draws its own GUI over the game's: the top bar's buttons, the player list and the health bar.
+`rur` draws them in play mode (`--mode play`), as a Roblox 0.747 client running its core scripts draws them at every
+device scale, so a play render looks like a client's screen. Edit mode emulates Studio's edit viewport, which has none,
+and draws none; so does a play run with `--topbar-inset 0` (a client without the top bar, whose GuiService inset is 0).
+
+| Piece | Where (GUI pixels) | Shown |
+|---|---|---|
+| Menu button | a dark disc 44 x 44 at (16, 12) with the Roblox logo | always, but not on a gamepad (`--device gamepad`) |
+| Unibar | a dark pill at (68, 12), 44 tall: 96 wide with the menu and chat buttons, 52 with the menu button alone | always, but not on a gamepad; chat's button while chat is enabled |
+| Player list | 62 px down at the right edge less 170: the local player's `DisplayName`, and with leaderstats a title row and up to four stat columns | desktop only (`--device desktop`, the default) |
+| Health bar | 125 x 20 at the right edge less 141, 24 px down, filled to the local character's health share in green, yellow or red | while the `Humanoid` of `Players.LocalPlayer.Character` is below its `MaxHealth` |
+| Flash of a hit | a red vignette over the whole screen for about 0.65 s | when that `Humanoid` loses at least 5 % of its `MaxHealth` at once |
+
+A game changes them the way it does in a client:
+
+- `StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)` takes chat's button out of the Unibar, `PlayerList` hides
+  the player list, `Health` the health bar and the flash, and `All` all three. The menu button and the Unibar always
+  stay, as in a client.
+- `StarterGui:SetCore("TopbarEnabled", false)` hides the player list and nothing else: a current client keeps its top
+  bar, and `GuiService:GetGuiInset()` still reads 58.
+- Leaderstats are the `IntValue`, `NumberValue`, `StringValue` and `BoolValue` children of an instance named
+  `leaderstats` in the local player. Each adds a 77 px column, four at most; numbers read as the client writes them
+  (`1,234`, `12.3K` for a fractional value past a thousand, `1.2M`, `1B`), booleans as `1` and `0`.
+- What moves moves as in a client, frame by frame: the Unibar narrowing or widening after chat changes, the player list
+  sliding in when it is shown again, the flash fading in and out.
+- `ScreenGui`s of the game draw under all of it, whatever their `DisplayOrder` (Roblox draws its own GUI in the `CoreGui`
+  pass). A `ScreenGui` with `ScreenInsets` `CoreUISafeInsets` (the default) is laid out below the 58 px inset.
+
+Roblox's GUI is two `ScreenGui`s outside the game's DataModel, `TopBarApp` and `PlayerList`, listed last in `scene.json`
+(`inspect tree` shows them). Game scripts cannot find them, as in a client, and they take no input: in a client the
+game's GUI under the menu button gets no hover or click there, and a click opens Roblox's menu; `rur` draws neither.
+Their icons and names are text in Roblox's BuilderIcons and BuilderSans fonts, and the health bar and the flash are
+images, all read from your Roblox install at run time (as other `rbxasset://` content is); `rur` ships none of them.
+Without an install the dark shapes are drawn and the icons, names and images are not. Not drawn either: a touch
+device's thumbstick and jump button, Roblox's chat window, and the menu a click on the menu button opens.
 
 ## Sweep
 

@@ -378,7 +378,8 @@ fn scene_only_hidden(scene: &SceneStore) -> DomHiddenSummary {
     let mut disabled_root_ids: HashSet<u64> = HashSet::new();
 
     if let Some(layers) = scene.layers().as_array() {
-        for layer in layers {
+        // (Roblox's own GUI is not the game's: engine/chrome.rs)
+        for layer in layers.iter().filter(|layer| layer["roblox"] != true) {
             if let Some(rid) = layer.get("root").and_then(node_id) {
                 if let Some(node) = scene.node(rid) {
                     let name = node["name"].as_str().unwrap_or("?").to_string();
@@ -2741,7 +2742,8 @@ pub fn analyze_scene_with_mode(
     };
 
     let layers = scene.layers().as_array().map(Vec::as_slice).unwrap_or(&[]);
-    let mut indexed_layers: Vec<(usize, &Value)> = layers.iter().enumerate().collect();
+    // (Roblox's own GUI on a playing client's screen is drawn but not the game's: engine/chrome.rs)
+    let mut indexed_layers: Vec<(usize, &Value)> = layers.iter().enumerate().filter(|(_, layer)| layer["roblox"] != true).collect();
     indexed_layers.sort_by(|(ia, a), (ib, b)| {
         layer_pass(a)
             .cmp(&layer_pass(b))

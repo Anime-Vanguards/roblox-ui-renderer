@@ -254,6 +254,8 @@ pub struct Ids {
     /// ScreenInsets.CoreUISafeInsets: the one ScreenGui inset that starts below the topbar
     /// (IgnoreGuiInset is a view of it, derived.rs)
     pub core_ui_safe_insets: Option<EnumItemId>,
+    /// ScreenInsets.TopbarSafeInsets: laid out in the top bar's band right of Roblox's buttons (Layout::topbar_start)
+    pub topbar_safe_insets: Option<EnumItemId>,
 }
 
 impl Ids {
@@ -283,6 +285,7 @@ impl Ids {
             name_flags,
             automatic_none: reflection.enum_item("AutomaticSize", "None"),
             core_ui_safe_insets: reflection.enum_item("ScreenInsets", "CoreUISafeInsets"),
+            topbar_safe_insets: reflection.enum_item("ScreenInsets", "TopbarSafeInsets"),
         }
     }
 

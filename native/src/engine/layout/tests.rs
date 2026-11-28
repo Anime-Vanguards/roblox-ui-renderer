@@ -111,6 +111,47 @@ fn absolute_positions_are_measured_from_below_the_top_inset() {
     assert_eq!(lines[1], format!("false 0,0 {width},{} 10,20 {},{}", height - 58.0, half(width), half(height - 58.0)), "{lines:?}");
 }
 
+/// A playing client with Roblox's top bar lays a TopbarSafeInsets ScreenGui out in the band right of its buttons (from 164,
+/// 120 once chat is off), the inset's height, and reads it from below the inset (a 0.747 client: (164, -58) and 1116 x 58
+/// at 1280 x 720, ror P9b and notes/interaction.md "Roblox's own GUI"); without the bar (edit mode) over the whole screen.
+#[test]
+fn topbar_safe_insets_take_the_top_bars_band() {
+    let run = |mode: &str| -> Vec<String> {
+        let mut options = crate::engine::options();
+        options.mode = mode.into();
+        options.profile.device.topbar_inset = Some(58.0);
+        options.profile.device.viewport = Some((1280.0, 720.0));
+        let engine = crate::engine::new_engine(options).expect("engine");
+        let lua = Lua::new();
+        engine_lua::start(&lua, &engine).expect("start");
+        let script = {
+            let mut state = engine.state.borrow_mut();
+            let class = engine.reflection.class_id("ModuleScript").unwrap();
+            crate::engine::instance::create_named(&mut state, &engine.reflection, class, "Test")
+        };
+        let env = engine_lua::modules::environment(&lua, &engine, script).expect("environment");
+        let source = r#"
+            local function V(Value) return `{Value.X},{Value.Y}` end
+            local Gui = Instance.new("ScreenGui")
+            Gui.ScreenInsets = Enum.ScreenInsets.TopbarSafeInsets
+            Gui.Parent = game:GetService("CoreGui")
+            print(`{V(Gui.AbsolutePosition)} {V(Gui.AbsoluteSize)}`)
+            game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
+            print(`{V(Gui.AbsolutePosition)} {V(Gui.AbsoluteSize)}`)
+        "#;
+        let function = lua.load(source).set_name("=Test").set_environment(env).into_function().expect("compile");
+        let call = engine_lua::globals::call(&lua, &engine, function, LuaMultiValue::new()).expect("call");
+        if let CallOutcome::Failed(message, _) = call.outcome().unwrap() {
+            panic!("test script failed: {message}");
+        }
+        let lines = engine.state.borrow().output.entries.iter().map(|e| e.message.clone()).collect();
+        drop(lua);
+        lines
+    };
+    assert_eq!(run("play"), ["164,-58 1116,58", "120,-58 1160,58"]);
+    assert_eq!(run("edit"), ["0,-58 1280,720", "0,-58 1280,720"]);
+}
+
 const API_SCRIPT: &str = r#"
 return function(Target)
 	local function V(Value) return `{Value.X},{Value.Y}` end
