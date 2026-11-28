@@ -327,6 +327,58 @@ mod tests {
         assert_eq!(plain, [944., 527., 1049., 572.]);
         assert_eq!(turned, plain);
     }
+    /// fixtures/image-probe-squarecorner-turned.luau: a client draws the edges of a turned shape's quadrant of radius 0
+    /// (beside rounded ones) hard: a pixel whose centre is in the quad is covered, where the rounded box's distance
+    /// ramps the edge (194 and 145 for 255 on a frame turned 45 degrees). The same on a turned Frame and a turned
+    /// CanvasGroup (drawn as a turned image); the rounded quadrants' straight edges keep their ramp
+    #[test]
+    fn a_turned_shapes_square_corner_has_hard_edges() -> anyhow::Result<()> {
+        let (c, s) = (45f64.to_radians().cos(), 45f64.to_radians().sin());
+        let (x, y, w, h) = (15.0, 25.0, 50.0, 30.0);
+        let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+        let matrix = json!([c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy]);
+        let mut gpu = match pollster::block_on(super::super::gpu::GpuRenderer::headless()) {
+            Ok(gpu) => gpu,
+            Err(error) => {
+                eprintln!("skipped: no GPU adapter ({error})");
+                return Ok(());
+            }
+        };
+        let assets = AssetStore::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap(), true);
+        for (node, layers) in [
+            (json!({"id":1,"rect":[x,y,w,h],"matrix":matrix,"rotation":45,"corner":[10,0,10,10],"bg":{"color":[1,1,1],"transparency":0}}), json!([{"draw":[1]}])),
+            (json!({"id":1,"rect":[x,y,w,h],"matrix":matrix,"rotation":45,"corner":[10,0,10,10],"group":{"color":[1,1,1],"transparency":0},"bg":{"color":[1,1,1],"transparency":0}}), json!([{"group":1,"draw":[1]}])),
+        ] {
+            let mut scene = SceneStore::default();
+            scene.apply(&json!({"viewport":{"width":80,"height":80,"scale":1},"background":[0,0,0],"nodes":[node],"layers":layers,"fonts":[],"images":[]})).map_err(anyhow::Error::msg)?;
+            let packet = DrawPreparer::new().prepare(&scene, &assets)?;
+            gpu.reset_scene_resources();
+            gpu.render(&packet)?;
+            let pixels = gpu.readback_rgba()?;
+            let (mut square, mut ramp) = (0, 0);
+            for j in 0..80 {
+                for i in 0..80 {
+                    // The pixel centre in the shape's own space, from its top left corner
+                    let (dx, dy) = (i as f64 + 0.5 - cx, j as f64 + 0.5 - cy);
+                    let (lx, ly) = (c * dx + s * dy + w / 2.0, -s * dx + c * dy + h / 2.0);
+                    let edge = lx.min(w - lx).min(ly).min(h - ly);
+                    if !(0.02..1.0).contains(&edge) {
+                        continue;
+                    }
+                    let value = pixels[(j * 80 + i) * 4];
+                    if lx > w / 2.0 && ly < h / 2.0 {
+                        // The top right quadrant, radius 0
+                        assert_eq!(value, 255, "{node} at ({i}, {j}), {edge} px inside");
+                        square += 1;
+                    } else if lx > 12.0 && lx < w / 2.0 - 1.0 && ly < 1.0 && value < 250 {
+                        ramp += 1;
+                    }
+                }
+            }
+            assert!(square > 20 && ramp > 5, "{square} {ramp}");
+        }
+        Ok(())
+    }
     #[test]
     fn a_turned_frame_keeps_its_gradients_steps() {
         // fixtures/gradient-probe-turned.luau: black to white on a frame turned 180 degrees runs right to

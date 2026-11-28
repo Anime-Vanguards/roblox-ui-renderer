@@ -180,6 +180,10 @@
 			"digest": "c40b32127035aa7bbea0fdd1555b519f4e326bf1b46906a4802cb18ffacf0ac6",
 			"status": "ok"
 		},
+		"fast/edit/image-probe-roundturned": {
+			"digest": "869992ce78bacb2df78cdd956c0586f963eff78e3981d1e4f414dd82f94385e4",
+			"status": "ok"
+		},
 		"fast/edit/image-probe-scroll": {
 			"digest": "3b28dd7de118d16c6d421ea61984293b98977fe4f5f2c67e4a3c9e7ef815db83",
 			"status": "ok"
@@ -202,6 +206,10 @@
 		},
 		"fast/edit/image-probe-squarecorner": {
 			"digest": "864b837917d0e80e11a59b2eb2b96ef6086697f1038a98b1f98f042869f7ee39",
+			"status": "ok"
+		},
+		"fast/edit/image-probe-squarecorner-turned": {
+			"digest": "f1acc8f7c6874f8b880fa5ab7bd56361478eb5574c565ced58bb6f0222ab1689",
 			"status": "ok"
 		},
 		"fast/edit/image-probe-thumb": {
@@ -1644,6 +1652,10 @@
 			"digest": "a0bc19640cfc96a4958492cded760935fb1818c9c2179bf6de77bb8682f4c46c",
 			"status": "ok"
 		},
+		"fixtures/edit/image-probe-roundturned": {
+			"digest": "506b0822de2a84ea55fec4e2a7e1d5133fb467622013b500777ba843e2ad9709",
+			"status": "ok"
+		},
 		"fixtures/edit/image-probe-scroll": {
 			"digest": "0689fe90a4cc00eb1e1b29b74f04df73080a765b6d20c1c8cc6e639b98ba598c",
 			"status": "ok"
@@ -1666,6 +1678,10 @@
 		},
 		"fixtures/edit/image-probe-squarecorner": {
 			"digest": "8857b4216bf1a2493cd477caa939e70aea5c976777d7f73ed48ddf9640bdfa4c",
+			"status": "ok"
+		},
+		"fixtures/edit/image-probe-squarecorner-turned": {
+			"digest": "812999d5effd3cff451ae62c07f63ff213b257deb7f2e9d86154f083aec4d0d1",
 			"status": "ok"
 		},
 		"fixtures/edit/image-probe-thumb": {
@@ -3096,6 +3112,10 @@
 			"digest": "b690cd8495e4a1eeb009e7ef69e14dcffc6f9922c1f03aaf8515f32dc6da1612",
 			"status": "ok"
 		},
+		"fixtures/play/image-probe-roundturned": {
+			"digest": "f4f8a363ebe96005768e803beb24cbc8ee1f3d43a186dd0cd093cad050198508",
+			"status": "ok"
+		},
 		"fixtures/play/image-probe-scroll": {
 			"digest": "8afc8536646624e723b929268b06a3a02f62a715b543508e8666db08b64f783c",
 			"status": "ok"
@@ -3118,6 +3138,10 @@
 		},
 		"fixtures/play/image-probe-squarecorner": {
 			"digest": "1463aba06c79476555420ee194d8c863b608933fc37d5e1d8feb1b3594591fd8",
+			"status": "ok"
+		},
+		"fixtures/play/image-probe-squarecorner-turned": {
+			"digest": "cfaffae91c4c881a32319310c08bb58ff66f9844142570631696431146093e77",
 			"status": "ok"
 		},
 		"fixtures/play/image-probe-thumb": {
@@ -4285,7 +4309,7 @@
 			"status": "live"
 		}
 	},
-	"recorded": "2026-11-27T21:35:54.977Z",
+	"recorded": "2026-11-27T23:44:34.300Z",
 	"fonts": {
 		"frozen": "2026-10-09T23:43:34.099Z",
 		"studio": "version-2366ba214ec740ca",

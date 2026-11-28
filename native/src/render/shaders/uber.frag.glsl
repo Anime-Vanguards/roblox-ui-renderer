@@ -450,6 +450,10 @@ vec4 kindRotated(ivec2 P, vec2 X) {
 		a = clamp(1.0 - max(q.x, q.y), 0.0, 1.0);
 	} else if (!quarter && (exact ? !gridQuad(7, P) : p.x < -halfSize.x || p.x >= halfSize.x || p.y < -halfSize.y || p.y >= halfSize.y)) {
 		a = 0.0;
+	} else if (quadrantRadius(p, rec(6)) <= 0.0) {
+		// In a quadrant of radius 0 beside rounded ones a pixel in the quad is covered: its edges there are hard, as
+		// the square corner of an unturned shape (coverage.rs square_corner; fixtures/image-probe-squarecorner-turned.luau)
+		a = 1.0;
 	} else {
 		// The distance's change over a pixel is the GPU's coarse derivative, as under no rotation
 		// (cornerMask): differences within the 2x2 quad on even target coordinates, from its top-left pixel
@@ -1029,6 +1033,28 @@ float rotatedCoverage(vec2 p, vec2 halfSize, bool rounded, vec4 radii, vec4 m) {
 	return t * t * (3.0 - 2.0 * t);
 }
 
+// Coverage of a turned rounded image (or turned CanvasGroup) at its quad-centred local point p: inside the quad,
+// the rounded box's distance over the GPU's coarse derivative, differences within the 2 x 2 quad on even target
+// coordinates from its top-left pixel, as a turned rounded frame's (kindRotated); a quadrant of radius 0 beside
+// rounded ones is covered. The analytic derivative read the arcs up to 3 levels off at 1x
+// (fixtures/image-probe-squarecorner-turned.luau)
+float turnedRoundedCoverage(vec2 X, ivec2 P, vec2 p, vec4 m, vec4 tr, vec2 centre, vec2 halfSize, vec4 radii) {
+	if (p.x < -halfSize.x || p.x >= halfSize.x || p.y < -halfSize.y || p.y >= halfSize.y) {
+		return 0.0;
+	}
+	if (quadrantRadius(p, radii) <= 0.0) {
+		return 1.0;
+	}
+	vec2 Q = X - vec2(P & 1);
+	float d = turnedDistance(p, halfSize, radii);
+	float origin = turnedDistance(toLocal(m, tr, Q) - centre, halfSize, radii);
+	float dx = turnedDistance(toLocal(m, tr, Q + vec2(1.0, 0.0)) - centre, halfSize, radii);
+	float dy = turnedDistance(toLocal(m, tr, Q + vec2(0.0, 1.0)) - centre, halfSize, radii);
+	float fw = abs(dx - origin) + abs(dy - origin);
+	float t = fw > 0.0 ? clamp(0.5 - d / fw, 0.0, 1.0) : (d < 0.0 ? 1.0 : 0.0);
+	return t * t * (3.0 - 2.0 * t);
+}
+
 // Position along an edge of length L at distance d outside it, t from its start corner, as a fraction of L
 // (images.rs rotated_fringe_sample, measured)
 float fringeAlong(float t, float L, float d) {
@@ -1124,7 +1150,9 @@ vec4 kindImageRotated(ivec2 P, vec2 X) {
 	float coverage;
 	if (rounded) {
 		vec2 halfSize = (qb.zw - qb.xy) * 0.5;
-		coverage = rotatedCoverage(l - qb.xy - halfSize, halfSize, true, qs.z > 0.5 ? vec4(0.0) : rec(9), m);
+		coverage = qs.z > 0.5
+			? rotatedCoverage(l - qb.xy - halfSize, halfSize, true, vec4(0.0), m)
+			: turnedRoundedCoverage(X, P, l - qb.xy - halfSize, m, tr, qb.xy + halfSize, halfSize, rec(9));
 	} else if (quarter) {
 		coverage = X.x >= screen.x && X.x < screen.z && X.y >= screen.y && X.y < screen.w ? 1.0 : 0.0;
 	} else if ((flags & 16) != 0) {
