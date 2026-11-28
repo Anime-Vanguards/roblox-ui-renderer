@@ -997,7 +997,8 @@ fn at_end_keep(glyphs: &[Glyph], box_width: f64, ellipsis_width: &dyn Fn(usize) 
 /// is appended when it fits after the line; otherwise AtEnd drops characters of a line that ends
 /// inside a word until it fits, and leaves a line ending at a word boundary as it is. SplitWord
 /// counts the line's trailing whitespace and never drops characters. None: the line stays as it is.
-fn truncate_wrapped(line: &Line, source: Option<&[Glyph]>, max_width: f64, ellipsis: &[Glyph], ellipsis_width: f64, mode: Truncate) -> Option<Line> {
+/// `first`: the last visible line is the text's first.
+fn truncate_wrapped(line: &Line, source: Option<&[Glyph]>, max_width: f64, ellipsis: &[Glyph], ellipsis_width: f64, mode: Truncate, first: bool) -> Option<Line> {
     // Measured (layout-probe-truncate, "Supercalifragilistic" wrapped): on a line broken inside a word
     // SplitWord cuts like AtEnd.
     if mode == Truncate::SplitWord && !line.split {
@@ -1019,7 +1020,28 @@ fn truncate_wrapped(line: &Line, source: Option<&[Glyph]>, max_width: f64, ellip
         width += glyph.advance;
     }
     if width + ellipsis_width <= max_width + 1e-6 {
+        // Measured (a 0.747 client, SourceSans 16, boxes 10 .. 160 px one and two lines tall: 1493/1530
+        // TextBounds, was 1457; layout-probe-autotrunc's wrapped AtEnd label under a MaxSize): AtEnd cuts the
+        // line with the rest of its paragraph as an unwrapped line, so it can go into the word that wrapped
+        // to the next line: "A somewhat longer label text" in 61 px one line tall is "A some…" (the part
+        // "some" is wider than "A "), not "A…"
+        if mode == Truncate::AtEnd {
+            let mut glyphs = line.glyphs.clone();
+            if let Some(source) = source {
+                if line.last < source.len() {
+                    glyphs.extend_from_slice(&source[line.last..]);
+                }
+            }
+            let keep = at_end_keep(&glyphs, max_width, &|_| ellipsis_width).max(count);
+            return Some(concat(&glyphs[..keep], Some(ellipsis), true));
+        }
         return Some(concat(&line.glyphs[..count], Some(ellipsis), true));
+    }
+    // Measured (same probe, boxes 10 px wide, one line tall): when the text's first line is the last that
+    // shows, is broken inside a word and not even the ellipsis fits, nothing is drawn, as on an unwrapped
+    // line ("Super" shows nothing; a whole first word "A" and a lower line in such a box stay as they are)
+    if first && line.split && max_width < ellipsis_width - 1e-6 {
+        return Some(concat(&[], None, false));
     }
     if !line.split || max_width < ellipsis_width - 1e-6 {
         return None;
@@ -1389,7 +1411,7 @@ impl TextEngine {
                 lines.truncate(fit);
                 let index = fit - 1;
                 let source = sources[index].map(|paragraph| &paragraphs[paragraph][..]);
-                match truncate_wrapped(&lines[index], source, max_width, &ellipsis.0, ellipsis.1, truncate) {
+                match truncate_wrapped(&lines[index], source, max_width, &ellipsis.0, ellipsis.1, truncate, index == 0) {
                     // Measured (fixtures/layout-truncate.luau SplitWord_w_16, "G" / "ui" in 24 px): of a
                     // SplitWord line broken inside a word of which no character fits beside the ellipsis,
                     // the first character is drawn alone ("u"), while TextBounds are the lone ellipsis'
@@ -1494,6 +1516,32 @@ mod truncation_tests {
 
     fn shown(line: &Line) -> String {
         line.glyphs.iter().map(|glyph| char::from_u32(glyph.code).unwrap()).collect()
+    }
+
+    #[test]
+    fn a_wrapped_atend_line_is_cut_with_the_rest_of_its_paragraph() {
+        let faces: [FaceId; 2] = [1, 2];
+        // "A somewhat longer" in a box one line tall: line one holds "A " (the word after it wrapped away)
+        let source = glyphs("A somewhat longer", 10.0, 0..0, faces);
+        let line = make_line(&source, 0, 2, true, false);
+        let dots = ellipsis(20.0, faces[0]);
+        // The part of "somewhat" that fits beside the ellipsis ("som", 30 px) is wider than "A " (20 px): the cut
+        // goes into it, as on an unwrapped line, where it used to be "A…"
+        let cut = truncate_wrapped(&line, Some(&source), 71.0, &dots.0, dots.1, Truncate::AtEnd, true).unwrap();
+        assert_eq!(shown(&cut), "A som\u{2026}");
+        // "s" (10 px) is not: the line keeps its word and the ellipsis
+        let cut = truncate_wrapped(&line, Some(&source), 51.0, &dots.0, dots.1, Truncate::AtEnd, true).unwrap();
+        assert_eq!(shown(&cut), "A\u{2026}");
+        // SplitWord keeps filling characters, as before
+        let cut = truncate_wrapped(&line, Some(&source), 71.0, &dots.0, dots.1, Truncate::SplitWord, true).unwrap();
+        assert_eq!(shown(&cut), "A som\u{2026}");
+        // A box narrower than the ellipsis shows nothing of a first line broken inside a word, and leaves a later
+        // line or a whole first word as it is
+        let word = glyphs("Super", 10.0, 0..0, faces);
+        let split = Line { split: true, ..make_line(&word, 0, 1, true, false) };
+        assert!(truncate_wrapped(&split, Some(&word), 15.0, &dots.0, dots.1, Truncate::AtEnd, true).unwrap().glyphs.is_empty());
+        assert!(truncate_wrapped(&split, Some(&word), 15.0, &dots.0, dots.1, Truncate::AtEnd, false).is_none());
+        assert!(truncate_wrapped(&line, Some(&source), 15.0, &dots.0, dots.1, Truncate::AtEnd, true).is_none());
     }
 
     #[test]
