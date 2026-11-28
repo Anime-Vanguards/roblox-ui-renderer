@@ -10,7 +10,7 @@ Everything that executes Luau, lays out UI, rasterizes glyphs, and draws pixels 
   - `text/`: OpenType parsing and text shaping calibrated against Studio datasets.
   - `input/`: hit testing, `GuiState`, scroll springs, `TextBox` editing, and dragging.
   - `export.rs` & `export/retained.rs`: full `scene.json` export and incremental per-frame deltas.
-  - `story.rs`, `session.rs`, `cli.rs`: story mounting, live stdio sessions, and one-shot/standby/in-process hosts.
+  - `story.rs`, `session.rs`, `cli.rs`: story mounting (into `CoreGui` in edit mode, the local player's `PlayerGui` in play mode: [stories.md](stories.md)), live stdio sessions, and one-shot/standby/in-process hosts.
 - **GPU renderer (`native/src/render/`):** wgpu renderer with `shaders/uber.*.glsl`, `scene_draw.rs`, and Studio-measured raster rules (`coverage.rs`, `geometry.rs`, `sampling.rs`, `images.rs`, `groups.rs`, `text.rs`).
 - **Glyphs and assets:** `native/src/glyphs.rs` + `glyphs/rur_glyph.c` (compiled-in FreeType 2.14.2), `assets.rs` (decoded texture/atlas store, see [native/ASSETS.md](../native/ASSETS.md)), `resolve.rs` (URI resolution), and `download.rs` (HTTP downloads, auth, `rur-native assets`).
 - **App, service, and CLI commands:** `story_render.rs`, `serve.rs`, `headless.rs`, `app.rs` (desktop storybook), `places.rs`, `sweep.rs`, `diff.rs`, `story_args.rs`, `summary.rs`, and `gitref.rs`.

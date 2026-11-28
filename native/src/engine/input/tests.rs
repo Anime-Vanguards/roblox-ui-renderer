@@ -4913,30 +4913,27 @@ frames(2)
 }
 
 /// The ContextActionGui is drawn with the story (export.rs drawn_roots): a scene of a touch device's story gets the
-/// buttons' layer in the PlayerGui pass; a desktop's gets none.
+/// buttons' layer in the PlayerGui pass, above a play run's story (in the PlayerGui too, it came in first); a desktop's
+/// gets none. The story gui goes where a run mounts one (story.rs story_container), not into a CoreGui a play run's
+/// scripts do not get.
 #[test]
 fn touch_buttons_are_exported_with_the_story() {
     for (touch, layers) in [(true, 2), (false, 1)] {
         let (lua, engine) = if touch { touch_client(800.0, 600.0) } else { start(800.0, 600.0) };
-        run(
-            &lua,
-            &engine,
-            r##"
-local Gui = Instance.new("ScreenGui")
-Gui.Name = "Story"
-Gui.Parent = game:GetService("CoreGui")
-game:GetService("ContextActionService"):BindAction("Jump", function() end, true, Enum.KeyCode.Space)
-"##,
-        );
-        let core_gui = crate::engine::services::get_service(&engine, engine.world().game, "CoreGui").unwrap();
+        run(&lua, &engine, r##"local Gui = Instance.new("ScreenGui") Gui.Name = "Story" Gui.Parent = game:GetService("ReplicatedStorage")"##);
+        let storage = crate::engine::services::get_service(&engine, engine.world().game, "ReplicatedStorage").unwrap();
         let story = {
             let state = engine.state.borrow();
-            state.dom.at(core_gui).children.iter().copied().find(|&id| state.dom.at(id).name.to_string() == "Story").unwrap()
+            state.dom.at(storage).children.iter().copied().find(|&id| state.dom.at(id).name.to_string() == "Story").unwrap()
         };
+        let container = crate::engine::story::story_container(&engine).unwrap();
+        engine_lua::instance::set_parent(&engine, story, Some(container)).unwrap();
+        run(&lua, &engine, r##"game:GetService("ContextActionService"):BindAction("Jump", function() end, true, Enum.KeyCode.Space)"##);
         let scene = crate::engine::story::build_scene(&engine, &[story], serde_json::Map::new());
         let layers_json = scene["layers"].as_array().unwrap();
         assert_eq!(layers_json.len(), layers, "{}", scene["layers"]);
         if touch {
+            assert_eq!(layers_json[0]["playerGui"], Json::Bool(true), "a play run's story is in the PlayerGui");
             assert_eq!(layers_json[1]["playerGui"], Json::Bool(true));
             let names: Vec<&str> = scene["nodes"].as_array().unwrap().iter().filter_map(|n| n["name"].as_str()).collect();
             assert!(names.contains(&"ContextActionButton") && names.contains(&"ActionTitle"), "{names:?}");

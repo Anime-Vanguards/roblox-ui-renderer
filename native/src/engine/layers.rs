@@ -245,7 +245,8 @@ pub fn screen_layers(engine: &Rc<Engine>, roots: &[InstanceId]) -> Vec<InstanceI
     let (Some(layer_collector), Some(gui_base)) = (class("LayerCollector"), class("GuiBase2d")) else { return roots.to_vec() };
     let world_bound = [class("SurfaceGuiBase"), class("BillboardGui")];
     let game = engine.world().game;
-    let core_gui = services::get_service(engine, game, "CoreGui").ok();
+    // (found, not made: a play run's game scripts have no CoreGui, and one made here would show up in their DataModel)
+    let core_gui = services::find_service(engine, game, "CoreGui");
     let state = engine.state.borrow();
     let player_gui = engine
         .world()

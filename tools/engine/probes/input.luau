@@ -8,7 +8,7 @@
 -- with button K (900,200).
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
-local CoreGui = game:GetService("CoreGui")
+-- (ObjectsAt asks the story's container: CoreGui in edit mode, a play run's PlayerGui, as a client's script does)
 
 local function Num(Value)
 	return string.format("%.4f", Value)
@@ -187,7 +187,7 @@ return function(Target)
 			#UserInputService:GetMouseButtonsPressed(), Input:IsModifierKeyDown(Enum.ModifierKey.Shift))
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 then
 			local Names = {}
-			for _, Object in CoreGui:GetGuiObjectsAtPosition(Input.Position.X, Input.Position.Y) do
+			for _, Object in Target:FindFirstAncestorWhichIsA("BasePlayerGui"):GetGuiObjectsAtPosition(Input.Position.X, Input.Position.Y) do
 				table.insert(Names, Object.Name)
 			end
 			Log("UIS", "ObjectsAt", table.concat(Names, ","))

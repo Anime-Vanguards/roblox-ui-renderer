@@ -506,10 +506,27 @@ fn line_is_loop_yield(text: &str, line_no: usize) -> bool {
     stack[fn_start..].contains(&Block::Loop)
 }
 
-/// MakeStoryGui: the ScreenGui (RURStory in CoreGui) and target frame a story mounts into.
-fn make_story_gui(project: &Project, margin: f64, target: (f64, f64)) -> Result<(LuaValue, LuaValue, InstanceId, InstanceId), String> {
+/// Where the story gui goes. Play mode: the local player's PlayerGui, where a client's own code puts its GUI (a client
+/// gives a game script no CoreGui: ree's play runs answer nil for it; there the story's code finds its GUI under
+/// the PlayerGui, as PlayerGui:GetGuiObjectsAtPosition and FindFirstAncestorOfClass("PlayerGui") do in a client).
+/// Edit mode: CoreGui, where UI Labs mounts a story in Studio. Reached from here, not by the story host's script, the
+/// way Roblox's core scripts reach CoreGui. A run without a PlayerGui (none made) falls back to CoreGui.
+pub(crate) fn story_container(engine: &Rc<Engine>) -> Result<InstanceId, String> {
+    if !engine.options.edit_mode() {
+        let player_gui = engine.reflection.class_id("PlayerGui");
+        let found = engine.world().local_player.zip(player_gui).and_then(|(player, class)| engine.state.borrow().dom.find_child_of_class(player, class));
+        if let Some(found) = found {
+            return Ok(found);
+        }
+    }
+    services::get_service(engine, engine.world().game, "CoreGui").map_err(|_| "CoreGui".to_string())
+}
+
+/// MakeStoryGui: the ScreenGui (RURStory in [`story_container`]) and target frame a story mounts into.
+fn make_story_gui(lua: &Lua, engine: &Rc<Engine>, project: &Project, margin: f64, target: (f64, f64)) -> Result<(LuaValue, LuaValue, InstanceId, InstanceId), String> {
     let make_gui: LuaFunction = project.host.get("MakeStoryGui").map_err(lua_error)?;
-    let (gui, target_frame): (LuaValue, LuaValue) = make_gui.call((margin, target.0, target.1)).map_err(lua_error)?;
+    let container = instance_value(lua, engine, story_container(engine)?).map_err(lua_error)?;
+    let (gui, target_frame): (LuaValue, LuaValue) = make_gui.call((margin, target.0, target.1, container)).map_err(lua_error)?;
     let id = |value: &LuaValue| -> Result<InstanceId, String> {
         match value {
             LuaValue::UserData(ud) => engine_lua::raw::instance_of_ud(ud).ok_or_else(|| "MakeStoryGui: instance expected".to_string()),
@@ -651,7 +668,7 @@ pub fn mount(
         })?)
     };
     // (the module must exist before the story gui is made, as in main.luau)
-    let (_gui, target_frame, gui_id, target_id) = make_story_gui(project, margin, target)?;
+    let (_gui, target_frame, gui_id, target_id) = make_story_gui(lua, engine, project, margin, target)?;
     story.roots.push(gui_id);
 
     let e = engine.clone();
@@ -663,12 +680,11 @@ pub fn mount(
         .map_err(lua_error)?;
 
     if source.kind == SourceKind::Model {
-        // Scheduler.BeginMount, then the model's roots: LayerCollectors go to CoreGui (exported roots),
+        // Scheduler.BeginMount, then the model's roots: LayerCollectors go beside the story gui (exported roots),
         // GuiObjects and Folders into the target
         begin_mount.call::<()>(()).map_err(lua_error)?;
         let roots = project::load_model(engine, std::path::Path::new(&source.path)).map_err(|e| format!("{}: {e}", source.path))?;
-        let game = engine.world().game;
-        let core_gui = services::get_service(engine, game, "CoreGui").map_err(|_| "CoreGui")?;
+        let container = story_container(engine)?;
         let reflection = &engine.reflection;
         let layer_collector = reflection.class_id("LayerCollector");
         let gui_object = reflection.class_id("GuiObject");
@@ -677,7 +693,7 @@ pub fn mount(
             let class = engine.state.borrow().dom.at(root).class;
             let info = reflection.class(class);
             if layer_collector.is_some_and(|c| info.is_a(c)) {
-                let _ = engine_lua::instance::set_parent(engine, root, Some(core_gui));
+                let _ = engine_lua::instance::set_parent(engine, root, Some(container));
                 story.roots.push(root);
             } else if gui_object.is_some_and(|c| info.is_a(c)) || Some(class) == folder {
                 let _ = engine_lua::instance::set_parent(engine, root, Some(target_id));

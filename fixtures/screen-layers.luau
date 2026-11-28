@@ -11,6 +11,9 @@
 --   World    PlayerGui SurfaceGui                                         -> not drawn (3D)
 -- Draw order: Mid, Nested, Low, High, then RURStory and Core (CoreGui, DisplayOrder 0 and -10 tie
 -- by pass order: Core -10 first, then RURStory 0).
+-- Core needs CoreGui, which only edit mode's plugin identity reaches: a play run is a client's game script, which gets
+-- nil for it, so Core stays unparented there, and RURStory is in the PlayerGui (the first to come in: RURStory, Mid,
+-- Nested, Low, High).
 return function(_Target)
 	local Players = game:GetService("Players")
 	local PlayerGui = Players.LocalPlayer.PlayerGui

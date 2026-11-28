@@ -14,7 +14,12 @@ This page explains the input formats `rur` can mount, how UI Labs and Flipbook s
 
 A Roblox archive (`.rbx`, the save format that holds a place or model with its content beside it) is read wherever a model file is (`--model`, `--load`, `--snapshot-dir`, `--mount`), as the model it holds with the values its writer kept outside the scene (script sources, long text) put back. An archive that cannot be read fails `--model` and `--load` with the reason, and is a warning naming the file elsewhere. Rojo project trees mount only what Rojo reads, so a `.rbx` inside one is left out. The format: roblox-object-renderer's `docs/archives.md`.
 
-UI mounts into a `Frame` named `StoryTarget` inside `CoreGui.RURStory`, sized to `--viewport WxH` (logical pixels at `--scale`, default `1.5`) minus `--margin` on each side.
+UI mounts into a `Frame` named `StoryTarget` inside a `ScreenGui` named `RURStory`, sized to `--viewport WxH` (logical pixels at `--scale`, default `1.5`) minus `--margin` on each side. Where `RURStory` sits depends on the mode:
+
+- **Edit mode** (the default): `CoreGui.RURStory`, where UI Labs mounts a story in Studio.
+- **Play mode** (`--mode play`): the local player's `PlayerGui` (`Players.<player>.PlayerGui.RURStory`), where a client's own code puts its GUI. A client gives a game script no `CoreGui`, and code that looks for its GUI under the `PlayerGui` finds it there, as it would in a client: `PlayerGui:GetGuiObjectsAtPosition` lists the story's objects and `FindFirstAncestorOfClass("PlayerGui")` finds the `PlayerGui`. The story draws in Roblox's `PlayerGui` pass (its layer is `playerGui: true` in `scene.json`), ordered by `DisplayOrder` and then by when each `ScreenGui` came in. `RURStory` comes in before the story runs, so a `ScreenGui` the story parents to the `PlayerGui` later draws above it at the same `DisplayOrder`.
+
+A `--model`'s top-level `ScreenGui`s go beside `RURStory`. rur's own engine code puts `RURStory` in its container; the story host never asks for `CoreGui` itself. Action targets and `--crop` match node paths by their end (`StoryTarget.Stack.Button`, `Button`), so they work in both modes.
 
 ## Supported story formats
 

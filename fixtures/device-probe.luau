@@ -6,6 +6,8 @@
 -- default gui's height follow the Studio session (a gamepad an earlier script's VirtualInput used, the user's
 -- mouse over Studio's window, the size of Studio's viewport), so they are printed, not drawn: a capture does
 -- not depend on what Studio went through before it (notes/interaction.md "Device state in captures").
+-- The default gui goes where a client's own code puts one, the local player's PlayerGui (a client's scripts get no
+-- CoreGui).
 return function(Target)
 	local Input = game:GetService("UserInputService")
 	local Inset = game:GetService("GuiService"):GetGuiInset()
@@ -15,7 +17,7 @@ return function(Target)
 	local Fill = Instance.new("Frame")
 	Fill.Size = UDim2.fromScale(1, 1)
 	Fill.Parent = Gui
-	Gui.Parent = game:GetService("CoreGui")
+	Gui.Parent = game:GetService("Players").LocalPlayer:FindFirstChildOfClass("PlayerGui")
 
 	local Label = Instance.new("TextLabel")
 	Label.Name = "Probe"

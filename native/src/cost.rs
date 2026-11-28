@@ -137,7 +137,7 @@ pub struct DomHiddenSummary {
     /// (which drops descendants below `Visible = false` nodes).
     pub complete: bool,
     /// True when the live DOM walk saw zero mounted user instances outside the empty host
-    /// (`CoreGui.RURStory` / `StoryTarget`), zero hidden GuiObjects, and zero disabled ScreenGuis.
+    /// (`RURStory` / `StoryTarget`), zero hidden GuiObjects, and zero disabled ScreenGuis.
     pub mounted_empty: bool,
     pub roots: u64,
     pub gui_objects: u64,
@@ -165,7 +165,8 @@ pub fn collect_dom_hidden(engine: &Engine, roots: &[InstanceId]) -> DomHiddenSum
     let gui_base = reflection.class_id("GuiBase2d");
     let world_bound = [reflection.class_id("SurfaceGuiBase"), reflection.class_id("BillboardGui")];
     let game = engine.world().game;
-    let core_gui = services::get_service(engine, game, "CoreGui").ok();
+    // (found, not made: engine/layers.rs screen_layers)
+    let core_gui = services::find_service(engine, game, "CoreGui");
     let state = engine.state.borrow();
     let dom = &state.dom;
     let layout_guard = engine.layout().borrow();
@@ -214,8 +215,9 @@ pub fn collect_dom_hidden(engine: &Engine, roots: &[InstanceId]) -> DomHiddenSum
         if dom.get(root).is_none() {
             continue;
         }
+        // (the story gui: CoreGui's in edit mode, the local player's PlayerGui's in play mode, story.rs story_container)
         let is_story_host = dom.at(root).name.to_string() == "RURStory"
-            && core_gui.is_some_and(|cg| dom.at(root).parent == Some(cg));
+            && [core_gui, player_gui].into_iter().flatten().any(|container| dom.at(root).parent == Some(container));
         if is_story_host {
             for &child in &dom.at(root).children {
                 if dom.at(child).name.to_string() == "StoryTarget" {

@@ -593,10 +593,10 @@ export function relativePaths(scene) {
 		paths.set(targetNode.id, "");
 	}
 	// A mounted model's LayerCollector (a ScreenGui at the model's root) lands beside the story in the
-	// offline run, while Studio mounts its children into the target (MOUNT_LUAU): its children are the
-	// target's
+	// offline run (in CoreGui, or a play run's PlayerGui), while Studio mounts its children into the target
+	// (MOUNT_LUAU): its children are the target's
 	for (const node of scene.nodes) {
-		if (/^CoreGui\.[^.]+$/.test(node.path) && node.name !== "RURStory" && /Gui$/.test(node.class)) {
+		if (/^(CoreGui|Players\.[^.]+\.PlayerGui)\.[^.]+$/.test(node.path) && node.name !== "RURStory" && /Gui$/.test(node.class)) {
 			paths.set(node.id, "");
 		}
 	}

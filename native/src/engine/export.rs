@@ -1804,7 +1804,7 @@ pub(crate) struct Layer {
     draw: Vec<Draw>,
     global: bool,
     /// Under a PlayerGui: drawn in Roblox's PlayerGui pass, below every CoreGui layer whatever their
-    /// DisplayOrders (`playerGui: true`; only `--all-layers` exports such layers)
+    /// DisplayOrders (`playerGui: true`: a play run's story gui, a touch device's buttons and `--all-layers`' layers)
     player_gui: bool,
 }
 
@@ -2643,8 +2643,9 @@ fn text_engine(engine: &Engine) -> std::cell::RefMut<'_, TextEngine> {
 
 /// The roots a scene draws: `roots`, then the ContextActionGui of a touch device's ContextActionService buttons
 /// (input/touch_buttons.rs) when the run made one, which a client draws whatever else is on screen (in the PlayerGui
-/// pass: under a story gui, which sits in CoreGui; `--all-layers` orders it among the PlayerGui's ScreenGuis), and the
-/// ScreenGuis nested in GuiObjects of those, each a layer of its own (layers.rs `with_nested`).
+/// pass: under an edit run's story gui, which sits in CoreGui; above a play run's, which came into the PlayerGui
+/// first; `--all-layers` orders it among the PlayerGui's ScreenGuis), and the ScreenGuis nested in GuiObjects of those,
+/// each a layer of its own (layers.rs `with_nested`).
 pub(crate) fn drawn_roots(engine: &Engine, roots: &[InstanceId]) -> Vec<InstanceId> {
     let mut drawn = roots.to_vec();
     if let Some(gui) = super::input::touch_buttons::gui(engine) {

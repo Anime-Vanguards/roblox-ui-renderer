@@ -5,8 +5,8 @@
 
 local Host = {}
 
--- MakeStoryGui: the ScreenGui and target frame a story mounts into.
-function Host.MakeStoryGui(Margin, TargetWidth, TargetHeight)
+-- MakeStoryGui: the ScreenGui and target frame a story mounts into, in Container (story.rs story_container).
+function Host.MakeStoryGui(Margin, TargetWidth, TargetHeight, Container)
 	local Gui = Instance.new("ScreenGui")
 	Gui.Name = "RURStory"
 	Gui.IgnoreGuiInset = true
@@ -21,7 +21,7 @@ function Host.MakeStoryGui(Margin, TargetWidth, TargetHeight)
 	Target.BorderSizePixel = 0
 	Target.Parent = Gui
 
-	Gui.Parent = game:GetService("CoreGui")
+	Gui.Parent = Container
 	return Gui, Target
 end
 

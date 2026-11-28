@@ -81,8 +81,19 @@ impl Crop {
     }
 }
 
-/// The story target every story's nodes sit under: left off the trace's paths
-const STORY_ROOT: &str = "CoreGui.RURStory.StoryTarget";
+/// The story target every story's nodes sit under, left off the trace's paths: `CoreGui.RURStory.StoryTarget` in edit
+/// mode, `Players.<player>.PlayerGui.RURStory.StoryTarget` in play mode (engine/story.rs `story_container`)
+const STORY_TARGET: &str = "RURStory.StoryTarget";
+
+/// The path of the story target `path` is under (or is), if any
+fn story_root(path: &str) -> Option<&str> {
+    let at = path.find(STORY_TARGET)?;
+    let end = at + STORY_TARGET.len();
+    let bytes = path.as_bytes();
+    let starts = at == 0 || bytes[at - 1] == b'.';
+    let ends = end == path.len() || matches!(bytes[end], b'.' | b'[');
+    (starts && ends).then(|| &path[..end])
+}
 
 /// Frames the engine half may run ahead of the drawing
 const FRAME_QUEUE: usize = 8;
@@ -261,6 +272,8 @@ pub struct Trace {
     by_id: HashMap<u64, usize>,
     paths: HashMap<String, u32>,
     seen: Vec<u32>,
+    /// The story target's path, from the first node under it
+    root: Option<String>,
 }
 
 struct TraceNode {
@@ -282,7 +295,11 @@ impl Trace {
                 Some(&slot) => slot,
                 None => {
                     let full = node["path"].as_str().unwrap_or("?");
-                    let path = full.strip_prefix(STORY_ROOT).map(|rest| rest.trim_start_matches('.')).filter(|rest| !rest.is_empty()).unwrap_or(full);
+                    let root = story_root(full);
+                    if self.root.is_none() {
+                        self.root = root.map(str::to_string);
+                    }
+                    let path = root.map(|root| full[root.len()..].trim_start_matches('.')).filter(|rest| !rest.is_empty()).unwrap_or(full);
                     let count = self.paths.entry(path.to_string()).or_insert(0);
                     *count += 1;
                     let path = if *count == 1 { path.to_string() } else { format!("{path}#{count}") };
@@ -313,7 +330,7 @@ impl Trace {
     pub fn to_value(&self, header: Value) -> Value {
         let mut value = header;
         value["units"] = json!("rows [frame, x, y, width, height, rotation]: AbsolutePosition and AbsoluteSize in logical pixels, Rotation in degrees, written at each frame they change (a node keeps its last row until its next); [frame, null]: not drawn from that frame (gone, invisible or culled)");
-        value["root"] = json!(STORY_ROOT);
+        value["root"] = json!(self.root.as_deref().unwrap_or("CoreGui.RURStory.StoryTarget"));
         value["nodes"] = Value::Array(self.nodes.iter().map(|node| json!({"path": node.path, "class": node.class, "id": node.id, "rows": node.rows})).collect());
         value
     }
@@ -1186,6 +1203,20 @@ mod tests {
         assert_eq!(rows("Root.Spark"), json!([[0, 3.0, 5.0, 10.0, 10.0, 0.0], [1, 4.0, 5.0, 10.0, 10.0, 0.0], [2, null]]));
         assert_eq!(rows("Root.Spark#2"), json!([[2, 9.0, 5.0, 10.0, 10.0, 0.0]]));
         assert_eq!(value["nodes"][2]["id"], 3);
+    }
+
+    /// A play-mode story sits in the local player's PlayerGui: the trace leaves that story target off too, and names it
+    #[test]
+    fn the_trace_root_follows_the_story_container() {
+        let node = |id: u64, path: &str| json!({"id": id, "class": "Frame", "name": "X", "path": path, "rect": [0, 0, 10, 10], "rotation": 0, "visible": true});
+        let mut trace = Trace::default();
+        trace.record(0, &scene_of(json!([node(1, "Players.Player1.PlayerGui.RURStory.StoryTarget.Root"), node(2, "Players.Player1.PlayerGui.RURStory.StoryTarget[\"Item.Name\"]")])));
+        let value = trace.to_value(json!({"version": 1}));
+        assert_eq!(value["root"], "Players.Player1.PlayerGui.RURStory.StoryTarget");
+        let paths: Vec<&str> = value["nodes"].as_array().unwrap().iter().map(|node| node["path"].as_str().unwrap()).collect();
+        assert_eq!(paths, ["Root", "[\"Item.Name\"]"]);
+        assert_eq!(story_root("CoreGui.RURStoryX.StoryTarget.A"), None);
+        assert_eq!(story_root("CoreGui.RURStory.StoryTargets"), None);
     }
 
     /// `--cursor` captures the platform pointer state on every sequence frame (including unchanged UI

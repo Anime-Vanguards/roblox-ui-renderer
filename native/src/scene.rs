@@ -92,8 +92,8 @@ pub(crate) fn array(value: &Value) -> Result<&[Value], String> {
     }
 }
 
-/// A layer's pass: Roblox draws the PlayerGui pass (`playerGui: true`, exported by `--all-layers`)
-/// under CoreGui's, whatever their DisplayOrders; layers sort by pass, then DisplayOrder.
+/// A layer's pass: Roblox draws the PlayerGui pass (`playerGui: true`: a play run's story gui, touch buttons,
+/// `--all-layers`' layers) under CoreGui's, whatever their DisplayOrders; layers sort by pass, then DisplayOrder.
 pub(crate) fn layer_pass(layer: &Value) -> u8 {
     if layer.get("playerGui").and_then(Value::as_bool) == Some(true) { 0 } else { 1 }
 }

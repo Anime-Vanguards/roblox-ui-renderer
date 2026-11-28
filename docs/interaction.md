@@ -78,7 +78,7 @@ On `--device touch`, `ContextActionService:BindAction(name, handler, true, ...)`
 - **When:** everything happens inside the call: binding makes the button, the setters change it, unbinding or binding the name again removes it (a rebind makes a new one, untitled). `SetDescription` shows nothing.
 - **Input:** a finger coming down on a button calls the action with `Begin` and that touch's `InputObject`, its moves on it `Change`, lifting it on the button `End`, lifting it anywhere else `Cancel`. A second finger takes the button over. The touch is processed (`gameProcessedEvent` true).
 - **Shown:** setting `GuiService.TouchControlsEnabled` or `UserInputService.ModalEnabled` shows or hides the buttons; the last change decides.
-- **Drawn:** with the story, under it (the buttons' `ScreenGui` is in the `PlayerGui`), and with `--all-layers` among the `PlayerGui`'s `ScreenGui`s.
+- **Drawn:** with the story. The buttons' `ScreenGui` is in the `PlayerGui`, so they draw under an edit-mode story, which sits in `CoreGui`. A play-mode story is in the `PlayerGui` too and came in first, so the buttons draw above it at the same `DisplayOrder`. With `--all-layers` they draw among the `PlayerGui`'s `ScreenGui`s.
 - **Not emulated:** a client hides the buttons when a key, a mouse button or a gamepad is used; rur keeps them shown.
 
 ## Mouse wheel and smooth scrolling
